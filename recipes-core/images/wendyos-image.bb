@@ -33,8 +33,12 @@ MENDER_CONNECT_ENABLE = "1"
 IMAGE_FEATURES += " \
     ssh-server-openssh \
     debug-tweaks \
-    package-management \
     "
+
+# Optional runtime package management (rpm/dnf in the rootfs).
+# Disabled by default — image is updated atomically via Mender A/B.
+# Set WENDYOS_ENABLE_PACKAGE_MANAGEMENT = "1" in local.conf or distro to enable.
+IMAGE_FEATURES += "${@bb.utils.contains('WENDYOS_ENABLE_PACKAGE_MANAGEMENT', '1', 'package-management', '', d)}"
 
 # Common packages for all machines (real hardware and QEMU)
 IMAGE_INSTALL:append = " \
