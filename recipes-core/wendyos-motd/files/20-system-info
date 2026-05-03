@@ -53,9 +53,12 @@ fi
 echo -e "  Disk: ${DISK_COLOR}${DISK_USAGE}${NC}"
 
 # Network information
-PRIMARY_IP=$(ip -4 addr show scope global | grep inet | head -1 | awk '{print $2}' | cut -d/ -f1)
+IP_BIN="$(command -v ip || echo /usr/sbin/ip)"
+PRIMARY_IP="$("$IP_BIN" -4 -o addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n1)"
 if [ -n "$PRIMARY_IP" ]; then
     echo "  IP Address: ${PRIMARY_IP}"
+else
+    echo "  IP Address: pending"
 fi
 
 # Uptime
