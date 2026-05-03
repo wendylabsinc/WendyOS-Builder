@@ -6,8 +6,6 @@ RequiresMountsFor=/data /home
 After=data.mount home.mount
 # Run before user sessions start
 Before=systemd-user-sessions.service
-# Only run once (script checks for flag file)
-ConditionPathExists=!/data/.wendyos-user-setup-done
 
 [Service]
 Type=oneshot

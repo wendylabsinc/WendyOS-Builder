@@ -24,6 +24,11 @@ do_install:append() {
     # Install sysctl config to quiet console (reduce kernel/audit messages)
     install -d ${D}${sysconfdir}/sysctl.d
     install -m 0644 ${WORKDIR}/sysctl.d/99-quiet-console.conf ${D}${sysconfdir}/sysctl.d/
+
+    # Suppress the upstream Poky /etc/motd disclaimer.
+    # Dynamic MOTD comes from update-motd via /etc/profile.d/motd.sh
+    # (see recipes-core/wendyos-motd).
+    : > ${D}${sysconfdir}/motd
 }
 
 # Make it a config file so local edits survive upgrades

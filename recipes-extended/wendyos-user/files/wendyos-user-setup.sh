@@ -1,7 +1,8 @@
 #!/bin/bash
-# WendyOS User Setup - First Boot Service
-# This script runs once on first boot to initialize user home directories
-# on the persistent data partition.
+# WendyOS User Setup
+# - On every boot: applies idempotent dotfile migrations.
+# - On first boot only: initializes user home directories on /data
+#   (gated by /data/.wendyos-user-setup-done).
 
 set -e
 
@@ -11,19 +12,31 @@ WENDY_HOME="/data/home/wendy"
 WENDY_UID=1000
 WENDY_GID=1000
 
-# Check if already run
-if [ -f "$SETUP_FLAG" ]; then
-    echo "WendyOS user setup already completed. Skipping."
-    exit 0
-fi
-
-echo "Running WendyOS user setup (first boot)..."
-
 # Ensure /data is mounted
 if ! mountpoint -q /data; then
     echo "ERROR: /data is not mounted. Cannot proceed."
     exit 1
 fi
+
+# Dotfile migration (run on every boot, idempotent)
+# Drop the legacy ~/.bashrc block that re-sourced /etc/profile,
+# which caused the dynamic MOTD to print twice on SSH login. Existing
+# devices skip first-boot init via SETUP_FLAG, so this migration is the
+# only thing that fixes them on the next OTA.
+if [ -f "$WENDY_HOME/.bashrc" ] && \
+   grep -q '^# Source global profile if available' "$WENDY_HOME/.bashrc"
+then
+    echo "Removing legacy /etc/profile re-source block from $WENDY_HOME/.bashrc"
+    sed -i '/^# Source global profile if available/,/^fi$/d' "$WENDY_HOME/.bashrc"
+fi
+
+# Check if already run
+if [ -f "$SETUP_FLAG" ]; then
+    echo "WendyOS user setup already completed. Skipping first-boot init."
+    exit 0
+fi
+
+echo "Running WendyOS user setup (first boot)..."
 
 # Create /data/home if it doesn't exist
 if [ ! -d "$DATA_HOME" ]; then
@@ -45,13 +58,8 @@ if [ ! -d "$WENDY_HOME" ]; then
     # Create minimal .bashrc that sources system profiles
     cat > "$WENDY_HOME/.bashrc" << 'EOF'
 # WendyOS User Environment
-# System defaults are in /etc/profile.d/ and update via OTA
-# Add your personal customizations below
-
-# Source global profile if available
-if [ -f /etc/profile ]; then
-    . /etc/profile
-fi
+# System defaults are in /etc/profile.d/ (sourced by /etc/profile on login).
+# Add your personal customizations below.
 
 # User's personal customizations below this line
 # These will persist across OTA updates
