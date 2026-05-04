@@ -272,13 +272,17 @@ jobs:
           # NOTE: counted with a pipe-free idiom on purpose. `find ... | head | wc -l`
           # under `set -o pipefail` aborts on warm caches because head closes
           # stdin early and find SIGPIPEs — the exact case we're trying to detect.
+          # maxdepth 5 covers both the legacy flat layout (sstate-cache/<aa>/<bb>/file)
+          # and the per-tree partitioned layout introduced with split-poky
+          # (sstate-cache/<tree>/<aa>/<bb>/file). Future-proof for one extra
+          # nesting level if BitBake ever changes its hash directory scheme.
           warm_threshold=500
           sstate_files=0
           if [[ -d "$GITHUB_WORKSPACE/sstate-cache" ]]; then
             while IFS= read -r _; do
               sstate_files=$((sstate_files + 1))
               if [[ "$sstate_files" -ge "$warm_threshold" ]]; then break; fi
-            done < <(find "$GITHUB_WORKSPACE/sstate-cache" -mindepth 2 -maxdepth 3 -type f -print 2>/dev/null)
+            done < <(find "$GITHUB_WORKSPACE/sstate-cache" -mindepth 2 -maxdepth 5 -type f -print 2>/dev/null)
           fi
 
           if [[ "$sstate_files" -lt "$warm_threshold" ]]; then

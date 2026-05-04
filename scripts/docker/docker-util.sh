@@ -89,8 +89,9 @@ OS_NAME="wendyos"
 DOCKER_BASE="${DOCKER_BASE:-ubuntu:24.04}"
 DOCKER_NAME=""
 DOCKER_REPO="${DOCKER_REPO:-${OS_NAME}-build}"
-# DOCKER_TAG="latest"
-DOCKER_TAG="${DOCKER_TAG:-scarthgap}"
+# Tag is no longer series-suffixed; the active yocto series is selected at
+# bootstrap time via WENDYOS_LAYER_TREE, not by image tag.
+DOCKER_TAG="${DOCKER_TAG:-latest}"
 DOCKER_CONFIG=""
 DOCKER_ENV="${WORK_DIR}/environment"
 DOCKER_USER="dev"

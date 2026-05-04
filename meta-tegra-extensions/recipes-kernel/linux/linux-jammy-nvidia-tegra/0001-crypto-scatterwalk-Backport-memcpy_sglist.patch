@@ -3,6 +3,8 @@ From: Eric Biggers <ebiggers@kernel.org>
 Date: Wed, 29 Apr 2026 23:35:56 -0700
 Subject: [PATCH] crypto: scatterwalk - Backport memcpy_sglist()
 
+Upstream-Status: Backport [https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/commit/?h=linux-5.15.y&id=36435a56cd6bab7609c3e0fd7a70224795375748]
+
 This backports the current implementation of memcpy_sglist() from
 upstream commit 4dffc9bbffb9ccfcda730d899c97c553599e7ca8.
 

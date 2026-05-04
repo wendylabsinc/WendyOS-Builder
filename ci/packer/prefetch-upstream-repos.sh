@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
 #
 # Pre-clone the upstream Yocto layer repos pinned in scripts/upstream-repos.env
-# into a cache directory. Invoked by ci/packer/wendyos-builder.pkr.hcl while
-# baking the CI runner AMI; bootstrap.sh's clone_repos picks them up and
-# fetches/checks out instead of doing a fresh clone.
+# into a per-tree subdirectory of <target_dir>. Invoked by
+# ci/packer/wendyos-builder.pkr.hcl while baking the CI runner AMI;
+# bootstrap.sh's clone_repos picks them up (under
+# <cache>/${WENDYOS_LAYER_TREE}/<folder>/) and fetches/checks out instead
+# of doing a fresh clone.
+#
+# The poky monolith has been retired here; "poky" is composed at clone time
+# from three split-style upstream repos (bitbake, openembedded-core,
+# meta-yocto). See plans/bootstrap-split-poky-migration.md.
 #
 # Usage:
 #   prefetch-upstream-repos.sh <target-dir> <upstream-repos.env path>
@@ -13,17 +19,24 @@ set -euo pipefail
 target_dir="${1:?target dir required}"
 env_file="${2:?upstream-repos.env path required}"
 
-mkdir -p "${target_dir}"
-cd "${target_dir}"
-
 # shellcheck disable=SC1090
 source "${env_file}"
 
+# Honour any layer-tree override sourced from the env file (default
+# scarthgap). When whinlatter (Thor) is added, this script can be invoked a
+# second time with WENDYOS_LAYER_TREE=whinlatter to populate the second
+# tree alongside the first.
+mkdir -p "${target_dir}/${WENDYOS_LAYER_TREE}"
+cd "${target_dir}/${WENDYOS_LAYER_TREE}"
+
 # Mirror the (URL, SRCREV, folder) tuples that bootstrap.sh derives from
-# repos[]. Folder name = basename of URL with .git stripped, matching
-# clone_repos in bootstrap.sh.
+# repos[]. Folder names are explicit here for the three split-poky repos
+# (so the mapping URL→folder is unambiguous); the rest match
+# basename-of-URL with .git stripped, like clone_repos in bootstrap.sh.
 declare -A repos=(
-    [poky]="${URL_POKY}|${SRCREV_POKY}"
+    [bitbake]="${URL_BITBAKE}|${SRCREV_BITBAKE}"
+    [openembedded-core]="${URL_OECORE}|${SRCREV_OECORE}"
+    [meta-yocto]="${URL_METAYOCTO}|${SRCREV_METAYOCTO}"
     [meta-openembedded]="${URL_OE}|${SRCREV_OE}"
     [meta-tegra]="${URL_TEGRA}|${SRCREV_TEGRA}"
     [meta-tegra-community]="${URL_TEGRA_COMM}|${SRCREV_TEGRA_COMM}"
@@ -35,7 +48,7 @@ declare -A repos=(
 
 for folder in "${!repos[@]}"; do
     IFS='|' read -r url srcrev <<< "${repos[$folder]}"
-    printf '[prefetch] %s @ %s\n' "${folder}" "${srcrev}"
+    printf '[prefetch] %s/%s @ %s\n' "${WENDYOS_LAYER_TREE}" "${folder}" "${srcrev}"
 
     if [[ ! -d "${folder}/.git" ]]; then
         git clone "${url}" "${folder}"

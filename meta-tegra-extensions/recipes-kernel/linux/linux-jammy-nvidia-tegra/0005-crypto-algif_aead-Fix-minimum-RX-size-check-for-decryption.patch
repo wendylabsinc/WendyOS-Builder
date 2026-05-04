@@ -3,6 +3,8 @@ From: Herbert Xu <herbert@gondor.apana.org.au>
 Date: Wed, 29 Apr 2026 23:36:04 -0700
 Subject: [PATCH] crypto: algif_aead - Fix minimum RX size check for decryption
 
+Upstream-Status: Backport [https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/commit/?h=linux-5.15.y&id=fd427dd84f224309afbcc2cb67c7bb770a01265c]
+
 commit 3d14bd48e3a77091cbce637a12c2ae31b4a1687c upstream.
 
 The check for the minimum receive buffer size did not take the

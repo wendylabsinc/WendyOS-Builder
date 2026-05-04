@@ -3,6 +3,8 @@ From: Douya Le <ldy3087146292@gmail.com>
 Date: Wed, 29 Apr 2026 23:35:59 -0700
 Subject: [PATCH] crypto: algif_aead - snapshot IV for async AEAD requests
 
+Upstream-Status: Backport [https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/commit/?h=linux-5.15.y&id=a920cabdb0b7cf1f4e11a20524253ae5bd09092b]
+
 commit 5aa58c3a572b3e3b6c786953339f7978b845cc52 upstream.
 
 AF_ALG AEAD AIO requests currently use the socket-wide IV buffer during

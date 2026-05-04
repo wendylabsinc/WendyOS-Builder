@@ -9,6 +9,8 @@
 #   REPOS_EXTRA=(...)    append extra clones that coexist with defaults,
 #                        each entry "enabled|url|folder|commit"
 
-#SRCREV_POKY="<commit-hash>"
+#SRCREV_BITBAKE="<commit-hash>"
+#SRCREV_OECORE="<commit-hash>"
+#SRCREV_METAYOCTO="<commit-hash>"
 #SRCREV_OE="<commit-hash>"
 #SRCREV_VIRT="<commit-hash>"

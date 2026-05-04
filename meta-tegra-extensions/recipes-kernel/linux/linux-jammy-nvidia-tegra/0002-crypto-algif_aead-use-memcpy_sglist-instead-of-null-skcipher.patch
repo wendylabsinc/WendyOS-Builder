@@ -4,6 +4,8 @@ Date: Wed, 29 Apr 2026 23:35:57 -0700
 Subject: [PATCH] crypto: algif_aead - use memcpy_sglist() instead of null
  skcipher
 
+Upstream-Status: Backport [https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/commit/?h=linux-5.15.y&id=17774d99bb4347c6b025ef80b637d6e3f94fe2f7]
+
 commit f2804d0eee8ddd57aa79d0b82872b74c21e1b69b upstream.
 
 For copying data between two scatterlists, just use memcpy_sglist()

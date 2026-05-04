@@ -266,9 +266,17 @@ make build
 
    # build the Linux image inside the container
    cd ./wendyos
-   . ./repos/poky/oe-init-build-env build
+   . ./build/.wendyos-env
+   . ./repos/$WENDYOS_LAYER_TREE/openembedded-core/oe-init-build-env build
    bitbake wendyos-image
    ```
+
+   `build/.wendyos-env` is written by `bootstrap.sh` and exports
+   `WENDYOS_LAYER_TREE` (default `scarthgap`), the per-series namespace
+   under `repos/<tree>/` populated for the active board. The Yocto core
+   (`bitbake`, `openembedded-core`, `meta-yocto`) is composed from upstream
+   split repos rather than the legacy bundled `poky.git` monolith — see
+   `plans/bootstrap-split-poky-migration.md` for the design rationale.
 
    Depending on the hardware configuration, the build process can take several hours on the first run (when the `download` and `sstate-cache` folders are empty!).
 
@@ -963,7 +971,8 @@ enabled on `ttyAMA0` at 115200 baud.
 
    # Inside the container:
    cd ./wendyos
-   . ./repos/poky/oe-init-build-env build
+   . ./build/.wendyos-env
+   . ./repos/$WENDYOS_LAYER_TREE/openembedded-core/oe-init-build-env build
    bitbake wendyos-image
    ```
 

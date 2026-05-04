@@ -19,7 +19,9 @@
 SHELL := /bin/bash
 IMAGE_NAME := wendyos
 DOCKER_REPO := wendyos-build
-DOCKER_TAG := scarthgap
+# Tag is no longer series-suffixed; bootstrap.sh + bblayers compose the
+# active yocto series via WENDYOS_LAYER_TREE, not via the Docker tag.
+DOCKER_TAG := latest
 DOCKER_USER := dev
 DOCKER_WORKDIR := /home/$(DOCKER_USER)/$(IMAGE_NAME)
 BUILD_DIR := build
@@ -157,7 +159,7 @@ shell:
 	@printf "\n"
 	@printf "$(YELLOW)Inside the container, run:$(NC)\n"
 	@printf "  cd ./$(IMAGE_NAME)\n"
-	@printf "  . ./repos/poky/oe-init-build-env build\n"
+	@printf "  . ./build/.wendyos-env && . ./repos/\$$WENDYOS_LAYER_TREE/openembedded-core/oe-init-build-env build\n"
 	@printf "  bitbake $(IMAGE_TARGET)\n"
 	@printf "\n"
 	@cd $(DOCKER_DIR) && ./docker-util.sh run
@@ -171,7 +173,8 @@ build: _check-machine _check-setup _ensure-volumes
 	@printf "\n"
 	@if [ "$(WENDYOS_HOST_BUILD)" = "1" ]; then \
 		cd $(PROJECT_DIR) && \
-		source ./repos/poky/oe-init-build-env $(BUILD_DIR) && \
+		. ./$(BUILD_DIR)/.wendyos-env && \
+		source ./repos/$$WENDYOS_LAYER_TREE/openembedded-core/oe-init-build-env $(BUILD_DIR) && \
 		BB_ENV_PASSTHROUGH_ADDITIONS="MACHINE" MACHINE=$(MACHINE) bitbake $(IMAGE_TARGET); \
 	elif [ "$$(uname)" = "Darwin" ]; then \
 		docker run \
@@ -187,7 +190,8 @@ build: _check-machine _check-setup _ensure-volumes
 			$(DOCKER_REPO):$(DOCKER_TAG) \
 			/bin/bash -c '\
 				cd $(DOCKER_WORKDIR) && \
-				source ./repos/poky/oe-init-build-env $(BUILD_DIR) && \
+				. ./$(BUILD_DIR)/.wendyos-env && \
+				source ./repos/$$WENDYOS_LAYER_TREE/openembedded-core/oe-init-build-env $(BUILD_DIR) && \
 				BB_ENV_PASSTHROUGH_ADDITIONS="MACHINE" MACHINE=$(MACHINE) bitbake $(IMAGE_TARGET) \
 			'; \
 	else \
@@ -202,7 +206,8 @@ build: _check-machine _check-setup _ensure-volumes
 			$(DOCKER_REPO):$(DOCKER_TAG) \
 			/bin/bash -c '\
 				cd $(DOCKER_WORKDIR) && \
-				source ./repos/poky/oe-init-build-env $(BUILD_DIR) && \
+				. ./$(BUILD_DIR)/.wendyos-env && \
+				source ./repos/$$WENDYOS_LAYER_TREE/openembedded-core/oe-init-build-env $(BUILD_DIR) && \
 				BB_ENV_PASSTHROUGH_ADDITIONS="MACHINE" MACHINE=$(MACHINE) bitbake $(IMAGE_TARGET) \
 			'; \
 	fi
@@ -232,7 +237,8 @@ build-sdk: _check-machine _check-setup _ensure-volumes
 			$(DOCKER_REPO):$(DOCKER_TAG) \
 			/bin/bash -c '\
 				cd $(DOCKER_WORKDIR) && \
-				source ./repos/poky/oe-init-build-env $(BUILD_DIR) && \
+				. ./$(BUILD_DIR)/.wendyos-env && \
+				source ./repos/$$WENDYOS_LAYER_TREE/openembedded-core/oe-init-build-env $(BUILD_DIR) && \
 				BB_ENV_PASSTHROUGH_ADDITIONS="MACHINE" MACHINE=$(MACHINE) bitbake $(IMAGE_TARGET) -c populate_sdk \
 			'; \
 	else \
@@ -247,7 +253,8 @@ build-sdk: _check-machine _check-setup _ensure-volumes
 			$(DOCKER_REPO):$(DOCKER_TAG) \
 			/bin/bash -c '\
 				cd $(DOCKER_WORKDIR) && \
-				source ./repos/poky/oe-init-build-env $(BUILD_DIR) && \
+				. ./$(BUILD_DIR)/.wendyos-env && \
+				source ./repos/$$WENDYOS_LAYER_TREE/openembedded-core/oe-init-build-env $(BUILD_DIR) && \
 				BB_ENV_PASSTHROUGH_ADDITIONS="MACHINE" MACHINE=$(MACHINE) bitbake $(IMAGE_TARGET) -c populate_sdk \
 			'; \
 	fi
@@ -505,12 +512,23 @@ _check-machine:
 
 # Each @-prefixed recipe line runs in its own shell, so a host-build "exit 0"
 # wouldn't skip subsequent Docker checks. Keep the whole branch in one block.
+#
+# The canonical "setup has been run" marker is build/.wendyos-env, written
+# by bootstrap.sh. It also tells us which layer tree the build is bound to,
+# which we re-source to confirm the matching openembedded-core checkout
+# exists under repos/<tree>/.
 _check-setup:
-	@if [ "$(WENDYOS_HOST_BUILD)" = "1" ]; then \
-		if [ ! -d "$(PROJECT_DIR)/repos/poky" ]; then \
-			printf "$(RED)Error: repos/poky not found. Run 'make setup' first.$(NC)\n"; \
+	@if [ ! -f "$(PROJECT_DIR)/$(BUILD_DIR)/.wendyos-env" ]; then \
+		printf "$(RED)Error: $(BUILD_DIR)/.wendyos-env not found. Run 'make setup' first.$(NC)\n"; \
+		exit 1; \
+	fi
+	@. $(PROJECT_DIR)/$(BUILD_DIR)/.wendyos-env && \
+		if [ ! -d "$(PROJECT_DIR)/repos/$$WENDYOS_LAYER_TREE/openembedded-core" ]; then \
+			printf "$(RED)Error: repos/$$WENDYOS_LAYER_TREE/openembedded-core not found. Re-run 'make setup'.$(NC)\n"; \
 			exit 1; \
-		fi; \
+		fi
+	@if [ "$(WENDYOS_HOST_BUILD)" = "1" ]; then \
+		exit 0; \
 	else \
 		if [ ! -d "$(DOCKER_DIR)" ]; then \
 			printf "$(RED)Error: Build environment not set up.$(NC)\n"; \
