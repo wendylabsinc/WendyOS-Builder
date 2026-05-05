@@ -24,6 +24,7 @@ CONF_VERSION = "2"
 # USB gadget function ordering (only effective when WENDYOS_USB_GADGET = "1")
 #GADGET_FUNC_ORDER="ecm ncm"
 
-# Debug features - can be overridden in local.conf or machine config
-WENDYOS_DEBUG = "1"
-WENDYOS_DEBUG_UART = "1"
+# Debug/SSH defaults — off for production; opt in via local.conf or board config.
+WENDYOS_DEBUG ?= "0"
+WENDYOS_DEBUG_UART ?= "0"
+WENDYOS_SSHD ?= "0"

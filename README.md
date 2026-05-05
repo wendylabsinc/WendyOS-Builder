@@ -833,8 +833,9 @@ You can modify these variables in `bootstrap.sh` before running:
 
 In `build/conf/local.conf`:
 - `WENDYOS_FLASH_IMAGE_SIZE` - Flash image size: "4GB", "8GB", "16GB", "32GB", "64GB" (default: "64GB" — set per-board in `conf/template/boards/<id>/local.conf`; Tegra only)
-- `WENDYOS_DEBUG` - Enable debug packages (default: 0)
+- `WENDYOS_DEBUG` - Enable debug packages and `debug-tweaks` (empty root password, passwordless root SSH) (default: 0)
 - `WENDYOS_DEBUG_UART` - Enable UART debug output (default: 0)
+- `WENDYOS_SSHD` - Include OpenSSH server (`sshd`) in the image (default: 0; set to `1` to enable sshd)
 - `WENDYOS_USB_GADGET` - Enable USB gadget mode (default: 0)
 - `WENDYOS_PERSIST_JOURNAL_LOGS` - Persist logs to storage (default: 0)
 

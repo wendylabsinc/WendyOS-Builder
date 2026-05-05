@@ -30,15 +30,18 @@ MENDER_RETRY_POLL_INTERVAL_SECONDS     = "300"
 MENDER_SYSTEMD_AUTO_ENABLE = "1"
 MENDER_CONNECT_ENABLE = "1"
 
-IMAGE_FEATURES += " \
-    ssh-server-openssh \
-    debug-tweaks \
-    "
+# debug-tweaks: empty root password, PermitEmptyPasswords, PermitRootLogin.
+# Controlled by WENDYOS_DEBUG (default: "0"). Set to "1" for development builds.
+IMAGE_FEATURES += "${@oe.utils.ifelse(d.getVar('WENDYOS_DEBUG') == '1', 'debug-tweaks', '')}"
 
 # Optional runtime package management (rpm/dnf in the rootfs).
 # Disabled by default — image is updated atomically via Mender A/B.
 # Set WENDYOS_ENABLE_PACKAGE_MANAGEMENT = "1" in local.conf or distro to enable.
 IMAGE_FEATURES += "${@bb.utils.contains('WENDYOS_ENABLE_PACKAGE_MANAGEMENT', '1', 'package-management', '', d)}"
+
+# OpenSSH server (sshd). Controlled by WENDYOS_SSHD (default: "0").
+# Set WENDYOS_SSHD = "1" in local.conf to include sshd in the image.
+IMAGE_FEATURES += "${@oe.utils.ifelse(d.getVar('WENDYOS_SSHD') == '1', 'ssh-server-openssh', '')}"
 
 # Common packages for all machines (real hardware and QEMU)
 IMAGE_INSTALL:append = " \
@@ -95,6 +98,7 @@ IMAGE_ROOTFS_EXTRA_SPACE:append = "${@bb.utils.contains("DISTRO_FEATURES", "syst
 BUILDCFG_VARS += " \
     WENDYOS_DEBUG \
     WENDYOS_DEBUG_UART \
+    WENDYOS_SSHD \
     WENDYOS_USB_GADGET \
     WENDYOS_USB_NET_MODE \
     WENDYOS_MDNS_INTERFACES \
