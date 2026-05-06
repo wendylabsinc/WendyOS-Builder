@@ -618,5 +618,5 @@ jobs:
           gh release create "$TAG" \
             --repo "$GITHUB_REPOSITORY" \
             --title "Nightly ${VERSION}-nightly ($(date -u +%Y-%m-%d))" \
-            --notes "Automated nightly build from the \`main\` branch." \
+            --generate-notes \
             --prerelease
