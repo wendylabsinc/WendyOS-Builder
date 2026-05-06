@@ -1,0 +1,12 @@
+# RPi3 MBR layout. The BCM2837 GPU bootrom can only read MBR-partitioned
+# FAT32 — GPT support landed later in the Pi 4 EEPROM bootloader, so the
+# shared rpi-partuuid.wks is not usable on Pi 3.
+#
+# Partitions are referenced by filesystem label: under MBR the kernel exposes
+# PARTUUIDs as <disk-signature>-<partno>, not as UUIDv4, so the values from
+# partuuid-rpi.bbclass would never resolve in cmdline.txt or fstab. See
+# rpi-cmdline.bbappend and rpi-mbr-fstab for the matching consumers.
+bootloader --ptable msdos
+part /boot --source bootimg-partition --ondisk mmcblk0 --fstype=vfat --label boot --active --align 4096 --size 128M
+part --ondisk mmcblk0 --fstype=vfat --label config --align 4096 --size ${WENDYOS_CONFIG_PART_SIZE_MB}M
+part / --source rootfs --ondisk mmcblk0 --fstype=ext4 --label root --align 4096 --size 8192M

@@ -36,8 +36,11 @@ if lsblk -rno PARTLABEL "$DISK" 2>/dev/null | grep -qiE 'root[a-b]'; then
   mkdir -p "$(dirname "$STAMP")"; touch "$STAMP"; exit 0
 fi
 
-# GPT backup header when image is flashed to a larger card
-if command -v sgdisk >/dev/null 2>&1; then
+# Fix GPT backup header when image is flashed to a larger card.
+# Skip on MBR-partitioned disks — sgdisk -e on MBR can write GPT structures
+# and corrupt the partition table before exiting.
+PTTYPE="$(blkid -o value -s PTTYPE "$DISK" 2>/dev/null || true)"
+if [[ "$PTTYPE" == "gpt" ]] && command -v sgdisk >/dev/null 2>&1; then
   echo "[expand-rootfs] sgdisk -e $DISK (fix GPT backup at end)"
   sgdisk -e "$DISK" || true
   command -v partprobe >/dev/null 2>&1 && partprobe "$DISK" || true
