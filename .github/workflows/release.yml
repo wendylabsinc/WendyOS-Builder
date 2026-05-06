@@ -155,7 +155,6 @@ jobs:
           DEVICE: ${{ matrix.device }}
           STORAGE: ${{ matrix.storage }}
           RELEASE_VERSION: ${{ github.ref_name }}
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
         run: |
           TOKEN=$(gcloud auth print-access-token)
 
