@@ -221,3 +221,14 @@ jobs:
               --title "WendyOS $RELEASE_TAG" \
               --generate-notes
           fi
+      - name: Send Discord announcement
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          [[ -z "${DISCORD_WEBHOOK_URL}" ]] && exit 0
+          RELEASE_URL="https://github.com/${GITHUB_REPOSITORY}/releases/tag/${RELEASE_TAG}"
+          curl -s -o /dev/null \
+            -H "Content-Type: application/json" \
+            -d "{\"content\": \"**WendyOS ${RELEASE_TAG}** is out! Full changelog and downloads: ${RELEASE_URL}\"}" \
+            "$DISCORD_WEBHOOK_URL"
