@@ -6,8 +6,7 @@
 # Note: This only disables PolicyKit integration in systemd itself. The polkit
 # daemon will still run on the target system for rtkit and other services.
 
-# networkd: NetworkManager is the sole net manager on this distro.
-PACKAGECONFIG:remove = "polkit networkd"
+PACKAGECONFIG:remove = "polkit"
 
 # Disable debug source package splitting to avoid pseudo uid lookup failures.
 # do_package hardlinks source files (owned by uid 1000 / build user) into PKGD.
