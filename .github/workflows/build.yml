@@ -530,7 +530,7 @@ jobs:
   publish:
     name: Update master manifest
     needs: build
-    if: ${{ success() && github.event_name != 'pull_request' }}
+    if: ${{ !cancelled() && github.event_name != 'pull_request' }}
     concurrency:
       group: update-master-manifest
       cancel-in-progress: false
@@ -601,6 +601,7 @@ jobs:
           done
 
       - name: Tag nightly pre-release on GitHub
+        if: ${{ success() }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
