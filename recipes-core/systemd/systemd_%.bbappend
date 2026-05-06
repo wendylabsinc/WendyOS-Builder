@@ -6,21 +6,8 @@
 # Note: This only disables PolicyKit integration in systemd itself. The polkit
 # daemon will still run on the target system for rtkit and other services.
 
-# NetworkManager is the sole net/DNS manager on this distro:
-#   - networkd: not used (no .network files, NM manages all interfaces)
-#   - resolved + nss-resolve: not used (NM owns /etc/resolv.conf via rc-manager=file)
-PACKAGECONFIG:remove = "polkit networkd resolved nss-resolve"
-
-# Strip the dangling /etc/resolv.conf symlink artefacts the upstream systemd
-# recipe injects when 'resolved' PACKAGECONFIG is disabled. The recipe assumes
-# you'll re-enable resolved later via tmpfiles; this distro doesn't — NM
-# (rc-manager=file) writes /etc/resolv.conf directly.
-do_install:append() {
-    if [ -f ${D}${exec_prefix}/lib/tmpfiles.d/etc.conf ]; then
-        sed -i '\|^L! /etc/resolv\.conf|d' ${D}${exec_prefix}/lib/tmpfiles.d/etc.conf
-    fi
-    rm -f ${D}${sysconfdir}/resolv-conf.systemd
-}
+# networkd: NetworkManager is the sole net manager on this distro.
+PACKAGECONFIG:remove = "polkit networkd"
 
 # Disable debug source package splitting to avoid pseudo uid lookup failures.
 # do_package hardlinks source files (owned by uid 1000 / build user) into PKGD.
