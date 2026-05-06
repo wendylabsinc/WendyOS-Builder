@@ -612,7 +612,9 @@ jobs:
 
           cd "$GITHUB_WORKSPACE/wendyos"
           git tag -f "$TAG"
+          git tag -f "${VERSION}-nightly"
           git push origin "$TAG" --force
+          git push origin "${VERSION}-nightly" --force
 
           gh release create "$TAG" \
             --repo "$GITHUB_REPOSITORY" \
