@@ -531,7 +531,7 @@ jobs:
   publish:
     name: Update master manifest
     needs: build
-    if: ${{ !cancelled() && github.event_name != 'pull_request' }}
+    if: ${{ success() && github.event_name != 'pull_request' }}
     concurrency:
       group: update-master-manifest
       cancel-in-progress: false
