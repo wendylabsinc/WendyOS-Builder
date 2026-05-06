@@ -570,8 +570,6 @@ jobs:
           go-version-file: wendy-os-publisher/go.mod
 
       - name: Update master manifest
-        env:
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_NIGHTLY_WEBHOOK_URL }}
         run: |
           VERSION=$(grep 'DISTRO_VERSION' "$GITHUB_WORKSPACE/wendyos/conf/distro/wendyos.conf" | head -1 | sed 's/.*"\(.*\)"/\1/')
           TOKEN=$(gcloud auth print-access-token)
@@ -599,6 +597,21 @@ jobs:
               fi
             done
           done
+
+      - name: Send Discord announcement
+        if: ${{ success() }}
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_NIGHTLY_WEBHOOK_URL }}
+          VERSION_FILE: ${{ github.workspace }}/wendyos/conf/distro/wendyos.conf
+        run: |
+          [[ -z "${DISCORD_WEBHOOK_URL}" ]] && exit 0
+          VERSION=$(grep 'DISTRO_VERSION' "$VERSION_FILE" | head -1 | sed 's/.*"\(.*\)"/\1/')
+          RELEASE_URL="https://github.com/${GITHUB_REPOSITORY}/releases/tag/nightly"
+          jq -n --arg msg "**WendyOS ${VERSION}-nightly** is out! Full changelog and downloads: ${RELEASE_URL}" '{content: $msg}' | \
+            curl -fsS -o /dev/null \
+              -H "Content-Type: application/json" \
+              -d @- \
+              "$DISCORD_WEBHOOK_URL"
 
       - name: Tag nightly pre-release on GitHub
         if: ${{ success() }}
