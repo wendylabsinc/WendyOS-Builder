@@ -30,9 +30,19 @@ MENDER_RETRY_POLL_INTERVAL_SECONDS     = "300"
 MENDER_SYSTEMD_AUTO_ENABLE = "1"
 MENDER_CONNECT_ENABLE = "1"
 
-# debug-tweaks: empty root password, PermitEmptyPasswords, PermitRootLogin.
-# Controlled by WENDYOS_DEBUG (default: "0"). Set to "1" for development builds.
-IMAGE_FEATURES += "${@oe.utils.ifelse(d.getVar('WENDYOS_DEBUG') == '1', 'debug-tweaks', '')}"
+# Development-time conveniences applied when WENDYOS_DEBUG = "1": empty
+# root password, PermitEmptyPasswords, PermitRootLogin, postinst logging.
+# Equivalent to scarthgap's legacy `debug-tweaks` alias, expanded into
+# individual features here because wrynose oe-core removed the alias from
+# IMAGE_FEATURES[validitems]. Override WENDYOS_DEBUG_FEATURES in local.conf
+# to add/remove features from the debug bundle.
+WENDYOS_DEBUG_FEATURES ?= " \
+    empty-root-password \
+    allow-empty-password \
+    allow-root-login \
+    post-install-logging \
+    "
+IMAGE_FEATURES += "${@oe.utils.ifelse(d.getVar('WENDYOS_DEBUG') == '1', d.getVar('WENDYOS_DEBUG_FEATURES'), '')}"
 
 # Optional runtime package management (rpm/dnf in the rootfs).
 # Disabled by default — image is updated atomically via Mender A/B.
@@ -64,10 +74,11 @@ IMAGE_INSTALL:append = " \
     gstreamer1.0-libav \
     "
 
-# Mender packages (only for real hardware, not QEMU or RPi)
+# Mender packages (only for real hardware: Orin tegra234, not QEMU, RPi, or Thor tegra264)
+# Thor (tegra264) excluded — Mender on Thor is deferred (see wendyos.conf:16-19).
 IMAGE_INSTALL:append = " \
-    ${@'' if ('qemuall' in d.getVar('MACHINEOVERRIDES').split(':') or 'rpi' in d.getVar('MACHINEOVERRIDES').split(':')) else 'mender-configure mender-connect'} \
-    ${@'' if ('qemuall' in d.getVar('MACHINEOVERRIDES').split(':') or 'rpi' in d.getVar('MACHINEOVERRIDES').split(':')) else 'python3-pip-jetson-config'} \
+    ${@'' if any(t in d.getVar('MACHINEOVERRIDES').split(':') for t in ('qemuall', 'rpi', 'tegra264')) else 'mender-configure mender-connect'} \
+    ${@'' if any(t in d.getVar('MACHINEOVERRIDES').split(':') for t in ('qemuall', 'rpi', 'tegra264')) else 'python3-pip-jetson-config'} \
     "
 
 # Enable USB peripheral (gadget) support for real hardware

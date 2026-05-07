@@ -14,24 +14,24 @@ SRC_URI = " \
     file://99-usb-gadget-udc.rules \
     file://usb0-force-up \
     "
-S = "${WORKDIR}"
+S = "${UNPACKDIR}"
 
 inherit systemd
 
 do_install() {
     install -d ${D}${sbindir}
-    install -m 0755 ${WORKDIR}/gadget-setup.sh ${D}${sbindir}/gadget-setup.sh
+    install -m 0755 ${UNPACKDIR}/gadget-setup.sh ${D}${sbindir}/gadget-setup.sh
 
     install -d ${D}${libexecdir}
-    install -m 0755 ${WORKDIR}/usb0-force-up ${D}${libexecdir}/usb0-force-up
+    install -m 0755 ${UNPACKDIR}/usb0-force-up ${D}${libexecdir}/usb0-force-up
 
     install -d ${D}${systemd_system_unitdir}
-    install -m 0644 ${WORKDIR}/gadget-setup.service ${D}${systemd_system_unitdir}/gadget-setup.service
-    install -m 0644 ${WORKDIR}/wendyos-usbgadget-unbind.service ${D}${systemd_system_unitdir}/wendyos-usbgadget-unbind.service
+    install -m 0644 ${UNPACKDIR}/gadget-setup.service ${D}${systemd_system_unitdir}/gadget-setup.service
+    install -m 0644 ${UNPACKDIR}/wendyos-usbgadget-unbind.service ${D}${systemd_system_unitdir}/wendyos-usbgadget-unbind.service
 
     install -d ${D}${sysconfdir}/udev/rules.d
-    install -m 0644 ${WORKDIR}/90-usb0-up.rules ${D}${sysconfdir}/udev/rules.d/90-usb0-up.rules
-    install -m 0644 ${WORKDIR}/99-usb-gadget-udc.rules ${D}${sysconfdir}/udev/rules.d/99-usb-gadget-udc.rules
+    install -m 0644 ${UNPACKDIR}/90-usb0-up.rules ${D}${sysconfdir}/udev/rules.d/90-usb0-up.rules
+    install -m 0644 ${UNPACKDIR}/99-usb-gadget-udc.rules ${D}${sysconfdir}/udev/rules.d/99-usb-gadget-udc.rules
 }
 
 SYSTEMD_SERVICE:${PN} = "gadget-setup.service"

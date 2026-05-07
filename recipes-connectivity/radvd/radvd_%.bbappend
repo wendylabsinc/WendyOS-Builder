@@ -7,7 +7,7 @@ inherit systemd
 do_install:append() {
     # Install our custom radvd configuration
     install -d ${D}${sysconfdir}
-    install -m 0644 ${WORKDIR}/radvd.conf ${D}${sysconfdir}/radvd.conf
+    install -m 0644 ${UNPACKDIR}/radvd.conf ${D}${sysconfdir}/radvd.conf
 
     # Create systemd service if not provided by the recipe
     if [ ! -f ${D}${systemd_unitdir}/system/radvd.service ]; then

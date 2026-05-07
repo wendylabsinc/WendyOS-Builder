@@ -8,7 +8,7 @@ SRC_URI = " \
     file://gadget-dnsmasq.service \
     "
 
-S = "${WORKDIR}"
+S = "${UNPACKDIR}"
 
 inherit systemd
 
@@ -17,11 +17,11 @@ RDEPENDS:${PN} += "dnsmasq avahi-daemon"
 do_install() {
     # dnsmasq config dedicated to usb0
     install -d ${D}${sysconfdir}/dnsmasq.d
-    install -m 0644 ${WORKDIR}/usb-gadget-dnsmasq.conf ${D}${sysconfdir}/dnsmasq.d/
+    install -m 0644 ${UNPACKDIR}/usb-gadget-dnsmasq.conf ${D}${sysconfdir}/dnsmasq.d/
 
     # Dedicated service so we don't alter any system-wide dnsmasq config
     install -d ${D}${systemd_system_unitdir}
-    install -m 0644 ${WORKDIR}/gadget-dnsmasq.service ${D}${systemd_system_unitdir}/
+    install -m 0644 ${UNPACKDIR}/gadget-dnsmasq.service ${D}${systemd_system_unitdir}/
 }
 
 SYSTEMD_SERVICE:${PN} = "gadget-dnsmasq.service"

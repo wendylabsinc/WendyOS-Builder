@@ -11,7 +11,7 @@ WENDYOS_PERSIST_JOURNAL_LOGS ?= "0"
 # WiFi support
 DISTRO_FEATURES:append = " wifi"
 # WKS search path
-WKS_SEARCH_PATH:prepend = "${TD_DISTRO_LAYERDIR}/wic:"
+WKS_SEARCH_PATH:prepend = "${TD_DISTRO_LAYERDIR}/files/wic:"
 
 # PARTUUID defaults (overwritten at parse-time by partuuid.bbclass)
 WENDYOS_BOOT_PARTUUID ?= "00000000-0000-0000-0000-000000000000"

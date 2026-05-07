@@ -14,6 +14,7 @@ SRC_URI = " \
     file://wendyos-etc-binds.service \
     file://setup-etc-binds.sh \
     "
+S = "${UNPACKDIR}"
 
 SYSTEMD_SERVICE:${PN} = "wendyos-etc-binds.service"
 SYSTEMD_AUTO_ENABLE = "enable"
@@ -23,11 +24,11 @@ RDEPENDS:${PN} += "bash coreutils"
 do_install() {
     # Install systemd service unit
     install -d ${D}${systemd_system_unitdir}
-    install -m 0644 ${WORKDIR}/wendyos-etc-binds.service ${D}${systemd_system_unitdir}/
+    install -m 0644 ${UNPACKDIR}/wendyos-etc-binds.service ${D}${systemd_system_unitdir}/
 
     # Install bind mount setup script
     install -d ${D}${sbindir}
-    install -m 0755 ${WORKDIR}/setup-etc-binds.sh ${D}${sbindir}/
+    install -m 0755 ${UNPACKDIR}/setup-etc-binds.sh ${D}${sbindir}/
 }
 
 FILES:${PN} += "${systemd_system_unitdir}/wendyos-etc-binds.service"

@@ -8,8 +8,10 @@ TEGRA_BOOTCONTROL_OVERLAYS += "boot-priority.dtbo"
 # packagegroup-wendyos-tegra pulls in tegra-bootcontrol-overlay,
 # setup-nv-boot-control, packagegroup-nvidia-container, and
 # conditionally tegra-uefi-capsules/bootloader-update.
+# mender-esp is excluded on Thor (tegra264) — Mender on Thor is deferred
+# (see wendyos.conf:16-19).
 IMAGE_INSTALL:append = " \
-    mender-esp \
+    ${@'' if 'tegra264' in d.getVar('MACHINEOVERRIDES').split(':') else 'mender-esp'} \
     packagegroup-wendyos-tegra \
     gstreamer1.0-plugins-nvvideo4linux2 \
     "

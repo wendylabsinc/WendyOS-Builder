@@ -7,11 +7,11 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 
 SRC_URI = "file://usb-gadget.conf"
 
-S = "${WORKDIR}"
+S = "${UNPACKDIR}"
 
 do_install() {
     install -d ${D}${sysconfdir}/modules-load.d
-    install -m 0644 ${WORKDIR}/usb-gadget.conf ${D}${sysconfdir}/modules-load.d/
+    install -m 0644 ${UNPACKDIR}/usb-gadget.conf ${D}${sysconfdir}/modules-load.d/
 }
 
 # Ensure the module packages are present.

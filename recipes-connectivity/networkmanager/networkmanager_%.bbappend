@@ -28,13 +28,13 @@ RRECOMMENDS:${PN}-daemon:remove = "${@'' if d.getVar('WENDYOS_USB_NET_MODE') == 
 do_install:append() {
     # Install main config
     install -d ${D}${sysconfdir}/NetworkManager
-    install -m 0644 ${WORKDIR}/NetworkManager.conf ${D}${sysconfdir}/NetworkManager/NetworkManager.conf
+    install -m 0644 ${UNPACKDIR}/NetworkManager.conf ${D}${sysconfdir}/NetworkManager/NetworkManager.conf
 
     # Install NetworkManager config drop-ins
     install -d ${D}${sysconfdir}/NetworkManager/conf.d
-    install -m 0644 ${WORKDIR}/00-manage-usb0.conf ${D}${sysconfdir}/NetworkManager/conf.d/00-manage-usb0.conf
-    install -m 0644 ${WORKDIR}/10-usb-gadget.conf ${D}${sysconfdir}/NetworkManager/conf.d/10-usb-gadget.conf
-    install -m 0644 ${WORKDIR}/99-interface-metrics.conf ${D}${sysconfdir}/NetworkManager/conf.d/99-interface-metrics.conf
+    install -m 0644 ${UNPACKDIR}/00-manage-usb0.conf ${D}${sysconfdir}/NetworkManager/conf.d/00-manage-usb0.conf
+    install -m 0644 ${UNPACKDIR}/10-usb-gadget.conf ${D}${sysconfdir}/NetworkManager/conf.d/10-usb-gadget.conf
+    install -m 0644 ${UNPACKDIR}/99-interface-metrics.conf ${D}${sysconfdir}/NetworkManager/conf.d/99-interface-metrics.conf
 
     # Install distro-managed connection profile to /usr/lib (read-only on rootfs).
     # NM 1.46+ natively reads /usr/lib/NetworkManager/system-connections/ as a
@@ -44,7 +44,7 @@ do_install:append() {
     # without overwriting user customizations.
     install -d ${D}${nonarch_libdir}/NetworkManager/system-connections
     sed 's|@USB_NET_MODE@|${@usb_net_nm_method(d)}|' \
-        ${WORKDIR}/usb-gadget.nmconnection \
+        ${UNPACKDIR}/usb-gadget.nmconnection \
         > ${D}${nonarch_libdir}/NetworkManager/system-connections/usb-gadget.nmconnection
     chmod 0600 ${D}${nonarch_libdir}/NetworkManager/system-connections/usb-gadget.nmconnection
 }

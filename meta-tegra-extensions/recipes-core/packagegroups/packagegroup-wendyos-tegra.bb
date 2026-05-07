@@ -11,8 +11,10 @@ COMPATIBLE_MACHINE = "(tegra)"
 inherit packagegroup
 
 SUMMARY:${PN} = "Tegra hardware support packages"
+# tegra-flash-reboot ships only on scarthgap meta-tegra (Orin / tegra234);
+# r38.4.x meta-tegra (Thor / tegra264) has no such recipe, so gate it.
 RDEPENDS:${PN} = " \
-    tegra-flash-reboot \
+    ${@'tegra-flash-reboot' if 'tegra234' in d.getVar('MACHINEOVERRIDES').split(':') else ''} \
     tegra-tools-tegrastats \
     tegra-bootcontrol-overlay \
     setup-nv-boot-control \
