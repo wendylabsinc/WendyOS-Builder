@@ -57,6 +57,11 @@ IMAGE_INSTALL:append = " \
     pipewire-alsa \
     rtkit \
     audio-config \
+    gstreamer1.0-plugins-base \
+    gstreamer1.0-plugins-good \
+    gstreamer1.0-plugins-bad \
+    gstreamer1.0-plugins-ugly \
+    gstreamer1.0-libav \
     "
 
 # Mender packages (only for real hardware, not QEMU or RPi)

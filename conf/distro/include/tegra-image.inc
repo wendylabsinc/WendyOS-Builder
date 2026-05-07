@@ -11,6 +11,7 @@ TEGRA_BOOTCONTROL_OVERLAYS += "boot-priority.dtbo"
 IMAGE_INSTALL:append = " \
     mender-esp \
     packagegroup-wendyos-tegra \
+    gstreamer1.0-plugins-nvvideo4linux2 \
     "
 
 # Enable DeepStream SDK support (optional - adds ~1GB to image)
