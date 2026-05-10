@@ -74,11 +74,10 @@ IMAGE_INSTALL:append = " \
     gstreamer1.0-libav \
     "
 
-# Mender packages (only for real hardware: Orin tegra234, not QEMU, RPi, or Thor tegra264)
-# Thor (tegra264) excluded — Mender on Thor is deferred (see wendyos.conf:16-19).
+# Mender userspace packages — gated on WENDYOS_MENDER (set in wendyos.conf
+# and overridable per-machine).
 IMAGE_INSTALL:append = " \
-    ${@'' if any(t in d.getVar('MACHINEOVERRIDES').split(':') for t in ('qemuall', 'rpi', 'tegra264')) else 'mender-configure mender-connect'} \
-    ${@'' if any(t in d.getVar('MACHINEOVERRIDES').split(':') for t in ('qemuall', 'rpi', 'tegra264')) else 'python3-pip-jetson-config'} \
+    ${@'mender-configure mender-connect python3-pip-jetson-config' if d.getVar('WENDYOS_MENDER') == '1' else ''} \
     "
 
 # Enable USB peripheral (gadget) support for real hardware
@@ -112,6 +111,7 @@ IMAGE_ROOTFS_EXTRA_SPACE:append = "${@bb.utils.contains("DISTRO_FEATURES", "syst
 # A space-separated list of variable names that BitBake prints in the
 # "Build Configuration" banner at the start of a build.
 BUILDCFG_VARS += " \
+    WENDYOS_MENDER \
     WENDYOS_DEBUG \
     WENDYOS_DEBUG_UART \
     WENDYOS_SSHD \

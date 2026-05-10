@@ -4,11 +4,10 @@
 # wendyos.conf:73 defaults it to "1", so Thor must override it to "0").
 WENDYOS_UPDATE_BOOTLOADER = "0"
 
-# Persistent journal logs — assume the chosen rootfs partition layout has
-# space for /var/log on a single ext4. If a separate /data partition is
-# introduced for Thor in a later phase, this stays "1"; in Phase 1 it
-# means logs persist across reboots on the rootfs filesystem.
-WENDYOS_PERSIST_JOURNAL_LOGS = "1"
+# Persistent journal logs — leave at the smart default (which tracks
+# WENDYOS_MENDER from wendyos.conf). On Thor, WENDYOS_MENDER=0
+# -> no /data partition -> logs are volatile (tmpfs). When Mender on Thor
+# lands, the smart default will flip to "1" automatically.
 
 # UEFI/EFI debug build mode:
 #   "0" - RELEASE (minimal UART output, production default)
