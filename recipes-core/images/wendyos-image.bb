@@ -18,17 +18,10 @@ IMAGE_FSTYPES += " ext4"
 # - If unset, it falls back to DISTRO_VERSION.
 IMAGE_VERSION_SUFFIX ?= "${DISTRO_VERSION}"
 
-# Keep names reproducible for releases.
-# (Avoid DATETIME here unless you WANT a new artifact for every rebuild.)
-MENDER_ARTIFACT_NAME = "${IMAGE_BASENAME}-${MACHINE}-${IMAGE_VERSION_SUFFIX}"
-# MENDER_ARTIFACT_NAME = "${IMAGE_BASENAME}-${DISTRO_VERSION}-${DATETIME}"
-
-# Mender configuration (only used when mender-full is inherited)
-MENDER_UPDATE_POLL_INTERVAL_SECONDS    = "1800"
-MENDER_INVENTORY_POLL_INTERVAL_SECONDS = "28800"
-MENDER_RETRY_POLL_INTERVAL_SECONDS     = "300"
-MENDER_SYSTEMD_AUTO_ENABLE = "1"
-MENDER_CONNECT_ENABLE = "1"
+# Mender artifact name and configuration live in conf/distro/include/mender.inc,
+# which is conditionally required when WENDYOS_MENDER = "1" (see wendyos.conf).
+# Defining them here unconditionally would leave dangling vars on machines
+# where Mender is disabled (Thor, QEMU, RPi).
 
 # Development-time conveniences applied when WENDYOS_DEBUG = "1": empty
 # root password, PermitEmptyPasswords, PermitRootLogin, postinst logging.

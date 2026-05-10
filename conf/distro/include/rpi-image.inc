@@ -3,9 +3,6 @@
 
 inherit partuuid-rpi
 
-# RPi5 has no Mender; suppress the unconditional MENDER_CONNECT_ENABLE=1 set by wendyos-image.bb
-MENDER_CONNECT_ENABLE = "0"
-
 # RPi5-specific packages
 IMAGE_INSTALL:append = " \
     packagegroup-wendyos-rpi \
