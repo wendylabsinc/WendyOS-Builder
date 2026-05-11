@@ -214,6 +214,8 @@ resolve_ref() {
 }
 
 ###
+# clone_repos must be called from inside repos/${WENDYOS_LAYER_TREE}/.
+# Each entry's <folder> is a sibling under that tree directory.
 function clone_repos() {
     for repo in "${repos[@]}"
     do
@@ -332,29 +334,6 @@ validate_meta_location || {
     mkdir -p "${PROJECT_DIR}"
 }
 
-cd "${PROJECT_DIR}"
-mkdir -p "repos"
-cd "repos"
-
-# Seed repos/ from a pre-cloned cache when one is provided. The CI runner AMI
-# (built by ci/packer/wendyos-builder.pkr.hcl) bakes the upstream layer
-# repos at the pinned SRCREVs into /opt/wendyos-cache/repos so clone_repos
-# below sees them as already-checked-out and only runs `git fetch` + `git
-# checkout`. Local dev leaves this unset and clones fresh as before.
-if [[ -n "${WENDYOS_REPO_CACHE_DIR:-}" && -d "${WENDYOS_REPO_CACHE_DIR}" ]]
-then
-    printf "Seeding repos/ from cache: %s\n" "${WENDYOS_REPO_CACHE_DIR}"
-    for cached in "${WENDYOS_REPO_CACHE_DIR}"/*/
-    do
-        [[ -d "${cached}" ]] || continue
-        folder=$(basename "${cached}")
-        if [[ ! -d "./${folder}" ]]
-        then
-            cp -r "${cached}" "./${folder}"
-        fi
-    done
-fi
-
 # Resolve template files based on BOARD. Each board has its own directory
 # conf/template/boards/<board-id>/ containing a self-contained local.conf and
 # bblayers.conf, which pull in shared fragments from
@@ -374,17 +353,56 @@ then
 fi
 
 # Per-board repo overrides (optional): override URL_*/SRCREV_* defaults
-# and/or append to REPOS_EXTRA before repos[] is built.
+# and/or append to REPOS_EXTRA before repos[] is built. Sourced BEFORE the
+# repos/${WENDYOS_LAYER_TREE} mkdir + cache-seed so a board can pick a
+# non-default tree (e.g. Thor on whinlatter, or an isolated experimental
+# tree) and have its clones land there.
 if [[ -f "${BOARD_DIR}/repos.overrides" ]]
 then
     # shellcheck source=/dev/null
     source "${BOARD_DIR}/repos.overrides"
 fi
 
+# Warn (but do not auto-delete) if a pre-migration bundled-poky checkout is
+# still on disk. It is no longer used; the user can remove it manually.
+if [[ -d "${PROJECT_DIR}/repos/poky" ]]
+then
+    printf "WARN: Legacy bundled-poky checkout at %s is no longer used. Safe to remove.\n" \
+        "${PROJECT_DIR}/repos/poky" >&2
+fi
+
+cd "${PROJECT_DIR}"
+mkdir -p "repos/${WENDYOS_LAYER_TREE}"
+cd "repos/${WENDYOS_LAYER_TREE}"
+
+# Seed the per-tree repos dir from a pre-cloned cache when one is provided.
+# The CI runner AMI (built by ci/packer/wendyos-builder.pkr.hcl) bakes the
+# upstream layer repos at the pinned SRCREVs into
+# /opt/wendyos-cache/repos/<tree>/ so clone_repos below sees them as
+# already-checked-out and only runs `git fetch` + `git checkout`. Local dev
+# leaves this unset and clones fresh as before.
+if [[ -n "${WENDYOS_REPO_CACHE_DIR:-}" && -d "${WENDYOS_REPO_CACHE_DIR}/${WENDYOS_LAYER_TREE}" ]]
+then
+    printf "Seeding repos/%s/ from cache: %s/%s\n" \
+        "${WENDYOS_LAYER_TREE}" "${WENDYOS_REPO_CACHE_DIR}" "${WENDYOS_LAYER_TREE}"
+    for cached in "${WENDYOS_REPO_CACHE_DIR}/${WENDYOS_LAYER_TREE}"/*/
+    do
+        [[ -d "${cached}" ]] || continue
+        folder=$(basename "${cached}")
+        if [[ ! -d "./${folder}" ]]
+        then
+            cp -r "${cached}" "./${folder}"
+        fi
+    done
+fi
+
 # Build the repos list with the (possibly overridden) URLs and SRCREVs.
-# Indexed (not associative) so iteration preserves the order below.
+# Indexed (not associative) so iteration preserves the order below. Folder
+# names are explicit (rather than derived from URL basename) for clarity.
 declare -a repos=(
-    "1|${URL_POKY}||${SRCREV_POKY}"
+    "1|${URL_BITBAKE}|bitbake|${SRCREV_BITBAKE}"
+    "1|${URL_OECORE}|openembedded-core|${SRCREV_OECORE}"
+    "1|${URL_METAYOCTO}|meta-yocto|${SRCREV_METAYOCTO}"
     "1|${URL_OE}||${SRCREV_OE}"
     "1|${URL_TEGRA}||${SRCREV_TEGRA}"
     "1|${URL_TEGRA_COMM}||${SRCREV_TEGRA_COMM}"
@@ -425,8 +443,14 @@ done
 
 # Only overwrite if the build dir doesn't already have the file
 # (matches previous behavior — user edits to build/conf survive re-bootstrap).
-# WENDYOS_META_REPO is prepended only to bblayers.conf (parsed first by BitBake);
-# the value stays in scope when local.conf is parsed later.
+# WENDYOS_LAYER_TREE is prepended to BOTH bblayers.conf and local.conf:
+#   - bblayers.conf needs it for the ${TOPDIR}/../repos/${WENDYOS_LAYER_TREE}/<layer>
+#     paths in conf/template/include/bblayers/*.inc.
+#   - local.conf needs it for the SSTATE_DIR partitioning in
+#     conf/template/include/local/common.inc (sstate-cache/${WENDYOS_LAYER_TREE}).
+# Setting it in both removes any dependency on cross-file variable propagation
+# inside BitBake's config parser. WENDYOS_META_REPO is bblayers-only — it is
+# only consumed in bblayers includes.
 for f in local.conf bblayers.conf
 do
     dst="./${YOCTO_BUILD_DIR}/conf/${f}"
@@ -435,14 +459,25 @@ do
         if [[ "${f}" == "bblayers.conf" ]]
         then
             {
+                printf 'WENDYOS_LAYER_TREE = "%s"\n' "${WENDYOS_LAYER_TREE}"
                 printf 'WENDYOS_META_REPO = "%s"\n\n' "${image_name}"
                 cat "${BOARD_DIR}/${f}"
             } > "${dst}"
         else
-            cp "${BOARD_DIR}/${f}" "${dst}"
+            {
+                printf 'WENDYOS_LAYER_TREE = "%s"\n\n' "${WENDYOS_LAYER_TREE}"
+                cat "${BOARD_DIR}/${f}"
+            } > "${dst}"
         fi
     fi
 done
+
+# Always overwrite the env file so re-bootstrapping with a different board
+# (one whose repos.overrides selects a different tree) picks up the change.
+# The Makefile sources this to find oe-init-build-env under the right tree.
+cat > "./${YOCTO_BUILD_DIR}/.wendyos-env" <<EOF
+WENDYOS_LAYER_TREE=${WENDYOS_LAYER_TREE}
+EOF
 
 printf "\nDirectory structure:\n"
 tree -d -L 2 -I 'build|downloads|sstate-cache' || true #--charset=ascii
@@ -462,7 +497,7 @@ Build with:
    make build MACHINE=<machine-name> WENDYOS_HOST_BUILD=1
 
 Or directly:
-   . ./repos/poky/oe-init-build-env ${YOCTO_BUILD_DIR}
+   . ./repos/${WENDYOS_LAYER_TREE}/openembedded-core/oe-init-build-env ${YOCTO_BUILD_DIR}
    bitbake wendyos-image
 
 EOF
@@ -499,7 +534,7 @@ Run the following command(s):
 
    # (within Docker container)
    cd ./${IMAGE_NAME}
-   . ./repos/poky/oe-init-build-env ${YOCTO_BUILD_DIR}
+   . ./repos/${WENDYOS_LAYER_TREE}/openembedded-core/oe-init-build-env ${YOCTO_BUILD_DIR}
    bitbake wendyos-image
 
 EOF

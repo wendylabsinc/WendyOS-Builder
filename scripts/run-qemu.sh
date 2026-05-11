@@ -109,7 +109,8 @@ check_image_exists() {
         echo ""
         echo "Please build the image first:"
         echo "  cd ${BUILD_DIR}"
-        echo "  source ../repos/poky/oe-init-build-env"
+        echo "  . .wendyos-env"
+        echo "  source ../repos/\$WENDYOS_LAYER_TREE/openembedded-core/oe-init-build-env"
         echo "  bitbake wendyos-image"
         return 1
     fi

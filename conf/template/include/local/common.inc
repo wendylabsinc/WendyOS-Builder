@@ -1,7 +1,11 @@
 # Shared build settings — required by every board.
 
 DL_DIR = "${TOPDIR}/../downloads"
-SSTATE_DIR = "${TOPDIR}/../sstate-cache"
+# sstate-cache is partitioned per layer tree so cross-series builds (e.g.
+# scarthgap Orin and whinlatter Thor on the same workspace) don't share
+# signatures or accidentally collide. Downloads stay shared — source
+# tarballs are keyed by URL/checksum and reusable across series.
+SSTATE_DIR = "${TOPDIR}/../sstate-cache/${WENDYOS_LAYER_TREE}"
 #TMPDIR = "${TOPDIR}/tmp"
 DISTRO = "wendyos"
 #EXTRA_IMAGE_FEATURES ?= "debug-tweaks"
@@ -25,6 +29,6 @@ CONF_VERSION = "2"
 #GADGET_FUNC_ORDER="ecm ncm"
 
 # Debug/SSH defaults — off for production; opt in via local.conf or board config.
-WENDYOS_DEBUG ?= "0"
-WENDYOS_DEBUG_UART ?= "0"
-WENDYOS_SSHD ?= "0"
+WENDYOS_DEBUG = "0"
+WENDYOS_DEBUG_UART = "0"
+WENDYOS_SSHD = "0"
