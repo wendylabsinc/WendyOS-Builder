@@ -360,15 +360,20 @@ flash-to-external: _check-machine
 		IMG_SIZE=$$(ls -lh "$(PROJECT_DIR)/deploy/wendyos.img" | awk '{print $$5}'); \
 		printf "Using existing image: $(PROJECT_DIR)/deploy/wendyos.img ($$IMG_SIZE)\n\n"; \
 	elif echo "$(MACHINE)" | grep -q "raspberrypi"; then \
+		SDIMG="$(PROJECT_DIR)/build/tmp/deploy/images/$(MACHINE)/$(IMAGE_TARGET)-$(MACHINE).sdimg"; \
 		WIC_IMG="$(PROJECT_DIR)/build/tmp/deploy/images/$(MACHINE)/$(IMAGE_TARGET)-$(MACHINE).rootfs.wic"; \
-		if [ ! -f "$$WIC_IMG" ]; then \
-			printf "$(RED)Error: WIC image not found: $$WIC_IMG$(NC)\n"; \
+		if [ -f "$$SDIMG" ]; then \
+			SRC="$$SDIMG"; KIND="Mender sdimg"; \
+		elif [ -f "$$WIC_IMG" ]; then \
+			SRC="$$WIC_IMG"; KIND="wic"; \
+		else \
+			printf "$(RED)Error: neither sdimg nor wic image found in $(PROJECT_DIR)/build/tmp/deploy/images/$(MACHINE)/$(NC)\n"; \
 			printf "Run 'make build MACHINE=$(MACHINE)' first.\n"; \
 			exit 1; \
 		fi; \
 		mkdir -p "$(PROJECT_DIR)/deploy"; \
-		cp "$$WIC_IMG" "$(PROJECT_DIR)/deploy/wendyos.img"; \
-		printf "$(GREEN)RPi5 WIC image ready: $(PROJECT_DIR)/deploy/wendyos.img$(NC)\n\n"; \
+		cp "$$SRC" "$(PROJECT_DIR)/deploy/wendyos.img"; \
+		printf "$(GREEN)RPi $$KIND image ready: $(PROJECT_DIR)/deploy/wendyos.img$(NC)\n\n"; \
 	else \
 		if [ "$$OS_TYPE" = "Darwin" ]; then \
 			if [ ! -f "$(PROJECT_DIR)/deploy/$(IMAGE_TARGET)-$(MACHINE).tegraflash.tar.gz" ]; then \
@@ -416,7 +421,7 @@ flash-to-external: _check-machine
 		if [ "$$OS_TYPE" = "Darwin" ]; then \
 			diskutil list external physical 2>/dev/null || printf "No external disks found.\n"; \
 		else \
-			lsblk -d -o NAME,SIZE,MODEL,TRAN 2>/dev/null | grep -E "usb|sata|nvme" || \
+			lsblk -d -o NAME,SIZE,MODEL,TRAN 2>/dev/null | grep -E "usb|sata|nvme|mmc" || \
 			lsblk -d -o NAME,SIZE,MODEL 2>/dev/null | grep -vE "^(loop|sr|ram)" | head -20; \
 		fi; \
 		printf "\n"; \
@@ -427,7 +432,7 @@ flash-to-external: _check-machine
 		if [ "$$OS_TYPE" = "Darwin" ]; then \
 			printf "$(YELLOW)Enter the disk to flash (e.g., disk42) or 'q' to quit:$(NC) "; \
 		else \
-			printf "$(YELLOW)Enter the disk to flash (e.g., sdb, nvme0n1) or 'q' to quit:$(NC) "; \
+			printf "$(YELLOW)Enter the disk to flash (e.g., sdb, nvme0n1, mmcblk0) or 'q' to quit:$(NC) "; \
 		fi; \
 		read device_input; \
 		if [ "$$device_input" = "q" ] || [ "$$device_input" = "Q" ]; then \
@@ -442,9 +447,9 @@ flash-to-external: _check-machine
 			esac; \
 		else \
 			case "$$device_input" in \
-				sd[a-z]|sd[a-z][a-z]|nvme[0-9]n[0-9]|nvme[0-9][0-9]n[0-9]) DEVICE="/dev/$$device_input" ;; \
-				/dev/sd[a-z]*|/dev/nvme*) DEVICE="$$device_input" ;; \
-				*) printf "$(RED)Error: Invalid disk name '$$device_input'. Must be like 'sdb', 'nvme0n1', or '/dev/sdb'$(NC)\n"; exit 1 ;; \
+				sd[a-z]|sd[a-z][a-z]|nvme[0-9]n[0-9]|nvme[0-9][0-9]n[0-9]|mmcblk[0-9]|mmcblk[0-9][0-9]) DEVICE="/dev/$$device_input" ;; \
+				/dev/sd[a-z]*|/dev/nvme*|/dev/mmcblk*) DEVICE="$$device_input" ;; \
+				*) printf "$(RED)Error: Invalid disk name '$$device_input'. Must be like 'sdb', 'nvme0n1', 'mmcblk0', or '/dev/sdb'$(NC)\n"; exit 1 ;; \
 			esac; \
 		fi; \
 	fi; \
@@ -480,7 +485,7 @@ flash-to-external: _check-machine
 		if sudo dd if=$(PROJECT_DIR)/deploy/wendyos.img of="$$RAW_DEVICE" bs=$$DD_BS status=progress; then \
 			sync; \
 			printf "\n$(GREEN)Flash complete!$(NC)\n"; \
-			printf "You can now safely eject the drive and insert it into your Jetson.\n"; \
+			printf "You can now safely eject the drive and insert it into your target board.\n"; \
 			if [ "$$OS_TYPE" = "Darwin" ]; then \
 				diskutil eject "$$DEVICE" 2>/dev/null || true; \
 			else \
