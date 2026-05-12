@@ -22,7 +22,7 @@ SRC_URI = "file://wendyos-agent.service \
            file://wendyos-agent-updater.sh \
            file://download-wendyos-agent.sh"
 
-S = "${WORKDIR}"
+S = "${UNPACKDIR}"
 
 inherit systemd
 
@@ -82,14 +82,14 @@ do_install() {
 
     # Install systemd services
     install -d ${D}${systemd_system_unitdir}
-    install -m 0644 ${WORKDIR}/wendyos-agent.service ${D}${systemd_system_unitdir}/
-    install -m 0644 ${WORKDIR}/wendyos-agent-updater.service ${D}${systemd_system_unitdir}/
-    install -m 0644 ${WORKDIR}/wendyos-agent-updater.timer ${D}${systemd_system_unitdir}/
+    install -m 0644 ${UNPACKDIR}/wendyos-agent.service ${D}${systemd_system_unitdir}/
+    install -m 0644 ${UNPACKDIR}/wendyos-agent-updater.service ${D}${systemd_system_unitdir}/
+    install -m 0644 ${UNPACKDIR}/wendyos-agent-updater.timer ${D}${systemd_system_unitdir}/
 
     # Install updater and download scripts
     install -d ${D}/opt/wendyos/bin
-    install -m 0755 ${WORKDIR}/wendyos-agent-updater.sh ${D}/opt/wendyos/bin/
-    install -m 0755 ${WORKDIR}/download-wendyos-agent.sh ${D}/opt/wendyos/bin/
+    install -m 0755 ${UNPACKDIR}/wendyos-agent-updater.sh ${D}/opt/wendyos/bin/
+    install -m 0755 ${UNPACKDIR}/download-wendyos-agent.sh ${D}/opt/wendyos/bin/
 
     # Create runtime directories
     install -d ${D}/var/lib/wendyos-agent

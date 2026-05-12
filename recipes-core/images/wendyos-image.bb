@@ -18,21 +18,24 @@ IMAGE_FSTYPES += " ext4"
 # - If unset, it falls back to DISTRO_VERSION.
 IMAGE_VERSION_SUFFIX ?= "${DISTRO_VERSION}"
 
-# Keep names reproducible for releases.
-# (Avoid DATETIME here unless you WANT a new artifact for every rebuild.)
-MENDER_ARTIFACT_NAME = "${IMAGE_BASENAME}-${MACHINE}-${IMAGE_VERSION_SUFFIX}"
-# MENDER_ARTIFACT_NAME = "${IMAGE_BASENAME}-${DISTRO_VERSION}-${DATETIME}"
+# Mender artifact name and configuration live in conf/distro/include/mender.inc,
+# which is conditionally required when WENDYOS_MENDER = "1" (see wendyos.conf).
+# Defining them here unconditionally would leave dangling vars on machines
+# where Mender is disabled (Thor, QEMU, RPi).
 
-# Mender configuration (only used when mender-full is inherited)
-MENDER_UPDATE_POLL_INTERVAL_SECONDS    = "1800"
-MENDER_INVENTORY_POLL_INTERVAL_SECONDS = "28800"
-MENDER_RETRY_POLL_INTERVAL_SECONDS     = "300"
-MENDER_SYSTEMD_AUTO_ENABLE = "1"
-MENDER_CONNECT_ENABLE = "1"
-
-# debug-tweaks: empty root password, PermitEmptyPasswords, PermitRootLogin.
-# Controlled by WENDYOS_DEBUG (default: "0"). Set to "1" for development builds.
-IMAGE_FEATURES += "${@oe.utils.ifelse(d.getVar('WENDYOS_DEBUG') == '1', 'debug-tweaks', '')}"
+# Development-time conveniences applied when WENDYOS_DEBUG = "1": empty
+# root password, PermitEmptyPasswords, PermitRootLogin, postinst logging.
+# Equivalent to scarthgap's legacy `debug-tweaks` alias, expanded into
+# individual features here because wrynose oe-core removed the alias from
+# IMAGE_FEATURES[validitems]. Override WENDYOS_DEBUG_FEATURES in local.conf
+# to add/remove features from the debug bundle.
+WENDYOS_DEBUG_FEATURES ?= " \
+    empty-root-password \
+    allow-empty-password \
+    allow-root-login \
+    post-install-logging \
+    "
+IMAGE_FEATURES += "${@oe.utils.ifelse(d.getVar('WENDYOS_DEBUG') == '1', d.getVar('WENDYOS_DEBUG_FEATURES'), '')}"
 
 # Optional runtime package management (rpm/dnf in the rootfs).
 # Disabled by default — image is updated atomically via Mender A/B.
@@ -64,10 +67,10 @@ IMAGE_INSTALL:append = " \
     gstreamer1.0-libav \
     "
 
-# Mender packages (only for real hardware, not QEMU or RPi)
+# Mender userspace packages — gated on WENDYOS_MENDER (set in wendyos.conf
+# and overridable per-machine).
 IMAGE_INSTALL:append = " \
-    ${@'' if ('qemuall' in d.getVar('MACHINEOVERRIDES').split(':') or 'rpi' in d.getVar('MACHINEOVERRIDES').split(':')) else 'mender-configure mender-connect'} \
-    ${@'' if ('qemuall' in d.getVar('MACHINEOVERRIDES').split(':') or 'rpi' in d.getVar('MACHINEOVERRIDES').split(':')) else 'python3-pip-jetson-config'} \
+    ${@'mender-configure mender-connect python3-pip-jetson-config' if d.getVar('WENDYOS_MENDER') == '1' else ''} \
     "
 
 # Enable USB peripheral (gadget) support for real hardware
@@ -101,6 +104,7 @@ IMAGE_ROOTFS_EXTRA_SPACE:append = "${@bb.utils.contains("DISTRO_FEATURES", "syst
 # A space-separated list of variable names that BitBake prints in the
 # "Build Configuration" banner at the start of a build.
 BUILDCFG_VARS += " \
+    WENDYOS_MENDER \
     WENDYOS_DEBUG \
     WENDYOS_DEBUG_UART \
     WENDYOS_SSHD \

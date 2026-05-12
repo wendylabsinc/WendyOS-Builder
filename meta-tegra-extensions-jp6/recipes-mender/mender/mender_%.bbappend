@@ -9,7 +9,7 @@ SRC_URI += " \
 
 do_install:append() {
     install -d ${D}${sysconfdir}/mender
-    install -m 0644 ${WORKDIR}/server.crt ${D}${sysconfdir}/mender
+    install -m 0644 ${UNPACKDIR}/server.crt ${D}${sysconfdir}/mender
 }
 
 FILES:mender-config += "${sysconfdir}/mender/server.crt"

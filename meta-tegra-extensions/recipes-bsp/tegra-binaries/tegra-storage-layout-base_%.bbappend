@@ -11,8 +11,8 @@ inherit tegra_partition_config
 mender_flash_layout_adjust() {
     local file=$1
     [ -n "$file" ] || return 0
-    mv ${D}${datadir}/l4t-storage-layout/$file ${WORKDIR}/$file
-    nvflashxmlparse -v --rewrite-contents-from=${WORKDIR}/UDA.xml \
+    mv ${D}${datadir}/l4t-storage-layout/$file ${UNPACKDIR}/$file
+    nvflashxmlparse -v --rewrite-contents-from=${UNPACKDIR}/UDA.xml \
         --output=${D}${datadir}/l4t-storage-layout/$file \
-        ${WORKDIR}/$file
+        ${UNPACKDIR}/$file
 }

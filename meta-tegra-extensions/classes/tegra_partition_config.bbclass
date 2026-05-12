@@ -7,9 +7,12 @@
 #
 #   1. Remove the 'reserved' partition (blocks expansion, not needed)
 #   2. Remove <filename> from UDA (kept for NVIDIA compat, not used)
-#   3. Rename 'permanet_user_storage' -> 'mender_data' if present (meta-mender-
-#      tegra p3768 boards), or create 'mender_data' from scratch (BSP XML)
-#   4. Insert a FAT32 'config' partition before mender_data
+#   3. (WENDYOS_MENDER = "1" only) Rename 'permanet_user_storage' -> 'mender_data'
+#      if present (meta-mender-tegra p3768 boards), or create 'mender_data'
+#      from scratch (BSP XML).  Skipped when Mender is disabled — there is no
+#      .dataimg artifact, so leaving mender_data in the XML breaks flashing.
+#   4. Insert a FAT32 'config' partition.  Anchored before mender_data when
+#      that exists, before secondary_gpt otherwise.
 #
 # The BSP tarball's _rootfs_ab.xml does NOT contain permanet_user_storage —
 # that partition only exists in meta-mender-tegra's custom XML for p3768
@@ -157,9 +160,14 @@ python do_modify_partition_layout() {
                 uda.remove(fn)
                 bb.note('  Removed <filename> from UDA')
 
-        # Step 3: Create or rename mender_data partition
+        # Step 3: Create or rename mender_data partition (Mender builds only)
         #
-        # Two possible input states:
+        # Gated on WENDYOS_MENDER. When Mender is off (e.g. Thor Phase 1)
+        # we skip this step entirely — there is no .dataimg artifact, and
+        # leaving mender_data with <filename>DATAFILE</filename> in the
+        # XML would make tegraparser_v2 fail to find the file at flash time.
+        #
+        # Two possible input states when Mender is on:
         #
         # A) BSP XML (normal case for WendyOS machines):
         #    The XML has no permanet_user_storage.  We create mender_data
@@ -175,61 +183,66 @@ python do_modify_partition_layout() {
         #
         # Path B is defensive code — it's not exercised by WendyOS machines
         # but is kept for upstream compatibility.
-        pus = device.find('./partition[@name="permanet_user_storage"]')
-        if pus is not None:
-            # Path B: rename in-place
-            pus.set('name', 'mender_data')
-            pus.set('id', str(data_part_num))
-            size_el = pus.find('size')
-            if size_el is not None:
-                size_el.text = ' 536870912 '
-            alloc_el = pus.find('allocation_attribute')
-            if alloc_el is not None:
-                alloc_el.text = ' 0x8 '
-            guid_el = pus.find('partition_type_guid')
-            if guid_el is None:
-                guid_el = ET.SubElement(pus, 'partition_type_guid')
-            guid_el.text = ' 0FC63DAF-8483-4772-8E79-3D69D8477DE4 '
-            desc_el = pus.find('description')
-            if desc_el is None:
-                desc_el = ET.SubElement(pus, 'description')
-            desc_el.text = (' **WendyOS/Mender.** Data partition for persistent'
-                            ' storage. Auto-expands via mender-grow-data.service'
-                            ' on first boot. ')
-            bb.note('  Renamed "permanet_user_storage" -> "mender_data" (id=%d)' % data_part_num)
-            mender_data = pus
+        mender_enabled = (d.getVar('WENDYOS_MENDER') or '0') == '1'
+        mender_data = None
+        if mender_enabled:
+            pus = device.find('./partition[@name="permanet_user_storage"]')
+            if pus is not None:
+                # Path B: rename in-place
+                pus.set('name', 'mender_data')
+                pus.set('id', str(data_part_num))
+                size_el = pus.find('size')
+                if size_el is not None:
+                    size_el.text = ' 536870912 '
+                alloc_el = pus.find('allocation_attribute')
+                if alloc_el is not None:
+                    alloc_el.text = ' 0x8 '
+                guid_el = pus.find('partition_type_guid')
+                if guid_el is None:
+                    guid_el = ET.SubElement(pus, 'partition_type_guid')
+                guid_el.text = ' 0FC63DAF-8483-4772-8E79-3D69D8477DE4 '
+                desc_el = pus.find('description')
+                if desc_el is None:
+                    desc_el = ET.SubElement(pus, 'description')
+                desc_el.text = (' **WendyOS/Mender.** Data partition for persistent'
+                                ' storage. Auto-expands via mender-grow-data.service'
+                                ' on first boot. ')
+                bb.note('  Renamed "permanet_user_storage" -> "mender_data" (id=%d)' % data_part_num)
+                mender_data = pus
+            else:
+                # Path A: create from scratch and insert before secondary_gpt.
+                # list(device).index(sec_gpt) finds the child position of
+                # secondary_gpt, then device.insert(idx, ...) places mender_data
+                # just before it — making mender_data the last real partition
+                # on disk (before the GPT backup header).  This is required for
+                # "parted resizepart <N> 100%" to expand it to fill free space.
+                mender_data = make_partition_element(
+                    name='mender_data',
+                    part_id=data_part_num,
+                    size=536870912,
+                    alloc_attr='0x8',
+                    type_guid='0FC63DAF-8483-4772-8E79-3D69D8477DE4',
+                    filename='DATAFILE',
+                    description=('**WendyOS/Mender.** Data partition for persistent'
+                                 ' storage. Auto-expands via mender-grow-data.service'
+                                 ' on first boot.'),
+                )
+                sec_gpt = device.find('./partition[@name="secondary_gpt"]')
+                if sec_gpt is None:
+                    bb.fatal('%s: "secondary_gpt" partition not found' % layout_path)
+                idx = list(device).index(sec_gpt)
+                device.insert(idx, mender_data)
+                bb.note('  Created "mender_data" partition (id=%d)' % data_part_num)
         else:
-            # Path A: create from scratch and insert before secondary_gpt.
-            # list(device).index(sec_gpt) finds the child position of
-            # secondary_gpt, then device.insert(idx, ...) places mender_data
-            # just before it — making mender_data the last real partition
-            # on disk (before the GPT backup header).  This is required for
-            # "parted resizepart <N> 100%" to expand it to fill free space.
-            mender_data = make_partition_element(
-                name='mender_data',
-                part_id=data_part_num,
-                size=536870912,
-                alloc_attr='0x8',
-                type_guid='0FC63DAF-8483-4772-8E79-3D69D8477DE4',
-                filename='DATAFILE',
-                description=('**WendyOS/Mender.** Data partition for persistent'
-                             ' storage. Auto-expands via mender-grow-data.service'
-                             ' on first boot.'),
-            )
-            sec_gpt = device.find('./partition[@name="secondary_gpt"]')
-            if sec_gpt is None:
-                bb.fatal('%s: "secondary_gpt" partition not found' % layout_path)
-            idx = list(device).index(sec_gpt)
-            device.insert(idx, mender_data)
-            bb.note('  Created "mender_data" partition (id=%d)' % data_part_num)
+            bb.note('  Skipping mender_data partition (WENDYOS_MENDER = "0")')
 
-        # Step 4: Insert 'config' partition before mender_data
+        # Step 4: Insert 'config' partition.
         #
-        # The config partition must go BEFORE mender_data (not after) because
-        # mender_data must be the last real partition on disk for runtime
-        # expansion to work.  "parted resizepart 17 100%" grows partition 17
-        # from its start to the end of the disk — if config were after
-        # mender_data, the expansion would overwrite it.
+        # When Mender is on, config goes BEFORE mender_data — mender_data
+        # must remain the last real partition on disk so runtime expansion
+        # via "parted resizepart <N> 100%" can grow it to fill free space.
+        # When Mender is off, mender_data isn't present and config becomes
+        # the last real partition (inserted before secondary_gpt).
         #
         # Sanity check: APP_b must exist (A/B layout expected).
         app_b = device.find('./partition[@name="APP_b"]')
@@ -246,11 +259,20 @@ python do_modify_partition_layout() {
             description='FAT32 configuration partition.',
         )
 
-        # Insert config just before mender_data.
-        # Final order: ... APP_b -> config -> mender_data -> secondary_gpt
-        idx = list(device).index(mender_data)
+        if mender_data is not None:
+            # Mender on: ... APP_b -> config -> mender_data -> secondary_gpt
+            anchor = mender_data
+            anchor_name = 'mender_data'
+        else:
+            # Mender off: ... APP_b -> config -> secondary_gpt
+            anchor = device.find('./partition[@name="secondary_gpt"]')
+            anchor_name = 'secondary_gpt'
+            if anchor is None:
+                bb.fatal('%s: "secondary_gpt" partition not found' % layout_path)
+        idx = list(device).index(anchor)
         device.insert(idx, config_part)
-        bb.note('  Inserted "config" partition (id=%d, %d MB)' % (config_part_num, int(config_size_mb)))
+        bb.note('  Inserted "config" partition (id=%d, %d MB) before %s'
+                % (config_part_num, int(config_size_mb), anchor_name))
 
     # Determine which layout files to modify
     #
@@ -329,6 +351,7 @@ do_modify_partition_layout[doc] = "Modify Tegra partition layouts to add config 
 # these change.  Python tasks need explicit vardeps because BitBake cannot
 # auto-detect d.getVar() calls inside Python code.
 do_modify_partition_layout[vardeps] += " \
+    WENDYOS_MENDER \
     WENDYOS_CONFIG_PART_SIZE_MB \
     WENDYOS_CONFIG_PART_NUMBER \
     MENDER_DATA_PART_NUMBER \

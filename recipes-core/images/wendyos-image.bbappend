@@ -14,14 +14,20 @@ tegraflash_custom_post:append() {
         bbfatal "config-partition.fat32.img not found in DEPLOY_DIR_IMAGE"
     fi
 
-    # Replace placeholders in external-flash.xml.in (NVMe machines only)
+    # Replace placeholders in external-flash.xml.in (NVMe machines only).
+    # APPFILE/APPFILE_b must match the actual rootfs filename in the
+    # bundle, which is governed by IMAGE_TEGRAFLASH_FS_TYPE (default
+    # "ext4.simg" — sparse). Hardcoding ".ext4" here was a latent bug:
+    # scarthgap's flash.sh auto-handled the mismatch, but r38.4.x's new
+    # unified-flash flow (create_l4t_bsp_images.py) does a literal
+    # shutil.move on the XML-referenced filename and fails ENOENT.
     if [ -f "external-flash.xml.in" ]; then
         DTB_NAME="$(basename ${KERNEL_DEVICETREE})"
         sed -i \
             -e "s,DTB_FILE,${DTB_NAME}," \
             -e "s,DATAFILE,${IMAGE_LINK_NAME}.dataimg," \
-            -e "s,APPFILE_b,${IMAGE_BASENAME}.ext4," \
-            -e "s,APPFILE,${IMAGE_BASENAME}.ext4," \
+            -e "s,APPFILE_b,${IMAGE_BASENAME}.${IMAGE_TEGRAFLASH_FS_TYPE}," \
+            -e "s,APPFILE,${IMAGE_BASENAME}.${IMAGE_TEGRAFLASH_FS_TYPE}," \
             external-flash.xml.in
         bbnote "Replaced placeholders in external-flash.xml.in"
     fi

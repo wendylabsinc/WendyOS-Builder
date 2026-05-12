@@ -20,7 +20,7 @@ SRC_URI += "file://UefiDefaultSecurityKeys.dts"
 
 # Verify the file is not empty (catches placeholder files)
 do_configure:prepend() {
-    if [ ! -s "${WORKDIR}/UefiDefaultSecurityKeys.dts" ]; then
+    if [ ! -s "${UNPACKDIR}/UefiDefaultSecurityKeys.dts" ]; then
         bbfatal "UefiDefaultSecurityKeys.dts is empty! See uefi-test-keys/README.md for generation instructions."
     fi
 

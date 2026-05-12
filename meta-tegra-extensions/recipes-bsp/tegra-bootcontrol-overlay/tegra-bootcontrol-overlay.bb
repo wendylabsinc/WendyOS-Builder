@@ -9,12 +9,13 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
 DTSO_FILE = "boot-priority.dtso"
 DTSO_FILE:jetson-agx-orin-devkit-nvme-wendyos = "boot-priority-nvme.dtso"
 DTSO_FILE:jetson-orin-nano-devkit-nvme-wendyos = "boot-priority-nvme.dtso"
+DTSO_FILE:jetson-agx-thor-devkit-nvme-wendyos = "boot-priority-nvme.dtso"
 
 SRC_URI = " \
     file://boot-priority.dtso \
     file://boot-priority-nvme.dtso \
     "
-S = "${WORKDIR}"
+S = "${UNPACKDIR}"
 
 inherit allarch
 
@@ -27,7 +28,7 @@ DEPLOYDIR = "${DEPLOY_DIR_IMAGE}"
 do_compile() {
     ${STAGING_BINDIR_NATIVE}/dtc -I dts -O dtb \
         -o ${B}/boot-priority.dtbo \
-        ${WORKDIR}/${DTSO_FILE}
+        ${UNPACKDIR}/${DTSO_FILE}
 }
 
 # deploy to tmp/deploy/images/${MACHINE}/ so tegraflash can pick it up

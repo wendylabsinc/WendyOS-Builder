@@ -12,6 +12,7 @@ SRC_URI = " \
     file://wendyos-user-setup.sh \
     file://wendyos-user-setup.service \
 "
+S = "${UNPACKDIR}"
 
 PACKAGES = "${PN}-data-setup ${PN}"
 
@@ -28,11 +29,11 @@ SYSTEMD_AUTO_ENABLE:${PN}-data-setup = "enable"
 do_install() {
     # Install first-boot setup script (packaged in -data-setup)
     install -d ${D}${sbindir}
-    install -m 0755 ${WORKDIR}/wendyos-user-setup.sh ${D}${sbindir}/wendyos-user-setup.sh
+    install -m 0755 ${UNPACKDIR}/wendyos-user-setup.sh ${D}${sbindir}/wendyos-user-setup.sh
 
     # Install systemd service (packaged in -data-setup)
     install -d ${D}${systemd_system_unitdir}
-    install -m 0644 ${WORKDIR}/wendyos-user-setup.service ${D}${systemd_system_unitdir}/wendyos-user-setup.service
+    install -m 0644 ${UNPACKDIR}/wendyos-user-setup.service ${D}${systemd_system_unitdir}/wendyos-user-setup.service
 }
 
 pkg_postinst_ontarget:${PN}() {

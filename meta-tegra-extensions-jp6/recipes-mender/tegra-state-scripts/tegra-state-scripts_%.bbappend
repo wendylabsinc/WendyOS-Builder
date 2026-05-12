@@ -17,9 +17,9 @@ RDEPENDS:${PN} = "tegra-bootcontrol-overlay"
 
 do_compile:prepend() {
     # Verify our custom switch-rootfs is being used
-    if grep -q "^WENDYOS_SWITCH_ROOTFS_VERSION=" ${WORKDIR}/switch-rootfs
+    if grep -q "^WENDYOS_SWITCH_ROOTFS_VERSION=" ${UNPACKDIR}/switch-rootfs
     then
-        version=$(grep "^WENDYOS_SWITCH_ROOTFS_VERSION=" ${WORKDIR}/switch-rootfs | cut -d'"' -f2)
+        version=$(grep "^WENDYOS_SWITCH_ROOTFS_VERSION=" ${UNPACKDIR}/switch-rootfs | cut -d'"' -f2)
         bbnote "Using WendyOS custom switch-rootfs v${version} (conditional capsule staging)"
     else
         bbfatal "FILESEXTRAPATHS not working! Upstream switch-rootfs detected - this breaks conditional updates."
@@ -33,11 +33,11 @@ do_compile:append() {
     #   MENDER_STATE_SCRIPTS_DIR during do_deploy and bundles them in the .mender artifact
     # - ArtifactCommit_Enter runs before commit (after reboot to new slot); non-zero
     #   return triggers Mender rollback
-    cp ${WORKDIR}/verify-bootloader-update \
+    cp ${UNPACKDIR}/verify-bootloader-update \
         ${MENDER_STATE_SCRIPTS_DIR}/ArtifactCommit_Enter_50_verify-bootloader-update
 
     # After successful commit, reset the inactive slot's UEFI RootfsStatus
     # variable to prevent permanent "unbootable" state from prior rollbacks.
-    cp ${WORKDIR}/reset-inactive-slot-status \
+    cp ${UNPACKDIR}/reset-inactive-slot-status \
         ${MENDER_STATE_SCRIPTS_DIR}/ArtifactCommit_Leave_50_reset-inactive-slot-status
 }

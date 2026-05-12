@@ -13,7 +13,7 @@ PACKAGE_ARCH = "${TEGRA_PKGARCH}"
 
 DEPENDS = "cuda-cudart"
 
-S = "${WORKDIR}"
+S = "${UNPACKDIR}"
 
 # The outer deb is a repo installer containing the actual package debs
 do_unpack[depends] += "xz-native:do_populate_sysroot"
@@ -23,11 +23,15 @@ python do_unpack:append() {
     import glob
     import os
 
+    # The outer deb is unpacked into UNPACKDIR (whinlatter+) / WORKDIR
+    # (scarthgap pre-UNPACKDIR-split). Inner debs we extract are scratch,
+    # kept under WORKDIR.
+    unpackdir = d.getVar('UNPACKDIR')
     workdir = d.getVar('WORKDIR')
 
     # The outer deb extracts to var/cusparselt-local-tegra-repo-*/
     # which contains the actual .deb packages
-    repo_dirs = glob.glob(os.path.join(workdir, 'var', 'cusparselt-local-tegra-repo-*'))
+    repo_dirs = glob.glob(os.path.join(unpackdir, 'var', 'cusparselt-local-tegra-repo-*'))
     if not repo_dirs:
         bb.fatal("Could not find cuSPARSELt local repo directory")
 

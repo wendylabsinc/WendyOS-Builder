@@ -2,7 +2,7 @@
 
 DL_DIR = "${TOPDIR}/../downloads"
 # sstate-cache is partitioned per layer tree so cross-series builds (e.g.
-# scarthgap Orin and whinlatter Thor on the same workspace) don't share
+# scarthgap Orin and wrynose Thor on the same workspace) don't share
 # signatures or accidentally collide. Downloads stay shared — source
 # tarballs are keyed by URL/checksum and reusable across series.
 SSTATE_DIR = "${TOPDIR}/../sstate-cache/${WENDYOS_LAYER_TREE}"

@@ -4,12 +4,24 @@
 # Apply our UEFI boot-priority overlay during flash
 TEGRA_BOOTCONTROL_OVERLAYS += "boot-priority.dtbo"
 
+# Silence the BPMP coprocessor's serial logging. meta-tegra defaults
+# TEGRA_BPMP_SERIAL_LOGGING to "1" (see tegra-bootfiles_*.bb), which
+# keeps the BPMP firmware's /serial DT node alive and floods the
+# shared Tegra Combined UART with "INFO: enter idle task" /
+# "INFO: END TASK:MBx" messages during normal power-management cycles.
+# Setting "0" makes the recipe fdtput -r the /serial node out of the
+# BPMP DTB at flash-package time. Override to "1" in local.conf when
+# you need BPMP-side firmware diagnostics on UART.
+TEGRA_BPMP_SERIAL_LOGGING ?= "0"
+
 # Tegra-specific packages (Jetson hardware only)
 # packagegroup-wendyos-tegra pulls in tegra-bootcontrol-overlay,
 # setup-nv-boot-control, packagegroup-nvidia-container, and
 # conditionally tegra-uefi-capsules/bootloader-update.
+# mender-esp is excluded when WENDYOS_MENDER = "0" (e.g. Thor — Mender
+# deferred).
 IMAGE_INSTALL:append = " \
-    mender-esp \
+    ${@'mender-esp' if d.getVar('WENDYOS_MENDER') == '1' else ''} \
     packagegroup-wendyos-tegra \
     gstreamer1.0-plugins-nvvideo4linux2 \
     "
