@@ -1,9 +1,10 @@
-# RPi5-specific distro configuration
-# This file is included when building for RPi machines
+# RPi-specific distro configuration
+# This file is included when building for RPi machines (MACHINEOVERRIDES
+# contains 'rpi'). Mender is enabled per-machine via IMAGE_FSTYPES — RPi3
+# remains non-Mender (MBR boot vs Mender-sdimg GPT default), RPi4 and RPi5
+# get Mender artifact emission.
 
-# No Mender for RPi5
-MENDER_CONNECT_ENABLE = "0"
-# No EFI/UEFI on RPi5
+# No EFI/UEFI on RPi
 WENDYOS_UPDATE_BOOTLOADER ?= "0"
 WENDYOS_EFI_DEBUG ?= "0"
 WENDYOS_DEEPSTREAM ?= "0"

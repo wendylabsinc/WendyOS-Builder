@@ -22,9 +22,10 @@ MENDER_RETRY_POLL_INTERVAL_SECONDS     = "300"
 MENDER_SYSTEMD_AUTO_ENABLE = "1"
 MENDER_CONNECT_ENABLE = "1"
 
-# tegra
-# these two classes only work as intended when being inherited in the
-# OE4t setup-env.sh style environment, as they modify bblayers.conf
-# and expect additional information on the host.
+# tegra-support-sanity and distro_layer_buildinfo only work as intended
+# when inherited in the OE4t setup-env.sh-style environment (they modify
+# bblayers.conf and expect host info we don't provide). Removing them is
+# a no-op on machines that don't inherit them, so this is safe to apply
+# universally. tegra-mender-setup is Tegra-specific and lives in
+# conf/distro/include/tegra-image.inc.
 INHERIT:remove = "tegra-support-sanity distro_layer_buildinfo"
-INHERIT += "tegra-mender-setup"

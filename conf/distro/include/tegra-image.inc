@@ -1,6 +1,12 @@
 # Tegra/Jetson-specific image configuration
 # This file is included when building for Tegra machines (MACHINEOVERRIDES contains 'tegra')
 
+# Tegra Mender wiring: l4t-mender override injection, tegraflash artifact
+# type, NVIDIA partition table. Only safe to inherit on Tegra targets;
+# kept here (gated by the tegra MACHINEOVERRIDE on this file's require)
+# rather than in the BSP-neutral mender.inc.
+INHERIT += "tegra-mender-setup"
+
 # Apply our UEFI boot-priority overlay during flash
 TEGRA_BOOTCONTROL_OVERLAYS += "boot-priority.dtbo"
 
