@@ -41,7 +41,7 @@ do_install() {
 
     # Install WirePlumber configuration for headless camera (V4L2) support
     # Requires V4L2 monitor so cameras are enumerated without a logind seat
-    install -m 0644 ${WORKDIR}/60-wireplumber-camera-headless.conf \
+    install -m 0644 ${UNPACKDIR}/60-wireplumber-camera-headless.conf \
         ${D}${sysconfdir}/wireplumber/wireplumber.conf.d/
 
     # Install D-Bus policy for Bluetooth access
