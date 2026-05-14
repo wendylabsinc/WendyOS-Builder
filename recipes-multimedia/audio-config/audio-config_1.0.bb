@@ -10,6 +10,7 @@ SRC_URI = " \
     file://pipewire-user-setup.sh \
     file://95-pipewire.preset \
     file://50-wireplumber-headless.conf \
+    file://60-wireplumber-camera-headless.conf \
     file://wireplumber-bluetooth.conf \
     file://wireplumber-dbus.conf \
 "
@@ -38,6 +39,11 @@ do_install() {
     install -m 0644 ${UNPACKDIR}/50-wireplumber-headless.conf \
         ${D}${sysconfdir}/wireplumber/wireplumber.conf.d/
 
+    # Install WirePlumber configuration for headless camera (V4L2) support
+    # Requires V4L2 monitor so cameras are enumerated without a logind seat
+    install -m 0644 ${UNPACKDIR}/60-wireplumber-camera-headless.conf \
+        ${D}${sysconfdir}/wireplumber/wireplumber.conf.d/
+
     # Install D-Bus policy for Bluetooth access
     # Allows wendy user to communicate with BlueZ over D-Bus
     install -d ${D}${sysconfdir}/dbus-1/system.d
@@ -56,6 +62,7 @@ FILES:${PN} += " \
     ${systemd_system_unitdir}/pipewire-user-setup.service \
     ${systemd_unitdir}/user-preset/95-pipewire.preset \
     ${sysconfdir}/wireplumber/wireplumber.conf.d/50-wireplumber-headless.conf \
+    ${sysconfdir}/wireplumber/wireplumber.conf.d/60-wireplumber-camera-headless.conf \
     ${sysconfdir}/dbus-1/system.d/wireplumber-bluetooth.conf \
     ${systemd_unitdir}/user/wireplumber.service.d/dbus.conf \
 "

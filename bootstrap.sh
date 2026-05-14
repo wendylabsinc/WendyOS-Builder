@@ -246,6 +246,20 @@ function clone_repos() {
             # repo exists - verify it's at the correct revision
             cd "${folder}"
 
+            # reconcile origin URL with the one declared in upstream-repos.env;
+            # otherwise edits to that file never reach already-cloned trees
+            # (git fetch reads .git/config, not the env file).
+            local current_url
+            current_url=$(git remote get-url origin 2>/dev/null || true)
+            if [[ "${current_url}" != "${url}" ]]; then
+                printf "[reurl] '%s' %s -> %s\n" "${folder}" "${current_url:-<none>}" "${url}"
+                git remote set-url origin "${url}" >> "${LOG_FILE}" 2>&1 || {
+                    printf "[error] Failed to set origin URL for '%s'\n" "${folder}"
+                    cd ..
+                    return 1
+                }
+            fi
+
             # fetch latest refs from remote
             git fetch origin >> "${LOG_FILE}" 2>&1 || {
                 printf "[error] Failed to fetch '%s'\n" "${folder}"

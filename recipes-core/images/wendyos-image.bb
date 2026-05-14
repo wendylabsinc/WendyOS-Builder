@@ -58,6 +58,7 @@ IMAGE_INSTALL:append = " \
     wireplumber \
     pipewire-pulse \
     pipewire-alsa \
+    pipewire-v4l2 \
     rtkit \
     audio-config \
     gstreamer1.0-plugins-base \
