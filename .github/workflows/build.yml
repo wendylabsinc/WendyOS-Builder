@@ -439,6 +439,10 @@ jobs:
           MACHINE: ${{ steps.vars.outputs.machine }}
           STORAGE: ${{ matrix.storage }}
         run: |
+          # Thor (JP7/r38.4.x) renamed the image type tegraflash → tegraflash-tar.
+          # The bundle is uploaded directly; no flash setup scripts are needed.
+          if [[ "$DEVICE" == "jetson-agx-thor" ]]; then exit 0; fi
+
           TEGRAFLASH_FILE="$DEPLOY_DIR/wendyos-image-${MACHINE}.tegraflash.tar.gz"
           FLASH_WORKDIR="$GITHUB_WORKSPACE/flash-work"
           mkdir -p "$FLASH_WORKDIR"
@@ -488,8 +492,9 @@ jobs:
           TOKEN=$(gcloud auth print-access-token)
 
           if [[ "$DEVICE" == "jetson-agx-thor" ]]; then
-            # Thor Phase 1: tegraflash bundle is the primary artifact (no standalone disk image).
-            IMAGE_FILE="$DEPLOY_DIR/wendyos-image-${MACHINE}.tegraflash.tar.gz"
+            # Thor Phase 1: tegraflash-tar bundle is the primary artifact (no standalone disk image).
+            # JP7/r38.4.x renamed the image type tegraflash → tegraflash-tar.
+            IMAGE_FILE="$DEPLOY_DIR/wendyos-image-${MACHINE}.tegraflash-tar"
           elif [[ "$MACHINE" != raspberry* && "$STORAGE" == "nvme" ]]; then
             IMAGE_FILE="$GITHUB_WORKSPACE/wendyos-nvme.img"
           elif [[ "$MACHINE" != raspberry* && "$STORAGE" == "emmc" ]]; then
@@ -512,8 +517,13 @@ jobs:
           )
 
           # For all Jetson targets, include the tegraflash bundle as the recovery file.
+          # Thor uses .tegraflash-tar (JP7/r38.4.x renamed the type); other Jetson use .tegraflash.tar.gz.
           if [[ "$MACHINE" != raspberry* ]]; then
-            ARGS+=(--recovery-file "$DEPLOY_DIR/wendyos-image-${MACHINE}.tegraflash.tar.gz")
+            if [[ "$DEVICE" == "jetson-agx-thor" ]]; then
+              ARGS+=(--recovery-file "$DEPLOY_DIR/wendyos-image-${MACHINE}.tegraflash-tar")
+            else
+              ARGS+=(--recovery-file "$DEPLOY_DIR/wendyos-image-${MACHINE}.tegraflash.tar.gz")
+            fi
           fi
 
           # Devices with multiple storage variants pass --storage so the manifest
@@ -531,13 +541,16 @@ jobs:
           cd "$GITHUB_WORKSPACE/wendy-os-publisher/cmd"
           # Outer retry handles 412 races when multiple storage variants for the
           # same device write to the same device manifest concurrently.
-          for attempt in 1 2 3 4 5; do
+          # 10 attempts with jitter breaks lockstep between competing builds.
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
             if go run upload_and_manifest.go "${ARGS[@]}"; then
               break
             fi
-            if [ "$attempt" -lt 5 ]; then
-              echo "Outer attempt $attempt failed, sleeping before retry..."
-              sleep $((attempt * 30))
+            if [ "$attempt" -lt 10 ]; then
+              JITTER=$((RANDOM % 30))
+              SLEEP_TIME=$((attempt * 20 + JITTER))
+              echo "Outer attempt $attempt failed, sleeping ${SLEEP_TIME}s before retry..."
+              sleep "$SLEEP_TIME"
             else
               echo "All outer attempts exhausted"
               exit 1

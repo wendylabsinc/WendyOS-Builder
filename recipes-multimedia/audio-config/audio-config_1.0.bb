@@ -71,6 +71,7 @@ FILES:${PN} += " \
 RDEPENDS:${PN} = " \
     bash \
     pipewire \
+    pipewire-v4l2 \
     wireplumber \
     pipewire-pulse \
     pipewire-alsa \
