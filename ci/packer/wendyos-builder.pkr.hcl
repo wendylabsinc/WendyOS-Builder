@@ -150,6 +150,11 @@ build {
   }
 
   provisioner "file" {
+    source      = "${path.root}/../../conf/template/boards/jetson-agx-thor/repos.overrides"
+    destination = "/tmp/repos.overrides.jetson-agx-thor"
+  }
+
+  provisioner "file" {
     source      = "${path.root}/prefetch-upstream-repos.sh"
     destination = "/tmp/prefetch-upstream-repos.sh"
   }
@@ -157,8 +162,9 @@ build {
   provisioner "shell" {
     inline = [
       "chmod +x /tmp/prefetch-upstream-repos.sh",
-      "sudo /tmp/prefetch-upstream-repos.sh /opt/wendyos-cache/repos /tmp/upstream-repos.env",
-      "rm -f /tmp/prefetch-upstream-repos.sh /tmp/upstream-repos.env",
+      # Prefetch scarthgap (RPi, Orin, QEMU) and wrynose (Thor) layer trees.
+      "sudo /tmp/prefetch-upstream-repos.sh /opt/wendyos-cache/repos /tmp/upstream-repos.env /tmp/repos.overrides.jetson-agx-thor",
+      "rm -f /tmp/prefetch-upstream-repos.sh /tmp/upstream-repos.env /tmp/repos.overrides.jetson-agx-thor",
     ]
   }
 
