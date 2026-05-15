@@ -213,7 +213,7 @@ jobs:
         uses: runs-on/snapshot@v1
         with:
           path: ${{ github.workspace }}/sstate-cache
-          volume_size: 100
+          volume_size: 150
 
       - name: Make L1 EBS mount writable
         run: sudo chmod -R a+rwX "$GITHUB_WORKSPACE/sstate-cache"
