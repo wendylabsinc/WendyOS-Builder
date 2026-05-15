@@ -437,6 +437,7 @@ jobs:
         env:
           DEPLOY_DIR: ${{ github.workspace }}/build/tmp/deploy/images/${{ steps.vars.outputs.machine }}
           MACHINE: ${{ steps.vars.outputs.machine }}
+          DEVICE: ${{ matrix.device }}
           STORAGE: ${{ matrix.storage }}
         run: |
           # Thor (JP7/r38.4.x) renamed the image type tegraflash → tegraflash-tar.
