@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/media/demo.gif" alt="WendyOS on NVIDIA Jetson" width="360">
+</p>
+
 # WendyOS
 
 This repository provides the meta-layer and build flow to build **WendyOS** — a Yocto-based embedded Linux distribution — for:
