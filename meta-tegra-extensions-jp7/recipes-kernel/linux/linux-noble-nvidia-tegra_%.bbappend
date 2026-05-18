@@ -17,4 +17,5 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 SRC_URI += " \
     file://usb-gadget.cfg \
     file://usb-gadget-builtin.cfg \
+    file://cve-2026-46333-ptrace.patch \
     "
