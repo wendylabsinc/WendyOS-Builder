@@ -12,3 +12,13 @@ SRC_URI += "file://0001-dwc2-force-g_dma-false-for-BCM2712-in-peripheral-mod.pat
 # config bumps the rpi kernel to 6.1 / 6.12, ship the matching stable backport.
 SRC_URI:append = " file://cve-2026-46333-ptrace.patch"
 
+# CVE-2026-31431 (crypto/algif_aead AAD in-place corruption) — 6.6.y backport
+# series; same scope assumption as above (PREFERRED_VERSION is 6.6.%).
+SRC_URI += " \
+    file://0001-crypto-scatterwalk-Backport-memcpy_sglist.patch \
+    file://0002-crypto-algif_aead-use-memcpy_sglist-instead-of-null-skcipher.patch \
+    file://0003-crypto-algif_aead-Revert-to-operating-out-of-place-CVE-2026-31431.patch \
+    file://0004-crypto-algif_aead-snapshot-IV-for-async-AEAD-requests.patch \
+    file://0005-crypto-algif_aead-Fix-minimum-RX-size-check-for-decryption.patch \
+    "
+
