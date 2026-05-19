@@ -356,10 +356,7 @@ flash-to-external: _check-machine
 	@printf "$(CYAN)==================$(NC)\n\n"
 	@OS_TYPE=$$(uname); \
 	if [ "$$OS_TYPE" = "Darwin" ]; then DD_BS="4m"; else DD_BS="4M"; fi; \
-	if [ -f "$(PROJECT_DIR)/deploy/wendyos.img" ]; then \
-		IMG_SIZE=$$(ls -lh "$(PROJECT_DIR)/deploy/wendyos.img" | awk '{print $$5}'); \
-		printf "Using existing image: $(PROJECT_DIR)/deploy/wendyos.img ($$IMG_SIZE)\n\n"; \
-	elif echo "$(MACHINE)" | grep -q "raspberrypi"; then \
+	if echo "$(MACHINE)" | grep -q "raspberrypi"; then \
 		SDIMG="$(PROJECT_DIR)/build/tmp/deploy/images/$(MACHINE)/$(IMAGE_TARGET)-$(MACHINE).sdimg"; \
 		WIC_IMG="$(PROJECT_DIR)/build/tmp/deploy/images/$(MACHINE)/$(IMAGE_TARGET)-$(MACHINE).rootfs.wic"; \
 		if [ -f "$$SDIMG" ]; then \
@@ -374,6 +371,9 @@ flash-to-external: _check-machine
 		mkdir -p "$(PROJECT_DIR)/deploy"; \
 		cp "$$SRC" "$(PROJECT_DIR)/deploy/wendyos.img"; \
 		printf "$(GREEN)RPi $$KIND image ready: $(PROJECT_DIR)/deploy/wendyos.img$(NC)\n\n"; \
+	elif [ -f "$(PROJECT_DIR)/deploy/wendyos.img" ]; then \
+		IMG_SIZE=$$(ls -lh "$(PROJECT_DIR)/deploy/wendyos.img" | awk '{print $$5}'); \
+		printf "Using existing tegraflash image: $(PROJECT_DIR)/deploy/wendyos.img ($$IMG_SIZE)\n\n"; \
 	else \
 		if [ "$$OS_TYPE" = "Darwin" ]; then \
 			if [ ! -f "$(PROJECT_DIR)/deploy/$(IMAGE_TARGET)-$(MACHINE).tegraflash.tar.gz" ]; then \
