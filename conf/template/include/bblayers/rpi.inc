@@ -10,12 +10,11 @@
 # This mirrors upstream meta-mender-community/kas/include/raspberrypi.yml
 # which pulls meta-lts-mixins for every RPi target (rpi0..rpi5).
 #
-# Mender artifact emission is gated per-machine: RPi3 sets
-# IMAGE_FSTYPES:remove = "... mender ..." in its machine conf (MBR boot
-# is incompatible with Mender's mender-image-sd default), so parsing the
-# Mender recipes is a harmless no-op for RPi3 builds (u-boot likewise
-# parses but doesn't compile because upstream meta-raspberrypi defaults
-# RPI_USE_U_BOOT to "0" when no machine conf opts in).
+# All 64-bit RPi machines (RPi3/4/5) share UBOOT_MACHINE = "rpi_arm64_config"
+# upstream, so meta-mender-raspberrypi's U-Boot patches apply identically
+# to each. Per-machine Mender storage geometry lives in the machine confs
+# (RPi3/4 and RPi5-SD use 7400 MiB total; RPi5-NVMe overrides to 32 GiB).
+# All three default WENDYOS_RPI_UBOOT="1".
 
 BBLAYERS += " \
     ${TOPDIR}/../repos/${WENDYOS_LAYER_TREE}/meta-raspberrypi \
