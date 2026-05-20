@@ -28,7 +28,9 @@ CONF_VERSION = "2"
 # USB gadget function ordering (only effective when WENDYOS_USB_GADGET = "1")
 #GADGET_FUNC_ORDER="ecm ncm"
 
-# Debug/SSH defaults — off for production; opt in via local.conf or board config.
-WENDYOS_DEBUG = "0"
-WENDYOS_DEBUG_UART = "0"
-WENDYOS_SSHD = "0"
+# Debug/SSH defaults — off for production; opt in via auto.conf (bootstrap.sh
+# --debug), local.conf, or board config. Uses ??= so bootstrap-generated
+# auto.conf (parsed before local.conf per bitbake.conf) is not clobbered.
+WENDYOS_DEBUG ??= "0"
+WENDYOS_DEBUG_UART ??= "0"
+WENDYOS_SSHD ??= "0"
