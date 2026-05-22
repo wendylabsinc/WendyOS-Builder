@@ -26,6 +26,16 @@ MENDER_CONNECT_ENABLE = "1"
 # when inherited in the OE4t setup-env.sh-style environment (they modify
 # bblayers.conf and expect host info we don't provide). Removing them is
 # a no-op on machines that don't inherit them, so this is safe to apply
-# universally. tegra-mender-setup is Tegra-specific and lives in
-# conf/distro/include/tegra-image.inc.
+# universally.
 INHERIT:remove = "tegra-support-sanity distro_layer_buildinfo"
+
+# tegra-mender-setup is Tegra-only (l4t-mender override injection,
+# tegraflash artifact type, NVIDIA partition table). It must be inherited
+# at config-parse time — bitbake reads INHERIT exactly once, at the end
+# of global config parsing, before any recipe is read. mender.inc is
+# required from wendyos.conf (distro scope) so this line takes effect;
+# putting the same line in a recipe-included .inc (e.g. tegra-image.inc
+# required from wendyos-image.bb) would be a silent no-op.
+# Lazy Python expansion gates the inherit on a Tegra MACHINEOVERRIDE so
+# non-Tegra builds don't try to load the class.
+INHERIT += "${@'tegra-mender-setup' if 'tegra' in d.getVar('MACHINEOVERRIDES').split(':') else ''}"

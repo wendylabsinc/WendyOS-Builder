@@ -19,7 +19,7 @@
 BBLAYERS += " \
     ${TOPDIR}/../repos/${WENDYOS_LAYER_TREE}/meta-raspberrypi \
     ${TOPDIR}/../${WENDYOS_META_REPO}/meta-rpi-extensions \
-    ${TOPDIR}/../repos/meta-mender/meta-mender-core \
-    ${TOPDIR}/../repos/meta-mender-community/meta-mender-raspberrypi \
-    ${TOPDIR}/../repos/meta-lts-mixins \
+    ${TOPDIR}/../repos/${WENDYOS_LAYER_TREE}/meta-mender/meta-mender-core \
+    ${TOPDIR}/../repos/${WENDYOS_LAYER_TREE}/meta-mender-community/meta-mender-raspberrypi \
+    ${TOPDIR}/../repos/${WENDYOS_LAYER_TREE}/meta-lts-mixins \
     "
