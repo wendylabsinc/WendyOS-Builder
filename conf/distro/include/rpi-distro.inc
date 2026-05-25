@@ -1,9 +1,9 @@
-# RPi5-specific distro configuration
-# This file is included when building for RPi machines
+# RPi-specific distro configuration
+# This file is included when building for RPi machines (MACHINEOVERRIDES
+# contains 'rpi'). All non-QEMU RPi machines (RPi3/4/5) emit Mender
+# artifacts via mender-image-sd; storage geometry is set per-machine.
 
-# No Mender for RPi5
-MENDER_CONNECT_ENABLE = "0"
-# No EFI/UEFI on RPi5
+# No EFI/UEFI on RPi
 WENDYOS_UPDATE_BOOTLOADER ?= "0"
 WENDYOS_EFI_DEBUG ?= "0"
 WENDYOS_DEEPSTREAM ?= "0"

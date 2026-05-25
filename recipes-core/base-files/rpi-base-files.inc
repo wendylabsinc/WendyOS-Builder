@@ -19,13 +19,25 @@ RPI_FSTAB_TEMPLATE = "rpi-fstab"
 RPI_FSTAB_TEMPLATE:raspberrypi3-64 = "rpi-mbr-fstab"
 
 do_install:append() {
-    install -m 0644 ${WORKDIR}/${RPI_FSTAB_TEMPLATE} ${D}${sysconfdir}/fstab
-    sed -i "s/RPI_BOOT_UUID/${WENDYOS_BOOT_PARTUUID}/g" ${D}${sysconfdir}/fstab
-    sed -i "s/RPI_ROOT_UUID/${WENDYOS_ROOT_PARTUUID}/g" ${D}${sysconfdir}/fstab
+    if [ "${WENDYOS_RPI_UBOOT}" = "1" ]; then
+        # Mender-managed layout: 4 partitions (boot/A/B/data), MBR disklabel.
+        # The poky-stock /etc/fstab (already installed by base-files's own
+        # do_install) is correct here — the kernel mounts / via the
+        # ${mender_kernel_root} cmdline arg, and Mender's image-build
+        # postprocess appends /data (and /uboot if MENDER_BOOT_PART_MOUNT_LOCATION
+        # is set). Our rpi-fstab references /boot by GPT-style PARTUUID and a
+        # /config label-mount; neither device exists in the Mender layout, so
+        # systemd would block 90s on each before dropping to emergency.
+        :
+    else
+        install -m 0644 ${WORKDIR}/${RPI_FSTAB_TEMPLATE} ${D}${sysconfdir}/fstab
+        sed -i "s/RPI_BOOT_UUID/${WENDYOS_BOOT_PARTUUID}/g" ${D}${sysconfdir}/fstab
+        sed -i "s/RPI_ROOT_UUID/${WENDYOS_ROOT_PARTUUID}/g" ${D}${sysconfdir}/fstab
+    fi
 }
 
-# Trigger a rebuild whenever the PARTUUIDs or selected template change
-do_install[vardeps] += " WENDYOS_BOOT_PARTUUID WENDYOS_ROOT_PARTUUID RPI_FSTAB_TEMPLATE"
+# Trigger a rebuild whenever the inputs to fstab generation change
+do_install[vardeps] += " WENDYOS_BOOT_PARTUUID WENDYOS_ROOT_PARTUUID RPI_FSTAB_TEMPLATE WENDYOS_RPI_UBOOT"
 
 # systemd persistent log
 # If /var/log is a symlink into /var/volatile/log, journald cannot persist logs

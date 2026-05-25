@@ -69,9 +69,11 @@ IMAGE_INSTALL:append = " \
     "
 
 # Mender userspace packages — gated on WENDYOS_MENDER (set in wendyos.conf
-# and overridable per-machine).
+# and overridable per-machine). python3-pip-jetson-config lives in
+# meta-tegra-extensions, so it's split out as Tegra-only.
 IMAGE_INSTALL:append = " \
-    ${@'mender-configure mender-connect python3-pip-jetson-config' if d.getVar('WENDYOS_MENDER') == '1' else ''} \
+    ${@'mender-configure mender-connect' if d.getVar('WENDYOS_MENDER') == '1' else ''} \
+    ${@'python3-pip-jetson-config' if 'tegra' in d.getVar('MACHINEOVERRIDES').split(':') else ''} \
     "
 
 # Enable USB peripheral (gadget) support for real hardware
