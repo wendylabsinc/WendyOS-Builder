@@ -11,13 +11,10 @@ COMPATIBLE_MACHINE = "(tegra)"
 inherit packagegroup
 
 SUMMARY:${PN} = "Tegra hardware support packages"
-# tegra-flash-reboot and tegra-camera-overlays ship only for scarthgap
-# meta-tegra (Orin / tegra234); r38.4.x meta-tegra (Thor / tegra264) has no
-# equivalent overlays in WendyOS yet (deferred per WDY-1249), so gate both
-# on MACHINEOVERRIDES.
+# tegra-flash-reboot ships only on scarthgap meta-tegra (Orin / tegra234);
+# r38.4.x meta-tegra (Thor / tegra264) has no such recipe, so gate it.
 RDEPENDS:${PN} = " \
     ${@'tegra-flash-reboot' if 'tegra234' in d.getVar('MACHINEOVERRIDES').split(':') else ''} \
-    ${@'tegra-camera-overlays' if 'tegra234' in d.getVar('MACHINEOVERRIDES').split(':') else ''} \
     tegra-tools-tegrastats \
     tegra-bootcontrol-overlay \
     setup-nv-boot-control \
