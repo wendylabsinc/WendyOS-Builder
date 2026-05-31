@@ -9,3 +9,11 @@ RDEPENDS:${PN}:append = " \
     ${@'tegra-flash-reboot' if 'tegra234' in d.getVar('MACHINEOVERRIDES').split(':') else ''} \
     tegra-tools-tegrastats \
     "
+
+# OP-TEE secure-storage persistence: bind-mount /var/lib/tee -> /data/tee so
+# PKCS#11 tokens / device keys survive Mender A/B OTA (the rootfs copy of
+# /var/lib/tee is wiped on every A/B switch). Gated on OP-TEE, which is present
+# on every Tegra machine (this .inc is Tegra-only); QEMU/RPi have no OP-TEE.
+# The mount itself self-gates on /data via RequiresMountsFor=/data, so it is
+# inert on any Tegra config that lacks a /data partition.
+RDEPENDS:${PN}:append = " systemd-mount-tee"
