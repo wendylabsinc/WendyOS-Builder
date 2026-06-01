@@ -1,8 +1,6 @@
 # RPi5-specific distro configuration
 # This file is included when building for RPi machines
 
-# No Mender for RPi5
-MENDER_CONNECT_ENABLE = "0"
 # No EFI/UEFI on RPi5
 WENDYOS_UPDATE_BOOTLOADER ?= "0"
 WENDYOS_EFI_DEBUG ?= "0"
