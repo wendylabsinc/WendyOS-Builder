@@ -430,7 +430,16 @@ jobs:
 
       - name: Install flashable image dependencies (Jetson only)
         if: github.event_name != 'pull_request' && startsWith(matrix.device, 'jetson-')
-        run: sudo apt-get update && sudo apt-get install -y device-tree-compiler
+        env:
+          DEVICE: ${{ matrix.device }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y device-tree-compiler
+          # simg2img converts Android sparse ext4 images to raw; needed by
+          # make-thor-nvme-img.py to write APP/APP_b into the Thor NVMe image.
+          if [[ "$DEVICE" == "jetson-agx-thor" ]]; then
+            sudo apt-get install -y android-tools-fsutils
+          fi
 
       - name: Generate flashable image (Jetson)
         if: github.event_name != 'pull_request' && startsWith(matrix.device, 'jetson-')
@@ -440,13 +449,25 @@ jobs:
           DEVICE: ${{ matrix.device }}
           STORAGE: ${{ matrix.storage }}
         run: |
-          # Thor (JP7/r38.4.x) renamed the image type tegraflash → tegraflash-tar.
-          # The bundle is uploaded directly; no flash setup scripts are needed.
-          if [[ "$DEVICE" == "jetson-agx-thor" ]]; then exit 0; fi
-
-          TEGRAFLASH_FILE="$DEPLOY_DIR/wendyos-image-${MACHINE}.tegraflash.tar.gz"
           FLASH_WORKDIR="$GITHUB_WORKSPACE/flash-work"
           mkdir -p "$FLASH_WORKDIR"
+
+          if [[ "$DEVICE" == "jetson-agx-thor" ]]; then
+            # Thor (JP7/L4T r38.4.x / T264): the tegraflash-tar bundle does not
+            # include doexternal.sh.  make-thor-nvme-img.py reimplements the same
+            # offline GPT image creation by parsing external-flash.xml.in and
+            # writing each partition's binary at the correct sector offset.
+            # The resulting wendyos-nvme.img is the primary artifact for
+            # `wendy os install` (dd-based provisioning); the tegraflash-tar
+            # bundle remains available as the recovery-flash artifact.
+            TEGRAFLASH_TAR="$DEPLOY_DIR/wendyos-image-${MACHINE}.tegraflash-tar"
+            tar -xf "$TEGRAFLASH_TAR" -C "$FLASH_WORKDIR"
+            python3 "$GITHUB_WORKSPACE/scripts/make-thor-nvme-img.py" \
+              "$FLASH_WORKDIR" "$GITHUB_WORKSPACE/wendyos-nvme.img"
+            exit 0
+          fi
+
+          TEGRAFLASH_FILE="$DEPLOY_DIR/wendyos-image-${MACHINE}.tegraflash.tar.gz"
           tar -xzf "$TEGRAFLASH_FILE" -C "$FLASH_WORKDIR"
           # The SD/eMMC tegraflash tarballs don't bundle config-partition.fat32.img
           # (it's only included via the NVMe external XML path). Without it, the
@@ -468,13 +489,7 @@ jobs:
           fi
           cd "$FLASH_WORKDIR"
           case "$STORAGE" in
-            nvme)
-              # Thor (JP7, Phase 1): tegraflash bundle is the primary deliverable.
-              # doexternal.sh is not used; the tarball itself is uploaded as IMAGE_FILE.
-              if [[ "$DEVICE" != "jetson-agx-thor" ]]; then
-                sudo ./doexternal.sh -s 64G "$GITHUB_WORKSPACE/wendyos-nvme.img"
-              fi
-              ;;
+            nvme)  sudo ./doexternal.sh -s 64G "$GITHUB_WORKSPACE/wendyos-nvme.img" ;;
             # eMMC uses sdmmc_user device type; meta-tegra never generates dosdcard.sh for it.
             # The tegraflash tarball is the correct recovery-flash artifact for eMMC.
             emmc) : ;;
@@ -492,11 +507,9 @@ jobs:
           VERSION=$(grep 'DISTRO_VERSION' "$GITHUB_WORKSPACE/wendyos/conf/distro/wendyos.conf" | head -1 | sed 's/.*"\(.*\)"/\1/')
           TOKEN=$(gcloud auth print-access-token)
 
-          if [[ "$DEVICE" == "jetson-agx-thor" ]]; then
-            # Thor Phase 1: tegraflash-tar bundle is the primary artifact (no standalone disk image).
-            # JP7/r38.4.x renamed the image type tegraflash → tegraflash-tar.
-            IMAGE_FILE="$DEPLOY_DIR/wendyos-image-${MACHINE}.tegraflash-tar"
-          elif [[ "$MACHINE" != raspberry* && "$STORAGE" == "nvme" ]]; then
+          if [[ "$MACHINE" != raspberry* && "$STORAGE" == "nvme" ]]; then
+            # Covers Thor (wendyos-nvme.img from make-thor-nvme-img.py) and all
+            # other NVMe Jetsons (wendyos-nvme.img from doexternal.sh).
             IMAGE_FILE="$GITHUB_WORKSPACE/wendyos-nvme.img"
           elif [[ "$MACHINE" != raspberry* && "$STORAGE" == "emmc" ]]; then
             # No offline disk image for eMMC (meta-tegra doesn't generate dosdcard.sh for
@@ -517,8 +530,9 @@ jobs:
             --access-token "$TOKEN"
           )
 
-          # For all Jetson targets, include the tegraflash bundle as the recovery file.
-          # Thor uses .tegraflash-tar (JP7/r38.4.x renamed the type); other Jetson use .tegraflash.tar.gz.
+          # For all Jetson targets, include the tegraflash bundle as the recovery file
+          # (used for USB recovery-mode flashing via tegraflash.py / initrd-flash).
+          # Thor uses .tegraflash-tar (JP7/r38.4.x renamed the type); others use .tegraflash.tar.gz.
           if [[ "$MACHINE" != raspberry* ]]; then
             if [[ "$DEVICE" == "jetson-agx-thor" ]]; then
               ARGS+=(--recovery-file "$DEPLOY_DIR/wendyos-image-${MACHINE}.tegraflash-tar")
