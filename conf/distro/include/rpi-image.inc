@@ -1,15 +1,16 @@
-# RPi5-specific image configuration
+# RPi-specific image configuration
 # This file is included when building for RPi machines (MACHINEOVERRIDES contains 'rpi')
 
 inherit partuuid-rpi
 
-# RPi5-specific packages
+# RPi-specific packages
 IMAGE_INSTALL:append = " \
     packagegroup-wendyos-rpi \
     "
 
-# wendyos-image.bb appends ext4 unconditionally; RPi5 only needs wic
-IMAGE_FSTYPES:remove = "ext4"
+# Note: ext4 is kept in IMAGE_FSTYPES because Mender's mender-image-sd
+# needs an ext4 rootfs for the A/B slot layout. RPi3 stays on wic-only
+# via its machine-conf IMAGE_FSTYPES override.
 
 # Remove Tegra-only packages added by tegra-image.inc or wendyos-image.bb.
 # Layer separation removes these recipes from the parse tree, but IMAGE_INSTALL
