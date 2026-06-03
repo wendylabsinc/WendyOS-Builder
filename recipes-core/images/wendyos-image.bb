@@ -117,6 +117,7 @@ BUILDCFG_VARS += " \
     WENDYOS_PERSIST_JOURNAL_LOGS \
     WENDYOS_UPDATE_BOOTLOADER \
     WENDYOS_DEEPSTREAM \
+    WENDYOS_NVIDIA_DGPU \
     "
 
 # Include hardware-specific image configuration
@@ -125,3 +126,4 @@ require ${@'conf/distro/include/qemu-image.inc' if 'qemuall' in d.getVar('MACHIN
 require ${@'conf/distro/include/tegra-image.inc' if 'tegra' in d.getVar('MACHINEOVERRIDES').split(':') else ''}
 require ${@'conf/distro/include/rpi-image.inc' if 'rpi' in d.getVar('MACHINEOVERRIDES').split(':') else ''}
 require ${@'conf/distro/include/rpi-nvme-image.inc' if 'raspberrypi5-nvme' in d.getVar('MACHINEOVERRIDES').split(':') else ''}
+require ${@'conf/distro/include/x86-image.inc' if 'x86-wendyos' in d.getVar('MACHINEOVERRIDES').split(':') else ''}
