@@ -518,11 +518,10 @@ jobs:
           elif [[ "$MACHINE" != raspberry* && "$STORAGE" == "sd" ]]; then
             IMAGE_FILE="$GITHUB_WORKSPACE/wendyos-sd.img"
           else
-            # Mender-enabled RPi builds (post-PR-79) produce .sdimg (A/B slot
-            # image); fall back to .rootfs.wic for any non-Mender RPi build.
-            SDIMG="$DEPLOY_DIR/wendyos-image-${MACHINE}.sdimg"
-            if [[ -f "$SDIMG" ]]; then
-              IMAGE_FILE="$SDIMG"
+            # RPi: Mender emits .sdimg; pre-Mender RPi builds produced
+            # .rootfs.wic. Prefer sdimg, fall back to wic.
+            if [[ -f "$DEPLOY_DIR/wendyos-image-${MACHINE}.sdimg" ]]; then
+              IMAGE_FILE="$DEPLOY_DIR/wendyos-image-${MACHINE}.sdimg"
             else
               IMAGE_FILE="$DEPLOY_DIR/wendyos-image-${MACHINE}.rootfs.wic"
             fi
