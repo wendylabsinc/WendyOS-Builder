@@ -12,7 +12,7 @@ image creation that doexternal.sh provides for Orin/Nano:
   4. Copy each partition's binary content at the right sector offset.
      .simg files (Android sparse ext4) are converted with simg2img first.
 
-Requires: sgdisk (gdisk package), simg2img (android-tools-fsutils package)
+Requires: sgdisk (gdisk package), simg2img (android-sdk-libsparse-utils package)
 
 Usage:
     python3 make-thor-nvme-img.py <bundle_dir> <output_img>
