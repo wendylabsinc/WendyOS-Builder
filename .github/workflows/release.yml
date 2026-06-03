@@ -172,6 +172,7 @@ jobs:
           RELEASE_VERSION: ${{ inputs.release_tag || github.ref_name }}
         run: |
           TOKEN=$(gcloud auth print-access-token)
+          RELEASE_VERSION="${RELEASE_VERSION#v}"
 
           if [[ "$DEVICE" == "jetson-agx-thor" ]]; then
             # Thor Phase 1: tegraflash bundle is the primary artifact (no standalone disk image).
