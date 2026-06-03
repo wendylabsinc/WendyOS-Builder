@@ -101,7 +101,9 @@ def create_gpt(img_path, sector_size, partitions):
     # + partition entries).  First usable LBA is 34.
     current_lba = 34
 
-    cmd = ["sgdisk", "-a", "1", "--clear"]
+    # --clear resets alignment to the default (2048 sectors); -a 1 must come
+    # after --clear so the 1-sector alignment takes effect for --new entries.
+    cmd = ["sgdisk", "--clear", "-a", "1"]
 
     for p in partitions:
         size_sectors = (p["size_bytes"] + sector_size - 1) // sector_size
