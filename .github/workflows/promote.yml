@@ -18,6 +18,7 @@ jobs:
     name: Promote ${{ inputs.source_nightly }} to ${{ inputs.release_tag }}
     permissions:
       contents: write
+      actions: write
     runs-on:
       - runs-on
       - family=c7i-flex.8xlarge
@@ -51,7 +52,20 @@ jobs:
           fi
           echo "Promoting commit $SHA to $RELEASE_TAG"
 
-          git tag "$RELEASE_TAG" "$SHA"
-          git push origin "$RELEASE_TAG"
-          # Pushing a v* tag triggers release.yml, which rebuilds using the warm
-          # sstate cache, publishes to GCS, and creates the GitHub release.
+          if git rev-parse "refs/tags/${RELEASE_TAG}" >/dev/null 2>&1 || \
+             git ls-remote --exit-code origin "refs/tags/${RELEASE_TAG}" >/dev/null 2>&1; then
+            echo "Tag $RELEASE_TAG already exists, skipping create/push."
+          else
+            git tag "$RELEASE_TAG" "$SHA"
+            git push origin "$RELEASE_TAG"
+          fi
+
+      - name: Dispatch release build
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          gh workflow run release.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            --field release_tag="$RELEASE_TAG"
