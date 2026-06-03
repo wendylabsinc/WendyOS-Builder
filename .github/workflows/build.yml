@@ -549,7 +549,7 @@ jobs:
 
           # Devices with multiple storage variants pass --storage so the manifest
           # records the correct per-storage-type paths.
-          if [[ "$DEVICE" == "jetson-orin-nano" || "$DEVICE" == "jetson-agx-orin" ]]; then
+          if [[ "$DEVICE" == "jetson-orin-nano" || "$DEVICE" == "jetson-agx-orin" || "$DEVICE" == "raspberry-pi-5" ]]; then
             ARGS+=(--storage "$STORAGE")
           fi
 
