@@ -518,7 +518,14 @@ jobs:
           elif [[ "$MACHINE" != raspberry* && "$STORAGE" == "sd" ]]; then
             IMAGE_FILE="$GITHUB_WORKSPACE/wendyos-sd.img"
           else
-            IMAGE_FILE="$DEPLOY_DIR/wendyos-image-${MACHINE}.rootfs.wic"
+            # Mender-enabled RPi builds (post-PR-79) produce .sdimg (A/B slot
+            # image); fall back to .rootfs.wic for any non-Mender RPi build.
+            SDIMG="$DEPLOY_DIR/wendyos-image-${MACHINE}.sdimg"
+            if [[ -f "$SDIMG" ]]; then
+              IMAGE_FILE="$SDIMG"
+            else
+              IMAGE_FILE="$DEPLOY_DIR/wendyos-image-${MACHINE}.rootfs.wic"
+            fi
           fi
 
           ARGS=(
@@ -543,7 +550,7 @@ jobs:
 
           # Devices with multiple storage variants pass --storage so the manifest
           # records the correct per-storage-type paths.
-          if [[ "$DEVICE" == "jetson-orin-nano" || "$DEVICE" == "jetson-agx-orin" ]]; then
+          if [[ "$DEVICE" == "jetson-orin-nano" || "$DEVICE" == "jetson-agx-orin" || "$DEVICE" == "raspberry-pi-5" ]]; then
             ARGS+=(--storage "$STORAGE")
           fi
 
