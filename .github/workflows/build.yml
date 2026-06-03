@@ -462,7 +462,7 @@ jobs:
             # bundle remains available as the recovery-flash artifact.
             TEGRAFLASH_TAR="$DEPLOY_DIR/wendyos-image-${MACHINE}.tegraflash-tar"
             tar -xf "$TEGRAFLASH_TAR" -C "$FLASH_WORKDIR"
-            python3 "$GITHUB_WORKSPACE/scripts/make-thor-nvme-img.py" \
+            python3 "$GITHUB_WORKSPACE/wendyos/scripts/make-thor-nvme-img.py" \
               "$FLASH_WORKDIR" "$GITHUB_WORKSPACE/wendyos-nvme.img"
             exit 0
           fi
