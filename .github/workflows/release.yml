@@ -220,7 +220,22 @@ jobs:
           fi
 
           cd "$GITHUB_WORKSPACE/wendy-os-publisher/cmd"
-          go run upload_and_manifest.go "${ARGS[@]}"
+          # Outer retry mirrors build.yml: handles 412 races when multiple matrix
+          # jobs for the same device write to the same manifest concurrently.
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            if go run upload_and_manifest.go "${ARGS[@]}"; then
+              break
+            fi
+            if [ "$attempt" -lt 10 ]; then
+              JITTER=$((RANDOM % 30))
+              SLEEP_TIME=$((attempt * 20 + JITTER))
+              echo "Outer attempt $attempt failed, sleeping ${SLEEP_TIME}s before retry..."
+              sleep "$SLEEP_TIME"
+            else
+              echo "All outer attempts exhausted"
+              exit 1
+            fi
+          done
 
   create-github-release:
     name: Create GitHub release
