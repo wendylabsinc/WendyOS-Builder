@@ -421,18 +421,12 @@ jobs:
         if: github.event_name != 'pull_request'
         uses: google-github-actions/setup-gcloud@v2
 
-      - name: Checkout publisher
-        if: github.event_name != 'pull_request'
-        uses: actions/checkout@v4
-        with:
-          repository: wendylabsinc/wendy-os-publisher
-          path: wendy-os-publisher
-
       - name: Set up Go
         if: github.event_name != 'pull_request'
         uses: actions/setup-go@v5
         with:
-          go-version-file: wendy-os-publisher/go.mod
+          go-version-file: wendyos/tools/publisher/go.mod
+          cache-dependency-path: wendyos/tools/publisher/go.sum
 
       - name: Install flashable image dependencies (Jetson only)
         if: github.event_name != 'pull_request' && startsWith(matrix.device, 'jetson-')
@@ -579,12 +573,12 @@ jobs:
             ARGS+=(--ota-update "$OTA_FILE")
           fi
 
-          cd "$GITHUB_WORKSPACE/wendy-os-publisher/cmd"
+          cd "$GITHUB_WORKSPACE/wendyos/tools/publisher"
           # Outer retry handles 412 races when multiple storage variants for the
           # same device write to the same device manifest concurrently.
           # 10 attempts with jitter breaks lockstep between competing builds.
           for attempt in 1 2 3 4 5 6 7 8 9 10; do
-            if go run upload_and_manifest.go "${ARGS[@]}"; then
+            if go run . "${ARGS[@]}"; then
               break
             fi
             if [ "$attempt" -lt 10 ]; then
@@ -629,29 +623,24 @@ jobs:
           path: wendyos
           ref: ${{ inputs.version }}
 
-      - name: Checkout publisher
-        uses: actions/checkout@v4
-        with:
-          repository: wendylabsinc/wendy-os-publisher
-          path: wendy-os-publisher
-
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: wendy-os-publisher/go.mod
+          go-version-file: wendyos/tools/publisher/go.mod
+          cache-dependency-path: wendyos/tools/publisher/go.sum
 
       - name: Update master manifest
         run: |
           VERSION=$(grep 'DISTRO_VERSION' "$GITHUB_WORKSPACE/wendyos/conf/distro/wendyos.conf" | head -1 | sed 's/.*"\(.*\)"/\1/')
           TOKEN=$(gcloud auth print-access-token)
 
-          cd "$GITHUB_WORKSPACE/wendy-os-publisher/cmd"
+          cd "$GITHUB_WORKSPACE/wendyos/tools/publisher"
           for DEVICE in raspberry-pi-3 raspberry-pi-4 raspberry-pi-5 jetson-agx-orin jetson-orin-nano jetson-agx-thor; do
             # Outer shell retry handles transient 412 bursts from concurrent writers
             # (e.g. Cloud Function draining a Pub/Sub backlog). The publisher already
             # retries internally 10x with exponential backoff; this adds 5 extra rounds.
             for attempt in 1 2 3 4 5; do
-              if go run upload_and_manifest.go \
+              if go run . \
                 --device "$DEVICE" \
                 --version "${VERSION}-nightly" \
                 --nightly \

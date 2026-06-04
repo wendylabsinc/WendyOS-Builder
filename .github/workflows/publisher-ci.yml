@@ -1,0 +1,36 @@
+name: Publisher CI
+
+# The publisher (tools/publisher) previously lived in its own repo with no CI.
+# Gate every change to it with vet + tests so workflow runs never pick up a
+# broken publisher.
+on:
+  pull_request:
+    paths:
+      - 'tools/publisher/**'
+      - '.github/workflows/publisher-ci.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'tools/publisher/**'
+      - '.github/workflows/publisher-ci.yml'
+
+jobs:
+  test:
+    name: Vet and test publisher
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tools/publisher
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: tools/publisher/go.mod
+          cache-dependency-path: tools/publisher/go.sum
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test
+        run: go test ./...
