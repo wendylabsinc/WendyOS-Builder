@@ -56,6 +56,16 @@ func (s *gcloudTokenSource) Token() (*oauth2.Token, error) {
 	return s.token, nil
 }
 
+// manifestCacheControl is set on every manifest write. Manifests are mutable
+// and read-modify-written under GenerationMatch preconditions; without this,
+// GCS applies its default "public, max-age=3600" to publicly readable objects
+// and serves reads (including our own) from its built-in edge cache. Stale
+// reads carry stale generation numbers, which livelocks CAS retries with 412s
+// and silently resurrects old state on unconditional writes — both observed
+// in production (run 26967801954). "no-store" forces every manifest read,
+// by CI and by device clients, to be strongly consistent.
+const manifestCacheControl = "no-store"
+
 // discordWebhookURL is read from the DISCORD_WEBHOOK_URL environment variable.
 var discordWebhookURL = os.Getenv("DISCORD_WEBHOOK_URL")
 
@@ -943,6 +953,9 @@ func main() {
 	updateOnly := flag.Bool("update-only", false, "Only update manifests without uploading")
 	skipMasterManifest := flag.Bool("skip-master-manifest", false, "Skip master manifest update (a separate job will handle it)")
 	masterManifestOnly := flag.Bool("master-manifest-only", false, "Only update the master manifest, skip upload and device manifest")
+	uploadOnly := flag.Bool("upload-only", false, "Upload files without touching any manifest; requires --metadata-out (a serialised publish job applies the manifest writes later)")
+	metadataOut := flag.String("metadata-out", "", "Path to write the manifest-entry JSON produced by --upload-only")
+	applyMetadata := flag.String("apply-metadata", "", "Path to a manifest-entry JSON (from --upload-only); updates the device manifest from it without uploading")
 	listImages := flag.Bool("list", false, "List all images in the bucket")
 	createDevice := flag.Bool("create-device", false, "Create a new device type in the manifest")
 	nightly := flag.Bool("nightly", false, "Mark this build as a nightly/untested build")
@@ -1045,6 +1058,12 @@ func main() {
 		if err := validateFileExists(*localFile); err != nil {
 			log.WithError(err).Fatal("Invalid file")
 		}
+	} else if *applyMetadata != "" {
+		// For applying a manifest entry, the file must exist; everything else
+		// (device, version, paths) is validated from the entry content.
+		if err := validateFileExists(*applyMetadata); err != nil {
+			log.WithError(err).Fatal("Invalid --apply-metadata file")
+		}
 	} else {
 		// For normal operations, we need device type and version
 		if err := validateDeviceType(*deviceType); err != nil {
@@ -1058,6 +1077,14 @@ func main() {
 		}
 		if *storage != "" && *storage != "nvme" && *storage != "sd" && *storage != "emmc" {
 			log.Fatalf("Invalid --storage value %q: must be nvme, sd, or emmc", *storage)
+		}
+		if *uploadOnly {
+			if *metadataOut == "" {
+				log.Fatal("--upload-only requires --metadata-out")
+			}
+			if *updateOnly || *masterManifestOnly {
+				log.Fatal("--upload-only cannot be combined with --update-only or --master-manifest-only")
+			}
 		}
 		if !*updateOnly && !*masterManifestOnly {
 			// At least one file (main, OTA, or recovery) must be provided
@@ -1145,6 +1172,31 @@ func main() {
 		if err := updateMasterManifest(ctx, logger, bucket, *deviceType, *version, *nightly, *stability, true); err != nil {
 			log.WithError(err).Fatal("Failed to update master manifest")
 		}
+		return
+	}
+
+	// Apply a manifest entry produced by --upload-only (used by the serialised
+	// publish job after parallel builds). Only the device manifest is written;
+	// the publish job updates the master manifest separately via
+	// --master-manifest-only once all entries have been applied.
+	if *applyMetadata != "" {
+		entry, err := readManifestEntry(*applyMetadata)
+		if err != nil {
+			log.WithError(err).Fatal("Failed to read manifest entry")
+		}
+		log.WithFields(logrus.Fields{
+			"entry":   *applyMetadata,
+			"device":  entry.Device,
+			"version": entry.Version,
+			"storage": entry.Storage,
+		}).Info("Applying manifest entry")
+		updateManifests(
+			ctx, bucket, entry.Device, entry.Version,
+			entry.FilePath, entry.FileSize, entry.FileChecksum,
+			entry.OTAUpdatePath, entry.OTAUpdateSize, entry.OTAUpdateChecksum,
+			entry.RecoveryPath, entry.RecoverySize, entry.RecoveryChecksum,
+			entry.Storage, entry.Nightly, entry.Stability, *notifyDiscord, true,
+		)
 		return
 	}
 
@@ -1331,6 +1383,32 @@ func main() {
 				log.WithError(recoveryUpload.err).Fatal("Failed to upload recovery file")
 			}
 			log.Info("Recovery file uploaded successfully")
+		}
+
+		// In upload-only mode the manifests are deliberately untouched: write
+		// the entry file for the publish job and stop here.
+		if *uploadOnly {
+			entry := ManifestEntry{
+				Device:            *deviceType,
+				Version:           *version,
+				Storage:           *storage,
+				Nightly:           *nightly,
+				Stability:         *stability,
+				FilePath:          mainUpload.path,
+				FileSize:          mainUpload.size,
+				FileChecksum:      mainResult.checksum,
+				OTAUpdatePath:     otaUpdateUpload.path,
+				OTAUpdateSize:     otaUpdateUpload.size,
+				OTAUpdateChecksum: otaUpdateResult.checksum,
+				RecoveryPath:      recoveryUpload.path,
+				RecoverySize:      recoveryUpload.size,
+				RecoveryChecksum:  recoveryResult.checksum,
+			}
+			if err := writeManifestEntry(*metadataOut, entry); err != nil {
+				log.WithError(err).Fatal("Failed to write manifest entry")
+			}
+			log.WithField("path", *metadataOut).Info("Uploads complete; manifest entry written (manifests untouched, --upload-only)")
+			return
 		}
 
 		// Update manifests with results
@@ -1858,6 +1936,7 @@ func updateDeviceManifest(ctx context.Context, logger *logrus.Entry, bucket *sto
 			deviceConds = storage.Conditions{GenerationMatch: generation}
 		}
 		w := obj.If(deviceConds).NewWriter(ctx)
+		w.CacheControl = manifestCacheControl
 
 		// Marshal to JSON with indentation
 		content, err := json.MarshalIndent(manifest, "", "  ")
@@ -1997,6 +2076,7 @@ func updateMasterManifest(ctx context.Context, logger *logrus.Entry, bucket *sto
 			// job with a concurrency group). Avoids livelock from any mystery concurrent
 			// writer because we are the authoritative publisher.
 			w = obj.NewWriter(ctx)
+			w.CacheControl = manifestCacheControl
 		} else {
 			// Use GenerationMatch so concurrent build jobs don't clobber each other.
 			var masterConds storage.Conditions
@@ -2006,6 +2086,7 @@ func updateMasterManifest(ctx context.Context, logger *logrus.Entry, bucket *sto
 				masterConds = storage.Conditions{GenerationMatch: generation}
 			}
 			w = obj.If(masterConds).NewWriter(ctx)
+			w.CacheControl = manifestCacheControl
 		}
 
 		// Marshal to JSON with indentation
@@ -2062,6 +2143,7 @@ func createNewDevice(ctx context.Context, bucket *storage.BucketHandle, deviceTy
 	// Write device manifest
 	obj := bucket.Object(manifestPath)
 	w := obj.NewWriter(ctx)
+	w.CacheControl = manifestCacheControl
 
 	content, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
@@ -2123,6 +2205,7 @@ func createNewDevice(ctx context.Context, bucket *storage.BucketHandle, deviceTy
 
 	// Write master manifest
 	w = masterObj.NewWriter(ctx)
+	w.CacheControl = manifestCacheControl
 
 	content, err = json.MarshalIndent(masterManifest, "", "  ")
 	if err != nil {
@@ -2353,6 +2436,7 @@ func promoteNightlyToStable(ctx context.Context, bucket *storage.BucketHandle, d
 	// Write device manifest back
 	logger.Info("Writing updated device manifest")
 	w := obj.NewWriter(ctx)
+	w.CacheControl = manifestCacheControl
 
 	manifestContent, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
@@ -2429,6 +2513,7 @@ func updateMasterManifestForPromotion(ctx context.Context, logger *logrus.Entry,
 		}
 
 		w := obj.If(storage.Conditions{GenerationMatch: generation}).NewWriter(ctx)
+		w.CacheControl = manifestCacheControl
 		if _, err := w.Write(manifestContent); err != nil {
 			w.Close()
 			return fmt.Errorf("failed to write master manifest: %w", err)
@@ -2600,6 +2685,7 @@ func swapImageFile(ctx context.Context, bucket *storage.BucketHandle, deviceType
 	manifest.Versions[version] = updatedVersion
 
 	w := obj.NewWriter(ctx)
+	w.CacheControl = manifestCacheControl
 
 	manifestContent, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
@@ -2667,6 +2753,7 @@ func updateMasterManifestTimestamp(ctx context.Context, logger *logrus.Entry, bu
 	masterManifest.LastUpdated = time.Now()
 
 	w := obj.NewWriter(ctx)
+	w.CacheControl = manifestCacheControl
 
 	manifestContent, err := json.MarshalIndent(masterManifest, "", "  ")
 	if err != nil {
@@ -2878,6 +2965,7 @@ func updateFirmwareChipManifest(ctx context.Context, logger *logrus.Entry, bucke
 	// Write back to bucket
 	logger.Info("Writing firmware chip manifest back to bucket")
 	w := obj.NewWriter(ctx)
+	w.CacheControl = manifestCacheControl
 
 	content, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
@@ -2967,6 +3055,7 @@ func updateMasterManifestFirmware(ctx context.Context, logger *logrus.Entry, buc
 	// Write back to bucket
 	logger.Info("Writing master manifest back to bucket")
 	w := obj.NewWriter(ctx)
+	w.CacheControl = manifestCacheControl
 
 	content, err := json.MarshalIndent(masterManifest, "", "  ")
 	if err != nil {
@@ -3151,6 +3240,7 @@ func createNewFirmwareChip(ctx context.Context, bucket *storage.BucketHandle, ch
 	// Write chip manifest
 	obj := bucket.Object(manifestPath)
 	w := obj.NewWriter(ctx)
+	w.CacheControl = manifestCacheControl
 
 	content, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
@@ -3211,6 +3301,7 @@ func createNewFirmwareChip(ctx context.Context, bucket *storage.BucketHandle, ch
 
 	// Write master manifest
 	w = masterObj.NewWriter(ctx)
+	w.CacheControl = manifestCacheControl
 
 	content, err = json.MarshalIndent(masterManifest, "", "  ")
 	if err != nil {
@@ -3320,6 +3411,7 @@ func removeDeviceType(ctx context.Context, bucket *storage.BucketHandle, deviceT
 	masterManifest.LastUpdated = time.Now()
 
 	w := masterObj.NewWriter(ctx)
+	w.CacheControl = manifestCacheControl
 	updatedContent, err := json.MarshalIndent(masterManifest, "", "  ")
 	if err != nil {
 		logger.WithError(err).Error("Failed to marshal master manifest")
@@ -3473,6 +3565,7 @@ func renameDeviceType(ctx context.Context, bucket *storage.BucketHandle, oldDevi
 
 	// Write the new device manifest
 	w := newManifestObj.NewWriter(ctx)
+	w.CacheControl = manifestCacheControl
 	newContent, err := json.MarshalIndent(targetManifest, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal target device manifest: %w", err)
@@ -3521,6 +3614,7 @@ func renameDeviceType(ctx context.Context, bucket *storage.BucketHandle, oldDevi
 
 	// Write master manifest
 	w = masterObj.NewWriter(ctx)
+	w.CacheControl = manifestCacheControl
 	masterContent, err := json.MarshalIndent(masterManifest, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal master manifest: %w", err)
@@ -3604,6 +3698,7 @@ func removeFirmwareChip(ctx context.Context, bucket *storage.BucketHandle, chip 
 	masterManifest.LastUpdated = time.Now()
 
 	w := masterObj.NewWriter(ctx)
+	w.CacheControl = manifestCacheControl
 	updatedContent, err := json.MarshalIndent(masterManifest, "", "  ")
 	if err != nil {
 		logger.WithError(err).Error("Failed to marshal master manifest")
