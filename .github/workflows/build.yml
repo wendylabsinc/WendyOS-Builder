@@ -688,14 +688,17 @@ jobs:
           merge-multiple: true
 
       - name: Write device manifests
+        id: apply
         run: |
           set -euo pipefail
           shopt -s nullglob
           entries=("$GITHUB_WORKSPACE"/manifest-entries/*.json)
           if [[ ${#entries[@]} -eq 0 ]]; then
             echo "::warning::No manifest entries found (did every build fail?); nothing to publish."
+            echo "published=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          echo "published=true" >> "$GITHUB_OUTPUT"
           TOKEN=$(gcloud auth print-access-token)
           cd "$GITHUB_WORKSPACE/wendyos/tools/publisher"
           # Build once; up to 15 invocations follow across this step and the
@@ -748,7 +751,9 @@ jobs:
 
       - name: Tag nightly pre-release on GitHub
         # Nightly builds only: release tags already exist (created by promote.yml).
-        if: ${{ success() && github.ref_type != 'tag' }}
+        # Skipped when zero entries were published (every build failed) - never
+        # tag and announce a nightly that has no images behind it.
+        if: ${{ success() && github.ref_type != 'tag' && steps.apply.outputs.published == 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.detect-changes.outputs.version }}
@@ -783,7 +788,7 @@ jobs:
 
       - name: Send Discord announcement
         # Nightly builds only: release announcements are sent by promote.yml.
-        if: ${{ success() && github.ref_type != 'tag' }}
+        if: ${{ success() && github.ref_type != 'tag' && steps.apply.outputs.published == 'true' }}
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_NIGHTLY_WEBHOOK_URL }}
           VERSION: ${{ needs.detect-changes.outputs.version }}

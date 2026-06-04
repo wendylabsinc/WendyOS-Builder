@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -2248,6 +2249,14 @@ func promoteNightlyToStable(ctx context.Context, bucket *storage.BucketHandle, d
 		logger.Fatal("Cannot promote version 'nightly' - must have additional version info (e.g., 'nightly-2025-12-20')")
 	} else if !strings.Contains(strings.ToLower(stableVersion), "nightly") {
 		logger.Fatal("Version does not contain 'nightly' - cannot determine stable version name")
+	}
+
+	// CI nightlies named nightly-YYYYMMDDTHHMMSS don't embed a semantic
+	// version: stripping the prefix would "promote" to a bare timestamp.
+	// Those builds are released by tagging the commit MAJOR.MINOR.PATCH
+	// (promote.yml), which rebuilds and publishes the real version.
+	if !regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`).MatchString(stableVersion) {
+		logger.Fatalf("Derived stable version %q is not MAJOR.MINOR.PATCH - cannot promote %q in place. Use the 'Promote Nightly to Release' GitHub workflow instead.", stableVersion, nightlyVersion)
 	}
 
 	logger.WithField("stable_version", stableVersion).Info("Derived stable version name")
