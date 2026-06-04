@@ -603,6 +603,9 @@ jobs:
           path: manifest-entry-${{ matrix.device }}-${{ matrix.storage }}.json
           if-no-files-found: error
           retention-days: 7
+          # v4 artifacts are immutable per name; without this, re-running a
+          # failed build job 409s on the artifact left by the earlier attempt.
+          overwrite: true
 
   # ---------------------------------------------------------------------------
   # publish: the ONLY writer of GCS manifests. Build jobs upload files and
@@ -666,12 +669,15 @@ jobs:
           fi
           TOKEN=$(gcloud auth print-access-token)
           cd "$GITHUB_WORKSPACE/wendyos/tools/publisher"
+          # Build once; up to 15 invocations follow across this step and the
+          # master manifest step ($RUNNER_TEMP persists between steps).
+          go build -o "$RUNNER_TEMP/publisher" .
           # Applied strictly one at a time: this job is the only manifest
           # writer, so there is nothing to race against and no retry loop.
           for entry in "${entries[@]}"; do
             echo "::group::apply $(basename "$entry")"
             cat "$entry"
-            go run . --apply-metadata "$entry" --access-token "$TOKEN"
+            "$RUNNER_TEMP/publisher" --apply-metadata "$entry" --access-token "$TOKEN"
             echo "::endgroup::"
           done
 
@@ -686,6 +692,9 @@ jobs:
           fi
           TOKEN=$(gcloud auth print-access-token)
           cd "$GITHUB_WORKSPACE/wendyos/tools/publisher"
+          # Reuse the binary from the previous step; rebuild only if missing
+          # (e.g. this step re-run in isolation).
+          [[ -x "$RUNNER_TEMP/publisher" ]] || go build -o "$RUNNER_TEMP/publisher" .
           # One master-manifest write per device that actually published
           # (storage variants of a device share one device manifest, hence
           # unique_by). Devices whose builds failed keep their previous
@@ -705,7 +714,7 @@ jobs:
             if [[ "$NIGHTLY" == "true" ]]; then
               ARGS+=(--nightly)
             fi
-            go run . "${ARGS[@]}" </dev/null
+            "$RUNNER_TEMP/publisher" "${ARGS[@]}" </dev/null
           done
 
       - name: Send Discord announcement
