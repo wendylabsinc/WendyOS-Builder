@@ -3,6 +3,8 @@ name: Build WendyOS Images
 on:
   push:
     branches: [main]
+    tags:
+      - 'v*'
   pull_request:
   workflow_dispatch:
     inputs:
@@ -404,6 +406,10 @@ jobs:
 
       # --- Upload image and update device manifest (master manifest is handled by the publish job) ---
 
+      - name: Fix deploy directory permissions
+        if: github.event_name != 'pull_request'
+        run: sudo chown -R "$(id -u):$(id -g)" "${{ github.workspace }}/build/tmp/deploy" 2>/dev/null || true
+
       - name: Authenticate to Google Cloud
         if: github.event_name != 'pull_request'
         uses: google-github-actions/auth@v2
@@ -503,6 +509,7 @@ jobs:
           MACHINE: ${{ steps.vars.outputs.machine }}
           DEVICE: ${{ matrix.device }}
           STORAGE: ${{ matrix.storage }}
+          IS_RELEASE: ${{ github.ref_type == 'tag' }}
         run: |
           VERSION=$(grep 'DISTRO_VERSION' "$GITHUB_WORKSPACE/wendyos/conf/distro/wendyos.conf" | head -1 | sed 's/.*"\(.*\)"/\1/')
           TOKEN=$(gcloud auth print-access-token)
@@ -531,14 +538,22 @@ jobs:
             fi
           fi
 
+          if [[ "$IS_RELEASE" == "true" ]]; then
+            UPLOAD_VERSION="$VERSION"
+          else
+            UPLOAD_VERSION="${VERSION}-nightly"
+          fi
+
           ARGS=(
             --device "$DEVICE"
-            --version "${VERSION}-nightly"
+            --version "$UPLOAD_VERSION"
             --file "$IMAGE_FILE"
-            --nightly
-            --skip-master-manifest
             --access-token "$TOKEN"
           )
+
+          if [[ "$IS_RELEASE" != "true" ]]; then
+            ARGS+=(--nightly --skip-master-manifest)
+          fi
 
           # For all Jetson targets, include the tegraflash bundle as the recovery file
           # (used for USB recovery-mode flashing via tegraflash.py / initrd-flash).
@@ -585,7 +600,7 @@ jobs:
   publish:
     name: Update master manifest
     needs: build
-    if: ${{ !cancelled() && github.event_name != 'pull_request' }}
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && github.ref_type != 'tag' }}
     concurrency:
       group: update-master-manifest
       cancel-in-progress: false
