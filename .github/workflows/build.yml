@@ -530,8 +530,9 @@ jobs:
             if [[ -f "$DEPLOY_DIR/wendyos-image-${MACHINE}.sdimg" ]]; then
               # Resolve the Yocto symlink to the real file before gzipping;
               # gzip fails with ELOOP when the symlink chain is too deep.
+              # Use -f to suppress the "has N other links" error from Yocto hard links.
               SDIMG_REAL=$(readlink -f "$DEPLOY_DIR/wendyos-image-${MACHINE}.sdimg")
-              gzip "$SDIMG_REAL"
+              gzip -f "$SDIMG_REAL"
               IMAGE_FILE="${SDIMG_REAL}.gz"
             else
               IMAGE_FILE="$DEPLOY_DIR/wendyos-image-${MACHINE}.rootfs.wic"
