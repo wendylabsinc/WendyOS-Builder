@@ -15,7 +15,12 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=3417a46e992fdf62e5759fba9baef7a7 \
                     file://LICENSES/GPL-2.0-only.txt;md5=b234ee4d69f5fce4486a80fdaf4a4263 \
                     file://LICENSES/GPL-2.0-or-later.txt;md5=fed54355545ffd980b814dab4a3b312c"
 
-SRC_URI = "git://github.com/raspberrypi/libpisp.git;protocol=https;branch=main;tag=v${PV}"
+# Pin by SRCREV only. Upstream tags v1.3.0 at exactly this commit, but the
+# scarthgap bitbake fetcher rejects a git url that carries both tag= and an
+# explicit SRCREV ("Conflicting revisions ... please specify one valid value").
+# meta-raspberrypi master keeps tag=v${PV} because its newer bitbake resolves
+# and cross-checks the two; the older bitbake WendyOS pins does not.
+SRC_URI = "git://github.com/raspberrypi/libpisp.git;protocol=https;branch=main"
 SRCREV = "9ba67e6680f03f31f2b1741a53e8fd549be82cbe"
 
 # Explicit S for git fetches: unlike meta-raspberrypi master (which runs on a
