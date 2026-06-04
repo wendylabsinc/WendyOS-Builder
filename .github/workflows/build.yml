@@ -521,9 +521,11 @@ jobs:
             # RPi: Mender emits .sdimg; pre-Mender RPi builds produced
             # .rootfs.wic. Prefer sdimg, fall back to wic.
             if [[ -f "$DEPLOY_DIR/wendyos-image-${MACHINE}.sdimg" ]]; then
-              # Compress in-place — raw sdimg is ~7–34 GiB; gzip shrinks it ~30×.
-              gzip "$DEPLOY_DIR/wendyos-image-${MACHINE}.sdimg"
-              IMAGE_FILE="$DEPLOY_DIR/wendyos-image-${MACHINE}.sdimg.gz"
+              # Resolve the Yocto symlink to the real file before gzipping;
+              # gzip fails with ELOOP when the symlink chain is too deep.
+              SDIMG_REAL=$(readlink -f "$DEPLOY_DIR/wendyos-image-${MACHINE}.sdimg")
+              gzip "$SDIMG_REAL"
+              IMAGE_FILE="${SDIMG_REAL}.gz"
             else
               IMAGE_FILE="$DEPLOY_DIR/wendyos-image-${MACHINE}.rootfs.wic"
             fi
