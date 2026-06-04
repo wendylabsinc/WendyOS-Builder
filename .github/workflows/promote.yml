@@ -4,18 +4,18 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: "Release tag to create (e.g. v1.2.3)"
+        description: "Release version to create, e.g. 1.2.3 (no 'v' prefix; one is stripped if given)"
         type: string
         required: true
       source_nightly:
-        description: "Nightly tag to promote from"
+        description: "Nightly tag to promote from (empty = most recent nightly-* tag)"
         type: string
         required: false
-        default: nightly
+        default: ""
 
 jobs:
   promote:
-    name: Promote ${{ inputs.source_nightly }} to ${{ inputs.release_tag }}
+    name: Promote ${{ inputs.source_nightly || 'latest nightly' }} to ${{ inputs.release_tag }}
     permissions:
       contents: write
     runs-on:
@@ -33,45 +33,69 @@ jobs:
         env:
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
-          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9] ]]; then
-            echo "ERROR: release_tag must start with vMAJOR.MINOR.PATCH (got: $RELEASE_TAG)"
+          set -euo pipefail
+          # Versions are plain MAJOR.MINOR.PATCH everywhere (git tags, GitHub
+          # releases, GCS manifests). Strip a leading 'v' typed out of habit.
+          TAG="${RELEASE_TAG#v}"
+          if [[ ! "$TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "ERROR: release_tag must be MAJOR.MINOR.PATCH (got: $RELEASE_TAG)"
             exit 1
           fi
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
 
       - name: Resolve nightly commit and push release tag
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ inputs.release_tag }}
           SOURCE_NIGHTLY: ${{ inputs.source_nightly }}
         run: |
-          # Resolve the exact commit the nightly tag points to.
-          if ! SHA=$(git rev-parse "refs/tags/${SOURCE_NIGHTLY}^{commit}" 2>/dev/null); then
-            git fetch origin "refs/tags/${SOURCE_NIGHTLY}:refs/tags/${SOURCE_NIGHTLY}"
-            SHA=$(git rev-parse "refs/tags/${SOURCE_NIGHTLY}^{commit}")
-          fi
-          echo "Promoting commit $SHA to $RELEASE_TAG"
+          set -euo pipefail
+          git fetch --tags --quiet
 
-          if git rev-parse "refs/tags/${RELEASE_TAG}" >/dev/null 2>&1 || \
-             git ls-remote --exit-code origin "refs/tags/${RELEASE_TAG}" >/dev/null 2>&1; then
-            echo "Tag $RELEASE_TAG already exists, skipping create/push."
+          # Default to the most recent nightly: nightly-YYYYMMDDTHHMMSS sorts
+          # chronologically as a string.
+          if [[ -z "$SOURCE_NIGHTLY" ]]; then
+            SOURCE_NIGHTLY=$(git tag -l 'nightly-*' | sort | tail -1)
+            if [[ -z "$SOURCE_NIGHTLY" ]]; then
+              echo "ERROR: no nightly-* tags found; pass source_nightly explicitly."
+              exit 1
+            fi
+            echo "Resolved latest nightly: $SOURCE_NIGHTLY"
+          fi
+
+          SHA=$(git rev-parse "refs/tags/${SOURCE_NIGHTLY}^{commit}")
+          echo "Promoting commit $SHA ($SOURCE_NIGHTLY) to $TAG"
+
+          # The tag-triggered release build publishes with the tag as the
+          # version and fails if it disagrees with DISTRO_VERSION baked into
+          # the image. Catch that here, before any tag exists.
+          DISTRO_VERSION=$(git show "$SHA:conf/distro/wendyos.conf" | grep 'DISTRO_VERSION' | head -1 | sed 's/.*"\(.*\)"/\1/')
+          if [[ "$TAG" != "$DISTRO_VERSION" ]]; then
+            echo "ERROR: release tag $TAG != DISTRO_VERSION=$DISTRO_VERSION at $SOURCE_NIGHTLY ($SHA)."
+            echo "Bump DISTRO_VERSION in conf/distro/wendyos.conf, let a nightly build, then promote that."
+            exit 1
+          fi
+
+          if git rev-parse "refs/tags/${TAG}" >/dev/null 2>&1 || \
+             git ls-remote --exit-code origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists, skipping create/push."
           else
-            git tag "$RELEASE_TAG" "$SHA"
-            git push origin "$RELEASE_TAG"
+            git tag "$TAG" "$SHA"
+            git push origin "$TAG"
           fi
 
       - name: Create GitHub release
         id: create_release
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
-          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "Release $RELEASE_TAG already exists."
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG already exists."
             echo "created=false" >> "$GITHUB_OUTPUT"
           else
-            gh release create "$RELEASE_TAG" \
+            gh release create "$TAG" \
               --repo "$GITHUB_REPOSITORY" \
-              --title "WendyOS $RELEASE_TAG" \
+              --title "WendyOS $TAG" \
               --generate-notes
             echo "created=true" >> "$GITHUB_OUTPUT"
           fi
@@ -80,11 +104,10 @@ jobs:
         if: steps.create_release.outputs.created == 'true'
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
-          RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           [[ -z "${DISCORD_WEBHOOK_URL}" ]] && exit 0
-          RELEASE_URL="https://github.com/${GITHUB_REPOSITORY}/releases/tag/${RELEASE_TAG}"
-          jq -n --arg msg "**WendyOS ${RELEASE_TAG}** is out! Full changelog and downloads: ${RELEASE_URL}" '{content: $msg}' | \
+          RELEASE_URL="https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
+          jq -n --arg msg "**WendyOS ${TAG}** is out! Full changelog and downloads: ${RELEASE_URL}" '{content: $msg}' | \
             curl -fsS -o /dev/null \
               -H "Content-Type: application/json" \
               -d @- \

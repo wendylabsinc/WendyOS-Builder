@@ -4,7 +4,9 @@ on:
   push:
     branches: [main]
     tags:
-      - 'v*'
+      # Release tags are plain MAJOR.MINOR.PATCH - no 'v' prefix anywhere
+      # (git tags, GitHub releases, and GCS manifests all use the same string).
+      - '[0-9]+.[0-9]+.[0-9]+'
   pull_request:
   workflow_dispatch:
     inputs:
@@ -50,11 +52,44 @@ jobs:
     outputs:
       matrix: ${{ steps.set.outputs.matrix }}
       devices: ${{ steps.set.outputs.devices }}
+      version: ${{ steps.version.outputs.version }}
+      is-release: ${{ steps.version.outputs.is-release }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           ref: ${{ inputs.version }}
+
+      # Compute the build version exactly once so every matrix job and the
+      # publish job agree on a single version string for the whole run.
+      #   tag push        -> MAJOR.MINOR.PATCH (the tag itself, no 'v')
+      #   main / dispatch -> nightly-YYYYMMDDTHHMMSS
+      - id: version
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [[ "$REF_TYPE" == "tag" ]]; then
+            VERSION="${REF_NAME#v}"
+            if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "ERROR: release tag must be MAJOR.MINOR.PATCH (got: $REF_NAME)" >&2
+              exit 1
+            fi
+            # The published version must match what the image believes it is.
+            # promote.yml checks this before tagging; this guards manual tags.
+            DISTRO_VERSION=$(grep 'DISTRO_VERSION' conf/distro/wendyos.conf | head -1 | sed 's/.*"\(.*\)"/\1/')
+            if [[ "$VERSION" != "$DISTRO_VERSION" ]]; then
+              echo "ERROR: tag $REF_NAME does not match DISTRO_VERSION=$DISTRO_VERSION in conf/distro/wendyos.conf" >&2
+              exit 1
+            fi
+            echo "is-release=true" >> "$GITHUB_OUTPUT"
+          else
+            VERSION="nightly-$(date -u +%Y%m%dT%H%M%S)"
+            echo "is-release=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Build version: $VERSION"
 
       - id: set
         env:
@@ -512,9 +547,9 @@ jobs:
           MACHINE: ${{ steps.vars.outputs.machine }}
           DEVICE: ${{ matrix.device }}
           STORAGE: ${{ matrix.storage }}
-          IS_RELEASE: ${{ github.ref_type == 'tag' }}
+          IS_RELEASE: ${{ needs.detect-changes.outputs.is-release }}
+          UPLOAD_VERSION: ${{ needs.detect-changes.outputs.version }}
         run: |
-          VERSION=$(grep 'DISTRO_VERSION' "$GITHUB_WORKSPACE/wendyos/conf/distro/wendyos.conf" | head -1 | sed 's/.*"\(.*\)"/\1/')
           TOKEN=$(gcloud auth print-access-token)
 
           if [[ "$MACHINE" != raspberry* && "$STORAGE" == "nvme" ]]; then
@@ -540,12 +575,6 @@ jobs:
             else
               IMAGE_FILE="$DEPLOY_DIR/wendyos-image-${MACHINE}.rootfs.wic"
             fi
-          fi
-
-          if [[ "$IS_RELEASE" == "true" ]]; then
-            UPLOAD_VERSION="$VERSION"
-          else
-            UPLOAD_VERSION="${VERSION}-nightly"
           fi
 
           # Upload-only: files are pushed to GCS here, but ALL manifest writes
@@ -613,7 +642,7 @@ jobs:
   # ---------------------------------------------------------------------------
   publish:
     name: Publish manifests
-    needs: build
+    needs: [detect-changes, build]
     if: ${{ !cancelled() && github.event_name != 'pull_request' }}
     concurrency:
       group: update-master-manifest
@@ -708,41 +737,52 @@ jobs:
             go run . "${ARGS[@]}" </dev/null
           done
 
-      - name: Send Discord announcement
-        # Nightly builds only: release announcements are sent by promote.yml.
-        if: ${{ success() && github.ref_type != 'tag' }}
-        env:
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_NIGHTLY_WEBHOOK_URL }}
-          VERSION_FILE: ${{ github.workspace }}/wendyos/conf/distro/wendyos.conf
-        run: |
-          [[ -z "${DISCORD_WEBHOOK_URL}" ]] && exit 0
-          VERSION=$(grep 'DISTRO_VERSION' "$VERSION_FILE" | head -1 | sed 's/.*"\(.*\)"/\1/')
-          RELEASE_URL="https://github.com/${GITHUB_REPOSITORY}/releases/tag/nightly"
-          jq -n --arg msg "**WendyOS ${VERSION}-nightly** is out! Full changelog and downloads: ${RELEASE_URL}" '{content: $msg}' | \
-            curl -fsS -o /dev/null \
-              -H "Content-Type: application/json" \
-              -d @- \
-              "$DISCORD_WEBHOOK_URL"
-
       - name: Tag nightly pre-release on GitHub
         # Nightly builds only: release tags already exist (created by promote.yml).
         if: ${{ success() && github.ref_type != 'tag' }}
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.detect-changes.outputs.version }}
         run: |
-          VERSION=$(grep 'DISTRO_VERSION' "$GITHUB_WORKSPACE/wendyos/conf/distro/wendyos.conf" | head -1 | sed 's/.*"\(.*\)"/\1/')
-          TAG="nightly"
-
-          gh release delete "$TAG" --yes --repo "$GITHUB_REPOSITORY" 2>/dev/null || true
-
+          set -euo pipefail
           cd "$GITHUB_WORKSPACE/wendyos"
-          git tag -f "$TAG"
-          git tag -f "${VERSION}-nightly"
-          git push origin "$TAG" --force
-          git push origin "${VERSION}-nightly" --force
 
-          gh release create "$TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "Nightly ${VERSION}-nightly ($(date -u +%Y-%m-%d))" \
-            --generate-notes \
-            --prerelease
+          # -f/--force for idempotency: a re-run of this job re-tags the same
+          # commit with the same nightly-<timestamp> version.
+          git tag -f "$VERSION"
+          git push origin "$VERSION" --force
+
+          if gh release view "$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $VERSION already exists (job re-run), skipping create."
+          else
+            gh release create "$VERSION" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "WendyOS $VERSION" \
+              --generate-notes \
+              --prerelease
+          fi
+
+          # Keep the releases page tidy: retain the 7 most recent nightly
+          # pre-releases. Git tags are kept forever for traceability and
+          # promotion; nightly-YYYYMMDDTHHMMSS sorts chronologically.
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName,isPrerelease \
+            --jq '[.[] | select(.isPrerelease and (.tagName | startswith("nightly-"))) | .tagName] | sort | reverse | .[7:][]' |
+            while read -r old; do
+              echo "Pruning old nightly pre-release $old (tag kept)"
+              gh release delete "$old" --yes --repo "$GITHUB_REPOSITORY"
+            done
+
+      - name: Send Discord announcement
+        # Nightly builds only: release announcements are sent by promote.yml.
+        if: ${{ success() && github.ref_type != 'tag' }}
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_NIGHTLY_WEBHOOK_URL }}
+          VERSION: ${{ needs.detect-changes.outputs.version }}
+        run: |
+          [[ -z "${DISCORD_WEBHOOK_URL}" ]] && exit 0
+          RELEASE_URL="https://github.com/${GITHUB_REPOSITORY}/releases/tag/${VERSION}"
+          jq -n --arg msg "**WendyOS ${VERSION}** is out! Full changelog and downloads: ${RELEASE_URL}" '{content: $msg}' | \
+            curl -fsS -o /dev/null \
+              -H "Content-Type: application/json" \
+              -d @- \
+              "$DISCORD_WEBHOOK_URL"
