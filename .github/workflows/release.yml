@@ -19,10 +19,15 @@ jobs:
       id-token: write
     runs-on:
       - runs-on
-      - family=c7i-flex.8xlarge
+      - family=c8id.8xlarge
       - spot=false
-      - volume=400gb:gp3
+      - image=wendyos-builder
       - run-id=${{ github.run_id }}-${{ matrix.device }}-${{ matrix.storage }}
+    env:
+      CACHE_BUCKET: ${{ vars.WENDYOS_BUILD_CACHE_BUCKET }}
+      CACHE_REGION: ${{ vars.WENDYOS_BUILD_CACHE_REGION }}
+      WENDYOS_HOST_BUILD: "1"
+      WENDYOS_REPO_CACHE_DIR: /opt/wendyos-cache/repos
     strategy:
       fail-fast: false
       matrix:
@@ -47,20 +52,79 @@ jobs:
             storage: nvme
 
     steps:
-      # Disabled: build caching is flaky for mender builds
-      # - name: Restore build cache
-      #   uses: runs-on/snapshot@v1
-      #   with:
-      #     path: ${{ github.workspace }}
-      #     volume_size: 500
-
       - name: Fix workspace permissions
-        run: sudo chown "$(id -u):$(id -g)" "${{ github.workspace }}"
+        run: sudo chown "$(id -u):$(id -g)" "$GITHUB_WORKSPACE"
 
       - name: Checkout
         uses: actions/checkout@v4
         with:
           path: wendyos
+
+      # ---------- Build cache: two-layer ----------
+      # L1 (per-runner snapshot): runs-on/snapshot mounts an EBS volume at
+      #     sstate-cache/ and downloads/ and snapshots it on workflow end.
+      # L2 (S3 mirror): shared across every matrix entry / runner family,
+      #     and acts as the fallback when the snapshot misses (cold runner).
+
+      - name: Pre-create snapshot mount points
+        run: |
+          mkdir -p \
+            "$GITHUB_WORKSPACE/sstate-cache" \
+            "$GITHUB_WORKSPACE/downloads"
+
+      - name: Restore sstate-cache snapshot (L1)
+        uses: runs-on/snapshot@v1
+        with:
+          path: ${{ github.workspace }}/sstate-cache
+          volume_size: 150
+
+      - name: Make L1 EBS mount writable
+        run: sudo chmod -R a+rwX "$GITHUB_WORKSPACE/sstate-cache"
+
+      - name: Configure AWS credentials for build cache
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_BUILD_CACHE_ROLE_ARN }}
+          aws-region: ${{ vars.WENDYOS_BUILD_CACHE_REGION }}
+
+      - name: Restore sstate-cache and downloads from S3 (L2)
+        run: |
+          set -euo pipefail
+          if command -v s5cmd >/dev/null 2>&1; then
+            s3_sync() { s5cmd sync --size-only "$1" "$2"; }
+            src_sstate_glob="s3://${CACHE_BUCKET}/sstate-cache/*"
+            src_downloads_glob="s3://${CACHE_BUCKET}/downloads/*"
+          else
+            echo "::warning::s5cmd not found; falling back to aws s3 sync"
+            s3_sync() { aws s3 sync --no-progress --size-only "$1" "$2"; }
+            src_sstate_glob="s3://${CACHE_BUCKET}/sstate-cache/"
+            src_downloads_glob="s3://${CACHE_BUCKET}/downloads/"
+          fi
+          run_sync() {
+            local label="$1" src="$2" dst="$3" local_dir="$4"
+            echo "::group::$label"
+            [[ -d "$local_dir" ]] && echo "before: $(du -sh "$local_dir" | cut -f1)"
+            local start; start=$(date +%s)
+            s3_sync "$src" "$dst"
+            echo "elapsed: $(( $(date +%s) - start ))s"
+            [[ -d "$local_dir" ]] && echo "after:  $(du -sh "$local_dir" | cut -f1)"
+            echo "::endgroup::"
+          }
+          warm_threshold=500
+          sstate_files=0
+          if [[ -d "$GITHUB_WORKSPACE/sstate-cache" ]]; then
+            while IFS= read -r _; do
+              sstate_files=$((sstate_files + 1))
+              [[ "$sstate_files" -ge "$warm_threshold" ]] && break
+            done < <(find "$GITHUB_WORKSPACE/sstate-cache" -mindepth 2 -maxdepth 5 -type f -print 2>/dev/null)
+          fi
+          if [[ "$sstate_files" -lt "$warm_threshold" ]]; then
+            echo "Cold sstate-cache (${sstate_files} files); restoring from S3"
+            run_sync "restore sstate-cache" "${src_sstate_glob}" "$GITHUB_WORKSPACE/sstate-cache/" "$GITHUB_WORKSPACE/sstate-cache"
+          else
+            echo "Warm sstate-cache (>=${warm_threshold} files via L1); skipping S3 restore"
+          fi
+          run_sync "restore downloads" "${src_downloads_glob}" "$GITHUB_WORKSPACE/downloads/" "$GITHUB_WORKSPACE/downloads"
 
       - name: Derive build variables
         id: vars
@@ -87,16 +151,48 @@ jobs:
         working-directory: ${{ github.workspace }}
         env:
           BOARD: ${{ steps.vars.outputs.board }}
-        run: BOARD=$BOARD ./wendyos/bootstrap.sh
-
-      - name: Fix workspace permissions for Docker
-        run: chmod -R a+rwX ${{ github.workspace }} 2>/dev/null || true
+        # WENDYOS_HOST_BUILD and WENDYOS_REPO_CACHE_DIR are inherited from the
+        # job-level env block. Host-build mode skips Docker image creation;
+        # the repo cache seeds repos/ from the AMI's bake-time clones.
+        run: ./wendyos/bootstrap.sh
 
       - name: Build image
         working-directory: ${{ github.workspace }}/wendyos
         env:
           MACHINE: ${{ steps.vars.outputs.machine }}
-        run: make build MACHINE=$MACHINE
+        run: make build MACHINE="$MACHINE"
+
+      - name: Save sstate-cache and downloads to S3 (L2)
+        if: always()
+        env:
+          GH_EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          if command -v s5cmd >/dev/null 2>&1; then
+            s3_save() { s5cmd sync --size-only "$1" "$2"; }
+            sstate_src="$GITHUB_WORKSPACE/sstate-cache/*"
+            downloads_src="$GITHUB_WORKSPACE/downloads/*"
+          else
+            echo "::warning::s5cmd not found; falling back to aws s3 sync"
+            s3_save() { aws s3 sync --no-progress --size-only "$1" "$2"; }
+            sstate_src="$GITHUB_WORKSPACE/sstate-cache/"
+            downloads_src="$GITHUB_WORKSPACE/downloads/"
+          fi
+          run_save() {
+            local label="$1" src="$2" dst="$3" local_dir="$4"
+            echo "::group::$label"
+            [[ -d "$local_dir" ]] && echo "local: $(du -sh "$local_dir" | cut -f1)"
+            local start; start=$(date +%s)
+            s3_save "$src" "$dst"
+            echo "elapsed: $(( $(date +%s) - start ))s"
+            echo "::endgroup::"
+          }
+          if [[ -d "$GITHUB_WORKSPACE/sstate-cache" ]]; then
+            run_save "save sstate-cache" "${sstate_src}" "s3://${CACHE_BUCKET}/sstate-cache/" "$GITHUB_WORKSPACE/sstate-cache"
+          fi
+          if [[ "$GH_EVENT_NAME" != "pull_request" && -d "$GITHUB_WORKSPACE/downloads" ]]; then
+            run_save "save downloads" "${downloads_src}" "s3://${CACHE_BUCKET}/downloads/" "$GITHUB_WORKSPACE/downloads"
+          fi
 
       - name: Fix deploy directory permissions
         run: sudo chown -R "$(id -u):$(id -g)" "${{ github.workspace }}/build/tmp/deploy" 2>/dev/null || true
