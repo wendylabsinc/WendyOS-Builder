@@ -19,8 +19,24 @@ RDEPENDS:${PN} = " \
 # Include the package only on RPi5 to keep it out of RPi4/RPi3 builds.
 RDEPENDS:${PN}:append:raspberrypi5 = " rpi-eeprom-config"
 
+# Camera stack. Mirrors stock Raspberry Pi OS so an official CSI camera
+# (IMX219/IMX477/IMX708), auto-detected via camera_auto_detect=1 in the Pi 5
+# config.txt (raspberrypi5-wendyos.conf), enumerates and streams out of the box:
+#   - libcamera     : core library plus the `cam` tool (the agent runs
+#                     `cam --list` to discover CSI cameras; the binary ships in
+#                     the main libcamera package).
+#   - libcamera-gst : the `libcamerasrc` GStreamer element the agent's video
+#                     pipeline streams through on CSI cameras.
+# Both the gstreamer element and the PiSP pipeline they rely on are enabled by
+# the meta-rpi-extensions libcamera bbappend; the gstreamer runtime itself is
+# already in the shared image (recipes-core/images/wendyos-image.bb).
+RDEPENDS:${PN} += " \
+    libcamera \
+    libcamera-gst \
+    "
+
 RDEPENDS:${PN}:append = " \
-    ${@oe.utils.ifelse(d.getVar('WENDYOS_DEBUG') == '1', ' iw mmc-utils', '')} \
+    ${@oe.utils.ifelse(d.getVar('WENDYOS_DEBUG') == '1', ' iw mmc-utils v4l-utils', '')} \
     "
 
 COMPATIBLE_MACHINE = "rpi"
