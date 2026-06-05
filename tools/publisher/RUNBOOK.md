@@ -87,7 +87,13 @@ This preserves the version's metadata (release date, changelog) but replaces the
 
 ### 3. Promote a Nightly to Stable
 
-After testing a nightly build on devices and confirming it's good:
+> **CI nightlies (`nightly-YYYYMMDDTHHMMSS`) are NOT promoted with this tool.**
+> They don't embed a semantic version, so there is nothing to strip the
+> `nightly` marker from (the tool refuses with an error). Promote them by
+> running the **"Promote Nightly to Release"** GitHub workflow, which tags the
+> commit `MAJOR.MINOR.PATCH` and rebuilds/publishes the real version.
+
+For legacy `X.Y.Z-nightly` versions, after testing on devices:
 
 ```bash
 go run . \
@@ -206,8 +212,9 @@ The typical flow for Jetson releases:
 
 ### Version Naming Convention
 
-- **Nightly:** `X.Y.Z-nightly` (e.g., `0.10.4-nightly`)
-- **Stable:** `X.Y.Z` (e.g., `0.10.5`)
+- **Nightly (CI):** `nightly-YYYYMMDDTHHMMSS` (e.g., `nightly-20260604T163205`, UTC; sorts chronologically)
+- **Stable:** `X.Y.Z` (e.g., `0.10.5`) — never a `v` prefix
+- **Nightly (legacy):** `X.Y.Z-nightly` (e.g., `0.10.4-nightly`)
 - **Date-based nightly (legacy):** `nightly-YYYY-MM-DD`
 
 ---
