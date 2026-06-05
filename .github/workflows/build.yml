@@ -4,7 +4,9 @@ on:
   push:
     branches: [main]
     tags:
-      - 'v*'
+      # Release tags are plain MAJOR.MINOR.PATCH - no 'v' prefix anywhere
+      # (git tags, GitHub releases, and GCS manifests all use the same string).
+      - '[0-9]+.[0-9]+.[0-9]+'
   pull_request:
   workflow_dispatch:
     inputs:
@@ -27,6 +29,15 @@ on:
         required: false
         default: ""
 
+# Never let two runs for the same ref overlap: the failing nightly on
+# 2026-06-04 had two main-push runs uploading and publishing the same
+# version concurrently (4 writers per device manifest). PR runs cancel
+# superseded builds; main/tag runs queue instead so a publish in progress
+# is never killed halfway.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   # ---------------------------------------------------------------------------
   # detect-changes: compute the build matrix.
@@ -41,11 +52,44 @@ jobs:
     outputs:
       matrix: ${{ steps.set.outputs.matrix }}
       devices: ${{ steps.set.outputs.devices }}
+      version: ${{ steps.version.outputs.version }}
+      is-release: ${{ steps.version.outputs.is-release }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           ref: ${{ inputs.version }}
+
+      # Compute the build version exactly once so every matrix job and the
+      # publish job agree on a single version string for the whole run.
+      #   tag push        -> MAJOR.MINOR.PATCH (the tag itself, no 'v')
+      #   main / dispatch -> nightly-YYYYMMDDTHHMMSS
+      - id: version
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [[ "$REF_TYPE" == "tag" ]]; then
+            VERSION="${REF_NAME#v}"
+            if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "ERROR: release tag must be MAJOR.MINOR.PATCH (got: $REF_NAME)" >&2
+              exit 1
+            fi
+            # The published version must match what the image believes it is.
+            # promote.yml checks this before tagging; this guards manual tags.
+            DISTRO_VERSION=$(grep 'DISTRO_VERSION' conf/distro/wendyos.conf | head -1 | sed 's/.*"\(.*\)"/\1/')
+            if [[ "$VERSION" != "$DISTRO_VERSION" ]]; then
+              echo "ERROR: tag $REF_NAME does not match DISTRO_VERSION=$DISTRO_VERSION in conf/distro/wendyos.conf" >&2
+              exit 1
+            fi
+            echo "is-release=true" >> "$GITHUB_OUTPUT"
+          else
+            VERSION="nightly-$(date -u +%Y%m%dT%H%M%S)"
+            echo "is-release=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Build version: $VERSION"
 
       - id: set
         env:
@@ -496,16 +540,16 @@ jobs:
             sd)   sudo ./dosdcard.sh "$GITHUB_WORKSPACE/wendyos-sd.img" ;;
           esac
 
-      - name: Upload image and update device manifest
+      - name: Upload image and emit manifest entry
         if: github.event_name != 'pull_request'
         env:
           DEPLOY_DIR: ${{ github.workspace }}/build/tmp/deploy/images/${{ steps.vars.outputs.machine }}
           MACHINE: ${{ steps.vars.outputs.machine }}
           DEVICE: ${{ matrix.device }}
           STORAGE: ${{ matrix.storage }}
-          IS_RELEASE: ${{ github.ref_type == 'tag' }}
+          IS_RELEASE: ${{ needs.detect-changes.outputs.is-release }}
+          UPLOAD_VERSION: ${{ needs.detect-changes.outputs.version }}
         run: |
-          VERSION=$(grep 'DISTRO_VERSION' "$GITHUB_WORKSPACE/wendyos/conf/distro/wendyos.conf" | head -1 | sed 's/.*"\(.*\)"/\1/')
           TOKEN=$(gcloud auth print-access-token)
 
           if [[ "$MACHINE" != raspberry* && "$STORAGE" == "nvme" ]]; then
@@ -533,21 +577,22 @@ jobs:
             fi
           fi
 
-          if [[ "$IS_RELEASE" == "true" ]]; then
-            UPLOAD_VERSION="$VERSION"
-          else
-            UPLOAD_VERSION="${VERSION}-nightly"
-          fi
-
+          # Upload-only: files are pushed to GCS here, but ALL manifest writes
+          # are deferred to the single serialised publish job. Parallel matrix
+          # entries must never read-modify-write shared manifests (412 races,
+          # lost updates). The entry JSON below is the handoff.
+          ENTRY_FILE="$GITHUB_WORKSPACE/manifest-entry-${DEVICE}-${STORAGE}.json"
           ARGS=(
             --device "$DEVICE"
             --version "$UPLOAD_VERSION"
             --file "$IMAGE_FILE"
             --access-token "$TOKEN"
+            --upload-only
+            --metadata-out "$ENTRY_FILE"
           )
 
           if [[ "$IS_RELEASE" != "true" ]]; then
-            ARGS+=(--nightly --skip-master-manifest)
+            ARGS+=(--nightly)
           fi
 
           # For all Jetson targets, include the tegraflash bundle as the recovery file
@@ -574,28 +619,34 @@ jobs:
           fi
 
           cd "$GITHUB_WORKSPACE/wendyos/tools/publisher"
-          # Outer retry handles 412 races when multiple storage variants for the
-          # same device write to the same device manifest concurrently.
-          # 10 attempts with jitter breaks lockstep between competing builds.
-          for attempt in 1 2 3 4 5 6 7 8 9 10; do
-            if go run . "${ARGS[@]}"; then
-              break
-            fi
-            if [ "$attempt" -lt 10 ]; then
-              JITTER=$((RANDOM % 30))
-              SLEEP_TIME=$((attempt * 20 + JITTER))
-              echo "Outer attempt $attempt failed, sleeping ${SLEEP_TIME}s before retry..."
-              sleep "$SLEEP_TIME"
-            else
-              echo "All outer attempts exhausted"
-              exit 1
-            fi
-          done
+          # No retry loop: uploads go to unique per-version paths (no shared
+          # state to race on) and the publisher's storage client already
+          # retries transient errors internally.
+          go run . "${ARGS[@]}"
 
+      - name: Upload manifest entry artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: manifest-entry-${{ matrix.device }}-${{ matrix.storage }}
+          path: manifest-entry-${{ matrix.device }}-${{ matrix.storage }}.json
+          if-no-files-found: error
+          retention-days: 7
+          # v4 artifacts are immutable per name; without this, re-running a
+          # failed build job 409s on the artifact left by the earlier attempt.
+          overwrite: true
+
+  # ---------------------------------------------------------------------------
+  # publish: the ONLY writer of GCS manifests. Build jobs upload files and
+  # hand over manifest-entry artifacts; this job applies them one at a time,
+  # so device and master manifests never see concurrent read-modify-writes
+  # from CI. Runs for nightly (main/dispatch) and release (tag) builds.
+  # !cancelled(): publish whatever subset of devices built successfully.
+  # ---------------------------------------------------------------------------
   publish:
-    name: Update master manifest
-    needs: build
-    if: ${{ !cancelled() && github.event_name != 'pull_request' && github.ref_type != 'tag' }}
+    name: Publish manifests
+    needs: [detect-changes, build]
+    if: ${{ !cancelled() && github.event_name != 'pull_request' }}
     concurrency:
       group: update-master-manifest
       cancel-in-progress: false
@@ -629,68 +680,123 @@ jobs:
           go-version-file: wendyos/tools/publisher/go.mod
           cache-dependency-path: wendyos/tools/publisher/go.sum
 
-      - name: Update master manifest
-        run: |
-          VERSION=$(grep 'DISTRO_VERSION' "$GITHUB_WORKSPACE/wendyos/conf/distro/wendyos.conf" | head -1 | sed 's/.*"\(.*\)"/\1/')
-          TOKEN=$(gcloud auth print-access-token)
+      - name: Download manifest entries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: manifest-entry-*
+          path: manifest-entries
+          merge-multiple: true
 
+      - name: Write device manifests
+        id: apply
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          entries=("$GITHUB_WORKSPACE"/manifest-entries/*.json)
+          if [[ ${#entries[@]} -eq 0 ]]; then
+            echo "::warning::No manifest entries found (did every build fail?); nothing to publish."
+            echo "published=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "published=true" >> "$GITHUB_OUTPUT"
+          TOKEN=$(gcloud auth print-access-token)
           cd "$GITHUB_WORKSPACE/wendyos/tools/publisher"
-          for DEVICE in raspberry-pi-3 raspberry-pi-4 raspberry-pi-5 jetson-agx-orin jetson-orin-nano jetson-agx-thor; do
-            # Outer shell retry handles transient 412 bursts from concurrent writers
-            # (e.g. Cloud Function draining a Pub/Sub backlog). The publisher already
-            # retries internally 10x with exponential backoff; this adds 5 extra rounds.
-            for attempt in 1 2 3 4 5; do
-              if go run . \
-                --device "$DEVICE" \
-                --version "${VERSION}-nightly" \
-                --nightly \
-                --master-manifest-only \
-                --access-token "$TOKEN"; then
-                break
-              fi
-              if [ "$attempt" -lt 5 ]; then
-                echo "Outer attempt $attempt failed for $DEVICE, sleeping before retry..."
-                sleep $((attempt * 30))
-              else
-                echo "All outer attempts exhausted for $DEVICE"
-                exit 1
-              fi
-            done
+          # Build once; up to 15 invocations follow across this step and the
+          # master manifest step ($RUNNER_TEMP persists between steps).
+          go build -o "$RUNNER_TEMP/publisher" .
+          # Applied strictly one at a time: this job is the only manifest
+          # writer, so there is nothing to race against and no retry loop.
+          for entry in "${entries[@]}"; do
+            echo "::group::apply $(basename "$entry")"
+            cat "$entry"
+            "$RUNNER_TEMP/publisher" --apply-metadata "$entry" --access-token "$TOKEN"
+            echo "::endgroup::"
           done
 
+      - name: Update master manifest
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          entries=("$GITHUB_WORKSPACE"/manifest-entries/*.json)
+          if [[ ${#entries[@]} -eq 0 ]]; then
+            echo "No manifest entries; skipping master manifest update."
+            exit 0
+          fi
+          TOKEN=$(gcloud auth print-access-token)
+          cd "$GITHUB_WORKSPACE/wendyos/tools/publisher"
+          # Reuse the binary from the previous step; rebuild only if missing
+          # (e.g. this step re-run in isolation).
+          [[ -x "$RUNNER_TEMP/publisher" ]] || go build -o "$RUNNER_TEMP/publisher" .
+          # One master-manifest write per device that actually published
+          # (storage variants of a device share one device manifest, hence
+          # unique_by). Devices whose builds failed keep their previous
+          # latest pointers instead of being bumped to a version they
+          # never produced.
+          readarray -t rows < <(jq -sc '[.[] | {device, version, nightly}] | unique_by(.device) | .[]' "${entries[@]}")
+          for row in "${rows[@]}"; do
+            DEVICE=$(jq -r .device <<<"$row")
+            VERSION=$(jq -r .version <<<"$row")
+            NIGHTLY=$(jq -r .nightly <<<"$row")
+            ARGS=(
+              --device "$DEVICE"
+              --version "$VERSION"
+              --master-manifest-only
+              --access-token "$TOKEN"
+            )
+            if [[ "$NIGHTLY" == "true" ]]; then
+              ARGS+=(--nightly)
+            fi
+            "$RUNNER_TEMP/publisher" "${ARGS[@]}" </dev/null
+          done
+
+      - name: Tag nightly pre-release on GitHub
+        # Nightly builds only: release tags already exist (created by promote.yml).
+        # Skipped when zero entries were published (every build failed) - never
+        # tag and announce a nightly that has no images behind it.
+        if: ${{ success() && github.ref_type != 'tag' && steps.apply.outputs.published == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.detect-changes.outputs.version }}
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE/wendyos"
+
+          # -f/--force for idempotency: a re-run of this job re-tags the same
+          # commit with the same nightly-<timestamp> version.
+          git tag -f "$VERSION"
+          git push origin "$VERSION" --force
+
+          if gh release view "$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $VERSION already exists (job re-run), skipping create."
+          else
+            gh release create "$VERSION" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "WendyOS $VERSION" \
+              --generate-notes \
+              --prerelease
+          fi
+
+          # Keep the releases page tidy: retain the 7 most recent nightly
+          # pre-releases. Git tags are kept forever for traceability and
+          # promotion; nightly-YYYYMMDDTHHMMSS sorts chronologically.
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName,isPrerelease \
+            --jq '[.[] | select(.isPrerelease and (.tagName | startswith("nightly-"))) | .tagName] | sort | reverse | .[7:][]' |
+            while read -r old; do
+              echo "Pruning old nightly pre-release $old (tag kept)"
+              gh release delete "$old" --yes --repo "$GITHUB_REPOSITORY"
+            done
+
       - name: Send Discord announcement
-        if: ${{ success() }}
+        # Nightly builds only: release announcements are sent by promote.yml.
+        if: ${{ success() && github.ref_type != 'tag' && steps.apply.outputs.published == 'true' }}
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_NIGHTLY_WEBHOOK_URL }}
-          VERSION_FILE: ${{ github.workspace }}/wendyos/conf/distro/wendyos.conf
+          VERSION: ${{ needs.detect-changes.outputs.version }}
         run: |
           [[ -z "${DISCORD_WEBHOOK_URL}" ]] && exit 0
-          VERSION=$(grep 'DISTRO_VERSION' "$VERSION_FILE" | head -1 | sed 's/.*"\(.*\)"/\1/')
-          RELEASE_URL="https://github.com/${GITHUB_REPOSITORY}/releases/tag/nightly"
-          jq -n --arg msg "**WendyOS ${VERSION}-nightly** is out! Full changelog and downloads: ${RELEASE_URL}" '{content: $msg}' | \
+          RELEASE_URL="https://github.com/${GITHUB_REPOSITORY}/releases/tag/${VERSION}"
+          jq -n --arg msg "**WendyOS ${VERSION}** is out! Full changelog and downloads: ${RELEASE_URL}" '{content: $msg}' | \
             curl -fsS -o /dev/null \
               -H "Content-Type: application/json" \
               -d @- \
               "$DISCORD_WEBHOOK_URL"
-
-      - name: Tag nightly pre-release on GitHub
-        if: ${{ success() }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          VERSION=$(grep 'DISTRO_VERSION' "$GITHUB_WORKSPACE/wendyos/conf/distro/wendyos.conf" | head -1 | sed 's/.*"\(.*\)"/\1/')
-          TAG="nightly"
-
-          gh release delete "$TAG" --yes --repo "$GITHUB_REPOSITORY" 2>/dev/null || true
-
-          cd "$GITHUB_WORKSPACE/wendyos"
-          git tag -f "$TAG"
-          git tag -f "${VERSION}-nightly"
-          git push origin "$TAG" --force
-          git push origin "${VERSION}-nightly" --force
-
-          gh release create "$TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "Nightly ${VERSION}-nightly ($(date -u +%Y-%m-%d))" \
-            --generate-notes \
-            --prerelease
