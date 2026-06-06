@@ -29,6 +29,9 @@ IMAGE_INSTALL:append = " \
     ${@'mender-esp' if d.getVar('WENDYOS_MENDER') == '1' else ''} \
     packagegroup-wendyos-tegra \
     gstreamer1.0-plugins-nvvideo4linux2 \
+    gstreamer1.0-plugins-nvarguscamerasrc \
+    gstreamer1.0-plugins-nvvidconv \
+    v4l-utils \
     "
 
 # Enable DeepStream SDK support (optional - adds ~1GB to image)
