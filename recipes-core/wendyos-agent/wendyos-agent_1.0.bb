@@ -30,7 +30,19 @@ SYSTEMD_SERVICE:${PN} = "wendyos-agent.service wendyos-agent-updater.service wen
 SYSTEMD_AUTO_ENABLE:${PN} = "enable"
 
 do_compile() {
-    bbnote "Downloading wendy-agent binary for aarch64..."
+    case "${TARGET_ARCH}" in
+        x86_64|x86-64)
+            AGENT_RELEASE_ARCH="amd64"
+            ;;
+        aarch64|arm64)
+            AGENT_RELEASE_ARCH="arm64"
+            ;;
+        *)
+            bbfatal "Unsupported TARGET_ARCH for wendy-agent: ${TARGET_ARCH}"
+            ;;
+    esac
+
+    bbnote "Downloading wendy-agent binary for ${TARGET_ARCH} (${AGENT_RELEASE_ARCH})..."
 
     # Get the latest stable release from GitHub (excludes pre-releases)
     RELEASES_URL="https://api.github.com/repos/wendylabsinc/wendy-agent/releases/latest"
@@ -40,14 +52,14 @@ do_compile() {
         curl -sL -o ${B}/release.json "${RELEASES_URL}" || \
         bbfatal "Failed to fetch latest release from GitHub"
 
-    # Extract download URL for aarch64 binary (match .tar.gz files only)
-    # Asset naming: wendy-agent-linux-arm64-*.tar.gz (formerly wendy-agent-linux-static-musl-aarch64)
+    # Extract download URL for the target binary (match .tar.gz files only).
+    # Asset naming: wendy-agent-linux-amd64-*.tar.gz or wendy-agent-linux-arm64-*.tar.gz
     DOWNLOAD_URL=$(cat ${B}/release.json | \
-        grep -o '"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]*wendy-agent-linux-arm64[^"]*\.tar\.gz[^"]*"' | \
+        grep -o '"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]*wendy-agent-linux-'"${AGENT_RELEASE_ARCH}"'[^"]*\.tar\.gz[^"]*"' | \
         head -1 | cut -d'"' -f4)
 
     if [ -z "${DOWNLOAD_URL}" ]; then
-        bbfatal "Failed to find wendy-agent-linux-static-musl-aarch64 binary in release"
+        bbfatal "Failed to find wendy-agent-linux-${AGENT_RELEASE_ARCH} binary in release"
     fi
 
     bbnote "Downloading from: ${DOWNLOAD_URL}"

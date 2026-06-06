@@ -1,6 +1,6 @@
 SUMMARY = "WendyOS Default User Configuration"
-DESCRIPTION = "Creates the default 'wendy' user with appropriate permissions for WendyOS. \
-The base package creates the user and sudoers config. The -data-setup package \
+DESCRIPTION = "Creates the default 'wendy' user for WendyOS. \
+The base package creates the user. The -data-setup package \
 provides the first-boot service that initializes the home directory on the \
 persistent /data partition (Tegra only)."
 LICENSE = "MIT"
@@ -34,18 +34,10 @@ do_install() {
     # Install systemd service (packaged in -data-setup)
     install -d ${D}${systemd_system_unitdir}
     install -m 0644 ${UNPACKDIR}/wendyos-user-setup.service ${D}${systemd_system_unitdir}/wendyos-user-setup.service
+
 }
 
-pkg_postinst_ontarget:${PN}() {
-    # Add sudoers entry for wendy user on target only
-    if [ -d /etc/sudoers.d ]; then
-        echo "wendy ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/wendy
-        chmod 0440 /etc/sudoers.d/wendy
-    fi
-}
-
-# Base package: user creation + sudoers (no files, useradd class handles /etc/passwd)
-FILES:${PN} = ""
+# Base package: user creation only (useradd class handles /etc/passwd)
 ALLOW_EMPTY:${PN} = "1"
 RDEPENDS:${PN} = "sudo bash systemd"
 
