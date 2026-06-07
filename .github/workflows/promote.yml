@@ -100,6 +100,17 @@ jobs:
             echo "created=true" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Trigger release build
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          # GITHUB_TOKEN tag pushes don't trigger other workflows (GitHub limitation),
+          # so we explicitly dispatch build.yml on the release tag here.
+          gh workflow run build.yml \
+            --ref "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY"
+
       - name: Send Discord announcement
         if: steps.create_release.outputs.created == 'true'
         env:
