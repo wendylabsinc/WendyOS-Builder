@@ -4,6 +4,13 @@
 # wendyos.conf:73 defaults it to "1", so Thor must override it to "0").
 WENDYOS_UPDATE_BOOTLOADER = "0"
 
+# Keep the persistent /data partition in the A/B flash layout despite
+# Mender being off: wendy-update needs it for OTA state
+# (docs/plans/wendy-ota-update.md, Phase 1). Allocated empty at flash time
+# (no <filename> in the XML), formatted and expanded on first boot.
+# See tegra_partition_config.bbclass.
+WENDYOS_DATA_PART = "1"
+
 # Persistent journal logs — leave at the smart default (which tracks
 # WENDYOS_MENDER from wendyos.conf). On Thor, WENDYOS_MENDER=0
 # -> no /data partition -> logs are volatile (tmpfs). When Mender on Thor
