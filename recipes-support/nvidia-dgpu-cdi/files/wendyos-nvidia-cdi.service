@@ -1,6 +1,6 @@
 [Unit]
 Description=WendyOS NVIDIA dGPU CDI generation
-After=multi-user.target
+After=local-fs.target
 ConditionPathExistsGlob=/dev/nvidia*
 
 [Service]
