@@ -18,6 +18,7 @@ jobs:
     name: Promote ${{ inputs.source_nightly || 'latest nightly' }} to ${{ inputs.release_tag }}
     permissions:
       contents: write
+      actions: write
     runs-on:
       - runs-on
       - family=c7i-flex.8xlarge
