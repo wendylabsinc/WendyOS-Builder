@@ -66,6 +66,21 @@ python do_modify_partition_layout() {
     config_part_num = int(d.getVar('WENDYOS_CONFIG_PART_NUMBER') or '16')
     data_part_num = int(d.getVar('WENDYOS_DATA_PART_NUMBER') or d.getVar('MENDER_DATA_PART_NUMBER') or '17')
 
+    # Partition start alignment, in bytes. Default 4 MiB — matches the RPi
+    # wic layout (rpi-*.wks use --align 4096 KiB) for a single cross-board
+    # alignment story, and is a clean multiple of every plausible logical/
+    # physical sector, NVMe page, eMMC/SD erase group, SD allocation unit,
+    # minimum_io_size and optimal_io_size — so config/data land on a real I/O
+    # boundary on any medium, with margin for large erase blocks. The NVIDIA
+    # BSP boot region starts the rootfs partitions on a 32 KiB-skewed offset;
+    # the old 16 KiB align_boundary was too small to snap past it, so the data
+    # partition started 32768 B off a 512 KiB boundary (mke2fs "alignment is
+    # offset by 32768 bytes"). 4 MiB corrects it. Over-aligning only costs
+    # <4 MiB of padding per partition (noise on a multi-GB medium) and is
+    # always safe; under-aligning is the only hazard. Overridable per machine
+    # via WENDYOS_PART_ALIGN.
+    part_align = int(d.getVar('WENDYOS_PART_ALIGN') or '4194304')
+
     # helper: build a <partition> element with standard sub-elements
     #
     # Creates XML like:
@@ -80,23 +95,28 @@ python do_modify_partition_layout() {
     # convention.  nvflashxmlparse strips whitespace when reading, so this
     # is cosmetic but keeps the output consistent with upstream XMLs.
     def make_partition_element(name, part_id, size, alloc_attr, type_guid,
-                               filename=None, description=None, align=16384):
+                               filename=None, description=None, align=part_align):
         part = ET.Element('partition', name=name, id=str(part_id), type='data')
         sub = lambda tag, text: _add_sub(part, tag, text)
         sub('allocation_policy', 'sequential')
         sub('filesystem_type', 'basic')
         sub('size', str(size))
         sub('file_system_attribute', '0')
+
         # allocation_attribute: 0x8 = fixed size (no fill-to-end).
         # Bit 0x800 would mean "fill to end of disk" which we don't want —
         # runtime expansion via parted/mender-grow-data handles that instead.
         sub('allocation_attribute', alloc_attr)
+
         # partition_type_guid: GPT partition type.
         # EBD0A0A2-... = Microsoft Basic Data (FAT32, recognized by all OSes)
         # 0FC63DAF-... = Linux filesystem (ext4/data partitions)
         sub('partition_type_guid', type_guid)
         sub('percent_reserved', '0')
-        # align_boundary: 16384 bytes (16 KB), matches NVIDIA convention.
+
+        # align_boundary: partition start alignment in bytes (default 4 MiB,
+        # see part_align above). NVIDIA's own XMLs use 16 KiB, but that is too
+        # small to correct the BSP boot region's 32 KiB start skew.
         sub('align_boundary', str(align))
         if filename is not None:
             sub('filename', filename)
@@ -400,6 +420,7 @@ do_modify_partition_layout[vardeps] += " \
     WENDYOS_DATA_PART_NUMBER \
     WENDYOS_CONFIG_PART_SIZE_MB \
     WENDYOS_CONFIG_PART_NUMBER \
+    WENDYOS_PART_ALIGN \
     MENDER_DATA_PART_NUMBER \
     PARTITION_LAYOUT_EXTERNAL \
     PARTITION_LAYOUT_TEMPLATE \
