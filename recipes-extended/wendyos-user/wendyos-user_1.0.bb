@@ -18,10 +18,11 @@ PACKAGES = "${PN}-data-setup ${PN}"
 
 # Create wendy user - simplified group list (non-existent groups cause failures)
 USERADD_PACKAGES = "${PN}"
+GROUPADD_PARAM:${PN} = "-r render"
 # Password 'wendy' hash generated with: openssl passwd -6 -salt 5ixFr0sKRtsKKKhY wendy
 # useradd -m creates /home/wendy on the rootfs; on Tegra, the first-boot service
 # in wendyos-user-data-setup re-initializes it from persistent storage (/data/home)
-USERADD_PARAM:${PN} = "-m -d /home/wendy -s /bin/bash -G dialout,video,audio,users -p '\$6\$5ixFr0sKRtsKKKhY\$5SyCVB9y95JEITWZ8AMcMCrMF4Rvq97ymUjEoUCBKfTl7vWHjTLEboowxWF6hIJgBUMOnJQfeIRPPwYCUaIwm.' wendy"
+USERADD_PARAM:${PN} = "-m -d /home/wendy -s /bin/bash -G dialout,video,audio,users,render -p '\$6\$5ixFr0sKRtsKKKhY\$5SyCVB9y95JEITWZ8AMcMCrMF4Rvq97ymUjEoUCBKfTl7vWHjTLEboowxWF6hIJgBUMOnJQfeIRPPwYCUaIwm.' wendy"
 
 SYSTEMD_SERVICE:${PN}-data-setup = "wendyos-user-setup.service"
 SYSTEMD_AUTO_ENABLE:${PN}-data-setup = "enable"

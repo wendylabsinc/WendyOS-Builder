@@ -13,6 +13,7 @@ WENDYOS_SSHD:x86-wendyos ?= "1"
 WENDYOS_DRIVER_FEED_URI ??= ""
 WENDYOS_DRIVER_FEED_GPGCHECK ??= "0"
 WENDYOS_NVIDIA_DRIVER_PACKAGE ??= "packagegroup-wendyos-nvidia-graphics"
+WENDYOS_ROCM_DRIVER_PACKAGE ??= "packagegroup-wendyos-rocm"
 
 # Useful on commodity PCs and harmless on machines without a given bus/device.
 IMAGE_INSTALL:append = " \
@@ -33,6 +34,7 @@ configure_wendyos_driver_feed() {
     install -d ${IMAGE_ROOTFS}${libdir}/wendyos
     cat > ${IMAGE_ROOTFS}${libdir}/wendyos/driver-installer.conf <<EOF
 WENDYOS_NVIDIA_DRIVER_PACKAGE="${WENDYOS_NVIDIA_DRIVER_PACKAGE}"
+WENDYOS_ROCM_DRIVER_PACKAGE="${WENDYOS_ROCM_DRIVER_PACKAGE}"
 EOF
 
     if [ -n "${WENDYOS_DRIVER_FEED_URI}" ]; then
