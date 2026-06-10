@@ -9,17 +9,17 @@
 #   2. Remove <filename> from UDA (kept for NVIDIA compat, not used)
 #   3. Persistent 'data' partition (mounted at /data), gated independently
 #      of Mender:
-#      - WENDYOS_MENDER = "1": rename 'permanet_user_storage' -> 'data'
+#      - WENDYOS_OTA = "mender": rename 'permanet_user_storage' -> 'data'
 #        if present (meta-mender-tegra p3768 boards), or create 'data'
 #        from scratch (BSP XML), with <filename>DATAFILE</filename> so the
 #        flash tools write the Mender .dataimg into it.
-#      - WENDYOS_MENDER = "0", WENDYOS_DATA_PART = "1" (JP7 / wendy-update):
+#      - WENDYOS_DATA_PART = "1" without Mender (e.g. WENDYOS_OTA = "wendy"):
 #        create 'data' with the same placement and numbering but NO
 #        <filename> — there is no .dataimg artifact without the Mender build
 #        machinery, and a dangling filename makes tegraparser_v2 fail at
 #        flash time.  The flash tools allocate the partition empty; a
 #        first-boot unit formats and expands it.
-#      - both "0": no data partition (e.g. Thor before wendy-update lands).
+#      - WENDYOS_DATA_PART = "0": no data partition.
 #   4. Insert a FAT32 'config' partition.  Anchored before the data
 #      partition when that exists, before secondary_gpt otherwise.
 #
@@ -175,14 +175,13 @@ python do_modify_partition_layout() {
         #
         # The partition is named 'data' (mounted at /data) in every case.
         # Two gates decide whether/how it is created:
-        #   WENDYOS_MENDER = "1"      -> 'data' with DATAFILE filename
-        #                                (flash tools write Mender's .dataimg)
-        #   WENDYOS_DATA_PART = "1"   -> 'data' with NO filename
-        #     (and Mender off)           (allocated empty at flash time; a
-        #                                first-boot unit formats and expands
-        #                                it — wendy-update OTA, JP7 boards)
-        #   both "0"                  -> skipped entirely (e.g. Thor before
-        #                                wendy-update lands)
+        #   WENDYOS_OTA = "mender"          -> 'data' with DATAFILE filename
+        #                                      (flash tools write Mender's .dataimg)
+        #   WENDYOS_DATA_PART = "1" + not    -> 'data' with NO filename
+        #     Mender (e.g. WENDYOS_OTA=wendy)   (allocated empty at flash time;
+        #                                      a first-boot unit formats and
+        #                                      expands it — wendy-update OTA)
+        #   WENDYOS_DATA_PART = "0"          -> skipped entirely
         #
         # The no-filename rule is what makes the Mender-free path flashable:
         # there is no .dataimg artifact without the Mender build machinery,
@@ -204,7 +203,7 @@ python do_modify_partition_layout() {
         #
         # Path B is defensive code — it's not exercised by WendyOS machines
         # but is kept for upstream compatibility.
-        mender_enabled = (d.getVar('WENDYOS_MENDER') or '0') == '1'
+        mender_enabled = (d.getVar('WENDYOS_OTA') or 'none') == 'mender'
         data_part_enabled = (d.getVar('WENDYOS_DATA_PART') or '0') == '1'
         data_part = None
         if mender_enabled:
@@ -277,7 +276,7 @@ python do_modify_partition_layout() {
             device.insert(idx, data_part)
             bb.note('  Created "data" partition (id=%d, no filename)' % data_part_num)
         else:
-            bb.note('  Skipping data partition (WENDYOS_MENDER and WENDYOS_DATA_PART both "0")')
+            bb.note('  Skipping data partition (WENDYOS_DATA_PART = "0")')
 
         # Step 4: Insert 'config' partition.
         #
@@ -396,7 +395,7 @@ do_modify_partition_layout[doc] = "Modify Tegra partition layouts to add config 
 # these change.  Python tasks need explicit vardeps because BitBake cannot
 # auto-detect d.getVar() calls inside Python code.
 do_modify_partition_layout[vardeps] += " \
-    WENDYOS_MENDER \
+    WENDYOS_OTA \
     WENDYOS_DATA_PART \
     WENDYOS_DATA_PART_NUMBER \
     WENDYOS_CONFIG_PART_SIZE_MB \

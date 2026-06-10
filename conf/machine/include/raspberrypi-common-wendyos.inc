@@ -8,8 +8,8 @@ IMAGE_FSTYPES:remove = "tegraflash dataimg uefiimg uefiimg.bmap uefiimg.bz2 rpi-
 
 LICENSE_FLAGS_ACCEPTED += "synaptics-killswitch"
 
-# Mender opt-in (wendyos.conf default is off for RPi).
-WENDYOS_MENDER = "1"
+# Mender opt-in (wendyos.conf default is "none" for RPi).
+WENDYOS_OTA = "mender"
 
 # U-Boot is on by default (Mender's upstream-supported path).
 WENDYOS_RPI_UBOOT ?= "1"

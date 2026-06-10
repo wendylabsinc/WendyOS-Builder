@@ -33,14 +33,13 @@ RDEPENDS:${PN} = " \
     xdg-dbus-proxy \
     "
 
-# Recipes that bind-mount or otherwise depend on the /data partition
-# Mender provides. Gated on WENDYOS_MENDER (set in wendyos.conf): when
-# disabled (e.g. Thor, QEMU), there is no /data partition and these
+# Recipes that bind-mount or otherwise depend on the /data partition the
+# OTA stack provides. Gated on WENDYOS_OTA != "none" (set in wendyos.conf):
+# with no OTA stack (e.g. QEMU) there is no /data partition and these
 # services would fail at boot.
 RDEPENDS:${PN}:append = " \
-    ${@bb.utils.contains('WENDYOS_MENDER', '1', \
-        'wendyos-user-data-setup systemd-mount-containerd swapfile-setup wendyos-etc-binds', \
-        '', d)} \
+    ${@'' if (d.getVar('WENDYOS_OTA') or 'none') == 'none' else \
+        'wendyos-user-data-setup systemd-mount-containerd swapfile-setup wendyos-etc-binds'} \
     "
 
 RDEPENDS:${PN}:append = " \

@@ -1,20 +1,19 @@
-# Tegra T264 (Thor) defaults (no Mender, no UEFI capsule update).
-# Mirrors local/tegra.inc but explicitly sets WENDYOS_UPDATE_BOOTLOADER = "0"
-# (the variable gates the Mender capsule artefact,
-# wendyos.conf:73 defaults it to "1", so Thor must override it to "0").
+# Tegra T264 (Thor): wendy-update OTA (no Mender, no UEFI capsule update yet).
+# WENDYOS_UPDATE_BOOTLOADER gates the Mender capsule artefact; Thor uses
+# wendy-update with rootfs-only swaps for now, so keep it off.
 WENDYOS_UPDATE_BOOTLOADER = "0"
 
-# Keep the persistent /data partition in the A/B flash layout despite
-# Mender being off: wendy-update needs it for OTA state
-# (docs/plans/wendy-ota-update.md, Phase 1). Allocated empty at flash time
-# (no <filename> in the XML), formatted and expanded on first boot.
-# See tegra_partition_config.bbclass.
-WENDYOS_DATA_PART = "1"
+# Thor runs the wendy-update OTA stack (wendyos.conf defaults tegra264 to
+# "none"; override here). This pulls in the client + data-setup + the
+# .wendy artifact (conf/distro/include/wendyos-update.inc) and implies the
+# persistent /data partition (no separate WENDYOS_DATA_PART needed — its
+# default derives "1" from WENDYOS_OTA != "none"). The data partition is
+# allocated empty at flash time and formatted/grown on first boot by
+# wendyos-data-setup. See tegra_partition_config.bbclass.
+WENDYOS_OTA = "wendy"
 
-# Persistent journal logs — leave at the smart default (which tracks
-# WENDYOS_MENDER from wendyos.conf). On Thor, WENDYOS_MENDER=0
-# -> no /data partition -> logs are volatile (tmpfs). When Mender on Thor
-# lands, the smart default will flip to "1" automatically.
+# Persistent journal logs — left at the smart default (tracks WENDYOS_OTA):
+# WENDYOS_OTA="wendy" -> persistent on /data.
 
 # UEFI/EFI debug build mode:
 #   "0" - RELEASE (minimal UART output, production default)
