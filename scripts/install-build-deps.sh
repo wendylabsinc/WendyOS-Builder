@@ -82,6 +82,42 @@ install -m 0755 "${tmp_s5}/s5cmd" /usr/local/bin/s5cmd
 rm -rf "${tmp_s5}"
 /usr/local/bin/s5cmd version
 
+# Go toolchain. Needed to build wendy-os-update (the OTA tool) and to run
+# its host-side `wendy-update pack` from the build container / CI. Ubuntu
+# 24.04's apt 'golang' is ~1.22 — too old for the tool's go.mod (go 1.26)
+# — so install the official tarball to /usr/local/go (the upstream
+# location). A profile.d entry and /usr/local/bin symlinks make it
+# reachable from login and non-login (docker exec) shells alike.
+#
+# Defaults to the latest stable release (resolved from go.dev). Pin a
+# specific version for a reproducible CI AMI bake by exporting
+# GO_VERSION=1.26.0 before running this script.
+case "${arch}" in
+    amd64) go_arch="amd64" ;;
+    arm64) go_arch="arm64" ;;
+    *)     echo "Unsupported arch for go: ${arch}" >&2; exit 1 ;;
+esac
+if [[ -n "${GO_VERSION:-}" ]]; then
+    go_tag="go${GO_VERSION}"
+else
+    # go.dev/VERSION?m=text returns the latest stable tag (e.g. "go1.26.0")
+    # on its first line.
+    go_tag="$(wget -qO- 'https://go.dev/VERSION?m=text' | head -1)"
+fi
+[[ "${go_tag}" == go* ]] || { echo "could not resolve Go version (got '${go_tag}')" >&2; exit 1; }
+tmp_go=$(mktemp -d)
+wget -qO "${tmp_go}/go.tar.gz" \
+    "https://go.dev/dl/${go_tag}.linux-${go_arch}.tar.gz"
+rm -rf /usr/local/go
+tar -C /usr/local -xzf "${tmp_go}/go.tar.gz"
+rm -rf "${tmp_go}"
+cat > /etc/profile.d/golang.sh <<'EOF'
+export PATH="/usr/local/go/bin:${PATH}"
+EOF
+ln -sf /usr/local/go/bin/go /usr/local/bin/go
+ln -sf /usr/local/go/bin/gofmt /usr/local/bin/gofmt
+/usr/local/bin/go version
+
 # Ubuntu 24.04 (Noble) restricts unprivileged user namespaces via AppArmor by
 # default. BitBake's pseudo / fakeroot machinery needs them, and refuses to run
 # with: "User namespaces are not usable by BitBake, possibly due to AppArmor."

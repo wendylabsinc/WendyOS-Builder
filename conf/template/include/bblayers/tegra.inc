@@ -1,8 +1,9 @@
 # Tegra-exclusive layers: Mender OTA stack, meta-tegra, Tegra sub-layer.
-# The non-Mender meta-tegra paths are factored into tegra-thor.inc so
-# Thor (tegra264, no Mender in Phase 1) can reuse them without duplication.
+# The shared meta-tegra paths are factored into tegra-base.inc so Thor
+# (tegra264) and JP7 Orin boards (no Mender on wrynose) can reuse them
+# without duplication.
 
-require ${TOPDIR}/../${WENDYOS_META_REPO}/conf/template/include/bblayers/tegra-thor.inc
+require ${TOPDIR}/../${WENDYOS_META_REPO}/conf/template/include/bblayers/tegra-base.inc
 
 BBLAYERS += " \
     ${TOPDIR}/../${WENDYOS_META_REPO}/meta-tegra-extensions-jp6 \

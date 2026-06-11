@@ -20,11 +20,15 @@ fi
 if [ ! -f "$SWAPFILE" ]; then
     echo "Creating ${SWAPSIZE_MB}MB swap file at $SWAPFILE..."
 
-    # Check available space on /data
+    # Check available space on /data. Swap is an optimization, not a boot
+    # requirement: if /data is too small (e.g. a not-yet-grown or undersized
+    # partition), skip and log rather than failing the unit and leaving a red
+    # entry in `systemctl --failed`. The data-swapfile.swap unit is
+    # ConditionPathExists-gated, so it is skipped too when no file is created.
     AVAILABLE_MB=$(df -BM /data | tail -1 | awk '{print $4}' | sed 's/M//')
     if [ "$AVAILABLE_MB" -lt "$((SWAPSIZE_MB + 1024))" ]; then
-        echo "ERROR: Not enough space on /data. Need ${SWAPSIZE_MB}MB + 1GB buffer, have ${AVAILABLE_MB}MB"
-        exit 1
+        echo "WARNING: not enough space on /data for swap (need ${SWAPSIZE_MB}MB + 1GB buffer, have ${AVAILABLE_MB}MB); skipping swap setup"
+        exit 0
     fi
 
     # Allocate the swap file (use fallocate for speed, fallback to dd)
