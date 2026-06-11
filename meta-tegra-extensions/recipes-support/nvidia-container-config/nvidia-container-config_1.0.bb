@@ -1,5 +1,5 @@
 SUMMARY = "NVIDIA Container Configuration for Jetson"
-DESCRIPTION = "Provides l4t.csv configuration, CDI spec generation, and CUDA environment detection for NVIDIA GPU containers"
+DESCRIPTION = "Provides the l4t.csv library manifest, CDI spec generation, and CUDA environment detection for NVIDIA GPU containers"
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
 
@@ -9,7 +9,7 @@ inherit systemd
 WENDYOS_DEEPSTREAM ?= "0"
 
 SRC_URI = " \
-    file://l4t.csv \
+    file://l4t-csv-manifest.csv \
     file://l4t-deepstream.csv \
     file://devices-wendyos.csv \
     file://wendyos-cdi-generate.service \
@@ -28,8 +28,12 @@ do_install() {
     # Install CSV files to the NVIDIA container runtime config directory
     install -d ${D}${sysconfdir}/nvidia-container-runtime/host-files-for-container.d
 
-    # Install base l4t.csv (CUDA/PyTorch libraries)
-    install -m 0644 ${UNPACKDIR}/l4t.csv ${D}${sysconfdir}/nvidia-container-runtime/host-files-for-container.d/
+    # Install the l4t.csv library-stem manifest (CUDA/PyTorch libraries).
+    # The actual l4t.csv is generated from this manifest at image build time
+    # by the l4t-csv-generate bbclass, resolving each stem against the image
+    # rootfs so the entries match the installed CUDA/cuDNN/TensorRT versions.
+    install -d ${D}${datadir}/wendyos
+    install -m 0644 ${UNPACKDIR}/l4t-csv-manifest.csv ${D}${datadir}/wendyos/
 
     # Install DeepStream CSV if enabled
     if [ "${WENDYOS_DEEPSTREAM}" = "1" ]; then
@@ -69,7 +73,7 @@ do_install() {
     install -d ${D}${sysconfdir}/default
 }
 
-FILES:${PN} += "${sysconfdir}/nvidia-container-runtime/host-files-for-container.d/l4t.csv"
+FILES:${PN} += "${datadir}/wendyos/l4t-csv-manifest.csv"
 FILES:${PN} += "${sysconfdir}/nvidia-container-runtime/host-files-for-container.d/l4t-deepstream.csv"
 FILES:${PN} += "${sysconfdir}/nvidia-container-runtime/host-files-for-container.d/devices-wendyos.csv"
 FILES:${PN} += "${bindir}/generate-cuda-env.sh"

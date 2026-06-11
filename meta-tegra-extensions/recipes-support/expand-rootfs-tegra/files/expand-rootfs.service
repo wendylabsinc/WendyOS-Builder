@@ -1,0 +1,16 @@
+[Unit]
+Description=WendyOS First Boot Rootfs Resize
+After=local-fs.target
+# On non-Mender Tegra there is no /data partition: containerd stores images
+# on the rootfs, so the expansion must complete before containerd starts or
+# the first large deploy can hit a still-tiny root filesystem.
+Before=containerd.service
+ConditionPathExists=!/var/lib/expand-rootfs.done
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/expand-rootfs.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

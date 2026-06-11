@@ -1,0 +1,169 @@
+# WendyOS l4t.csv manifest - NVIDIA container library mapping, by stem
+#
+# This file is NOT consumed by nvidia-ctk directly. At image build time the
+# l4t-csv-generate bbclass resolves each "lib" stem against the actual image
+# rootfs (/usr/local/cuda-*/lib{,64}, /usr/lib{,64}) and writes the resulting
+# lib/sym entries to /etc/nvidia-container-runtime/host-files-for-container.d/
+# l4t.csv. This keeps the CSV correct across JetPack versions (CUDA 12.6 on
+# Orin/JP6, CUDA 13.0 on Thor/JP7) without hardcoding dot-versions.
+#
+# Line types:
+#   dev,  /dev/...   - passed through verbatim (device nodes only exist at
+#                      runtime, so they cannot be validated at build time)
+#   dir,  /path      - passed through verbatim
+#   lib,  <stem>     - REQUIRED library stem; the build FAILS if no regular
+#                      file matching <stem>.so[.N...] exists in the rootfs
+#   lib?, <stem>     - optional library stem; missing stems only warn
+#
+# Stems match basenames exactly: "libcudnn" matches libcudnn.so.9.3.0 but
+# not libcudnn_ops.so.9 (which needs its own "libcudnn_ops" entry).
+
+# =============================================================================
+# DEVICE NODES
+# =============================================================================
+dev, /dev/nvidiactl
+dev, /dev/nvidia0
+dev, /dev/nvmap
+dev, /dev/nvhost-gpu
+dev, /dev/nvhost-ctrl-gpu
+dev, /dev/nvhost-as-gpu
+dev, /dev/nvhost-dbg-gpu
+dev, /dev/nvhost-prof-gpu
+dev, /dev/nvhost-ctxsw-gpu
+dev, /dev/nvhost-sched-gpu
+dev, /dev/nvhost-tsg-gpu
+dev, /dev/nvhost-vic
+
+# DRI devices (for graphics/display)
+dev, /dev/dri
+
+# =============================================================================
+# CUDA RUNTIME (required by all CUDA applications)
+# =============================================================================
+lib, libcudart
+
+# =============================================================================
+# cuBLAS - Linear algebra (REQUIRED by PyTorch)
+# =============================================================================
+lib, libcublas
+lib, libcublasLt
+
+# =============================================================================
+# cuSPARSE - Sparse matrix operations (used by PyTorch sparse tensors)
+# =============================================================================
+lib, libcusparse
+
+# =============================================================================
+# cuSPARSELt - Lightweight sparse operations
+# =============================================================================
+lib, libcusparseLt
+
+# =============================================================================
+# cuSOLVER - Linear solvers (used by torch.linalg operations)
+# =============================================================================
+lib, libcusolver
+lib, libcusolverMg
+
+# =============================================================================
+# cuRAND - Random number generation (used by torch.rand with CUDA)
+# =============================================================================
+lib, libcurand
+
+# =============================================================================
+# cuFFT - Fast Fourier Transform (used by torch.fft)
+# =============================================================================
+lib, libcufft
+lib, libcufftw
+
+# =============================================================================
+# NVRTC - Runtime compilation (used by torch.jit)
+# =============================================================================
+lib, libnvrtc
+lib, libnvrtc-builtins
+
+# =============================================================================
+# nvJitLink - JIT Linker (required by PyTorch JIT and torch.compile)
+# =============================================================================
+lib, libnvJitLink
+
+# =============================================================================
+# NVTX - NVIDIA Tools Extension (used by PyTorch profiler)
+# Optional: removed in CUDA 13 (NVTX v3 is header-only on JP7/Thor)
+# =============================================================================
+lib?, libnvToolsExt
+
+# =============================================================================
+# CUPTI - CUDA Profiling Tools Interface (used by PyTorch profiler)
+# =============================================================================
+lib, libcupti
+
+# =============================================================================
+# cuFile - GPUDirect Storage (required by PyTorch 2.8.0)
+# =============================================================================
+lib, libcufile
+
+# =============================================================================
+# cuDLA - Deep Learning Accelerator Runtime
+# Optional: Thor (T264) has no DLA engine, so JP7 does not ship libcudla
+# =============================================================================
+lib?, libcudla
+
+# =============================================================================
+# NPP - Image processing primitives (used by vision operations)
+# =============================================================================
+lib, libnppc
+lib, libnppial
+lib, libnppicc
+lib, libnppidei
+lib, libnppif
+lib, libnppig
+lib, libnppim
+lib, libnppist
+lib, libnppisu
+lib, libnppitc
+lib, libnpps
+
+# =============================================================================
+# cuDNN - Deep learning primitives (REQUIRED by PyTorch)
+# =============================================================================
+lib, libcudnn
+lib, libcudnn_ops
+lib, libcudnn_cnn
+lib, libcudnn_adv
+lib, libcudnn_graph
+lib, libcudnn_engines_runtime_compiled
+lib, libcudnn_engines_precompiled
+lib, libcudnn_heuristic
+
+# =============================================================================
+# TensorRT - Inference optimization (required by torch-tensorrt)
+# =============================================================================
+lib, libnvinfer
+lib, libnvinfer_plugin
+lib, libnvinfer_builder_resource
+lib, libnvonnxparser
+
+# =============================================================================
+# Tegra CUDA driver (critical for all GPU operations)
+# =============================================================================
+lib, libcuda
+
+# =============================================================================
+# NvSci libraries (inter-process buffer sharing)
+# =============================================================================
+lib, libnvscibuf
+lib, libnvscicommon
+lib, libnvscisync
+lib, libnvscistream
+lib, libnvscievent
+lib, libnvsciipc
+
+# =============================================================================
+# NVIDIA Management Library (nvidia-smi support)
+# =============================================================================
+lib, libnvidia-ml
+
+# =============================================================================
+# PTX JIT Compiler
+# =============================================================================
+lib, libnvidia-ptxjitcompiler

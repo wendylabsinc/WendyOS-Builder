@@ -9,6 +9,12 @@
 # Apply our UEFI boot-priority overlay during flash
 TEGRA_BOOTCONTROL_OVERLAYS += "boot-priority.dtbo"
 
+# Generate l4t.csv (NVIDIA container library mounts) from the stem manifest
+# shipped by nvidia-container-config, resolved against this image's rootfs.
+# Fails the build if a required CUDA/cuDNN/TensorRT library is missing,
+# instead of nvidia-ctk silently skipping stale entries at boot.
+inherit l4t-csv-generate
+
 # Silence the BPMP coprocessor's serial logging. meta-tegra defaults
 # TEGRA_BPMP_SERIAL_LOGGING to "1" (see tegra-bootfiles_*.bb), which
 # keeps the BPMP firmware's /serial DT node alive and floods the

@@ -10,6 +10,18 @@ RDEPENDS:${PN}:append = " \
     tegra-tools-tegrastats \
     "
 
+# First-boot rootfs expansion for Tegra machines without the Mender stack
+# (currently Thor / tegra264). Tegraflash writes a GPT sized for
+# TEGRA_EXTERNAL_DEVICE_SECTORS, so on a larger NVMe the rest of the disk is
+# unpartitioned — and with no /data partition, containerd fills up the small
+# rootfs on the first sizeable deploy. Gated on WENDYOS_MENDER rather than
+# SoC: Mender machines must NOT grow the APP partition (the A/B + /data
+# layout owns the disk and mender-growfs-data expands /data instead), and
+# re-enabling Mender on Thor automatically drops this package.
+RDEPENDS:${PN}:append = " \
+    ${@'' if d.getVar('WENDYOS_MENDER') == '1' else 'expand-rootfs-tegra'} \
+    "
+
 # OP-TEE normal-world userspace:
 # tee-supplicant (shipped by optee-client) is the Linux daemon that services
 # secure-world RPC: it backs REE-FS secure storage by writing TEE-encrypted
