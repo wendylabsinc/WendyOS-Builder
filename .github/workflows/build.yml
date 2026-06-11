@@ -344,6 +344,26 @@ jobs:
           # downloads/ is not in the L1 snapshot, so always restore from S3.
           run_sync "restore downloads" "${src_downloads_glob}" "$GITHUB_WORKSPACE/downloads/" "$GITHUB_WORKSPACE/downloads"
 
+          # S3 sync only transfers files, so empty directories are lost on the
+          # round-trip. A bare git mirror with fully-packed refs has an empty
+          # refs/ dir, and git refuses to recognize the repo without it
+          # ("fatal: not a git repository"). BitBake then re-clones every git2
+          # mirror from upstream — and fails the build outright when upstream
+          # is down (e.g. iso-codes on salsa.debian.org). Recreate refs/, and
+          # drop any mirror git still can't read together with its .done
+          # marker so BitBake falls back to the mirror tarball or upstream
+          # instead of choking on a broken clonedir.
+          if [[ -d "$GITHUB_WORKSPACE/downloads/git2" ]]; then
+            for repo in "$GITHUB_WORKSPACE/downloads/git2"/*/; do
+              [[ -f "$repo/HEAD" ]] || continue
+              mkdir -p "$repo/refs"
+              if ! git -C "$repo" rev-parse --git-dir >/dev/null 2>&1; then
+                echo "::warning::Dropping unreadable git mirror $repo"
+                rm -rf "$repo" "${repo%/}.done"
+              fi
+            done
+          fi
+
       # ---------- Build ----------
 
       - name: Derive build variables
