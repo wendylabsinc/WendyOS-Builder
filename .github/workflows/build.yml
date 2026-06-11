@@ -259,7 +259,16 @@ jobs:
         uses: runs-on/snapshot@v1
         with:
           path: ${{ github.workspace }}/sstate-cache
-          volume_size: 150
+          # The snapshot lineage is shared by every matrix job (keyed on this
+          # path + branch), so the volume converges to the union of all nine
+          # boards' sstate and nothing prunes it. 150 GB filled up once the
+          # Thor board joined the matrix, killing builds with BitBake's
+          # STOPTASKS disk monitor. Note runs-on/snapshot discards a snapshot
+          # SMALLER than volume_size and starts a blank volume instead, so
+          # raising this forces one cold run (sstate re-restored from S3) and
+          # snapshots at the new size from then on. EBS snapshot cost scales
+          # with used blocks, not volume size, so headroom is nearly free.
+          volume_size: 400
 
       - name: Make L1 EBS mount writable
         run: sudo chmod -R a+rwX "$GITHUB_WORKSPACE/sstate-cache"
