@@ -12,7 +12,7 @@ if [ -f /etc/default/wendy-agent ]; then
 fi
 
 # Default values if not configured
-GITHUB_REPO="${WENDYOS_AGENT_GITHUB_REPO:-wendylabsinc/wendy-agent}"
+GITHUB_REPO="${WENDYOS_AGENT_GITHUB_REPO:-wendylabsinc/WendyOS}"
 VERSION="${WENDYOS_AGENT_VERSION:-latest}"
 ARCH="aarch64"  # Hardcoded for RPi
 

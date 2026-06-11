@@ -384,6 +384,11 @@ jobs:
         working-directory: ${{ github.workspace }}/wendyos
         env:
           MACHINE: ${{ steps.vars.outputs.machine }}
+          # Lets the Makefile resolve the latest wendy-agent release tag
+          # without hitting unauthenticated GitHub API rate limits. The tag
+          # pins WENDY_AGENT_VERSION so new agent releases invalidate the
+          # wendyos-agent sstate object instead of reusing a stale binary.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: make build MACHINE="$MACHINE"
 
       # ---------- Build cache: save to S3 ----------------------------------

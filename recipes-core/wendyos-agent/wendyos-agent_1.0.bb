@@ -1,13 +1,18 @@
 
 # [Note]
-# This recipe fetches the wendyos-agent binary from GitHub at build time
-# inside do_compile using wget/curl, bypassing SRC_URI checksums and breaking
-# build reproducibility (two builds may produce different binaries).
-# It also uses 'SRCREV = "${AUTOREV}"'' for the source repo.
+# This recipe fetches the wendy-agent binary from GitHub at build time inside
+# do_compile using wget/curl, bypassing SRC_URI checksums.
 #
-# [Fix]
-# Pin the binary download URL and its sha256sum in SRC_URI, or use a proper
-# recipe with SRC_URI[sha256sum].
+# WENDY_AGENT_VERSION pins the release tag to bundle. The Makefile resolves it
+# to the latest GitHub release before invoking bitbake and passes it through
+# the environment, so a new release changes this task's signature and
+# invalidates stale sstate. If unset/unresolvable it falls back to "latest",
+# which queries the GitHub API here in do_compile — that path is NOT
+# cache-safe: warm sstate will keep bundling whatever was latest when the
+# cache object was created.
+#
+# [Remaining fix]
+# Pin the asset sha256 as well (SRC_URI[sha256sum]) for full reproducibility.
 # Runtime self-update should remain in wendyos-agent-updater.service,
 # not at build time.
 
@@ -29,25 +34,44 @@ inherit systemd
 SYSTEMD_SERVICE:${PN} = "wendyos-agent.service wendyos-agent-updater.service wendyos-agent-updater.timer"
 SYSTEMD_AUTO_ENABLE:${PN} = "enable"
 
+# GitHub repo hosting wendy-agent release assets
+# (formerly wendylabsinc/wendy-agent, renamed to wendylabsinc/WendyOS)
+WENDY_AGENT_GITHUB_REPO ?= "wendylabsinc/WendyOS"
+# Release tag to bundle; resolved by the Makefile, see header note.
+WENDY_AGENT_VERSION ?= "latest"
+
 do_compile() {
     bbnote "Downloading wendy-agent binary for aarch64..."
 
-    # Get the latest stable release from GitHub (excludes pre-releases)
-    RELEASES_URL="https://api.github.com/repos/wendylabsinc/wendy-agent/releases/latest"
+    AGENT_VERSION="${WENDY_AGENT_VERSION}"
+    if [ -z "${AGENT_VERSION}" ]; then
+        AGENT_VERSION="latest"
+    fi
 
-    # Fetch latest stable release
-    wget -q -O ${B}/release.json "${RELEASES_URL}" || \
-        curl -sL -o ${B}/release.json "${RELEASES_URL}" || \
-        bbfatal "Failed to fetch latest release from GitHub"
+    if [ "${AGENT_VERSION}" = "latest" ]; then
+        bbwarn "WENDY_AGENT_VERSION is not pinned; querying GitHub for the latest release. Warm sstate may bundle an older agent."
 
-    # Extract download URL for aarch64 binary (match .tar.gz files only)
-    # Asset naming: wendy-agent-linux-arm64-*.tar.gz (formerly wendy-agent-linux-static-musl-aarch64)
-    DOWNLOAD_URL=$(cat ${B}/release.json | \
-        grep -o '"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]*wendy-agent-linux-arm64[^"]*\.tar\.gz[^"]*"' | \
-        head -1 | cut -d'"' -f4)
+        # Get the latest stable release from GitHub (excludes pre-releases)
+        RELEASES_URL="https://api.github.com/repos/${WENDY_AGENT_GITHUB_REPO}/releases/latest"
 
-    if [ -z "${DOWNLOAD_URL}" ]; then
-        bbfatal "Failed to find wendy-agent-linux-static-musl-aarch64 binary in release"
+        # Fetch latest stable release
+        wget -q -O ${B}/release.json "${RELEASES_URL}" || \
+            curl -sL -o ${B}/release.json "${RELEASES_URL}" || \
+            bbfatal "Failed to fetch latest release from GitHub"
+
+        # Extract download URL for aarch64 binary (match .tar.gz files only)
+        # Asset naming: wendy-agent-linux-arm64-*.tar.gz (formerly wendy-agent-linux-static-musl-aarch64)
+        DOWNLOAD_URL=$(cat ${B}/release.json | \
+            grep -o '"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]*wendy-agent-linux-arm64[^"]*\.tar\.gz[^"]*"' | \
+            head -1 | cut -d'"' -f4)
+
+        if [ -z "${DOWNLOAD_URL}" ]; then
+            bbfatal "Failed to find wendy-agent-linux-arm64 binary in release"
+        fi
+    else
+        # Pinned tag: assets are named wendy-agent-linux-arm64-<tag>.tar.gz
+        DOWNLOAD_URL="https://github.com/${WENDY_AGENT_GITHUB_REPO}/releases/download/${WENDY_AGENT_VERSION}/wendy-agent-linux-arm64-${WENDY_AGENT_VERSION}.tar.gz"
+        bbnote "Using pinned wendy-agent release: ${WENDY_AGENT_VERSION}"
     fi
 
     bbnote "Downloading from: ${DOWNLOAD_URL}"

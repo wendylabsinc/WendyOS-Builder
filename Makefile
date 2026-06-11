@@ -32,6 +32,19 @@ IMAGE_TARGET ?= wendyos-image
 # has the Yocto host prerequisites installed; local dev leaves it unset.
 WENDYOS_HOST_BUILD ?= 0
 
+# wendy-agent release tag to bundle into the image. Resolved to the latest
+# GitHub release once per build so the wendyos-agent recipe's task signature
+# changes whenever a new agent ships — warm sstate would otherwise keep
+# bundling the old binary. Override with WENDY_AGENT_VERSION=<tag>. If the
+# lookup fails (offline, rate-limited) it stays empty and the recipe falls
+# back to its unpinned "latest" lookup, which is not cache-safe.
+ifneq ($(filter build build-sdk,$(MAKECMDGOALS)),)
+# Uses GITHUB_TOKEN when set (CI) to avoid unauthenticated API rate limits.
+WENDY_AGENT_VERSION ?= $(shell curl -fsSL --connect-timeout 10 $(if $(GITHUB_TOKEN),-H "Authorization: Bearer $(GITHUB_TOKEN)") https://api.github.com/repos/wendylabsinc/WendyOS/releases/latest 2>/dev/null | grep -m1 '"tag_name"' | cut -d '"' -f 4)
+endif
+# Force a single expansion so the GitHub lookup runs at most once.
+WENDY_AGENT_VERSION := $(WENDY_AGENT_VERSION)
+
 # Flash configuration
 FLASH_DEVICE ?=
 FLASH_IMAGE_SIZE ?= 64G
@@ -175,7 +188,7 @@ build: _check-machine _check-setup _ensure-volumes
 		cd $(PROJECT_DIR) && \
 		. ./$(BUILD_DIR)/.wendyos-env && \
 		source ./repos/$$WENDYOS_LAYER_TREE/openembedded-core/oe-init-build-env $(BUILD_DIR) && \
-		BB_ENV_PASSTHROUGH_ADDITIONS="MACHINE" MACHINE=$(MACHINE) bitbake $(IMAGE_TARGET); \
+		BB_ENV_PASSTHROUGH_ADDITIONS="MACHINE WENDY_AGENT_VERSION" MACHINE=$(MACHINE) WENDY_AGENT_VERSION="$(WENDY_AGENT_VERSION)" bitbake $(IMAGE_TARGET); \
 	elif [ "$$(uname)" = "Darwin" ]; then \
 		docker run \
 			--rm -t \
@@ -192,7 +205,7 @@ build: _check-machine _check-setup _ensure-volumes
 				cd $(DOCKER_WORKDIR) && \
 				. ./$(BUILD_DIR)/.wendyos-env && \
 				source ./repos/$$WENDYOS_LAYER_TREE/openembedded-core/oe-init-build-env $(BUILD_DIR) && \
-				BB_ENV_PASSTHROUGH_ADDITIONS="MACHINE" MACHINE=$(MACHINE) bitbake $(IMAGE_TARGET) \
+				BB_ENV_PASSTHROUGH_ADDITIONS="MACHINE WENDY_AGENT_VERSION" MACHINE=$(MACHINE) WENDY_AGENT_VERSION="$(WENDY_AGENT_VERSION)" bitbake $(IMAGE_TARGET) \
 			'; \
 	else \
 		cd $(DOCKER_DIR) && docker run \
@@ -208,7 +221,7 @@ build: _check-machine _check-setup _ensure-volumes
 				cd $(DOCKER_WORKDIR) && \
 				. ./$(BUILD_DIR)/.wendyos-env && \
 				source ./repos/$$WENDYOS_LAYER_TREE/openembedded-core/oe-init-build-env $(BUILD_DIR) && \
-				BB_ENV_PASSTHROUGH_ADDITIONS="MACHINE" MACHINE=$(MACHINE) bitbake $(IMAGE_TARGET) \
+				BB_ENV_PASSTHROUGH_ADDITIONS="MACHINE WENDY_AGENT_VERSION" MACHINE=$(MACHINE) WENDY_AGENT_VERSION="$(WENDY_AGENT_VERSION)" bitbake $(IMAGE_TARGET) \
 			'; \
 	fi
 	@printf "\n"
@@ -239,7 +252,7 @@ build-sdk: _check-machine _check-setup _ensure-volumes
 				cd $(DOCKER_WORKDIR) && \
 				. ./$(BUILD_DIR)/.wendyos-env && \
 				source ./repos/$$WENDYOS_LAYER_TREE/openembedded-core/oe-init-build-env $(BUILD_DIR) && \
-				BB_ENV_PASSTHROUGH_ADDITIONS="MACHINE" MACHINE=$(MACHINE) bitbake $(IMAGE_TARGET) -c populate_sdk \
+				BB_ENV_PASSTHROUGH_ADDITIONS="MACHINE WENDY_AGENT_VERSION" MACHINE=$(MACHINE) WENDY_AGENT_VERSION="$(WENDY_AGENT_VERSION)" bitbake $(IMAGE_TARGET) -c populate_sdk \
 			'; \
 	else \
 		cd $(DOCKER_DIR) && docker run \
@@ -255,7 +268,7 @@ build-sdk: _check-machine _check-setup _ensure-volumes
 				cd $(DOCKER_WORKDIR) && \
 				. ./$(BUILD_DIR)/.wendyos-env && \
 				source ./repos/$$WENDYOS_LAYER_TREE/openembedded-core/oe-init-build-env $(BUILD_DIR) && \
-				BB_ENV_PASSTHROUGH_ADDITIONS="MACHINE" MACHINE=$(MACHINE) bitbake $(IMAGE_TARGET) -c populate_sdk \
+				BB_ENV_PASSTHROUGH_ADDITIONS="MACHINE WENDY_AGENT_VERSION" MACHINE=$(MACHINE) WENDY_AGENT_VERSION="$(WENDY_AGENT_VERSION)" bitbake $(IMAGE_TARGET) -c populate_sdk \
 			'; \
 	fi
 	@printf "\n"

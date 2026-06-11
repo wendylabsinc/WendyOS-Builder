@@ -1,6 +1,6 @@
 [Unit]
 Description=WendyOS Agent Updater
-Documentation=https://github.com/wendylabsinc/wendy-agent
+Documentation=https://github.com/wendylabsinc/WendyOS
 After=network-online.target
 Wants=network-online.target
 
