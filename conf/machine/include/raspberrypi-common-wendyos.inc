@@ -16,8 +16,8 @@ WENDYOS_RPI_UBOOT ?= "1"
 RPI_USE_U_BOOT = "${@'1' if d.getVar('WENDYOS_RPI_UBOOT') == '1' else '0'}"
 
 # Mender storage geometry. SD card on /dev/mmcblk0 with partition suffix
-# 'p' (e.g. /dev/mmcblk0p2). 7400 MiB fits a nominal 8 GB SD card
-# (~7629 MiB usable); raspberrypi5-nvme-wendyos.conf overrides
+# 'p' (e.g. /dev/mmcblk0p2). 7528 MiB (7400 + the 128 MiB config part below)
+# fits a nominal 8 GB SD card. raspberrypi5-nvme-wendyos.conf overrides
 # MENDER_STORAGE_DEVICE and MENDER_STORAGE_TOTAL_SIZE_MB for NVMe.
 # MENDER_STORAGE_DEVICE_BASE uses lazy expansion so the NVMe override of
 # MENDER_STORAGE_DEVICE alone is enough to derive /dev/nvme0n1p* names.
@@ -25,7 +25,26 @@ MENDER_STORAGE_DEVICE        = "/dev/mmcblk0"
 MENDER_STORAGE_DEVICE_BASE   = "${MENDER_STORAGE_DEVICE}p"
 MENDER_BOOT_PART_SIZE_MB     = "100"
 MENDER_DATA_PART_SIZE_MB     = "256"
-MENDER_STORAGE_TOTAL_SIZE_MB = "7400"
+MENDER_STORAGE_TOTAL_SIZE_MB = "7528"
+
+# --- WendyOS config partition --------------------------------------------
+# Small FAT32 "config" partition that `wendy os install` seeds with first-boot
+# provisioning (WiFi, device name, pre-enrolled identity, agent binary).
+# wendy-agent consumes and erases it on first boot (configpartition.Apply);
+# reclaim-config-part then deletes it and grows /data over the freed space.
+# Injected as a Mender extra part (mender-image-sd owns the sdimg layout);
+# Mender writes the /config fstab line. nofail: the partition is gone after
+# first boot, so the mount must not block later boots.
+MENDER_EXTRA_PARTS = "config"
+MENDER_EXTRA_PARTS[config] = "--label=config --fstype=vfat"
+MENDER_EXTRA_PARTS_SIZES_MB[config] = "128"
+MENDER_EXTRA_PARTS_MOUNT_LOCATIONS[config] = "/config"
+MENDER_EXTRA_PARTS_FSTAB[config] = "vfat defaults,nofail 0 0"
+
+# Extra parts land after /data, so mender-growfs-data would try to grow /data
+# over /config. Disable it (counters mender.inc's explicit enable);
+# reclaim-config-part is the sole /data grower.
+MENDER_FEATURES_DISABLE:append = " mender-growfs-data"
 
 # No UEFI capsule on RPi (Mender handles rootfs A/B; firmware blobs are
 # staged best-effort by meta-mender-raspberrypi's
