@@ -1,0 +1,19 @@
+[Unit]
+Description=WendyOS reclaim consumed /config partition into /data (first boot)
+# Run after wendy-agent has had a chance to consume /config and after storage
+# is mounted. The script re-checks that /config is drained and self-defers to a
+# later boot if not, so this ordering is best-effort rather than a hard gate.
+After=wendyos-agent.service data.mount local-fs.target
+RequiresMountsFor=/data
+ConditionPathExists=!/data/.wendyos-reclaim-config.done
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/reclaim-config-part.sh
+RemainAfterExit=yes
+# The drain-wait can run up to DRAIN_TIMEOUT (120s); keep the start timeout above
+# it so systemd never kills the script mid-surgery (default TimeoutStartSec=90s).
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target

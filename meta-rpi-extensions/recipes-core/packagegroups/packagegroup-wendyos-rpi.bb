@@ -6,6 +6,7 @@ inherit packagegroup
 RDEPENDS:${PN} = " \
     wireless-regdb-static \
     expand-rootfs \
+    reclaim-config-part \
     first-boot-timesync \
     pi-bluetooth \
     "
