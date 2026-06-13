@@ -409,6 +409,38 @@ jobs:
       # by conf/template/include/local/common.inc, which matches the S3 sync paths
       # below, no auto.conf override needed.
 
+      # Resolve the latest *stable* wendyos-agent release (tag + asset sha256)
+      # and export them so the wendyos-agent recipe pins this exact version.
+      # This is what makes "ship the latest agent on every run" actually work:
+      # the recipe embeds the version + checksum in SRC_URI, so a new release
+      # changes the do_fetch signature and sstate re-fetches instead of reusing
+      # a stale cached binary. Authenticated to avoid the 60/hr anon API limit.
+      - name: Resolve latest wendyos-agent version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          release_json="$(curl -sSfL \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/wendylabsinc/WendyOS/releases/latest")"
+
+          version="$(jq -r '.tag_name' <<<"$release_json")"
+          sha="$(jq -r '.assets[]
+            | select(.name | test("^wendy-agent-linux-arm64-.*\\.tar\\.gz$"))
+            | .digest' <<<"$release_json" | sed 's/^sha256://')"
+
+          if [[ -z "$version" || "$version" == "null" || -z "$sha" || "$sha" == "null" ]]; then
+            echo "Failed to resolve wendyos-agent version/sha (version='$version' sha='$sha')" >&2
+            exit 1
+          fi
+
+          echo "Resolved wendyos-agent $version (sha256=$sha)"
+          {
+            echo "WENDYOS_AGENT_VERSION=$version"
+            echo "WENDYOS_AGENT_SHA256=$sha"
+          } >> "$GITHUB_ENV"
+
       - name: Build image
         working-directory: ${{ github.workspace }}/wendyos
         env:
