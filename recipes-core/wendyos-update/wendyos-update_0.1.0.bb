@@ -13,7 +13,7 @@ LIC_FILES_CHKSUM = "file://src/${GO_IMPORT}/LICENSE;md5=32329fcd0da888dcffa77ba6
 GO_IMPORT = "github.com/wendylabsinc/wendy-os-update"
 
 SRC_URI = "git://${GO_IMPORT};protocol=https;branch=main;destsuffix=${GO_SRCURI_DESTSUFFIX}"
-SRCREV = "1765b2734de0c6c7c29ee7165d58469d80047c5c"
+SRCREV = "aa6571a005f3aa619a718766a1fc642f4e8ab76d"
 
 inherit go-mod systemd
 
