@@ -13,7 +13,7 @@ LIC_FILES_CHKSUM = "file://src/${GO_IMPORT}/LICENSE;md5=32329fcd0da888dcffa77ba6
 GO_IMPORT = "github.com/wendylabsinc/wendy-os-update"
 
 SRC_URI = "git://${GO_IMPORT};protocol=https;branch=main;destsuffix=${GO_SRCURI_DESTSUFFIX}"
-SRCREV = "aa6571a005f3aa619a718766a1fc642f4e8ab76d"
+SRCREV = "205222dcaf5080aa22bd106d0b2a6e4fa6573ad2"
 
 inherit go-mod systemd
 
@@ -42,9 +42,15 @@ do_install:append:class-target() {
     install -m 0644 ${GO_SRCDIR}/systemd/wendy-update-commit.service ${D}${systemd_system_unitdir}/
     install -m 0644 ${GO_SRCDIR}/systemd/wendy-update-boot-complete.target ${D}${systemd_system_unitdir}/
 
-    # config + health-hook dirs (config.json is optional; auto-detect works
-    # without it — see docs/cli-contract.md)
+    # config + lifecycle-hook dirs (config.json is optional; auto-detect
+    # works without it — see docs/cli-contract.md). Each <phase>.d holds
+    # product executables run at that point in the update sequence; empty
+    # dirs are a no-op, shipped for discoverability.
+    install -d ${D}${sysconfdir}/wendy-update/pre-install.d
+    install -d ${D}${sysconfdir}/wendy-update/post-install.d
     install -d ${D}${sysconfdir}/wendy-update/health.d
+    install -d ${D}${sysconfdir}/wendy-update/post-commit.d
+    install -d ${D}${sysconfdir}/wendy-update/on-failure.d
 }
 
 # The Go source tree (incl. vendor/) installed by go_do_install lands in the
