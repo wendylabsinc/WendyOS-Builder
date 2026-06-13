@@ -7,7 +7,9 @@
 # <filename> — see tegra_partition_config.bbclass), so on first boot it
 # has no filesystem. This script, run once before data.mount:
 #   1. resolves the partition by GPT label "data",
-#   2. if it already holds an ext4 filesystem -> nothing to do,
+#   2. if it already holds an ext4 filesystem that fits the partition ->
+#      nothing to do (a stale superblock from a prior larger layout does
+#      not count — see the guard below),
 #   3. otherwise: fix the GPT backup header (the image is flashed to a
 #      disk far larger than the layout), grow the partition to fill the
 #      disk, and mkfs.ext4 it.
@@ -36,10 +38,25 @@ fi
 DEV="$(readlink -f "${BYLABEL}")"
 log "data partition: ${DEV}"
 
-# Already initialised? (slot-safe idempotency)
+# Already initialised? (slot-safe idempotency — key on the filesystem,
+# not a per-rootfs stamp). But "blkid reports ext4" is not sufficient: a
+# reflash recreates this partition at its small initial size while leaving
+# behind the superblock of a previously-grown filesystem. blkid still sees
+# ext4, yet the kernel refuses the mount with "bad geometry: block count N
+# exceeds size of device". Treat the fs as initialised only if it also
+# physically fits the partition; otherwise it is a stale superblock and we
+# must grow + reformat (the mkfs.ext4 -F below overwrites it).
 if [ "$(blkid -o value -s TYPE "${DEV}" 2>/dev/null || true)" = "ext4" ]; then
-    log "already ext4; nothing to do"
-    exit 0
+    fs_blocks="$(dumpe2fs -h "${DEV}" 2>/dev/null | awk -F: '/^Block count:/{gsub(/ /,"",$2); print $2}')"
+    fs_bsize="$(dumpe2fs -h "${DEV}" 2>/dev/null | awk -F: '/^Block size:/{gsub(/ /,"",$2); print $2}')"
+    dev_bytes="$(blockdev --getsize64 "${DEV}" 2>/dev/null || echo 0)"
+    if [ -n "${fs_blocks}" ] && [ -n "${fs_bsize}" ] && [ "${dev_bytes}" -gt 0 ] \
+       && [ "$(( fs_blocks * fs_bsize ))" -le "${dev_bytes}" ]; then
+        log "already ext4 and fits device; nothing to do"
+        exit 0
+    fi
+    log "ext4 superblock present but does not fit device (stale from a prior, larger layout); reinitialising"
+    # fall through to grow + mkfs
 fi
 
 # Resolve parent disk + partition number via sysfs (portable across
