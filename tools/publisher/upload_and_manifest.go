@@ -110,6 +110,7 @@ type VersionMetadata struct {
 	RecoveryPath       string     `json:"recovery_path,omitempty"`
 	RecoveryChecksum   string     `json:"recovery_checksum,omitempty"`
 	RecoverySizeBytes  int64      `json:"recovery_size_bytes,omitempty"`
+	BmapPath string `json:"bmap_path,omitempty"`
 	// Storage-specific image paths for devices that produce multiple artifacts
 	// (e.g. jetson-orin-nano which ships both an NVMe and an SD card image).
 	// Path above stays set to the NVMe image for backwards compatibility with
@@ -950,6 +951,7 @@ func main() {
 	localFile := flag.String("file", "", "Local file path to upload")
 	otaUpdateFile := flag.String("ota-update", "", "Local OTA update file path to upload")
 	recoveryFile := flag.String("recovery-file", "", "Optional recovery/tegraflash file path to upload")
+	bmapFile := flag.String("bmap-file", "", "Optional .bmap block-map file to upload alongside the OS image")
 	storage := flag.String("storage", "", "Storage type for multi-artifact devices: nvme or sd (omit for single-storage devices)")
 	updateOnly := flag.Bool("update-only", false, "Only update manifests without uploading")
 	skipMasterManifest := flag.Bool("skip-master-manifest", false, "Skip master manifest update (a separate job will handle it)")
@@ -1113,6 +1115,13 @@ func main() {
 					log.WithError(err).Fatal("Invalid recovery file")
 				}
 			}
+
+			// Validate bmap file if provided
+			if *bmapFile != "" {
+				if err := validateFileExists(*bmapFile); err != nil {
+					log.WithError(err).Fatal("Invalid bmap file")
+				}
+			}
 		}
 	}
 
@@ -1194,6 +1203,7 @@ func main() {
 		updateManifests(
 			ctx, bucket, entry.Device, entry.Version,
 			entry.FilePath, entry.FileSize, entry.FileChecksum,
+			entry.BmapPath,
 			entry.OTAUpdatePath, entry.OTAUpdateSize, entry.OTAUpdateChecksum,
 			entry.RecoveryPath, entry.RecoverySize, entry.RecoveryChecksum,
 			entry.Storage, entry.Nightly, entry.Stability, *notifyDiscord, true,
@@ -1358,6 +1368,12 @@ func main() {
 			recoveryUploadChan = uploadFileAsync(ctx, bucket, recoveryResult.compressedPath, *deviceType, *version)
 		}
 
+		// bmap is a small XML file; upload it in parallel with the others.
+		var bmapUploadChan <-chan uploadResult
+		if *bmapFile != "" {
+			bmapUploadChan = uploadFileAsync(ctx, bucket, *bmapFile, *deviceType, *version)
+		}
+
 		// Wait for uploads to complete
 		var mainUpload uploadResult
 		if mainUploadChan != nil {
@@ -1386,6 +1402,15 @@ func main() {
 			log.Info("Recovery file uploaded successfully")
 		}
 
+		var bmapUpload uploadResult
+		if bmapUploadChan != nil {
+			bmapUpload = <-bmapUploadChan
+			if bmapUpload.err != nil {
+				log.WithError(bmapUpload.err).Fatal("Failed to upload bmap file")
+			}
+			log.Info("Bmap file uploaded successfully")
+		}
+
 		// In upload-only mode the manifests are deliberately untouched: write
 		// the entry file for the publish job and stop here.
 		if *uploadOnly {
@@ -1398,6 +1423,7 @@ func main() {
 				FilePath:          mainUpload.path,
 				FileSize:          mainUpload.size,
 				FileChecksum:      mainResult.checksum,
+				BmapPath:          bmapUpload.path,
 				OTAUpdatePath:     otaUpdateUpload.path,
 				OTAUpdateSize:     otaUpdateUpload.size,
 				OTAUpdateChecksum: otaUpdateResult.checksum,
@@ -1416,6 +1442,7 @@ func main() {
 		updateManifests(
 			ctx, bucket, *deviceType, *version,
 			mainUpload.path, mainUpload.size, mainResult.checksum,
+			bmapUpload.path,
 			otaUpdateUpload.path, otaUpdateUpload.size, otaUpdateResult.checksum,
 			recoveryUpload.path, recoveryUpload.size, recoveryResult.checksum,
 			*storage, *nightly, *stability, *notifyDiscord, *skipMasterManifest,
@@ -1492,7 +1519,7 @@ func main() {
 			recoverySize = recoveryAttrs.Size
 		}
 
-		updateManifests(ctx, bucket, *deviceType, *version, imagePath, attrs.Size, mainChecksum, otaUpdatePath, otaUpdateSize, otaUpdateChecksum, recoveryPath, recoverySize, recoveryChecksum, *storage, *nightly, *stability, *notifyDiscord, *skipMasterManifest)
+		updateManifests(ctx, bucket, *deviceType, *version, imagePath, attrs.Size, mainChecksum, "", otaUpdatePath, otaUpdateSize, otaUpdateChecksum, recoveryPath, recoverySize, recoveryChecksum, *storage, *nightly, *stability, *notifyDiscord, *skipMasterManifest)
 	}
 }
 
@@ -1667,7 +1694,7 @@ func uploadFile(ctx context.Context, bucket *storage.BucketHandle, localPath, de
 	return destinationPath, nil
 }
 
-func updateManifests(ctx context.Context, bucket *storage.BucketHandle, deviceType, version, filePath string, fileSize int64, fileChecksum string, otaUpdatePath string, otaUpdateSize int64, otaUpdateChecksum string, recoveryPath string, recoverySize int64, recoveryChecksum string, storage string, isNightly bool, stability string, notifyDiscord bool, skipMasterManifest bool) {
+func updateManifests(ctx context.Context, bucket *storage.BucketHandle, deviceType, version, filePath string, fileSize int64, fileChecksum string, bmapPath string, otaUpdatePath string, otaUpdateSize int64, otaUpdateChecksum string, recoveryPath string, recoverySize int64, recoveryChecksum string, storage string, isNightly bool, stability string, notifyDiscord bool, skipMasterManifest bool) {
 	logger := log.WithFields(logrus.Fields{
 		"device_type":     deviceType,
 		"version":         version,
@@ -1693,7 +1720,7 @@ func updateManifests(ctx context.Context, bucket *storage.BucketHandle, deviceTy
 
 	if skipMasterManifest {
 		logger.Info("Updating device manifest (master manifest will be updated by a separate publish job)")
-		if err := updateDeviceManifest(ctx, deviceLogger, bucket, deviceType, version, filePath, fileSize, fileChecksum, otaUpdatePath, otaUpdateSize, otaUpdateChecksum, recoveryPath, recoverySize, recoveryChecksum, storage, isNightly); err != nil {
+		if err := updateDeviceManifest(ctx, deviceLogger, bucket, deviceType, version, filePath, fileSize, fileChecksum, bmapPath, otaUpdatePath, otaUpdateSize, otaUpdateChecksum, recoveryPath, recoverySize, recoveryChecksum, storage, isNightly); err != nil {
 			logger.WithError(err).Fatal("Failed to update device manifest")
 		}
 	} else {
@@ -1715,7 +1742,7 @@ func updateManifests(ctx context.Context, bucket *storage.BucketHandle, deviceTy
 
 		go func() {
 			defer wg.Done()
-			deviceErrChan <- updateDeviceManifest(ctx, deviceLogger, bucket, deviceType, version, filePath, fileSize, fileChecksum, otaUpdatePath, otaUpdateSize, otaUpdateChecksum, recoveryPath, recoverySize, recoveryChecksum, storage, isNightly)
+			deviceErrChan <- updateDeviceManifest(ctx, deviceLogger, bucket, deviceType, version, filePath, fileSize, fileChecksum, bmapPath, otaUpdatePath, otaUpdateSize, otaUpdateChecksum, recoveryPath, recoverySize, recoveryChecksum, storage, isNightly)
 		}()
 
 		go func() {
@@ -1746,7 +1773,7 @@ func updateManifests(ctx context.Context, bucket *storage.BucketHandle, deviceTy
 	}
 }
 
-func updateDeviceManifest(ctx context.Context, logger *logrus.Entry, bucket *storage.BucketHandle, deviceType, version, filePath string, fileSize int64, fileChecksum string, otaUpdatePath string, otaUpdateSize int64, otaUpdateChecksum string, recoveryPath string, recoverySize int64, recoveryChecksum string, storageType string, isNightly bool) error {
+func updateDeviceManifest(ctx context.Context, logger *logrus.Entry, bucket *storage.BucketHandle, deviceType, version, filePath string, fileSize int64, fileChecksum string, bmapPath string, otaUpdatePath string, otaUpdateSize int64, otaUpdateChecksum string, recoveryPath string, recoverySize int64, recoveryChecksum string, storageType string, isNightly bool) error {
 	manifestPath := fmt.Sprintf("manifests/%s.json", deviceType)
 	logger = logger.WithField("manifest_path", manifestPath)
 	logger.Info("Processing device manifest")
@@ -1892,6 +1919,11 @@ func updateDeviceManifest(ctx context.Context, logger *logrus.Entry, bucket *sto
 					"checksum": fileChecksum,
 				}).Info("Updating OS image metadata")
 			}
+		}
+
+		// Update bmap path if provided
+		if bmapPath != "" {
+			versionMetadata.BmapPath = bmapPath
 		}
 
 		// Update OTA update fields only if provided

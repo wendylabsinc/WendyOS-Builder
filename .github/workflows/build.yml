@@ -613,16 +613,21 @@ jobs:
         run: |
           TOKEN=$(gcloud auth print-access-token)
 
+          BMAP_FILE=""
           if [[ "$MACHINE" != raspberry* && "$STORAGE" == "nvme" ]]; then
             # Covers Thor (wendyos-nvme.img from make-thor-nvme-img.py) and all
             # other NVMe Jetsons (wendyos-nvme.img from doexternal.sh).
             IMAGE_FILE="$GITHUB_WORKSPACE/wendyos-nvme.img"
+            bmaptool create "$IMAGE_FILE" > "${IMAGE_FILE}.bmap"
+            BMAP_FILE="${IMAGE_FILE}.bmap"
           elif [[ "$MACHINE" != raspberry* && "$STORAGE" == "emmc" ]]; then
             # No offline disk image for eMMC (meta-tegra doesn't generate dosdcard.sh for
             # sdmmc_user devices). The tegraflash tarball is the recovery-flash artifact.
             IMAGE_FILE="$DEPLOY_DIR/wendyos-image-${MACHINE}.tegraflash.tar.gz"
           elif [[ "$MACHINE" != raspberry* && "$STORAGE" == "sd" ]]; then
             IMAGE_FILE="$GITHUB_WORKSPACE/wendyos-sd.img"
+            bmaptool create "$IMAGE_FILE" > "${IMAGE_FILE}.bmap"
+            BMAP_FILE="${IMAGE_FILE}.bmap"
           else
             # RPi: Mender emits .sdimg; pre-Mender RPi builds produced
             # .rootfs.wic. Prefer sdimg, fall back to wic.
@@ -631,10 +636,15 @@ jobs:
               # gzip fails with ELOOP when the symlink chain is too deep.
               # Use -f to suppress the "has N other links" error from Yocto hard links.
               SDIMG_REAL=$(readlink -f "$DEPLOY_DIR/wendyos-image-${MACHINE}.sdimg")
+              # Generate bmap before gzip — bmaptool operates on the raw image.
+              bmaptool create "$SDIMG_REAL" > "${SDIMG_REAL}.bmap"
+              BMAP_FILE="${SDIMG_REAL}.bmap"
               gzip -f "$SDIMG_REAL"
               IMAGE_FILE="${SDIMG_REAL}.gz"
             else
               IMAGE_FILE="$DEPLOY_DIR/wendyos-image-${MACHINE}.rootfs.wic"
+              bmaptool create "$IMAGE_FILE" > "${IMAGE_FILE}.bmap"
+              BMAP_FILE="${IMAGE_FILE}.bmap"
             fi
           fi
 
@@ -671,6 +681,11 @@ jobs:
           # records the correct per-storage-type paths.
           if [[ "$DEVICE" == "jetson-orin-nano" || "$DEVICE" == "jetson-agx-orin" || "$DEVICE" == "raspberry-pi-5" ]]; then
             ARGS+=(--storage "$STORAGE")
+          fi
+
+          # Include bmap if one was generated for this image type.
+          if [[ -n "$BMAP_FILE" ]]; then
+            ARGS+=(--bmap-file "$BMAP_FILE")
           fi
 
           # Include Mender OTA artifact if the build produced one
