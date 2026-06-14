@@ -1,7 +1,7 @@
-SUMMARY = "First-boot /data partition setup for the wendy-update OTA stack"
+SUMMARY = "First-boot /data partition setup for the wendyos-update OTA stack"
 DESCRIPTION = "Formats and grows the persistent /data partition on first \
 boot, and mounts it at /data. Replaces Mender's mender-grow-data and fstab \
-entry for boards using the wendy-update OTA client (WENDYOS_OTA = wendy). \
+entry for boards using the wendyos-update OTA client (WENDYOS_OTA = wendy). \
 The partition is carved allocated-empty by tegra_partition_config.bbclass; \
 this initialises it. Idempotency keys on the on-disk ext4 filesystem, not a \
 per-rootfs stamp, so an A/B rootfs swap can never wipe /data."

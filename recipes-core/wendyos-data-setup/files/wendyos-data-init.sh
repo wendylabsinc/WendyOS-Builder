@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # First-boot initialisation of the persistent /data partition for the
-# wendy-update OTA stack (replaces Mender's mender-grow-data).
+# wendyos-update OTA stack (replaces Mender's mender-grow-data).
 #
 # The partition is carved into the flash layout allocated-empty (no
 # <filename> — see tegra_partition_config.bbclass), so on first boot it

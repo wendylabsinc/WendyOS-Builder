@@ -1,9 +1,9 @@
-# Tegra T264 (Thor): wendy-update OTA (no Mender, no UEFI capsule update yet).
+# Tegra T264 (Thor): wendyos-update OTA (no Mender, no UEFI capsule update yet).
 # WENDYOS_UPDATE_BOOTLOADER gates the Mender capsule artefact; Thor uses
-# wendy-update with rootfs-only swaps for now, so keep it off.
+# wendyos-update with rootfs-only swaps for now, so keep it off.
 WENDYOS_UPDATE_BOOTLOADER = "0"
 
-# Thor runs the wendy-update OTA stack (wendyos.conf defaults tegra264 to
+# Thor runs the wendyos-update OTA stack (wendyos.conf defaults tegra264 to
 # "none"; override here). This pulls in the client + data-setup + the
 # .wendy artifact (conf/distro/include/wendyos-update.inc) and implies the
 # persistent /data partition (no separate WENDYOS_DATA_PART needed — its

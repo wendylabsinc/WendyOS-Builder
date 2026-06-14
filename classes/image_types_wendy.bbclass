@@ -1,9 +1,9 @@
 # image_types_wendy.bbclass
 #
 # Defines the "wendy" IMAGE_FSTYPE: a .wendy OTA artifact for the
-# wendy-update client, produced by running `wendy-update pack` on the
+# wendyos-update client, produced by running `wendyos-update pack` on the
 # image's ext4 rootfs. Replaces mender-artifactimg.bbclass for boards
-# using the wendy-update OTA stack (WENDYOS_OTA = "wendy").
+# using the wendyos-update OTA stack (WENDYOS_OTA = "wendy").
 #
 # Enable per build by adding to the image's fstypes + classes (done in
 # the OTA wiring, gated on WENDYOS_OTA == "wendy"):
@@ -18,7 +18,7 @@
 WENDY_ARTIFACTIMG_FSTYPE ?= "ext4"
 IMAGE_TYPEDEP:wendy:append = " ${WENDY_ARTIFACTIMG_FSTYPE}"
 
-# `wendy-update pack` runs on the build host (native variant of the
+# `wendyos-update pack` runs on the build host (native variant of the
 # client recipe — BBCLASSEXTEND = "native").
 do_image_wendy[depends] += "wendyos-update-native:do_populate_sysroot"
 
@@ -36,7 +36,7 @@ IMAGE_CMD:wendy () {
     if [ -z "${WENDYOS_BOARD_ID}" ]; then
         bbfatal "image_types_wendy: WENDYOS_BOARD_ID is unset; cannot set the artifact's compatible device"
     fi
-    wendy-update pack \
+    wendyos-update pack \
         --image ${IMGDEPLOYDIR}/${IMAGE_LINK_NAME}.${WENDY_ARTIFACTIMG_FSTYPE} \
         --name ${WENDY_ARTIFACT_NAME} \
         --version ${WENDY_ARTIFACT_VERSION} \
