@@ -131,6 +131,14 @@ type VersionMetadata struct {
 	// offline image, hence no bmap.
 	NVMEBmapPath   string `json:"nvme_bmap_path,omitempty"`
 	SDCardBmapPath string `json:"sd_bmap_path,omitempty"`
+	// Storage-specific OTA (Mender) artifacts. The NVMe and SD/eMMC builds
+	// produce distinct .mender artifacts whose embedded device_type differs,
+	// so they cannot share a single ota_update_path. The CLI selects
+	// nvme_ota_update_path when the device reports storage_medium=nvme;
+	// otherwise it uses ota_update_path.
+	NVMEOTAUpdatePath      string `json:"nvme_ota_update_path,omitempty"`
+	NVMEOTAUpdateChecksum  string `json:"nvme_ota_update_checksum,omitempty"`
+	NVMEOTAUpdateSizeBytes int64  `json:"nvme_ota_update_size_bytes,omitempty"`
 }
 
 // MasterManifest represents the top-level manifest
@@ -1806,6 +1814,35 @@ func setBmapPath(meta *VersionMetadata, storageType, bmapPath string) {
 	}
 }
 
+// applyOTAUpdate records an OTA (Mender) artifact in the version metadata,
+// routing NVMe artifacts to the NVMe-specific fields. The NVMe and SD/eMMC
+// builds emit distinct .mender artifacts whose embedded device_type differs,
+// so they must not share ota_update_path — otherwise whichever variant
+// publishes last wins and the other variant's devices reject the artifact
+// ("Artifact device type doesn't match"). For "nvme" the artifact also
+// populates ota_update_path as a default, but only when it is unset, so a
+// single-variant NVMe board still exposes an OTA without clobbering a
+// previously published SD/eMMC artifact.
+func applyOTAUpdate(meta *VersionMetadata, storageType, otaPath, otaChecksum string, otaSize int64) {
+	if otaPath == "" {
+		return
+	}
+	if storageType == "nvme" {
+		meta.NVMEOTAUpdatePath = otaPath
+		meta.NVMEOTAUpdateChecksum = otaChecksum
+		meta.NVMEOTAUpdateSizeBytes = otaSize
+		if meta.OTAUpdatePath == "" {
+			meta.OTAUpdatePath = otaPath
+			meta.OTAUpdateChecksum = otaChecksum
+			meta.OTAUpdateSizeBytes = otaSize
+		}
+		return
+	}
+	meta.OTAUpdatePath = otaPath
+	meta.OTAUpdateChecksum = otaChecksum
+	meta.OTAUpdateSizeBytes = otaSize
+}
+
 // copyManifestArtifact copies one artifact (image, block map, …) from srcPath
 // into the stable version's image directory and returns the new path. It
 // returns "" when srcPath is empty, malformed, or the copy fails — the caller
@@ -1981,12 +2018,13 @@ func updateDeviceManifest(ctx context.Context, logger *logrus.Entry, bucket *sto
 		// top-level path (the orin-nano NVMe-vs-SD mismatch).
 		setBmapPath(&versionMetadata, storageType, bmapPath)
 
-		// Update OTA update fields only if provided
+		// Update OTA update fields only if provided. NVMe artifacts are routed
+		// to the NVMe-specific field so storage variants don't clobber each
+		// other (see applyOTAUpdate).
 		if otaUpdatePath != "" {
-			versionMetadata.OTAUpdatePath = otaUpdatePath
-			versionMetadata.OTAUpdateChecksum = otaUpdateChecksum
-			versionMetadata.OTAUpdateSizeBytes = otaUpdateSize
+			applyOTAUpdate(&versionMetadata, storageType, otaUpdatePath, otaUpdateChecksum, otaUpdateSize)
 			logger.WithFields(logrus.Fields{
+				"storage":      storageType,
 				"ota_path":     otaUpdatePath,
 				"ota_size":     otaUpdateSize,
 				"ota_checksum": otaUpdateChecksum,
