@@ -562,3 +562,64 @@ func TestSetBmapPath(t *testing.T) {
 		}
 	})
 }
+
+func TestApplyOTAUpdate(t *testing.T) {
+	const (
+		nvmeOTA = "images/jetson-orin-nano/v1/wendyos-image-jetson-orin-nano-devkit-nvme-wendyos.mender"
+		sdOTA   = "images/jetson-orin-nano/v1/wendyos-image-jetson-orin-nano-devkit-wendyos.mender"
+	)
+
+	t.Run("nvme routes to nvme field and seeds default", func(t *testing.T) {
+		m := &VersionMetadata{}
+		applyOTAUpdate(m, "nvme", nvmeOTA, "ck-nvme", 10)
+		if m.NVMEOTAUpdatePath != nvmeOTA {
+			t.Errorf("NVMEOTAUpdatePath = %q, want %q", m.NVMEOTAUpdatePath, nvmeOTA)
+		}
+		if m.OTAUpdatePath != nvmeOTA {
+			t.Errorf("OTAUpdatePath = %q, want NVMe seeded as default when unset", m.OTAUpdatePath)
+		}
+	})
+
+	t.Run("sd routes to default ota field", func(t *testing.T) {
+		m := &VersionMetadata{}
+		applyOTAUpdate(m, "sd", sdOTA, "ck-sd", 20)
+		if m.OTAUpdatePath != sdOTA {
+			t.Errorf("OTAUpdatePath = %q, want %q", m.OTAUpdatePath, sdOTA)
+		}
+		if m.NVMEOTAUpdatePath != "" {
+			t.Errorf("NVMEOTAUpdatePath = %q, want empty for sd", m.NVMEOTAUpdatePath)
+		}
+	})
+
+	t.Run("sd then nvme keeps both distinct", func(t *testing.T) {
+		m := &VersionMetadata{}
+		applyOTAUpdate(m, "sd", sdOTA, "ck-sd", 20)
+		applyOTAUpdate(m, "nvme", nvmeOTA, "ck-nvme", 10)
+		if m.OTAUpdatePath != sdOTA {
+			t.Errorf("OTAUpdatePath = %q, want SD preserved (not clobbered by nvme)", m.OTAUpdatePath)
+		}
+		if m.NVMEOTAUpdatePath != nvmeOTA {
+			t.Errorf("NVMEOTAUpdatePath = %q, want %q", m.NVMEOTAUpdatePath, nvmeOTA)
+		}
+	})
+
+	t.Run("nvme then sd keeps both distinct", func(t *testing.T) {
+		m := &VersionMetadata{}
+		applyOTAUpdate(m, "nvme", nvmeOTA, "ck-nvme", 10)
+		applyOTAUpdate(m, "sd", sdOTA, "ck-sd", 20)
+		if m.OTAUpdatePath != sdOTA {
+			t.Errorf("OTAUpdatePath = %q, want SD to own the default", m.OTAUpdatePath)
+		}
+		if m.NVMEOTAUpdatePath != nvmeOTA {
+			t.Errorf("NVMEOTAUpdatePath = %q, want %q", m.NVMEOTAUpdatePath, nvmeOTA)
+		}
+	})
+
+	t.Run("empty path is a no-op", func(t *testing.T) {
+		m := &VersionMetadata{OTAUpdatePath: sdOTA}
+		applyOTAUpdate(m, "nvme", "", "", 0)
+		if m.OTAUpdatePath != sdOTA || m.NVMEOTAUpdatePath != "" {
+			t.Errorf("empty path mutated metadata: %+v", m)
+		}
+	})
+}
