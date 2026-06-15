@@ -200,7 +200,7 @@ python do_modify_partition_layout() {
         #   WENDYOS_DATA_PART = "1" + not    -> 'data' with NO filename
         #     Mender (e.g. WENDYOS_OTA=wendy)   (allocated empty at flash time;
         #                                      a first-boot unit formats and
-        #                                      expands it — wendy-update OTA)
+        #                                      expands it — wendyos-update OTA)
         #   WENDYOS_DATA_PART = "0"          -> skipped entirely
         #
         # The no-filename rule is what makes the Mender-free path flashable:
@@ -275,7 +275,7 @@ python do_modify_partition_layout() {
                 device.insert(idx, data_part)
                 bb.note('  Created "data" partition (id=%d)' % data_part_num)
         elif data_part_enabled:
-            # Mender-free data partition (JP7 / wendy-update OTA).
+            # Mender-free data partition (JP7 / wendyos-update OTA).
             # Same placement and numbering as the Mender path, but no
             # <filename> — allocated empty at flash time, formatted on
             # first boot.

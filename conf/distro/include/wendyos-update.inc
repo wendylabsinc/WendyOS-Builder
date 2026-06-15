@@ -1,12 +1,12 @@
-# wendy-update OTA stack. Required from wendyos.conf when
+# wendyos-update OTA stack. Required from wendyos.conf when
 # WENDYOS_OTA == "wendy". Parallels conf/distro/include/mender.inc.
 #
 # Pulls in the on-device pieces and the build-side artifact:
-#   - wendyos-update:      the OTA client (/usr/bin/wendy-update + the
+#   - wendyos-update:      the OTA client (/usr/bin/wendyos-update + the
 #                          boot-verify and auto-commit systemd units).
 #   - wendyos-data-setup:  first-boot /data format/grow + the data.mount.
 #   - image_types_wendy:   defines the "wendy" IMAGE_FSTYPE that produces
-#                          the .wendy OTA artifact via `wendy-update pack`.
+#                          the .wendy OTA artifact via `wendyos-update pack`.
 
 # Scope to the product image only (:pn-wendyos-image): this inc is
 # required at distro scope, so a bare :append would also hit the Tegra
