@@ -21,6 +21,8 @@ import (
 	"time"
 
 	"cloud.google.com/go/storage"
+	seekable "github.com/SaveTheRbtz/zstd-seekable-format-go/pkg"
+	"github.com/klauspost/compress/zstd"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/oauth2"
 	"google.golang.org/api/googleapi"
@@ -131,6 +133,20 @@ type VersionMetadata struct {
 	// offline image, hence no bmap.
 	NVMEBmapPath   string `json:"nvme_bmap_path,omitempty"`
 	SDCardBmapPath string `json:"sd_bmap_path,omitempty"`
+	// Seekable-zstd images. The top-level ZstPath mirrors Path/BmapPath
+	// semantics (NVMe wins, SD fills only when empty, eMMC has no offline
+	// image hence no zst). Each zst carries a checksum and size so the CLI
+	// can verify integrity before and after download without a separate bmap
+	// file.
+	ZstPath            string `json:"zst_path,omitempty"`
+	ZstChecksum        string `json:"zst_checksum,omitempty"`
+	ZstSizeBytes       int64  `json:"zst_size_bytes,omitempty"`
+	NVMEZstPath        string `json:"nvme_zst_path,omitempty"`
+	NVMEZstChecksum    string `json:"nvme_zst_checksum,omitempty"`
+	NVMEZstSizeBytes   int64  `json:"nvme_zst_size_bytes,omitempty"`
+	SDCardZstPath      string `json:"sd_zst_path,omitempty"`
+	SDCardZstChecksum  string `json:"sd_zst_checksum,omitempty"`
+	SDCardZstSizeBytes int64  `json:"sd_zst_size_bytes,omitempty"`
 }
 
 // MasterManifest represents the top-level manifest
@@ -1211,6 +1227,7 @@ func main() {
 			ctx, bucket, entry.Device, entry.Version,
 			entry.FilePath, entry.FileSize, entry.FileChecksum,
 			entry.BmapPath,
+			entry.ZstPath, entry.ZstChecksum, entry.ZstSize,
 			entry.OTAUpdatePath, entry.OTAUpdateSize, entry.OTAUpdateChecksum,
 			entry.RecoveryPath, entry.RecoverySize, entry.RecoveryChecksum,
 			entry.Storage, entry.Nightly, entry.Stability, *notifyDiscord, true,
@@ -1381,6 +1398,30 @@ func main() {
 			bmapUploadChan = uploadFileAsync(ctx, bucket, *bmapFile, *deviceType, *version)
 		}
 
+		// Generate and upload a seekable-zstd image for OS images (the
+		// .img/.wic/.sdimg → zip case). OTA and recovery files use their own
+		// compression formats and are not wrapped in .zst.
+		var zstUploadChan <-chan uploadResult
+		if *localFile != "" && mainResult.compressedPath != "" {
+			rawPath, symErr := filepath.EvalSymlinks(*localFile)
+			if symErr != nil {
+				rawPath = *localFile
+			}
+			rawExt := strings.ToLower(filepath.Ext(rawPath))
+			if rawExt == ".img" || rawExt == ".wic" || rawExt == ".sdimg" {
+				zstPath := rawPath + ".zst"
+				log.WithFields(logrus.Fields{
+					"src": rawPath,
+					"dst": zstPath,
+				}).Info("Generating seekable-zstd image...")
+				if zstErr := compressSeekableZstd(rawPath, zstPath); zstErr != nil {
+					log.WithError(zstErr).Fatal("Failed to generate seekable-zstd image")
+				}
+				log.Info("Seekable-zstd image generated, uploading...")
+				zstUploadChan = uploadFileAsync(ctx, bucket, zstPath, *deviceType, *version)
+			}
+		}
+
 		// Wait for uploads to complete
 		var mainUpload uploadResult
 		if mainUploadChan != nil {
@@ -1418,6 +1459,30 @@ func main() {
 			log.Info("Bmap file uploaded successfully")
 		}
 
+		var zstUpload uploadResult
+		if zstUploadChan != nil {
+			zstUpload = <-zstUploadChan
+			if zstUpload.err != nil {
+				log.WithError(zstUpload.err).Fatal("Failed to upload seekable-zstd file")
+			}
+			log.Info("Seekable-zstd file uploaded successfully")
+		}
+
+		// The checksum of the uploaded .zst (calculated from the local file).
+		var zstChecksum string
+		if zstUpload.path != "" {
+			rawPath, symErr := filepath.EvalSymlinks(*localFile)
+			if symErr != nil {
+				rawPath = *localFile
+			}
+			zstLocalPath := rawPath + ".zst"
+			if cs, csErr := calculateChecksum(zstLocalPath); csErr == nil {
+				zstChecksum = cs
+			} else {
+				log.WithError(csErr).Warn("Failed to calculate zst checksum; zst_checksum will be empty")
+			}
+		}
+
 		// In upload-only mode the manifests are deliberately untouched: write
 		// the entry file for the publish job and stop here.
 		if *uploadOnly {
@@ -1431,6 +1496,9 @@ func main() {
 				FileSize:          mainUpload.size,
 				FileChecksum:      mainResult.checksum,
 				BmapPath:          bmapUpload.path,
+				ZstPath:           zstUpload.path,
+				ZstChecksum:       zstChecksum,
+				ZstSize:           zstUpload.size,
 				OTAUpdatePath:     otaUpdateUpload.path,
 				OTAUpdateSize:     otaUpdateUpload.size,
 				OTAUpdateChecksum: otaUpdateResult.checksum,
@@ -1450,6 +1518,7 @@ func main() {
 			ctx, bucket, *deviceType, *version,
 			mainUpload.path, mainUpload.size, mainResult.checksum,
 			bmapUpload.path,
+			zstUpload.path, zstChecksum, zstUpload.size,
 			otaUpdateUpload.path, otaUpdateUpload.size, otaUpdateResult.checksum,
 			recoveryUpload.path, recoveryUpload.size, recoveryResult.checksum,
 			*storage, *nightly, *stability, *notifyDiscord, *skipMasterManifest,
@@ -1526,7 +1595,7 @@ func main() {
 			recoverySize = recoveryAttrs.Size
 		}
 
-		updateManifests(ctx, bucket, *deviceType, *version, imagePath, attrs.Size, mainChecksum, "", otaUpdatePath, otaUpdateSize, otaUpdateChecksum, recoveryPath, recoverySize, recoveryChecksum, *storage, *nightly, *stability, *notifyDiscord, *skipMasterManifest)
+		updateManifests(ctx, bucket, *deviceType, *version, imagePath, attrs.Size, mainChecksum, "", "", "", 0, otaUpdatePath, otaUpdateSize, otaUpdateChecksum, recoveryPath, recoverySize, recoveryChecksum, *storage, *nightly, *stability, *notifyDiscord, *skipMasterManifest)
 	}
 }
 
@@ -1701,7 +1770,7 @@ func uploadFile(ctx context.Context, bucket *storage.BucketHandle, localPath, de
 	return destinationPath, nil
 }
 
-func updateManifests(ctx context.Context, bucket *storage.BucketHandle, deviceType, version, filePath string, fileSize int64, fileChecksum string, bmapPath string, otaUpdatePath string, otaUpdateSize int64, otaUpdateChecksum string, recoveryPath string, recoverySize int64, recoveryChecksum string, storage string, isNightly bool, stability string, notifyDiscord bool, skipMasterManifest bool) {
+func updateManifests(ctx context.Context, bucket *storage.BucketHandle, deviceType, version, filePath string, fileSize int64, fileChecksum string, bmapPath string, zstPath, zstChecksum string, zstSize int64, otaUpdatePath string, otaUpdateSize int64, otaUpdateChecksum string, recoveryPath string, recoverySize int64, recoveryChecksum string, storage string, isNightly bool, stability string, notifyDiscord bool, skipMasterManifest bool) {
 	logger := log.WithFields(logrus.Fields{
 		"device_type":     deviceType,
 		"version":         version,
@@ -1727,7 +1796,7 @@ func updateManifests(ctx context.Context, bucket *storage.BucketHandle, deviceTy
 
 	if skipMasterManifest {
 		logger.Info("Updating device manifest (master manifest will be updated by a separate publish job)")
-		if err := updateDeviceManifest(ctx, deviceLogger, bucket, deviceType, version, filePath, fileSize, fileChecksum, bmapPath, otaUpdatePath, otaUpdateSize, otaUpdateChecksum, recoveryPath, recoverySize, recoveryChecksum, storage, isNightly); err != nil {
+		if err := updateDeviceManifest(ctx, deviceLogger, bucket, deviceType, version, filePath, fileSize, fileChecksum, bmapPath, zstPath, zstChecksum, zstSize, otaUpdatePath, otaUpdateSize, otaUpdateChecksum, recoveryPath, recoverySize, recoveryChecksum, storage, isNightly); err != nil {
 			logger.WithError(err).Fatal("Failed to update device manifest")
 		}
 	} else {
@@ -1749,7 +1818,7 @@ func updateManifests(ctx context.Context, bucket *storage.BucketHandle, deviceTy
 
 		go func() {
 			defer wg.Done()
-			deviceErrChan <- updateDeviceManifest(ctx, deviceLogger, bucket, deviceType, version, filePath, fileSize, fileChecksum, bmapPath, otaUpdatePath, otaUpdateSize, otaUpdateChecksum, recoveryPath, recoverySize, recoveryChecksum, storage, isNightly)
+			deviceErrChan <- updateDeviceManifest(ctx, deviceLogger, bucket, deviceType, version, filePath, fileSize, fileChecksum, bmapPath, zstPath, zstChecksum, zstSize, otaUpdatePath, otaUpdateSize, otaUpdateChecksum, recoveryPath, recoverySize, recoveryChecksum, storage, isNightly)
 		}()
 
 		go func() {
@@ -1806,6 +1875,97 @@ func setBmapPath(meta *VersionMetadata, storageType, bmapPath string) {
 	}
 }
 
+// setZstPath records a seekable-zstd image on the version metadata, mirroring
+// setBmapPath's per-storage logic. The top-level ZstPath mirrors the top-level
+// Path (NVMe wins, SD fills only when empty, eMMC ships no offline image so it
+// has no zst). Unlike bmap, each zst also carries a checksum and size for
+// integrity verification. An empty zstPath is a no-op.
+func setZstPath(meta *VersionMetadata, storageType, zstPath, zstChecksum string, zstSize int64) {
+	if zstPath == "" {
+		return
+	}
+	switch storageType {
+	case "nvme":
+		meta.NVMEZstPath = zstPath
+		meta.NVMEZstChecksum = zstChecksum
+		meta.NVMEZstSizeBytes = zstSize
+		meta.ZstPath = zstPath
+		meta.ZstChecksum = zstChecksum
+		meta.ZstSizeBytes = zstSize
+	case "sd":
+		meta.SDCardZstPath = zstPath
+		meta.SDCardZstChecksum = zstChecksum
+		meta.SDCardZstSizeBytes = zstSize
+		if meta.ZstPath == "" {
+			meta.ZstPath = zstPath
+			meta.ZstChecksum = zstChecksum
+			meta.ZstSizeBytes = zstSize
+		}
+	case "emmc":
+		// No offline image for eMMC, hence no seekable-zstd image.
+	default:
+		meta.ZstPath = zstPath
+		meta.ZstChecksum = zstChecksum
+		meta.ZstSizeBytes = zstSize
+	}
+}
+
+// seekableFrameSize is the uncompressed size of each independent zstd frame
+// written by compressSeekableZstd. 4 MiB balances random-access granularity
+// against seek-table overhead.
+const seekableFrameSize = 4 << 20 // 4 MiB
+
+// compressSeekableZstd writes srcPath as a seekable-zstd file to dstPath.
+// Each frame covers seekableFrameSize uncompressed bytes, so the CLI can
+// random-access the image without decompressing from the start.
+func compressSeekableZstd(srcPath, dstPath string) error {
+	in, err := os.Open(srcPath)
+	if err != nil {
+		return fmt.Errorf("opening image: %w", err)
+	}
+	defer in.Close()
+
+	out, err := os.Create(dstPath)
+	if err != nil {
+		return fmt.Errorf("creating zst: %w", err)
+	}
+	defer out.Close()
+
+	enc, err := zstd.NewWriter(nil)
+	if err != nil {
+		return err
+	}
+	defer enc.Close()
+
+	w, err := seekable.NewWriter(out, enc)
+	if err != nil {
+		return err
+	}
+
+	buf := make([]byte, seekableFrameSize)
+	for {
+		n, rerr := io.ReadFull(in, buf)
+		if n > 0 {
+			if _, werr := w.Write(buf[:n]); werr != nil {
+				w.Close()
+				return werr
+			}
+		}
+		if rerr == io.EOF || rerr == io.ErrUnexpectedEOF {
+			break
+		}
+		if rerr != nil {
+			w.Close()
+			return rerr
+		}
+	}
+
+	if err := w.Close(); err != nil {
+		return err
+	}
+	return out.Close()
+}
+
 // copyManifestArtifact copies one artifact (image, block map, …) from srcPath
 // into the stable version's image directory and returns the new path. It
 // returns "" when srcPath is empty, malformed, or the copy fails — the caller
@@ -1827,7 +1987,7 @@ func copyManifestArtifact(ctx context.Context, logger *logrus.Entry, bucket *sto
 	return destPath
 }
 
-func updateDeviceManifest(ctx context.Context, logger *logrus.Entry, bucket *storage.BucketHandle, deviceType, version, filePath string, fileSize int64, fileChecksum string, bmapPath string, otaUpdatePath string, otaUpdateSize int64, otaUpdateChecksum string, recoveryPath string, recoverySize int64, recoveryChecksum string, storageType string, isNightly bool) error {
+func updateDeviceManifest(ctx context.Context, logger *logrus.Entry, bucket *storage.BucketHandle, deviceType, version, filePath string, fileSize int64, fileChecksum string, bmapPath string, zstPath, zstChecksum string, zstSize int64, otaUpdatePath string, otaUpdateSize int64, otaUpdateChecksum string, recoveryPath string, recoverySize int64, recoveryChecksum string, storageType string, isNightly bool) error {
 	manifestPath := fmt.Sprintf("manifests/%s.json", deviceType)
 	logger = logger.WithField("manifest_path", manifestPath)
 	logger.Info("Processing device manifest")
@@ -1980,6 +2140,8 @@ func updateDeviceManifest(ctx context.Context, logger *logrus.Entry, bucket *sto
 		// it, leaving top-level bmap_path describing a different image than
 		// top-level path (the orin-nano NVMe-vs-SD mismatch).
 		setBmapPath(&versionMetadata, storageType, bmapPath)
+		// Same per-storage routing for the seekable-zstd image.
+		setZstPath(&versionMetadata, storageType, zstPath, zstChecksum, zstSize)
 
 		// Update OTA update fields only if provided
 		if otaUpdatePath != "" {
@@ -2499,26 +2661,85 @@ func promoteNightlyToStable(ctx context.Context, bucket *storage.BucketHandle, d
 		topBmapDest = copyManifestArtifact(ctx, logger, bucket, sourceVersionMeta.BmapPath, deviceType, stableVersion, "block map")
 	}
 
+	// Copy seekable-zstd images, mirroring bmap promotion. Each zst follows
+	// its image to the stable path and retains its checksum/size metadata.
+	nvmeZstDest := copyManifestArtifact(ctx, logger, bucket, sourceVersionMeta.NVMEZstPath, deviceType, stableVersion, "NVMe seekable-zstd")
+	sdZstDest := copyManifestArtifact(ctx, logger, bucket, sourceVersionMeta.SDCardZstPath, deviceType, stableVersion, "SD card seekable-zstd")
+	var topZstDest string
+	switch {
+	case nvmeZstDest != "":
+		topZstDest = nvmeZstDest
+	case sdZstDest != "":
+		topZstDest = sdZstDest
+	case sourceVersionMeta.ZstPath != "":
+		topZstDest = copyManifestArtifact(ctx, logger, bucket, sourceVersionMeta.ZstPath, deviceType, stableVersion, "seekable-zstd")
+	}
+
 	// Create new stable version entry with promotion metadata
 	promotedAt := time.Now()
 	sourceVersion := nightlyVersion
 	stableVersionMeta := VersionMetadata{
-		ReleaseDate:        sourceVersionMeta.ReleaseDate,
-		Path:               destinationPath,
-		Checksum:           sourceVersionMeta.Checksum,
-		SizeBytes:          sourceVersionMeta.SizeBytes,
-		Changelog:          sourceVersionMeta.Changelog,
-		IsLatest:           true,
-		IsNightly:          false,
-		PromotedFrom:       &sourceVersion,
-		PromotedAt:         &promotedAt,
-		NVMEPath:           nvmeDestPath,
-		NVMEChecksum:       nvmeChecksum,
-		SDCardPath:         sdDestPath,
-		SDCardChecksum:     sdChecksum,
-		NVMEBmapPath:       nvmeBmapDest,
-		SDCardBmapPath:     sdBmapDest,
-		BmapPath:           topBmapDest,
+		ReleaseDate:    sourceVersionMeta.ReleaseDate,
+		Path:           destinationPath,
+		Checksum:       sourceVersionMeta.Checksum,
+		SizeBytes:      sourceVersionMeta.SizeBytes,
+		Changelog:      sourceVersionMeta.Changelog,
+		IsLatest:       true,
+		IsNightly:      false,
+		PromotedFrom:   &sourceVersion,
+		PromotedAt:     &promotedAt,
+		NVMEPath:       nvmeDestPath,
+		NVMEChecksum:   nvmeChecksum,
+		SDCardPath:     sdDestPath,
+		SDCardChecksum: sdChecksum,
+		NVMEBmapPath:   nvmeBmapDest,
+		SDCardBmapPath: sdBmapDest,
+		BmapPath:       topBmapDest,
+		ZstPath:        topZstDest,
+		ZstChecksum: func() string {
+			if nvmeZstDest != "" {
+				return sourceVersionMeta.NVMEZstChecksum
+			}
+			if sdZstDest != "" {
+				return sourceVersionMeta.SDCardZstChecksum
+			}
+			return sourceVersionMeta.ZstChecksum
+		}(),
+		ZstSizeBytes: func() int64 {
+			if nvmeZstDest != "" {
+				return sourceVersionMeta.NVMEZstSizeBytes
+			}
+			if sdZstDest != "" {
+				return sourceVersionMeta.SDCardZstSizeBytes
+			}
+			return sourceVersionMeta.ZstSizeBytes
+		}(),
+		NVMEZstPath: nvmeZstDest,
+		NVMEZstChecksum: func() string {
+			if nvmeZstDest != "" {
+				return sourceVersionMeta.NVMEZstChecksum
+			}
+			return ""
+		}(),
+		NVMEZstSizeBytes: func() int64 {
+			if nvmeZstDest != "" {
+				return sourceVersionMeta.NVMEZstSizeBytes
+			}
+			return 0
+		}(),
+		SDCardZstPath: sdZstDest,
+		SDCardZstChecksum: func() string {
+			if sdZstDest != "" {
+				return sourceVersionMeta.SDCardZstChecksum
+			}
+			return ""
+		}(),
+		SDCardZstSizeBytes: func() int64 {
+			if sdZstDest != "" {
+				return sourceVersionMeta.SDCardZstSizeBytes
+			}
+			return 0
+		}(),
 		OTAUpdatePath:      otaDestPath,
 		OTAUpdateChecksum:  sourceVersionMeta.OTAUpdateChecksum,
 		OTAUpdateSizeBytes: sourceVersionMeta.OTAUpdateSizeBytes,

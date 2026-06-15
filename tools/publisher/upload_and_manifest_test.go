@@ -5,9 +5,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"io"
 	"os"
 	"testing"
 	"time"
+
+	seekable "github.com/SaveTheRbtz/zstd-seekable-format-go/pkg"
+	"github.com/klauspost/compress/zstd"
 )
 
 // Test validation functions
@@ -561,4 +565,176 @@ func TestSetBmapPath(t *testing.T) {
 			t.Errorf("empty bmapPath should not change anything, got %+v", m)
 		}
 	})
+}
+
+func TestSetZstPath(t *testing.T) {
+	t.Run("nvme sets per-storage and top-level", func(t *testing.T) {
+		m := &VersionMetadata{}
+		setZstPath(m, "nvme", "images/x/nvme.img.zst", "abc123", 1024)
+		if m.NVMEZstPath != "images/x/nvme.img.zst" {
+			t.Errorf("NVMEZstPath = %q", m.NVMEZstPath)
+		}
+		if m.NVMEZstChecksum != "abc123" {
+			t.Errorf("NVMEZstChecksum = %q", m.NVMEZstChecksum)
+		}
+		if m.NVMEZstSizeBytes != 1024 {
+			t.Errorf("NVMEZstSizeBytes = %d", m.NVMEZstSizeBytes)
+		}
+		if m.ZstPath != "images/x/nvme.img.zst" {
+			t.Errorf("ZstPath = %q, want NVMe zst (matches top-level Path)", m.ZstPath)
+		}
+		if m.ZstChecksum != "abc123" {
+			t.Errorf("ZstChecksum = %q", m.ZstChecksum)
+		}
+		if m.ZstSizeBytes != 1024 {
+			t.Errorf("ZstSizeBytes = %d", m.ZstSizeBytes)
+		}
+		if m.SDCardZstPath != "" {
+			t.Errorf("SDCardZstPath = %q, want empty", m.SDCardZstPath)
+		}
+	})
+
+	t.Run("sd after nvme does not clobber top-level", func(t *testing.T) {
+		m := &VersionMetadata{
+			ZstPath:          "images/x/nvme.img.zst",
+			ZstChecksum:      "abc123",
+			ZstSizeBytes:     1024,
+			NVMEZstPath:      "images/x/nvme.img.zst",
+			NVMEZstChecksum:  "abc123",
+			NVMEZstSizeBytes: 1024,
+		}
+		setZstPath(m, "sd", "images/x/sd.img.zst", "def456", 512)
+		if m.SDCardZstPath != "images/x/sd.img.zst" {
+			t.Errorf("SDCardZstPath = %q", m.SDCardZstPath)
+		}
+		if m.ZstPath != "images/x/nvme.img.zst" {
+			t.Errorf("ZstPath = %q, want NVMe zst preserved", m.ZstPath)
+		}
+		if m.ZstChecksum != "abc123" {
+			t.Errorf("ZstChecksum = %q, want NVMe checksum preserved", m.ZstChecksum)
+		}
+	})
+
+	t.Run("nvme after sd wins top-level", func(t *testing.T) {
+		m := &VersionMetadata{
+			ZstPath:            "images/x/sd.img.zst",
+			ZstChecksum:        "def456",
+			ZstSizeBytes:       512,
+			SDCardZstPath:      "images/x/sd.img.zst",
+			SDCardZstChecksum:  "def456",
+			SDCardZstSizeBytes: 512,
+		}
+		setZstPath(m, "nvme", "images/x/nvme.img.zst", "abc123", 1024)
+		if m.ZstPath != "images/x/nvme.img.zst" {
+			t.Errorf("ZstPath = %q, want NVMe to win top-level", m.ZstPath)
+		}
+		if m.SDCardZstPath != "images/x/sd.img.zst" {
+			t.Errorf("SDCardZstPath = %q, want SD preserved", m.SDCardZstPath)
+		}
+	})
+
+	t.Run("sd-only device fills top-level", func(t *testing.T) {
+		m := &VersionMetadata{}
+		setZstPath(m, "sd", "images/x/sd.img.zst", "def456", 512)
+		if m.ZstPath != "images/x/sd.img.zst" {
+			t.Errorf("ZstPath = %q, want SD zst for sd-only device", m.ZstPath)
+		}
+		if m.SDCardZstPath != "images/x/sd.img.zst" {
+			t.Errorf("SDCardZstPath = %q", m.SDCardZstPath)
+		}
+		if m.ZstChecksum != "def456" {
+			t.Errorf("ZstChecksum = %q", m.ZstChecksum)
+		}
+	})
+
+	t.Run("single-storage default sets top-level", func(t *testing.T) {
+		m := &VersionMetadata{}
+		setZstPath(m, "", "images/x/img.zst", "xyz789", 2048)
+		if m.ZstPath != "images/x/img.zst" {
+			t.Errorf("ZstPath = %q", m.ZstPath)
+		}
+		if m.ZstChecksum != "xyz789" {
+			t.Errorf("ZstChecksum = %q", m.ZstChecksum)
+		}
+	})
+
+	t.Run("emmc gets no zst", func(t *testing.T) {
+		m := &VersionMetadata{}
+		setZstPath(m, "emmc", "images/x/should-not-be-set.zst", "abc", 100)
+		if m.ZstPath != "" || m.NVMEZstPath != "" || m.SDCardZstPath != "" {
+			t.Errorf("eMMC should set no zst fields, got %+v", m)
+		}
+	})
+
+	t.Run("empty zst path is a no-op", func(t *testing.T) {
+		m := &VersionMetadata{ZstPath: "existing", ZstChecksum: "cs", ZstSizeBytes: 99}
+		setZstPath(m, "nvme", "", "", 0)
+		if m.ZstPath != "existing" || m.ZstChecksum != "cs" || m.NVMEZstPath != "" {
+			t.Errorf("empty zstPath should not change anything, got %+v", m)
+		}
+	})
+}
+
+func TestCompressSeekableZstdRoundTrips(t *testing.T) {
+	// Build a known payload that spans multiple frames (> seekableFrameSize would
+	// be slow in tests; use a small payload and verify the whole thing round-trips).
+	payload := make([]byte, 64*1024) // 64 KiB — fits in a single frame
+	for i := range payload {
+		payload[i] = byte(i % 251)
+	}
+
+	// Write source file.
+	srcFile, err := os.CreateTemp("", "zst-src-*.img")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(srcFile.Name())
+	if _, err := srcFile.Write(payload); err != nil {
+		t.Fatal(err)
+	}
+	srcFile.Close()
+
+	// Compress to a .zst file.
+	dstPath := srcFile.Name() + ".zst"
+	defer os.Remove(dstPath)
+	if err := compressSeekableZstd(srcFile.Name(), dstPath); err != nil {
+		t.Fatalf("compressSeekableZstd: %v", err)
+	}
+
+	// Verify the .zst file exists and is non-empty.
+	info, err := os.Stat(dstPath)
+	if err != nil {
+		t.Fatalf("zst file not found: %v", err)
+	}
+	if info.Size() == 0 {
+		t.Fatal("zst file is empty")
+	}
+
+	// Round-trip: decompress with seekable reader and verify content.
+	zstFile, err := os.Open(dstPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer zstFile.Close()
+
+	dec, err := zstd.NewReader(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dec.Close()
+
+	r, err := seekable.NewReader(zstFile, dec)
+	if err != nil {
+		t.Fatalf("seekable.NewReader: %v", err)
+	}
+	defer r.Close()
+
+	got := make([]byte, len(payload))
+	if _, err := r.ReadAt(got, 0); err != nil && err != io.EOF {
+		t.Fatalf("ReadAt: %v", err)
+	}
+
+	if string(got) != string(payload) {
+		t.Error("round-trip mismatch: decompressed bytes differ from original")
+	}
 }
