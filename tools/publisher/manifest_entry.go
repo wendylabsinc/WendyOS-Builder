@@ -22,6 +22,9 @@ type ManifestEntry struct {
 	FileSize     int64  `json:"file_size,omitempty"`
 	FileChecksum string `json:"file_checksum,omitempty"`
 	BmapPath     string `json:"bmap_path,omitempty"`
+	ZstPath      string `json:"zst_path,omitempty"`
+	ZstChecksum  string `json:"zst_checksum,omitempty"`
+	ZstSize      int64  `json:"zst_size_bytes,omitempty"`
 
 	OTAUpdatePath     string `json:"ota_update_path,omitempty"`
 	OTAUpdateSize     int64  `json:"ota_update_size,omitempty"`
