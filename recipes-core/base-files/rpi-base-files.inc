@@ -20,14 +20,13 @@ RPI_FSTAB_TEMPLATE:raspberrypi3-64 = "rpi-mbr-fstab"
 
 do_install:append() {
     if [ "${WENDYOS_RPI_UBOOT}" = "1" ]; then
-        # Mender-managed layout: 4 partitions (boot/A/B/data), MBR disklabel.
-        # The poky-stock /etc/fstab (already installed by base-files's own
+        # Mender-managed MBR layout: boot/A/B/extended{config,data}. The
+        # poky-stock /etc/fstab (already installed by base-files's own
         # do_install) is correct here — the kernel mounts / via the
         # ${mender_kernel_root} cmdline arg, and Mender's image-build
-        # postprocess appends /data (and /uboot if MENDER_BOOT_PART_MOUNT_LOCATION
-        # is set). Our rpi-fstab references /boot by GPT-style PARTUUID and a
-        # /config label-mount; neither device exists in the Mender layout, so
-        # systemd would block 90s on each before dropping to emergency.
+        # postprocess appends /data and /uboot (the wendyos-image bbappend
+        # fixes up the /config line). Our rpi-fstab hard-codes /boot and
+        # /config entries that don't match this layout, so we skip it here.
         :
     else
         install -m 0644 ${WORKDIR}/${RPI_FSTAB_TEMPLATE} ${D}${sysconfdir}/fstab
