@@ -110,7 +110,7 @@ type VersionMetadata struct {
 	RecoveryPath       string     `json:"recovery_path,omitempty"`
 	RecoveryChecksum   string     `json:"recovery_checksum,omitempty"`
 	RecoverySizeBytes  int64      `json:"recovery_size_bytes,omitempty"`
-	BmapPath string `json:"bmap_path,omitempty"`
+	BmapPath           string     `json:"bmap_path,omitempty"`
 	// Storage-specific image paths for devices that produce multiple artifacts
 	// (e.g. jetson-orin-nano which ships both an NVMe and an SD card image).
 	// Path above stays set to the NVMe image for backwards compatibility with
@@ -124,6 +124,13 @@ type VersionMetadata struct {
 	EMMCPath        string `json:"emmc_path,omitempty"`
 	EMMCChecksum    string `json:"emmc_checksum,omitempty"`
 	EMMCSizeBytes   int64  `json:"emmc_size_bytes,omitempty"`
+	// Storage-specific block maps. Each .bmap describes one image, so it must
+	// track the image it was generated from. The top-level BmapPath above
+	// mirrors Path (the NVMe image on multi-storage devices) for older CLIs;
+	// a CLI that flashes the SD variant uses SDCardBmapPath. eMMC has no
+	// offline image, hence no bmap.
+	NVMEBmapPath   string `json:"nvme_bmap_path,omitempty"`
+	SDCardBmapPath string `json:"sd_bmap_path,omitempty"`
 }
 
 // MasterManifest represents the top-level manifest
@@ -143,7 +150,7 @@ type DeviceLatestInfo struct {
 
 // FirmwareManifest represents a chip-specific firmware manifest
 type FirmwareManifest struct {
-	ChipID   string                              `json:"chip_id"`
+	ChipID   string                             `json:"chip_id"`
 	Versions map[string]FirmwareVersionMetadata `json:"versions"`
 }
 
@@ -305,11 +312,11 @@ func validateStability(stability string) error {
 
 // DiscordEmbed represents an embed in a Discord message
 type DiscordEmbed struct {
-	Title       string                 `json:"title,omitempty"`
-	Description string                 `json:"description,omitempty"`
-	Color       int                    `json:"color,omitempty"`
-	Fields      []DiscordEmbedField    `json:"fields,omitempty"`
-	Timestamp   string                 `json:"timestamp,omitempty"`
+	Title       string              `json:"title,omitempty"`
+	Description string              `json:"description,omitempty"`
+	Color       int                 `json:"color,omitempty"`
+	Fields      []DiscordEmbedField `json:"fields,omitempty"`
+	Timestamp   string              `json:"timestamp,omitempty"`
 }
 
 // DiscordEmbedField represents a field in a Discord embed
@@ -568,9 +575,9 @@ func compressFile(ctx context.Context, inputPath string, fileType string) (strin
 	}).Info("Compressing file...")
 
 	var cmd *exec.Cmd
-	var outFile *os.File // Declare at function scope for proper cleanup
+	var outFile *os.File       // Declare at function scope for proper cleanup
 	var cmdAlreadyStarted bool // Track if cmd.Start() was already called
-	var pvCommand *exec.Cmd // For cleanup when using pv pipeline
+	var pvCommand *exec.Cmd    // For cleanup when using pv pipeline
 
 	// Handle different compression methods
 	switch compressionMethod {
@@ -1773,6 +1780,53 @@ func updateManifests(ctx context.Context, bucket *storage.BucketHandle, deviceTy
 	}
 }
 
+// setBmapPath records a block map on the version metadata, tracking the image
+// it describes. The top-level BmapPath mirrors the top-level Path (the NVMe
+// image on multi-storage devices, per the Path comment) so older CLIs see a
+// consistent path/bmap pair: "nvme" always wins it, "sd" only fills it when no
+// NVMe image exists yet (an SD-only device), exactly as Path is assigned.
+// eMMC ships no offline image, so it has no bmap. An empty bmapPath is a no-op.
+func setBmapPath(meta *VersionMetadata, storageType, bmapPath string) {
+	if bmapPath == "" {
+		return
+	}
+	switch storageType {
+	case "nvme":
+		meta.NVMEBmapPath = bmapPath
+		meta.BmapPath = bmapPath
+	case "sd":
+		meta.SDCardBmapPath = bmapPath
+		if meta.BmapPath == "" {
+			meta.BmapPath = bmapPath
+		}
+	case "emmc":
+		// No offline image for eMMC, hence no block map.
+	default:
+		meta.BmapPath = bmapPath
+	}
+}
+
+// copyManifestArtifact copies one artifact (image, block map, …) from srcPath
+// into the stable version's image directory and returns the new path. It
+// returns "" when srcPath is empty, malformed, or the copy fails — the caller
+// treats a missing artifact as non-fatal, matching the image-copy behavior.
+func copyManifestArtifact(ctx context.Context, logger *logrus.Entry, bucket *storage.BucketHandle, srcPath, deviceType, stableVersion, label string) string {
+	if srcPath == "" {
+		return ""
+	}
+	parts := strings.Split(srcPath, "/")
+	if len(parts) < 4 {
+		return ""
+	}
+	destPath := fmt.Sprintf("images/%s/%s/%s", deviceType, stableVersion, parts[len(parts)-1])
+	if _, err := bucket.Object(destPath).CopierFrom(bucket.Object(srcPath)).Run(ctx); err != nil {
+		logger.WithError(err).Warnf("Failed to copy %s, continuing without it", label)
+		return ""
+	}
+	logger.Infof("%s copied successfully", label)
+	return destPath
+}
+
 func updateDeviceManifest(ctx context.Context, logger *logrus.Entry, bucket *storage.BucketHandle, deviceType, version, filePath string, fileSize int64, fileChecksum string, bmapPath string, otaUpdatePath string, otaUpdateSize int64, otaUpdateChecksum string, recoveryPath string, recoverySize int64, recoveryChecksum string, storageType string, isNightly bool) error {
 	manifestPath := fmt.Sprintf("manifests/%s.json", deviceType)
 	logger = logger.WithField("manifest_path", manifestPath)
@@ -1921,10 +1975,11 @@ func updateDeviceManifest(ctx context.Context, logger *logrus.Entry, bucket *sto
 			}
 		}
 
-		// Update bmap path if provided
-		if bmapPath != "" {
-			versionMetadata.BmapPath = bmapPath
-		}
+		// Store the block map in lockstep with the image it describes. A single
+		// shared bmap_path would let the last storage variant published clobber
+		// it, leaving top-level bmap_path describing a different image than
+		// top-level path (the orin-nano NVMe-vs-SD mismatch).
+		setBmapPath(&versionMetadata, storageType, bmapPath)
 
 		// Update OTA update fields only if provided
 		if otaUpdatePath != "" {
@@ -2428,6 +2483,22 @@ func promoteNightlyToStable(ctx context.Context, bucket *storage.BucketHandle, d
 		}
 	}
 
+	// Copy block maps, preserving the per-storage layout from upload time. A
+	// bmap describes one image, so each follows its image to the stable path.
+	// Top-level BmapPath mirrors top-level Path (NVMe) for older CLIs. A pre-fix
+	// nightly that only carries the legacy top-level BmapPath is still promoted.
+	nvmeBmapDest := copyManifestArtifact(ctx, logger, bucket, sourceVersionMeta.NVMEBmapPath, deviceType, stableVersion, "NVMe block map")
+	sdBmapDest := copyManifestArtifact(ctx, logger, bucket, sourceVersionMeta.SDCardBmapPath, deviceType, stableVersion, "SD card block map")
+	var topBmapDest string
+	switch {
+	case nvmeBmapDest != "":
+		topBmapDest = nvmeBmapDest
+	case sdBmapDest != "":
+		topBmapDest = sdBmapDest
+	case sourceVersionMeta.BmapPath != "":
+		topBmapDest = copyManifestArtifact(ctx, logger, bucket, sourceVersionMeta.BmapPath, deviceType, stableVersion, "block map")
+	}
+
 	// Create new stable version entry with promotion metadata
 	promotedAt := time.Now()
 	sourceVersion := nightlyVersion
@@ -2445,6 +2516,9 @@ func promoteNightlyToStable(ctx context.Context, bucket *storage.BucketHandle, d
 		NVMEChecksum:       nvmeChecksum,
 		SDCardPath:         sdDestPath,
 		SDCardChecksum:     sdChecksum,
+		NVMEBmapPath:       nvmeBmapDest,
+		SDCardBmapPath:     sdBmapDest,
+		BmapPath:           topBmapDest,
 		OTAUpdatePath:      otaDestPath,
 		OTAUpdateChecksum:  sourceVersionMeta.OTAUpdateChecksum,
 		OTAUpdateSizeBytes: sourceVersionMeta.OTAUpdateSizeBytes,

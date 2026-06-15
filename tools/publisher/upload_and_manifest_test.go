@@ -13,9 +13,9 @@ import (
 // Test validation functions
 func TestValidateDeviceType(t *testing.T) {
 	tests := []struct {
-		name      string
+		name       string
 		deviceType string
-		wantError bool
+		wantError  bool
 	}{
 		{"valid device", "raspberry-pi-5", false},
 		{"empty device", "", true},
@@ -479,4 +479,86 @@ func BenchmarkValidateDeviceType(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		_ = validateDeviceType(deviceType)
 	}
+}
+
+func TestSetBmapPath(t *testing.T) {
+	t.Run("nvme sets per-storage and top-level", func(t *testing.T) {
+		m := &VersionMetadata{}
+		setBmapPath(m, "nvme", "images/x/nvme.img.bmap")
+		if m.NVMEBmapPath != "images/x/nvme.img.bmap" {
+			t.Errorf("NVMEBmapPath = %q", m.NVMEBmapPath)
+		}
+		if m.BmapPath != "images/x/nvme.img.bmap" {
+			t.Errorf("BmapPath = %q, want NVMe bmap (matches top-level Path)", m.BmapPath)
+		}
+		if m.SDCardBmapPath != "" {
+			t.Errorf("SDCardBmapPath = %q, want empty", m.SDCardBmapPath)
+		}
+	})
+
+	t.Run("sd after nvme does not clobber top-level", func(t *testing.T) {
+		// Simulates the bug: NVMe published first, then SD. Top-level bmap_path
+		// must keep pointing at the NVMe bmap (matching top-level Path=NVMe).
+		m := &VersionMetadata{
+			BmapPath:     "images/x/nvme.img.bmap",
+			NVMEBmapPath: "images/x/nvme.img.bmap",
+		}
+		setBmapPath(m, "sd", "images/x/sd.img.bmap")
+		if m.SDCardBmapPath != "images/x/sd.img.bmap" {
+			t.Errorf("SDCardBmapPath = %q", m.SDCardBmapPath)
+		}
+		if m.BmapPath != "images/x/nvme.img.bmap" {
+			t.Errorf("BmapPath = %q, want NVMe bmap preserved", m.BmapPath)
+		}
+	})
+
+	t.Run("nvme after sd wins top-level", func(t *testing.T) {
+		// SD published first (filled top-level), then NVMe overwrites it.
+		m := &VersionMetadata{
+			BmapPath:       "images/x/sd.img.bmap",
+			SDCardBmapPath: "images/x/sd.img.bmap",
+		}
+		setBmapPath(m, "nvme", "images/x/nvme.img.bmap")
+		if m.BmapPath != "images/x/nvme.img.bmap" {
+			t.Errorf("BmapPath = %q, want NVMe to win top-level", m.BmapPath)
+		}
+		if m.SDCardBmapPath != "images/x/sd.img.bmap" {
+			t.Errorf("SDCardBmapPath = %q, want SD preserved", m.SDCardBmapPath)
+		}
+	})
+
+	t.Run("sd-only device fills top-level", func(t *testing.T) {
+		m := &VersionMetadata{}
+		setBmapPath(m, "sd", "images/x/sd.img.bmap")
+		if m.BmapPath != "images/x/sd.img.bmap" {
+			t.Errorf("BmapPath = %q, want SD bmap for sd-only device", m.BmapPath)
+		}
+		if m.SDCardBmapPath != "images/x/sd.img.bmap" {
+			t.Errorf("SDCardBmapPath = %q", m.SDCardBmapPath)
+		}
+	})
+
+	t.Run("single-storage default sets top-level", func(t *testing.T) {
+		m := &VersionMetadata{}
+		setBmapPath(m, "", "images/x/img.bmap")
+		if m.BmapPath != "images/x/img.bmap" {
+			t.Errorf("BmapPath = %q", m.BmapPath)
+		}
+	})
+
+	t.Run("emmc gets no bmap", func(t *testing.T) {
+		m := &VersionMetadata{}
+		setBmapPath(m, "emmc", "images/x/should-not-be-set.bmap")
+		if m.BmapPath != "" || m.NVMEBmapPath != "" || m.SDCardBmapPath != "" {
+			t.Errorf("eMMC should set no bmap fields, got %+v", m)
+		}
+	})
+
+	t.Run("empty bmap path is a no-op", func(t *testing.T) {
+		m := &VersionMetadata{BmapPath: "existing"}
+		setBmapPath(m, "nvme", "")
+		if m.BmapPath != "existing" || m.NVMEBmapPath != "" {
+			t.Errorf("empty bmapPath should not change anything, got %+v", m)
+		}
+	})
 }
