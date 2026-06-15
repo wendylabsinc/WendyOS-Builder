@@ -27,23 +27,31 @@ MENDER_BOOT_PART_SIZE_MB     = "100"
 MENDER_DATA_PART_SIZE_MB     = "256"
 MENDER_STORAGE_TOTAL_SIZE_MB = "7528"
 
-# --- WendyOS config partition --------------------------------------------
+# --- WendyOS config partition (placed BEFORE /data) ----------------------
 # Small FAT32 "config" partition that `wendy os install` seeds with first-boot
-# provisioning (WiFi, device name, pre-enrolled identity, agent binary).
-# wendy-agent consumes and erases it on first boot (configpartition.Apply);
-# reclaim-config-part then deletes it and grows /data over the freed space.
-# Injected as a Mender extra part (mender-image-sd owns the sdimg layout);
-# Mender writes the /config fstab line. nofail: the partition is gone after
-# first boot, so the mount must not block later boots.
+# provisioning (WiFi, device name, pre-enrolled identity). wendy-agent consumes
+# and erases the seed files on first boot (configpartition.Apply); the partition
+# itself PERSISTS (it is not deleted), so it stays a re-seed/recovery channel.
 MENDER_EXTRA_PARTS = "config"
 MENDER_EXTRA_PARTS[config] = "--label=config --fstype=vfat"
 MENDER_EXTRA_PARTS_SIZES_MB[config] = "128"
 MENDER_EXTRA_PARTS_MOUNT_LOCATIONS[config] = "/config"
 MENDER_EXTRA_PARTS_FSTAB[config] = "vfat defaults,nofail 0 0"
 
-# Extra parts land after /data, so mender-growfs-data would try to grow /data
-# over /config. Disable it (counters mender.inc's explicit enable);
-# reclaim-config-part is the sole /data grower.
+# mender-config-before-data.bbclass reorders the sdimg so the config extra part
+# is emitted BEFORE /data, keeping /data the LAST partition so it can grow to fill
+# any card on first boot. Layout: boot p1, rootfsA p2, rootfsB p3, extended p4,
+# config p5, data p6 (mirrors Tegra's config-before-data). The class is inherited
+# (late, so its mender_part_image override wins) from the wendyos-image bbappend.
+#
+# /data becomes the last logical (p6); Mender derives p5 (it assumes config is
+# after /data), so pin it. The /config fstab line is corrected to config's real
+# device (p5) by fix_config_fstab_rpi in that same bbappend.
+MENDER_DATA_PART_NUMBER = "6"
+
+# mender-growfs-data cannot resize the MBR extended container that holds the
+# logical /data, so keep it disabled (counters mender.inc's explicit enable);
+# grow-data-part is the /data grower (offline, first boot, no reboot).
 MENDER_FEATURES_DISABLE:append = " mender-growfs-data"
 
 # No UEFI capsule on RPi (Mender handles rootfs A/B; firmware blobs are

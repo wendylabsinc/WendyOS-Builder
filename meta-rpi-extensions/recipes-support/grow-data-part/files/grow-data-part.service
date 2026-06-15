@@ -1,0 +1,22 @@
+[Unit]
+Description=WendyOS grow /data to fill the storage device (offline, first boot)
+# Run before local filesystems are checked and mounted, like Mender's own
+# mender-grow-data. local-fs-pre.target is ordered before every local mount AND
+# before systemd-fsck@<dev>, so ordering Before it guarantees /data is unmounted
+# and unopened when we resize it -- no race with fsck, and parted/resize2fs can
+# operate. /data is the LAST partition (config sits before it), so it grows
+# straight into the trailing free space. Idempotent: resize2fs no-ops once full.
+DefaultDependencies=no
+Before=local-fs-pre.target data.mount
+Conflicts=shutdown.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Bound the one unbounded failure mode: if parted/resize2fs/udevadm wedges at this
+# early stage, fail the unit rather than stall boot for DefaultTimeoutStartSec.
+TimeoutStartSec=120
+ExecStart=/usr/sbin/grow-data-part.sh
+
+[Install]
+WantedBy=data.mount
