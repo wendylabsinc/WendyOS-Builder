@@ -1,5 +1,6 @@
-# Note: the /data-dependent recipes (systemd-mount-containerd, wendyos-etc-binds,
-# swapfile-setup, wendyos-user-data-setup) are intentionally NOT removed here.
+# Note: the /data-dependent recipes (systemd-mount-containerd, systemd-mount-wendy,
+# wendyos-etc-binds, swapfile-setup, wendyos-user-data-setup) are intentionally NOT
+# removed here.
 # They are gated on WENDYOS_MENDER in packagegroup-wendyos-base.bb, and 64-bit RPi
 # now sets WENDYOS_MENDER=1 (raspberrypi-common-wendyos.inc, WDY-983), so the /data
 # partition exists. In particular, systemd-mount-containerd bind-mounts containerd's

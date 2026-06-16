@@ -39,7 +39,7 @@ RDEPENDS:${PN} = " \
 # services would fail at boot.
 RDEPENDS:${PN}:append = " \
     ${@'' if (d.getVar('WENDYOS_OTA') or 'none') == 'none' else \
-        'wendyos-user-data-setup systemd-mount-containerd swapfile-setup wendyos-etc-binds'} \
+        'wendyos-user-data-setup systemd-mount-containerd systemd-mount-wendy swapfile-setup wendyos-etc-binds'} \
     "
 
 RDEPENDS:${PN}:append = " \
