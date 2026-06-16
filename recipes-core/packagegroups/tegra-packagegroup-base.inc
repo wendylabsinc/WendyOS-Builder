@@ -2,11 +2,14 @@
 # This file is included when building for Tegra machines
 
 # Tegra-specific tools and hardware support.
-# tegra-flash-reboot ships only on scarthgap meta-tegra (Orin / tegra234).
-# r38.4.x meta-tegra (Thor / tegra264) has no such recipe, so gate it.
+# tegra-flash-reboot ships ONLY on scarthgap meta-tegra (Orin / tegra234 /
+# JP6). Neither Thor (tegra264) nor the JP7.2/blacksail tree has the recipe
+# (blacksail's tegra-flash-init does not RDEPEND on it), so gate on BOTH the
+# SoC and the scarthgap layer tree — a bare tegra234 check would wrongly pull
+# it on blacksail Orin ("Nothing PROVIDES tegra-flash-reboot").
 RDEPENDS:${PN}:append = " \
     efibootmgr \
-    ${@'tegra-flash-reboot' if 'tegra234' in d.getVar('MACHINEOVERRIDES').split(':') else ''} \
+    ${@'tegra-flash-reboot' if ('tegra234' in d.getVar('MACHINEOVERRIDES').split(':') and (d.getVar('WENDYOS_LAYER_TREE') or '') == 'scarthgap') else ''} \
     tegra-tools-tegrastats \
     "
 
