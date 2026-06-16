@@ -320,6 +320,10 @@ build/tmp/deploy/images/<machine>/wendyos-image-<machine>.rootfs.tegraflash.tar.
 
 #### For SD Card Builds
 
+> **Requires a 64 GB (or larger) SD card.** The Orin Nano SD image uses a 64GB
+> layout (`WENDYOS_FLASH_IMAGE_SIZE = "64GB"`) so the A/B rootfs slots can hold
+> the 16GB rootfs.
+
 **Option 1: Directly Flash to SD Card**
 
 ```bash
