@@ -41,12 +41,15 @@ IMAGE_INSTALL:append = " \
 # - Additional libraries (libnuma) and monitoring paths
 WENDYOS_USB_GADGET ?= "1"
 WENDYOS_DEEPSTREAM ?= "1"
+# The DeepStream package is BSP-specific:
+#   blacksail (JP7.2/r39.2, CUDA 13) -> deepstream-8.0 (meta-tegra-extensions-jp7)
+#   scarthgap (JP6, CUDA 12)         -> deepstream-7.1 (meta-tegra-community)
+#   wrynose (r38.4) / other          -> none (no DeepStream recipe exists there)
+DEEPSTREAM_PKG = "${@'deepstream-8.0' if d.getVar('WENDYOS_LAYER_TREE') == 'blacksail' else ('deepstream-7.1' if d.getVar('WENDYOS_LAYER_TREE') == 'scarthgap' else '')}"
 IMAGE_INSTALL:append = " \
     ${@oe.utils.ifelse( \
         d.getVar('WENDYOS_DEEPSTREAM') == '1', \
-            ' \
-                deepstream-7.1 \
-            ', \
+            d.getVar('DEEPSTREAM_PKG'), \
             '' \
         )} \
     "

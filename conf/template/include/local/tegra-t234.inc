@@ -29,11 +29,10 @@ WENDYOS_UPDATE_BOOTLOADER = "0"
 #   "1" - DEBUG (verbose boot/capsule debug output)
 WENDYOS_EFI_DEBUG = "0"
 
-# DeepStream OFF for the initial blacksail bring-up — answer the existential
-# question first (does t234 / r39.2 build + boot the wendy stack, and does it
-# get the A/B redundant flash layout?), exactly like the Thor canary. The
-# DeepStream 8.0 integration (blacksail meta-tegra-community ships
-# deepstream-8.0; tegra-image.inc currently hardcodes deepstream-7.1 and the
-# jp6 7.1 bbappend would need a jp7 8.0 equivalent) is a follow-up once
-# base-green.
-WENDYOS_DEEPSTREAM = "0"
+# DeepStream 8.0 (JetPack 7.2 / CUDA 13) — ENABLED. tegra-image.inc resolves
+# WENDYOS_DEEPSTREAM=1 to the deepstream-8.0 package on blacksail, provided by
+# our vendored recipe in meta-tegra-extensions-jp7 (DS8 is not yet on the
+# meta-tegra-community wip-l4t-r39.2.0 branch — see scripts/check-jp7.2-upstream.sh
+# for when to drop the vendored recipe). COMPATIBLE_MACHINE=(tegra), so the same
+# recipe serves Orin (t234) and Thor (t264).
+WENDYOS_DEEPSTREAM = "1"

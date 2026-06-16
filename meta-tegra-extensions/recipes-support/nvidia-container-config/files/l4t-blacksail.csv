@@ -1,0 +1,225 @@
+# WendyOS Yocto l4t.csv - NVIDIA Container Library Mapping
+# This file maps host libraries into containers for GPU access
+# Note: Yocto paths differ from standard L4T:
+#   - CUDA libs: /usr/local/cuda-13.2/lib/ (not targets/aarch64-linux/lib/)
+#   - System libs: /usr/lib/ (not /usr/lib/aarch64-linux-gnu/)
+
+# =============================================================================
+# DEVICE NODES
+# =============================================================================
+dev, /dev/nvidiactl
+dev, /dev/nvidia0
+dev, /dev/nvmap
+dev, /dev/nvhost-gpu
+dev, /dev/nvhost-ctrl-gpu
+dev, /dev/nvhost-as-gpu
+dev, /dev/nvhost-dbg-gpu
+dev, /dev/nvhost-prof-gpu
+dev, /dev/nvhost-ctxsw-gpu
+dev, /dev/nvhost-sched-gpu
+dev, /dev/nvhost-tsg-gpu
+dev, /dev/nvhost-vic
+
+# DRI devices (for graphics/display)
+dev, /dev/dri
+
+# =============================================================================
+# CUDA RUNTIME (required by all CUDA applications)
+# =============================================================================
+lib, /usr/local/cuda-13.2/lib/libcudart.so.12.6.68
+sym, /usr/local/cuda-13.2/lib/libcudart.so.12
+sym, /usr/local/cuda-13.2/lib/libcudart.so
+
+# =============================================================================
+# cuBLAS - Linear algebra (REQUIRED by PyTorch)
+# =============================================================================
+lib, /usr/local/cuda-13.2/lib/libcublas.so.12.6.1.4
+sym, /usr/local/cuda-13.2/lib/libcublas.so.12
+sym, /usr/local/cuda-13.2/lib/libcublas.so
+lib, /usr/local/cuda-13.2/lib/libcublasLt.so.12.6.1.4
+sym, /usr/local/cuda-13.2/lib/libcublasLt.so.12
+sym, /usr/local/cuda-13.2/lib/libcublasLt.so
+
+# =============================================================================
+# cuSPARSE - Sparse matrix operations (used by PyTorch sparse tensors)
+# =============================================================================
+lib, /usr/local/cuda-13.2/lib/libcusparse.so.12.5.3.3
+sym, /usr/local/cuda-13.2/lib/libcusparse.so.12
+sym, /usr/local/cuda-13.2/lib/libcusparse.so
+
+# =============================================================================
+# cuSPARSELt - Lightweight sparse operations
+# =============================================================================
+lib, /usr/lib/libcusparseLt.so.0.8.1.1
+sym, /usr/lib/libcusparseLt.so.0
+
+# =============================================================================
+# cuSOLVER - Linear solvers (used by torch.linalg operations)
+# =============================================================================
+lib, /usr/local/cuda-13.2/lib/libcusolver.so.11.6.4.69
+sym, /usr/local/cuda-13.2/lib/libcusolver.so.11
+sym, /usr/local/cuda-13.2/lib/libcusolver.so
+lib, /usr/local/cuda-13.2/lib/libcusolverMg.so.11.6.4.69
+sym, /usr/local/cuda-13.2/lib/libcusolverMg.so.11
+sym, /usr/local/cuda-13.2/lib/libcusolverMg.so
+
+# =============================================================================
+# cuRAND - Random number generation (used by torch.rand with CUDA)
+# =============================================================================
+lib, /usr/local/cuda-13.2/lib/libcurand.so.10.3.7.68
+sym, /usr/local/cuda-13.2/lib/libcurand.so.10
+sym, /usr/local/cuda-13.2/lib/libcurand.so
+
+# =============================================================================
+# cuFFT - Fast Fourier Transform (used by torch.fft)
+# =============================================================================
+lib, /usr/local/cuda-13.2/lib/libcufft.so.11.2.6.59
+sym, /usr/local/cuda-13.2/lib/libcufft.so.11
+sym, /usr/local/cuda-13.2/lib/libcufft.so
+lib, /usr/local/cuda-13.2/lib/libcufftw.so.11.2.6.59
+sym, /usr/local/cuda-13.2/lib/libcufftw.so.11
+sym, /usr/local/cuda-13.2/lib/libcufftw.so
+
+# =============================================================================
+# NVRTC - Runtime compilation (used by torch.jit)
+# =============================================================================
+lib, /usr/local/cuda-13.2/lib/libnvrtc.so.12.6.68
+sym, /usr/local/cuda-13.2/lib/libnvrtc.so.12
+sym, /usr/local/cuda-13.2/lib/libnvrtc.so
+lib, /usr/local/cuda-13.2/lib/libnvrtc-builtins.so.12.6.68
+sym, /usr/local/cuda-13.2/lib/libnvrtc-builtins.so.12.6
+sym, /usr/local/cuda-13.2/lib/libnvrtc-builtins.so
+
+# =============================================================================
+# nvJitLink - JIT Linker (required by PyTorch JIT and torch.compile)
+# =============================================================================
+lib, /usr/local/cuda-13.2/lib/libnvJitLink.so.12.6.68
+sym, /usr/local/cuda-13.2/lib/libnvJitLink.so.12
+sym, /usr/local/cuda-13.2/lib/libnvJitLink.so
+
+# =============================================================================
+# NVTX - NVIDIA Tools Extension (used by PyTorch profiler)
+# =============================================================================
+lib, /usr/local/cuda-13.2/lib/libnvToolsExt.so.1.0.0
+sym, /usr/local/cuda-13.2/lib/libnvToolsExt.so.1
+
+# =============================================================================
+# CUPTI - CUDA Profiling Tools Interface (used by PyTorch profiler)
+# =============================================================================
+lib, /usr/local/cuda-13.2/lib/libcupti.so.2024.3.1
+sym, /usr/local/cuda-13.2/lib/libcupti.so.12
+
+# =============================================================================
+# cuFile - GPUDirect Storage (required by PyTorch 2.8.0)
+# =============================================================================
+lib, /usr/local/cuda-13.2/lib/libcufile.so.1.11.1
+sym, /usr/local/cuda-13.2/lib/libcufile.so.0
+sym, /usr/local/cuda-13.2/lib/libcufile.so
+
+# =============================================================================
+# cuDLA - Deep Learning Accelerator Runtime
+# =============================================================================
+lib, /usr/local/cuda-13.2/lib/libcudla.so.1.0.0
+sym, /usr/local/cuda-13.2/lib/libcudla.so.1
+sym, /usr/local/cuda-13.2/lib/libcudla.so
+
+# =============================================================================
+# NPP - Image processing primitives (used by vision operations)
+# =============================================================================
+lib, /usr/local/cuda-13.2/lib/libnppc.so.12.3.1.54
+sym, /usr/local/cuda-13.2/lib/libnppc.so.12
+sym, /usr/local/cuda-13.2/lib/libnppc.so
+lib, /usr/local/cuda-13.2/lib/libnppial.so.12.3.1.54
+sym, /usr/local/cuda-13.2/lib/libnppial.so.12
+sym, /usr/local/cuda-13.2/lib/libnppial.so
+lib, /usr/local/cuda-13.2/lib/libnppicc.so.12.3.1.54
+sym, /usr/local/cuda-13.2/lib/libnppicc.so.12
+sym, /usr/local/cuda-13.2/lib/libnppicc.so
+lib, /usr/local/cuda-13.2/lib/libnppidei.so.12.3.1.54
+sym, /usr/local/cuda-13.2/lib/libnppidei.so.12
+sym, /usr/local/cuda-13.2/lib/libnppidei.so
+lib, /usr/local/cuda-13.2/lib/libnppif.so.12.3.1.54
+sym, /usr/local/cuda-13.2/lib/libnppif.so.12
+sym, /usr/local/cuda-13.2/lib/libnppif.so
+lib, /usr/local/cuda-13.2/lib/libnppig.so.12.3.1.54
+sym, /usr/local/cuda-13.2/lib/libnppig.so.12
+sym, /usr/local/cuda-13.2/lib/libnppig.so
+lib, /usr/local/cuda-13.2/lib/libnppim.so.12.3.1.54
+sym, /usr/local/cuda-13.2/lib/libnppim.so.12
+sym, /usr/local/cuda-13.2/lib/libnppim.so
+lib, /usr/local/cuda-13.2/lib/libnppist.so.12.3.1.54
+sym, /usr/local/cuda-13.2/lib/libnppist.so.12
+sym, /usr/local/cuda-13.2/lib/libnppist.so
+lib, /usr/local/cuda-13.2/lib/libnppisu.so.12.3.1.54
+sym, /usr/local/cuda-13.2/lib/libnppisu.so.12
+sym, /usr/local/cuda-13.2/lib/libnppisu.so
+lib, /usr/local/cuda-13.2/lib/libnppitc.so.12.3.1.54
+sym, /usr/local/cuda-13.2/lib/libnppitc.so.12
+sym, /usr/local/cuda-13.2/lib/libnppitc.so
+lib, /usr/local/cuda-13.2/lib/libnpps.so.12.3.1.54
+sym, /usr/local/cuda-13.2/lib/libnpps.so.12
+sym, /usr/local/cuda-13.2/lib/libnpps.so
+
+# =============================================================================
+# cuDNN - Deep learning primitives (REQUIRED by PyTorch)
+# =============================================================================
+lib, /usr/lib/libcudnn.so.9.20.0
+sym, /usr/lib/libcudnn.so.9
+lib, /usr/lib/libcudnn_ops.so.9.20.0
+sym, /usr/lib/libcudnn_ops.so.9
+lib, /usr/lib/libcudnn_cnn.so.9.20.0
+sym, /usr/lib/libcudnn_cnn.so.9
+lib, /usr/lib/libcudnn_adv.so.9.20.0
+sym, /usr/lib/libcudnn_adv.so.9
+lib, /usr/lib/libcudnn_graph.so.9.20.0
+sym, /usr/lib/libcudnn_graph.so.9
+lib, /usr/lib/libcudnn_engines_runtime_compiled.so.9.20.0
+sym, /usr/lib/libcudnn_engines_runtime_compiled.so.9
+lib, /usr/lib/libcudnn_engines_precompiled.so.9.20.0
+sym, /usr/lib/libcudnn_engines_precompiled.so.9
+lib, /usr/lib/libcudnn_heuristic.so.9.20.0
+sym, /usr/lib/libcudnn_heuristic.so.9
+
+# =============================================================================
+# TensorRT - Inference optimization (required by torch-tensorrt)
+# =============================================================================
+lib, /usr/lib/libnvinfer.so.10.3.0
+sym, /usr/lib/libnvinfer.so.10
+lib, /usr/lib/libnvinfer_plugin.so.10.3.0
+sym, /usr/lib/libnvinfer_plugin.so.10
+lib, /usr/lib/libnvinfer_builder_resource.so.10.3.0
+lib, /usr/lib/libnvonnxparser.so.10.3.0
+sym, /usr/lib/libnvonnxparser.so.10
+
+# =============================================================================
+# Tegra CUDA driver (critical for all GPU operations)
+# =============================================================================
+lib, /usr/lib/libcuda.so.1.1
+sym, /usr/lib/libcuda.so.1
+sym, /usr/lib/libcuda.so
+
+# =============================================================================
+# NvSci libraries (inter-process buffer sharing)
+# =============================================================================
+lib, /usr/lib/libnvscibuf.so.1
+sym, /usr/lib/libnvscibuf.so
+lib, /usr/lib/libnvscicommon.so.1
+sym, /usr/lib/libnvscicommon.so
+lib, /usr/lib/libnvscisync.so.1
+sym, /usr/lib/libnvscisync.so
+lib, /usr/lib/libnvscistream.so.1
+sym, /usr/lib/libnvscistream.so
+lib, /usr/lib/libnvscievent.so
+lib, /usr/lib/libnvsciipc.so
+
+# =============================================================================
+# NVIDIA Management Library (nvidia-smi support)
+# =============================================================================
+lib, /usr/lib/libnvidia-ml.so.1
+sym, /usr/lib/libnvidia-ml.so
+
+# =============================================================================
+# PTX JIT Compiler
+# =============================================================================
+lib, /usr/lib/libnvidia-ptxjitcompiler.so.540.4.0
+sym, /usr/lib/libnvidia-ptxjitcompiler.so.1
