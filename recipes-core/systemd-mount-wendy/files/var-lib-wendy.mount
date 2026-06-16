@@ -1,6 +1,12 @@
 [Unit]
-Description=Bind mount /var/lib/wendy from persistent data partition
+Description=Bind mount /var/lib/wendy (persistent app volumes) from data partition
 Documentation=man:systemd.mount(5)
+
+# The agent creates persistent app volumes under /var/lib/wendy/volumes
+# (see wendy-agent oci/entitlements.go). By default that path is on the small
+# A/B rootfs, so heavy volume data fills the rootfs and is wiped on OTA. Back
+# it with /data/wendy (persists across A/B switches), same pattern as
+# /var/lib/containerd -> /data/containerd and /var/lib/tee -> /data/tee.
 
 # Ensure data partition is mounted and filesystem is fully expanded
 RequiresMountsFor=/data

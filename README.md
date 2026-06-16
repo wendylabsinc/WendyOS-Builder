@@ -4,21 +4,25 @@
 
 # WendyOS
 
-This repository provides the meta-layer and build flow to build **WendyOS** — a Yocto-based embedded Linux distribution — for:
-- **NVIDIA Jetson** Developer Kits (Orin Nano 8GB, AGX Orin 64GB)
-- **Raspberry Pi 5** (SD card and NVMe boot)
+This repository provides the meta-layer and build flow to build **WendyOS** — a Yocto-based embedded Linux distribution — across a broad range of ARM64 hardware:
+- **NVIDIA Jetson** Developer Kits — Orin Nano, AGX Orin, and AGX Thor
+- **Raspberry Pi** — Pi 3, Pi 4, and Pi 5 (SD card; Pi 5 also supports NVMe boot)
 - **QEMU ARM64** (virtual machine, for development)
 
 ### Supported Hardware
 
-| Hardware | SoC | RAM | Machine Config | Boot Device |
-|----------|-----|-----|----------------|-------------|
-| Jetson Orin Nano DevKit | Tegra234 | 8GB | `jetson-orin-nano-devkit-wendyos` | SD |
-| Jetson Orin Nano DevKit | Tegra234 | 8GB | `jetson-orin-nano-devkit-nvme-wendyos` | NVMe |
-| Jetson AGX Orin DevKit | Tegra234 | 64GB | `jetson-agx-orin-devkit-nvme-wendyos` | NVMe |
-| Jetson AGX Orin DevKit | Tegra234 | 64GB | `jetson-agx-orin-devkit-emmc-wendyos` | onboard eMMC |
-| Raspberry Pi 5 | Broadcom BCM2712 | 8GB | `raspberrypi5-wendyos` | SD |
-| Raspberry Pi 5 | Broadcom BCM2712 | 8GB | `raspberrypi5-nvme-wendyos` | NVMe |
+| Hardware | SoC | RAM | Board id (`BOARD=`) | Machine Config | Boot Device | OTA |
+|----------|-----|-----|---------------------|----------------|-------------|-----|
+| Jetson Orin Nano DevKit | Tegra234 | 8GB | `jetson-orin-nano-sd` | `jetson-orin-nano-devkit-wendyos` | SD | Mender |
+| Jetson Orin Nano DevKit | Tegra234 | 8GB | `jetson-orin-nano-nvme` | `jetson-orin-nano-devkit-nvme-wendyos` | NVMe | Mender |
+| Jetson AGX Orin DevKit | Tegra234 | 64GB | `jetson-agx-orin` | `jetson-agx-orin-devkit-nvme-wendyos` | NVMe | Mender |
+| Jetson AGX Orin DevKit | Tegra234 | 64GB | `jetson-agx-orin-emmc` | `jetson-agx-orin-devkit-emmc-wendyos` | onboard eMMC | Mender |
+| Jetson AGX Thor DevKit | Tegra264 | 128GB | `jetson-agx-thor` | `jetson-agx-thor-devkit-nvme-wendyos` | NVMe | _(coming, wendyos-update)_ |
+| Raspberry Pi 3 (B/B+) | Broadcom BCM2837 | 1GB | `rpi3-sd` | `raspberrypi3-64-wendyos` | SD | Mender |
+| Raspberry Pi 4 | Broadcom BCM2711 | 1–8GB | `rpi4-sd` | `raspberrypi4-64-wendyos` | SD | Mender |
+| Raspberry Pi 5 | Broadcom BCM2712 | 8GB | `rpi5-sd` | `raspberrypi5-wendyos` | SD | Mender |
+| Raspberry Pi 5 | Broadcom BCM2712 | 8GB | `rpi5-nvme` | `raspberrypi5-nvme-wendyos` | NVMe | Mender |
+| QEMU ARM64 | virtual | configurable | `qemu-arm64` | `qemuarm64-wendyos` | virtio | none |
 
 ## TL;DR
 
@@ -56,7 +60,7 @@ make flash-to-external  # Flash to external NVMe/USB drive
   - [Build Configuration Variables](#build-configuration-variables)
   - [Runtime Identity](#runtime-identity)
   - [Per-Board Repo Overrides](#per-board-repo-overrides)
-- [Raspberry Pi 5](#raspberry-pi-5)
+- [Raspberry Pi](#raspberry-pi)
   - [Supported Machines](#supported-machines)
   - [Build](#build)
   - [Flash the Image](#flash-the-image)
@@ -165,6 +169,18 @@ make build
 make setup BOARD=jetson-agx-orin-emmc
 make build
 
+# Jetson AGX Thor (NVMe)
+make setup BOARD=jetson-agx-thor
+make build
+
+# Raspberry Pi 3 (SD card)
+make setup BOARD=rpi3-sd
+make build
+
+# Raspberry Pi 4 (SD card)
+make setup BOARD=rpi4-sd
+make build
+
 # Raspberry Pi 5 (SD card)
 make setup BOARD=rpi5-sd
 make build
@@ -220,6 +236,9 @@ make build
    BOARD=jetson-orin-nano-sd   ./meta-wendyos/bootstrap.sh
    BOARD=jetson-agx-orin       ./meta-wendyos/bootstrap.sh
    BOARD=jetson-agx-orin-emmc  ./meta-wendyos/bootstrap.sh
+   BOARD=jetson-agx-thor       ./meta-wendyos/bootstrap.sh
+   BOARD=rpi3-sd               ./meta-wendyos/bootstrap.sh
+   BOARD=rpi4-sd               ./meta-wendyos/bootstrap.sh
    BOARD=rpi5-sd               ./meta-wendyos/bootstrap.sh
    BOARD=rpi5-nvme             ./meta-wendyos/bootstrap.sh
    BOARD=qemu-arm64            ./meta-wendyos/bootstrap.sh
@@ -249,6 +268,9 @@ make build
      - `jetson-orin-nano-sd`     → `jetson-orin-nano-devkit-wendyos`
      - `jetson-agx-orin`         → `jetson-agx-orin-devkit-nvme-wendyos`
      - `jetson-agx-orin-emmc`    → `jetson-agx-orin-devkit-emmc-wendyos`
+     - `jetson-agx-thor`         → `jetson-agx-thor-devkit-nvme-wendyos`
+     - `rpi3-sd`                 → `raspberrypi3-64-wendyos`
+     - `rpi4-sd`                 → `raspberrypi4-64-wendyos`
      - `rpi5-sd`                 → `raspberrypi5-wendyos`
      - `rpi5-nvme`               → `raspberrypi5-nvme-wendyos`
      - `qemu-arm64`              → `qemuarm64-wendyos`
@@ -933,31 +955,38 @@ overrides — today's shipped placeholders are exactly that. The shared
 that override the same folder to different commits will cause a re-checkout
 when switching. Use `REPOS_EXTRA` with a different folder name to avoid that.
 
-## Raspberry Pi 5
+## Raspberry Pi
 
-WendyOS supports the **Raspberry Pi 5** as an alternative target. The RPi5 build uses
-[meta-raspberrypi](https://git.yoctoproject.org/meta-raspberrypi) as its BSP layer and
-produces a `.wic` disk image (SD card or NVMe). Mender OTA is not supported on RPi5.
+WendyOS supports the **Raspberry Pi 3 (64-bit), Pi 4, and Pi 5** as alternative targets.
+The RPi builds use [meta-raspberrypi](https://git.yoctoproject.org/meta-raspberrypi) as
+their BSP layer. Mender OTA (A/B rootfs redundancy) **is** supported on all three boards;
+the build produces a Mender `.sdimg` disk image (with a `.mender` OTA artifact).
 
 ### Supported Machines
 
-| Machine | Boot device | WKS file |
-|---------|-------------|----------|
-| `raspberrypi5-wendyos` | SD card (default) | `rpi-partuuid.wks` |
-| `raspberrypi5-nvme-wendyos` | NVMe via passive PCIe adapter | `rpi-nvme-partuuid.wks` |
+| Machine | Board id | Boot device | USB gadget |
+|---------|----------|-------------|------------|
+| `raspberrypi3-64-wendyos` | `rpi3-sd` | SD card | no (LAN9514 hub blocks DWC2 peripheral mode) |
+| `raspberrypi4-64-wendyos` | `rpi4-sd` | SD card | yes (OTG-capable USB-C port) |
+| `raspberrypi5-wendyos` | `rpi5-sd` | SD card (default) | yes |
+| `raspberrypi5-nvme-wendyos` | `rpi5-nvme` | NVMe via passive PCIe adapter | yes |
 
-Both machines include Wi-Fi, Bluetooth, and USB gadget (NCM) support. UART console is
-enabled on `ttyAMA0` at 115200 baud.
+All machines include Wi-Fi and Bluetooth support. RPi4/5 also expose a USB gadget (NCM)
+interface. UART console is enabled at 115200 baud (`ttyS0` on RPi3/4, `ttyAMA0` on RPi5).
 
 ### Build
 
-1. **Bootstrap** the build environment for RPi5:
+1. **Bootstrap** the build environment for your Raspberry Pi:
 
    ```bash
    cd /path/to/project
-   # SD card boot (yocto MACHINE = raspberrypi5-wendyos)
+   # Pi 3 (SD card,  yocto MACHINE = raspberrypi3-64-wendyos)
+   BOARD=rpi3-sd ./meta-wendyos/bootstrap.sh
+   # Pi 4 (SD card,  yocto MACHINE = raspberrypi4-64-wendyos)
+   BOARD=rpi4-sd ./meta-wendyos/bootstrap.sh
+   # Pi 5 (SD card,  yocto MACHINE = raspberrypi5-wendyos)
    BOARD=rpi5-sd ./meta-wendyos/bootstrap.sh
-   # or NVMe boot (yocto MACHINE = raspberrypi5-nvme-wendyos)
+   # Pi 5 (NVMe,     yocto MACHINE = raspberrypi5-nvme-wendyos)
    BOARD=rpi5-nvme ./meta-wendyos/bootstrap.sh
    ```
 
@@ -980,25 +1009,29 @@ enabled on `ttyAMA0` at 115200 baud.
    bitbake wendyos-image
    ```
 
-   The build produces:
+   The build produces a Mender SD image (A/B rootfs layout):
    ```
-   build/tmp/deploy/images/<machine>/wendyos-image-<machine>.rootfs.wic
-   build/tmp/deploy/images/<machine>/wendyos-image-<machine>.rootfs.wic.bmap
+   build/tmp/deploy/images/<machine>/wendyos-image-<machine>.sdimg
+   build/tmp/deploy/images/<machine>/wendyos-image-<machine>.mender   # OTA artifact
    ```
+
+   > The easiest way to flash is `make flash-to-external` (works on macOS and
+   > Linux), which auto-detects the RPi `.sdimg` and writes it to your chosen
+   > drive. To flash manually, follow the steps below.
 
 ### Flash the Image
 
-Use `bmaptool` (faster, recommended) or `dd` to write the `.wic` image to the target
+Use `bmaptool` (faster, recommended) or `dd` to write the `.sdimg` image to the target
 storage device.
 
 **With bmaptool:**
 ```bash
-sudo bmaptool copy wendyos-image-<machine>.rootfs.wic /dev/sdX
+sudo bmaptool copy wendyos-image-<machine>.sdimg /dev/sdX
 ```
 
 **With dd:**
 ```bash
-sudo dd if=wendyos-image-<machine>.rootfs.wic of=/dev/sdX bs=4M status=progress conv=fsync
+sudo dd if=wendyos-image-<machine>.sdimg of=/dev/sdX bs=4M status=progress conv=fsync
 sync
 ```
 
@@ -1007,8 +1040,8 @@ for NVMe).
 
 **Warning**: This will erase all data on the target device!
 
-For SD card builds, insert the flashed card into the RPi5 and power on. For NVMe builds,
-ensure the NVMe drive is connected via a PCIe adapter and that the EEPROM boot order is
+For SD card builds, insert the flashed card into the Raspberry Pi and power on. For NVMe
+builds (RPi5 only), ensure the NVMe drive is connected via a PCIe adapter and that the EEPROM boot order is
 configured to boot from NVMe (see `rpi-eeprom-nvme-config` package included in the NVMe
 machine).
 
@@ -1096,12 +1129,12 @@ To check the current state:
 
 ## Architecture Notes
 
-- **Yocto Version**: `Scarthgap`
-- **Base Layer**: `meta-tegra` (NVIDIA Jetson BSP)
+- **Yocto Version**: `Scarthgap` (Jetson AGX Thor builds against a newer L4T r38 / `wrynose` core)
+- **BSP Layers**: `meta-tegra` (NVIDIA Jetson) and `meta-raspberrypi` (Raspberry Pi)
 - **Init System**: `systemd`
 - **Package Manager**: `RPM`
-- **Boot Method**: UEFI with extlinux
-- **OTA System**: Mender v5.0.x
+- **Boot Method**: UEFI with extlinux (Jetson); U-Boot (Raspberry Pi)
+- **OTA System**: Mender v5.0.x (Orin/AGX Orin and Raspberry Pi); AGX Thor OTA arrives later via `wendyos-update`
 - **Display Features**: Removed (headless embedded system)
 
 ## Building on macOS
