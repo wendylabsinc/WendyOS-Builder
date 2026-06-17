@@ -108,7 +108,6 @@ jobs:
             {"device":"jetson-agx-orin","storage":"nvme"},
             {"device":"jetson-agx-orin","storage":"emmc"},
             {"device":"jetson-orin-nano","storage":"nvme"},
-            {"device":"jetson-orin-nano","storage":"sd"},
             {"device":"jetson-agx-thor","storage":"nvme"}
           ]'
           # Collapse to one line so it can be written to $GITHUB_OUTPUT, which
@@ -389,7 +388,6 @@ jobs:
             jetson-agx-orin:nvme) BOARD=jetson-agx-orin;       MACHINE=jetson-agx-orin-devkit-nvme-wendyos ;;
             jetson-agx-orin:emmc) BOARD=jetson-agx-orin-emmc;  MACHINE=jetson-agx-orin-devkit-emmc-wendyos ;;
             jetson-orin-nano:nvme) BOARD=jetson-orin-nano-nvme; MACHINE=jetson-orin-nano-devkit-nvme-wendyos ;;
-            jetson-orin-nano:sd)  BOARD=jetson-orin-nano-sd;   MACHINE=jetson-orin-nano-devkit-wendyos ;;
             jetson-agx-thor:nvme) BOARD=jetson-agx-thor;       MACHINE=jetson-agx-thor-devkit-nvme-wendyos ;;
             *) echo "Unknown device/storage: $DEVICE/$STORAGE"; exit 1 ;;
           esac
@@ -575,22 +573,20 @@ jobs:
           # ship the doexternal.sh / dosdcard.sh helper scripts.
           # make-thor-nvme-img.py reimplements their offline GPT image creation
           # by parsing external-flash.xml.in and writing each partition's binary
-          # at the correct sector offset. The resulting wendyos-{nvme,sd}.img is
-          # the primary artifact for `wendy os install` (dd-based provisioning);
+          # at the correct sector offset. The resulting wendyos-nvme.img is the
+          # primary artifact for `wendy os install` (dd-based provisioning);
           # the tegraflash-tar bundle remains the recovery-flash artifact.
           TEGRAFLASH_TAR="$DEPLOY_DIR/wendyos-image-${MACHINE}.tegraflash-tar"
           tar -xf "$TEGRAFLASH_TAR" -C "$FLASH_WORKDIR"
-          # external-flash.xml.in describes the external boot/root device (NVMe
-          # or SD). eMMC builds are internal-only and ship no such layout — for
-          # them the tegraflash-tar bundle itself is the recovery/flash artifact,
-          # so there is no offline disk image to build.
+          # external-flash.xml.in describes the external NVMe boot/root device.
+          # eMMC builds are internal-only and ship no such layout; the SD-card
+          # Orin Nano is not a CI target (its layout lives in a <device
+          # type="sdcard"> block, not external-flash.xml.in, and the blacksail
+          # bundle no longer ships dosdcard.sh to build it). For those the
+          # tegraflash-tar bundle itself is the flash artifact — nothing to do.
           if [[ -f "$FLASH_WORKDIR/external-flash.xml.in" ]]; then
-            case "$STORAGE" in
-              sd) OUT="$GITHUB_WORKSPACE/wendyos-sd.img" ;;
-              *)  OUT="$GITHUB_WORKSPACE/wendyos-nvme.img" ;;
-            esac
             python3 "$GITHUB_WORKSPACE/wendyos/scripts/make-thor-nvme-img.py" \
-              "$FLASH_WORKDIR" "$OUT"
+              "$FLASH_WORKDIR" "$GITHUB_WORKSPACE/wendyos-nvme.img"
           else
             echo "No external-flash.xml.in in bundle (storage=$STORAGE); the tegraflash-tar is the flash artifact, skipping offline image."
           fi
@@ -625,10 +621,6 @@ jobs:
             # No offline disk image for eMMC (meta-tegra doesn't generate dosdcard.sh for
             # sdmmc_user devices). The tegraflash bundle is the recovery-flash artifact.
             IMAGE_FILE="$TEGRAFLASH_BUNDLE"
-          elif [[ "$MACHINE" != raspberry* && "$STORAGE" == "sd" ]]; then
-            IMAGE_FILE="$GITHUB_WORKSPACE/wendyos-sd.img"
-            bmaptool create "$IMAGE_FILE" > "${IMAGE_FILE}.bmap"
-            BMAP_FILE="${IMAGE_FILE}.bmap"
           else
             # RPi: Mender emits .sdimg; pre-Mender RPi builds produced
             # .rootfs.wic. Prefer sdimg, fall back to wic.
