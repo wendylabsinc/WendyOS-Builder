@@ -22,20 +22,80 @@ set -euo pipefail
 
 log() { printf '[wendyos-data-init] %s\n' "$*"; }
 
-BYLABEL="/dev/disk/by-partlabel/data"
+# Resolve the 'data' partition WITHOUT relying on the
+# /dev/disk/by-partlabel/data udev symlink.
+#
+# That symlink is the obvious way in, but it is not always present: on some
+# platforms (observed on Jetson Thor / T264) udev does not emit the
+# by-partlabel links even though the GPT partition name is written correctly.
+# When that happens the partition still exists and the kernel/libblkid can
+# see its GPT name — so we scan for it directly instead of giving up.
+#
+# Resolution order (first hit wins):
+#   1. /dev/disk/by-partlabel/data  — fast path when udev cooperates.
+#   2. GPT partition name via lsblk/libblkid (PARTLABEL == "data") — works
+#      even when the by-partlabel symlink is missing, and finds the
+#      not-yet-formatted partition on first boot.
+#   3. ext4 filesystem label via libblkid (LABEL == "data") — covers an
+#      already-formatted partition whose GPT name is somehow unreadable.
+resolve_data_part() {
+    if [ -e /dev/disk/by-partlabel/data ]; then
+        readlink -f /dev/disk/by-partlabel/data
+        return 0
+    fi
+    # PARTLABEL scan (GPT partition name). "data" contains no spaces, so the
+    # raw 2-column lsblk output is unambiguous.
+    dev="$(lsblk -nrpo NAME,PARTLABEL 2>/dev/null | awk '$2=="data"{print $1; exit}')"
+    if [ -n "${dev}" ]; then
+        printf '%s\n' "${dev}"
+        return 0
+    fi
+    # Filesystem-label scan (already formatted by a previous boot).
+    dev="$(blkid -L data 2>/dev/null || true)"
+    if [ -n "${dev}" ]; then
+        printf '%s\n' "${dev}"
+        return 0
+    fi
+    return 1
+}
 
-# Wait briefly for udev to create the by-partlabel link.
-for _ in $(seq 1 10); do
-    [ -e "${BYLABEL}" ] && break
+# Ensure /dev/disk/by-label/data exists so data.mount
+# (What=/dev/disk/by-label/data) can resolve the partition. mkfs.ext4 -L data
+# sets the *filesystem* label, from which udev normally derives this symlink.
+# On platforms where udev does not emit the disk/by-* links (the same fault
+# that hides by-partlabel), we create it ourselves so the mount still
+# succeeds. Called on every successful path — including the "already
+# initialised" reboot path — because the symlink must exist each boot.
+ensure_bylabel_link() {
+    # Nudge udev first; when it works it owns the link and we touch nothing.
+    udevadm trigger --action=change "${DEV}" 2>/dev/null || true
+    udevadm settle 2>/dev/null || true
+    [ -e /dev/disk/by-label/data ] && return 0
+    log "udev did not create /dev/disk/by-label/data; creating fallback symlink -> ${DEV}"
+    mkdir -p /dev/disk/by-label
+    ln -sfn "${DEV}" /dev/disk/by-label/data
+}
+
+# Retry briefly: the partition node and its GPT name may not be visible the
+# instant this oneshot runs after systemd-udevd. settle + rescan each pass.
+DEV=""
+for _ in $(seq 1 15); do
+    DEV="$(resolve_data_part || true)"
+    [ -n "${DEV}" ] && break
     udevadm settle 2>/dev/null || true
     sleep 1
 done
-if [ ! -e "${BYLABEL}" ]; then
-    log "no partition labelled 'data' found; nothing to do"
-    exit 0
-fi
 
-DEV="$(readlink -f "${BYLABEL}")"
+# Fail loud. This recipe is only installed on boards that carve a 'data'
+# partition, so not finding it is a real fault — not a no-op. Exiting non-zero
+# surfaces it in `systemctl status`/the journal instead of silently leaving
+# /data unmounted (the previous `exit 0` made exactly this bug invisible).
+if [ -z "${DEV}" ]; then
+    log "ERROR: no 'data' partition found (no by-partlabel link, and no GPT/fs label 'data' on any block device)"
+    log "block devices seen:"
+    lsblk -po NAME,SIZE,FSTYPE,PARTLABEL,LABEL 2>/dev/null | while IFS= read -r l; do log "  ${l}"; done
+    exit 1
+fi
 log "data partition: ${DEV}"
 
 # Already initialised? (slot-safe idempotency — key on the filesystem,
@@ -62,8 +122,10 @@ if [ "$(blkid -o value -s TYPE "${DEV}" 2>/dev/null || true)" = "ext4" ]; then
         dev_bytes="$(blockdev --getsize64 "${DEV}" 2>/dev/null || echo 0)"
         if [ -n "${fs_blocks}" ] && [ -n "${fs_bsize}" ] && [ "${dev_bytes}" -gt 0 ] \
            && [ "$(( fs_blocks * fs_bsize ))" -le "${dev_bytes}" ]; then
-            log "already ext4 and fits device; nothing to do"
+            log "already ext4 and fits device; nothing to format"
             rm -f "${de2fs_err}"
+            ensure_bylabel_link
+            log "done"
             exit 0
         fi
         log "ext4 present but does not fit the device (stale from a prior, larger layout); reinitialising"
@@ -104,4 +166,5 @@ udevadm settle 2>/dev/null || true
 log "mkfs.ext4 -L data ${DEV}"
 mkfs.ext4 -F -L data "${DEV}"
 
+ensure_bylabel_link
 log "done"
