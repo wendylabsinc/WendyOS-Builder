@@ -81,8 +81,18 @@ FILES:${PN} = "/usr/local/bin/wendy-agent \
                /var/lib/wendyos-agent \
                /var/lib/wendy-agent"
 
-# Skip QA checks for pre-built binary
-INSANE_SKIP:${PN} += "already-stripped"
+# Skip QA checks for the pre-built, vendored binary:
+#   already-stripped - upstream ships a stripped release binary.
+#   buildpaths       - the agent is a Go binary built in WendyOS's own CI
+#                      (also GitHub Actions), so it embeds /home/runner/...
+#                      build paths that we cannot trim out of a binary we did
+#                      not compile. blacksail promotes buildpaths to a fatal
+#                      ERROR_QA, which is why this only surfaces on the cold
+#                      blacksail Jetson builds. The embedded path is inert
+#                      debug metadata on-device. Proper fix is upstream
+#                      building the agent with `go build -trimpath`; drop this
+#                      skip once releases ship trimmed binaries.
+INSANE_SKIP:${PN} += "already-stripped buildpaths"
 
 # Runtime dependencies
 # curl/wget needed for auto-updater, tar for extraction
