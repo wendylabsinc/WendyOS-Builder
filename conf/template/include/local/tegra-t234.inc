@@ -19,7 +19,7 @@ WENDYOS_OTA = "wendy"
 # capsule path needs its own on-device verification on r39.2 — the ESRT
 # entry0 + fw_class GUID must be confirmed (Thor's GUID 3c834404 is
 # t264-only) — so it's a later phase mirroring Thor's Step B. Keep off.
-WENDYOS_UPDATE_BOOTLOADER = "0"
+WENDYOS_UPDATE_BOOTLOADER = "1"
 
 # Persistent journal logs left at the smart default (tracks WENDYOS_OTA):
 # WENDYOS_OTA="wendy" -> persistent on /data.
