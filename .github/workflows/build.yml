@@ -452,6 +452,22 @@ jobs:
       # end. L2 (S3) we push explicitly so other matrix entries / future
       # runners can prime from it.
 
+      # Re-assume the role for a fresh STS token before uploading. The
+      # credentials configured at job start expire after the default 1h
+      # session, and a cold blacksail build now runs longer than that — so by
+      # the time we reach the upload the original token is dead ("ExpiredToken:
+      # The provided token has expired"). Bumping role-duration-seconds alone
+      # would also require raising the IAM role's MaxSessionDuration; refreshing
+      # here is self-contained and gives the upload a full fresh hour.
+      # if: always() mirrors the save step so the cache still uploads after a
+      # failed build.
+      - name: Refresh AWS credentials for cache upload
+        if: always()
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_BUILD_CACHE_ROLE_ARN }}
+          aws-region: ${{ vars.WENDYOS_BUILD_CACHE_REGION }}
+
       - name: Save sstate-cache and downloads to S3 (L2)
         if: always()
         env:
