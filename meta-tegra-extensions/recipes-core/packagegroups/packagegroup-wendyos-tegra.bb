@@ -22,7 +22,12 @@ RDEPENDS:${PN} = " \
     tegra-bootcontrol-overlay \
     setup-nv-boot-control \
     packagegroup-nvidia-container \
+    bluetooth-config \
     "
+# bluetooth-config brings up the BT controller (kernel modules + firmware +
+# autoload) so it registers as hci0 and BlueZ exposes an adapter. The userspace
+# bluez5 stack ships from the shared image; this packagegroup adds the
+# hardware-facing pieces, mirroring how meta-rpi-extensions pulls pi-bluetooth.
 
 # Conditional UEFI capsule package installation
 # Controlled by WENDYOS_UPDATE_BOOTLOADER

@@ -14,9 +14,13 @@
 # be redundant on 6.8 but doesn't hurt.
 FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 
+# bluetooth.cfg enables the BT subsystem (off in the NVIDIA defconfig) so the
+# controller registers as hci0 and BlueZ can expose an adapter. UNVERIFIED on
+# Thor hardware — see the fragment header for the controller assumptions.
 SRC_URI += " \
     file://usb-gadget.cfg \
     file://usb-gadget-builtin.cfg \
+    file://bluetooth.cfg \
     file://0001-crypto-scatterwalk-Backport-memcpy_sglist.patch \
     file://0002-crypto-algif_aead-use-memcpy_sglist-instead-of-null-skcipher.patch \
     file://0003-crypto-algif_aead-Revert-to-operating-out-of-place-CVE-2026-31431.patch \
