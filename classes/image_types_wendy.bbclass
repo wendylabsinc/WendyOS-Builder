@@ -10,7 +10,7 @@
 #   IMAGE_CLASSES += "image_types_wendy"
 #   IMAGE_FSTYPES += "wendy"
 #
-# The artifact format and `pack` are documented in the wendy-os-update
+# The artifact format and `pack` are documented in the wendyos-update
 # repo (docs/manifest-schema.md, docs/cli-contract.md).
 
 # The artifact payload is the raw rootfs ext4; force it to be built even

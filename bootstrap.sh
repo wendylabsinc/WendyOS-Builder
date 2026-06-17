@@ -321,6 +321,45 @@ function clone_repos() {
     done
 }
 
+# Print which Yocto layer tree is active and, per layer, the short SHA it
+# landed on plus the matching upstream branch. Checkouts are by SRCREV
+# (detached HEAD), so "branch" is best-effort: the remote branch whose tip
+# equals HEAD (the common case — we pin branch tips), else a branch that
+# contains the commit, else "(detached)". Run from inside
+# repos/${WENDYOS_LAYER_TREE}/.
+function report_tree() {
+    printf "\n=== Active Yocto layer tree: %s  (repos/%s/) ===\n" \
+        "${WENDYOS_LAYER_TREE}" "${WENDYOS_LAYER_TREE}"
+    local repo enable url folder short branch
+    for repo in "${repos[@]}"
+    do
+        enable=$(echo "${repo}" | cut -d'|' -f 1)
+        [ "${enable}" -ne 1 ] && continue
+        url=$(echo "${repo}" | cut -d'|' -f 2)
+        folder=$(echo "${repo}" | cut -d'|' -f 3)
+        [[ -z "${folder}" ]] && folder=$(basename "${url%.git}")
+        [[ -d "./${folder}" ]] || continue
+        cd "${folder}"
+        short=$(git rev-parse --short HEAD 2>/dev/null || echo '?')
+        # Prefer the remote branch whose tip == HEAD (we pin branch tips);
+        # else any branch that contains the commit, preferring a real branch
+        # over a contrib/ mirror; drop the origin/HEAD symref either way.
+        # NOTE: trailing '|| true' is required — under `set -e`/`pipefail` a
+        # grep that filters everything exits 1 and would abort the script.
+        branch=$(git branch -r --points-at HEAD --format='%(refname:short)' 2>/dev/null | grep -vE '(^|/)HEAD$' | head -n1 || true)
+        if [[ -z "${branch}" ]]; then
+            local contains
+            contains=$(git branch -r --contains HEAD --format='%(refname:short)' 2>/dev/null | grep -vE '(^|/)HEAD$' || true)
+            branch=$(printf '%s\n' "${contains}" | grep -v 'contrib/' | head -n1 || true)
+            [[ -z "${branch}" ]] && branch=$(printf '%s\n' "${contains}" | head -n1 || true)
+        fi
+        [[ -z "${branch}" ]] && branch='(detached)'
+        printf "  %-20s %-12s %s\n" "${folder}" "${short}" "${branch}"
+        cd ..
+    done
+    printf "\n"
+}
+
 copy_dir() {
     local src="${1}"
     local dst="${2}"
@@ -390,6 +429,11 @@ then
     source "${BOARD_DIR}/repos.overrides"
 fi
 
+# Announce the resolved tree up front (after the board override) so it is
+# obvious which Yocto series this bootstrap targets before any cloning.
+printf "Board '%s' -> Yocto layer tree '%s' (clones under repos/%s/)\n" \
+    "${BOARD}" "${WENDYOS_LAYER_TREE}" "${WENDYOS_LAYER_TREE}"
+
 # Warn (but do not auto-delete) if a pre-migration bundled-poky checkout is
 # still on disk. It is no longer used; the user can remove it manually.
 if [[ -d "${PROJECT_DIR}/repos/poky" ]]
@@ -452,6 +496,9 @@ clone_repos || {
     cd "${WORK_DIR}"
     exit 1
 }
+
+# Summarise the active tree + each layer's branch/revision.
+report_tree
 
 image_name=$(basename "${META_LAYER_DIR}")
 

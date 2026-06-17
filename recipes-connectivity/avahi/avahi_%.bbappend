@@ -9,8 +9,18 @@ SRC_URI += " \
     file://90-wendyos.preset \
     "
 
-# Ensure D-Bus support is enabled for proper service publishing
-PACKAGECONFIG += "dbus"
+# Ensure D-Bus support is enabled for proper service publishing.
+# Use :append, NOT += : the recipe sets PACKAGECONFIG with a weak default
+# (??=), and += is an immediate assignment that DISCARDS that default
+# entirely (??= only applies if the var is otherwise unset). On avahi 0.8
+# (scarthgap/wrynose) the default was just "dbus", so += was harmless. But
+# avahi 0.9 (blacksail) added "systemd" to the default AND gates installing
+# avahi-daemon.service on PACKAGECONFIG[systemd]; += "dbus" wiped systemd,
+# so the unit was never installed while SYSTEMD_SERVICE still referenced it
+# -> do_package QA "Didn't find service unit 'avahi-daemon.service'".
+# :append is applied after ??= resolves, so it preserves the recipe default
+# (incl. systemd on 0.9) and is a no-op on 0.8 (whose default has no systemd).
+PACKAGECONFIG:append = " dbus"
 
 # Ensure Avahi compiles with static service file support
 EXTRA_OECONF += " \

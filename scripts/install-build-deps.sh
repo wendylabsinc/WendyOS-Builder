@@ -82,7 +82,7 @@ install -m 0755 "${tmp_s5}/s5cmd" /usr/local/bin/s5cmd
 rm -rf "${tmp_s5}"
 /usr/local/bin/s5cmd version
 
-# Go toolchain. Needed to build wendy-os-update (the OTA tool) and to run
+# Go toolchain. Needed to build wendyos-update (the OTA tool) and to run
 # its host-side `wendyos-update pack` from the build container / CI. Ubuntu
 # 24.04's apt 'golang' is ~1.22 — too old for the tool's go.mod (go 1.26)
 # — so install the official tarball to /usr/local/go (the upstream

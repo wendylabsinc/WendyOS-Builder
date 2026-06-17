@@ -1,20 +1,47 @@
 # Per-board repo version overrides for jetson-agx-orin.
 #
-# Sourced by bootstrap.sh after the default URL_*/SRCREV_* values are set,
-# but before the repos[] array is built. Uncomment a line below to pin
-# this board to a different commit of an upstream layer.
+# === BLACKSAIL / JetPack 7.2 / L4T R39.2.0 EXPERIMENT (feature/jp7.2-support) ===
+# This board joins the JP7.2 fleet-unification experiment alongside Thor.
+# r39.2.0 is the first JP7 line to support the Orin family AND Thor, so all
+# three Jetson boards share one Yocto series (blacksail) under
+# repos/blacksail/. The JP6/Mender Orin fallback lives on `main` (default
+# scarthgap pins); revert = git checkout main + re-bootstrap a clean build dir.
 #
-# Also available (see bootstrap.sh):
-#   URL_<name>           override a source URL (e.g. to use a fork)
-#   REPOS_EXTRA=(...)    append extra clones that coexist with defaults,
-#                        each entry "enabled|url|folder|commit"
+# The pins below are the SHARED blacksail tree set — IDENTICAL across Thor and
+# every Orin board. Keep them in sync with
+# conf/template/boards/jetson-agx-thor/repos.overrides. Resolved from upstream
+# HEADs on 2026-06-15 (git ls-remote).
+#
+# Sourced by bootstrap.sh after the default URL_*/SRCREV_* values are set, but
+# before the repos[] array is built.
 
-#SRCREV_BITBAKE="<commit-hash>"
-#SRCREV_OECORE="<commit-hash>"
-#SRCREV_METAYOCTO="<commit-hash>"
-#SRCREV_OE="<commit-hash>"
-#SRCREV_VIRT="<commit-hash>"
-#SRCREV_TEGRA="<commit-hash>"
-#SRCREV_TEGRA_COMM="<commit-hash>"
-#SRCREV_MENDER="<commit-hash>"
-#SRCREV_MENDER_COMM="<commit-hash>"
+WENDYOS_LAYER_TREE="blacksail"
+
+# Split-poky composition on blacksail. oe-core master declares
+# LAYERSERIES_CORENAMES = "wrynose blacksail" + LAYERSERIES_COMPAT_core =
+# "blacksail"; meta-yocto master + bitbake master (2.19.0 >= BB_MIN 2.18.0) match.
+SRCREV_BITBAKE="30ccfbb849ec80cddb4383d198a1441af0ea760a"
+SRCREV_OECORE="294409c4bfe392471509d4cb6c1e6fb1063d2b3b"
+SRCREV_METAYOCTO="f49de2f33e37ca971d64215cc1a3669312e1e7c3"
+
+# meta-openembedded master HEAD. NOTE: master still declares
+# LAYERSERIES_COMPAT = "whinlatter wrynose" (NOT blacksail) — bridged via
+# conf/template/include/local/blacksail-compat.inc. Re-pin + drop the bridge
+# once meta-oe bumps.
+SRCREV_OE="5d90e6543de4d1c39424956c67ff1925a39bf3c8"
+
+# meta-virtualization master HEAD. Same situation: declares
+# LAYERSERIES_COMPAT = "wrynose" only — bridged via blacksail-compat.inc.
+SRCREV_VIRT="022f4356d4a9b389f51472d40a9330aa59f6bb9a"
+
+# meta-tegra wip-l4t-r39.2.0 (JetPack 7.2 / L4T R39.2.0, Thor + Orin family).
+# conf/layer.conf declares LAYERSERIES_COMPAT_tegra = "blacksail".
+SRCREV_TEGRA="d0b2f4d81dc3cd286a6cfd244044a20cc61ebfe5"
+
+# meta-tegra-community wip-l4t-r39.2.0; conf/layer.conf declares
+# LAYERSERIES_COMPAT_tegra-community = "blacksail". LAYERDEPENDS pulls in
+# openembedded-layer + meta-python (hence the compat bridge).
+SRCREV_TEGRA_COMM="931db8c0f56eefbfb028d340ade0953b91006d54"
+
+# Mender SRCREVs intentionally NOT overridden — JetPack 7 has no Mender
+# support; these boards use the wendyos-update OTA stack (WENDYOS_OTA = "wendy").

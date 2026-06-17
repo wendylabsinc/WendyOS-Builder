@@ -1,0 +1,241 @@
+# NVIDIA DeepStream SDK 8.0 — VENDORED from OE4T meta-tegra-community
+# (branch master-l4t-r38.4.x, recipes-devtools/deepstream/deepstream-8.0_8.0.0-1.bb).
+#
+# Why vendored: meta-tegra-community ships this recipe on the r38.4 (JP7.1)
+# branches but has NOT yet forward-ported it to wip-l4t-r39.2.0 (the blacksail
+# branch we build from — that branch still only has deepstream-7.1). This is a
+# verbatim copy with the minimal blacksail/r39.2 reconciliations noted below.
+#
+# CUTOVER: when wip-l4t-r39.2.0 gains deepstream-8.0, DELETE this file — the
+# upstream recipe takes over (same PN), and the companion deepstream-8.0_%.bbappend
+# keeps applying our headless/container fixups to it. tegra-image.inc + the
+# container CSVs key on the package name / install path, so no other change.
+#
+# r39.2 RECONCILIATIONS vs the upstream r38.4 source (blacksail meta-oe is
+# NEWER than r38.4's, so several patchelf TARGET sonames differ):
+#   * jsoncpp: upstream hardcodes libjsoncpp.so.26 (jsoncpp 1.9.6); blacksail
+#     has jsoncpp 1.9.7 -> read the target dynamically from staging instead.
+#   * libgpr:  upstream hardcodes libgpr.so.46; blacksail has grpc 1.80.0 ->
+#     read dynamically from staging.
+#   * abseil:  upstream targets libabsl_synchronization.so.2505.0.0; blacksail
+#     abseil-cpp 20260107.1 builds .so.2601.0.0 (confirmed) -> use that.
+#   CUDA fixups (libcublas.so.13 / libcufft.so.12 / libnpp*.so.13) are CUDA-13
+#   and identical on r38.4 and r39.2, so kept verbatim.
+#
+# Headless/container fixups (X11 INSANE_SKIP, PRIVATE_LIBS, SKIP_FILEDEPS,
+# libcivetweb symlink) are NOT here — upstream does not carry them either; they
+# live in the companion deepstream-8.0_%.bbappend so they survive the cutover.
+
+DESCRIPTION = "NVIDIA Deepstream SDK"
+HOMEPAGE = "https://developer.nvidia.com/deepstream-sdk"
+LICENSE = "Proprietary"
+LIC_FILES_CHKSUM = " \
+    file://usr/share/doc/deepstream-8.0/copyright;md5=02bfaa859dba1e59dd1b4348a730ee00 \
+    file://opt/nvidia/deepstream/deepstream-8.0/LICENSE.txt;md5=ecccc0f1b797f19a3e80c11a3204d2b4 \
+    file://opt/nvidia/deepstream/deepstream-8.0/doc/nvidia-tegra/LICENSE.iothub_client;md5=4f8c6347a759d246b5f96281726b8611 \
+    file://opt/nvidia/deepstream/deepstream-8.0/doc/nvidia-tegra/LICENSE.nvds_amqp_protocol_adaptor;md5=8b4b651fa4090272b2e08e208140a658 \
+"
+
+inherit l4t_deb_pkgfeed
+
+SRC_COMMON_DEBS = "${BPN}_${PV}_arm64.deb;subdir=${BPN}"
+SRC_URI[sha256sum] = "1eb5ad4550d43416a561a318f53c5c2a4a166f828b9dcc8e50c321d6e6055c31"
+
+COMPATIBLE_MACHINE = "(tegra)"
+PACKAGE_ARCH = "${TEGRA_PKGARCH}"
+
+PACKAGECONFIG ??= ""
+PACKAGECONFIG[amqp] = ",,rabbitmq-c"
+PACKAGECONFIG[kafka] = ",,librdkafka"
+# NB: requires hiredis 1.0.0+
+PACKAGECONFIG[redis] = ",,hiredis"
+# NB: requires avahi to be built with 'libdns_sd' in PACKAGECONFIG
+#     which is not the default
+PACKAGECONFIG[nmos] = ",,avahi"
+# NB: requires Azure IoT Hub client library Azure IoT SDK
+PACKAGECONFIG[azure] = ",,azure-iot-sdk"
+# NB: need recipes for these dependencies
+PACKAGECONFIG[triton] = ""
+PACKAGECONFIG[rivermax] = ""
+PACKAGECONFIG[realsense] = ""
+
+# yaml-cpp: the DS8 libs link libyaml-cpp.so.0.8, but blacksail meta-oe ships
+# yaml-cpp 0.9 (.so.0.9). meta-tegra-community provides yaml-cpp-080 (0.8.0)
+# for exactly this, so depend on it rather than plain yaml-cpp. (Upstream's
+# r38.4 recipe used plain yaml-cpp because r38.4 meta-oe was still 0.8.)
+# Keep in sync with packagegroup-nvidia-container.bb's DS yaml-cpp choice.
+DEPENDS = "glib-2.0 gstreamer1.0 gstreamer1.0-plugins-base gstreamer1.0-rtsp-server \
+    tensorrt-core tensorrt-plugins libnvvpi4 libcufft libcublas libnpp json-glib \
+    tegra-libraries-multimedia-ds tegra-libraries-multimedia yaml-cpp-080 \
+    grpc protobuf tegra-libraries-nvdsseimeta libgstnvcustomhelper mosquitto jsoncpp cuda-nvrtc \
+"
+# XXX--- see hack in do_install
+DEPENDS += "patchelf-native"
+# ---XXX
+
+S = "${UNPACKDIR}/${BPN}"
+B = "${WORKDIR}/build"
+
+DEEPSTREAM_BASEDIR = "/opt/nvidia/deepstream"
+DEEPSTREAM_PATH = "${DEEPSTREAM_BASEDIR}/deepstream-8.0"
+SYSROOT_DIRS += "${DEEPSTREAM_PATH}/lib/ ${DEEPSTREAM_PATH}/sources/includes/ ${DEEPSTREAM_PATH}/sources/gst-plugins/"
+
+do_configure() {
+    for feature in azure amqp kafka nmos redis triton rivermax realsense; do
+        if ! echo "${PACKAGECONFIG}" | grep -q "$feature"; then
+            rm -f ${S}${DEEPSTREAM_PATH}/lib/libnvds_${feature}*
+            if [ "$feature" = "azure" ]; then
+                rm -f ${D}${DEEPSTREAM_PATH}/lib/libnvds_azure*
+            fi
+            if [ "$feature" = "nmos" ]; then
+                rm -f ${S}${DEEPSTREAM_PATH}/lib/libnvds_nmos.so*
+                rm -f ${S}${DEEPSTREAM_PATH}/sources/includes/nvdsnmos.h
+                rm -f ${S}${DEEPSTREAM_PATH}/bin/deepstream-nmos-app
+                rm -rf ${S}${DEEPSTREAM_PATH}/sources/apps/sample_apps/deepstream-nmos
+            fi
+            if [ "$feature" = "triton" ]; then
+                rm -f ${S}${DEEPSTREAM_PATH}/lib/gst-plugins/libnvdsgst_inferserver.so
+                rm -f ${S}${DEEPSTREAM_PATH}/lib/libnvds_infer_server.so
+            fi
+            if [ "$feature" = "rivermax" ]; then
+                rm -f ${S}${DEEPSTREAM_PATH}/lib/gst-plugins/libnvdsgst_udp.so
+            fi
+            if [ "$feature" = "realsense" ]; then
+                rm -f ${S}${DEEPSTREAM_PATH}/lib/libnvds_3d_dataloader_realsense.so
+            fi
+        fi
+    done
+    rm -rf ${S}${DEEPSTREAM_PATH}/sources/libs/gstnvcustomhelper
+    rm -f ${S}${DEEPSTREAM_PATH}/sources/includes/gst-nvcustomevent.h
+    rm -f ${S}${DEEPSTREAM_PATH}/lib/libiothub_client.so*
+}
+
+do_install() {
+    install -d ${D}${bindir}/
+    install -m 0755 ${S}${DEEPSTREAM_PATH}/bin/* ${D}${bindir}/
+
+    install -d ${D}${DEEPSTREAM_PATH}/lib/
+    for f in ${S}${DEEPSTREAM_PATH}/lib/*; do
+        [ ! -d "$f" ] || continue
+        install -m 0644 "$f" ${D}${DEEPSTREAM_PATH}/lib/
+    done
+    ln -sf libnvds_msgconv.so.1.0.0 ${D}${DEEPSTREAM_PATH}/lib/libnvds_msgconv.so
+    ln -sf libnvds_msgconv_audio.so.1.0.0 ${D}${DEEPSTREAM_PATH}/lib/libnvds_msgconv_audio.so
+
+    install -d ${D}/${sysconfdir}/ld.so.conf.d/
+    echo "${DEEPSTREAM_PATH}/lib" > ${D}/${sysconfdir}/ld.so.conf.d/deepstream.conf
+    echo "${libdir}/gstreamer-1.0/deepstream" >> ${D}/${sysconfdir}/ld.so.conf.d/deepstream.conf
+
+    install -d ${D}${libdir}/gstreamer-1.0/deepstream
+    install -m 0644 ${S}${DEEPSTREAM_PATH}/lib/gst-plugins/* ${D}${libdir}/gstreamer-1.0/deepstream/
+
+    cp -R --preserve=mode,timestamps ${S}${DEEPSTREAM_PATH}/samples ${D}${DEEPSTREAM_PATH}/
+    cp -R --preserve=mode,timestamps ${S}${DEEPSTREAM_PATH}/sources/ ${D}${DEEPSTREAM_PATH}/
+
+    # XXX---
+    # Some of the libraries carry the wrong SONAME in their DT_NEEDED ELF
+    # header, so rewrite them to prevent broken runtime dependencies. The
+    # grpc/grpc++/protobuf/protobuf-lite targets are read dynamically from
+    # staging (so they track whatever meta-oe ships); jsoncpp and gpr are read
+    # the same way here (blacksail meta-oe is newer than the r38.4 the upstream
+    # recipe hardcoded for); abseil uses the confirmed blacksail soname.
+    grpc_soname=$(${OBJDUMP} -p ${STAGING_LIBDIR}/libgrpc.so | grep SONAME | awk '{print $2}')
+    grpcpp_soname=$(${OBJDUMP} -p ${STAGING_LIBDIR}/libgrpc++.so | grep SONAME | awk '{print $2}')
+    protobuf_soname=$(${OBJDUMP} -p ${STAGING_LIBDIR}/libprotobuf.so | grep SONAME | awk '{print $2}')
+    libprotobuf_lite_soname=$(${OBJDUMP} -p ${STAGING_LIBDIR}/libprotobuf-lite.so | grep SONAME | awk '{print $2}')
+    jsoncpp_soname=$(${OBJDUMP} -p ${STAGING_LIBDIR}/libjsoncpp.so | grep SONAME | awk '{print $2}')
+    gpr_soname=$(${OBJDUMP} -p ${STAGING_LIBDIR}/libgpr.so | grep SONAME | awk '{print $2}')
+    patchelf --replace-needed libcufft.so libcufft.so.12 ${D}${DEEPSTREAM_PATH}/lib/libnvds_nvmultiobjecttracker.so
+    patchelf --replace-needed libcublas.so libcublas.so.13 ${D}${DEEPSTREAM_PATH}/lib/libnvds_nvmultiobjecttracker.so
+    patchelf --replace-needed libcufft.so libcufft.so.12 ${D}${DEEPSTREAM_PATH}/lib/libnvds_audiotransform.so
+    bbnote "Patching libgrpc NEEDED to $grpc_soname"
+    patchelf --replace-needed libgrpc.so.31 $grpc_soname ${D}${DEEPSTREAM_PATH}/lib/libnvds_riva_tts.so
+    patchelf --replace-needed libgrpc.so.31 $grpc_soname ${D}${DEEPSTREAM_PATH}/lib/libnvds_riva_asr_grpc.so
+    bbnote "Patching libgrpc++ NEEDED to $grpcpp_soname"
+    patchelf --replace-needed libgrpc++.so.1.54 $grpcpp_soname ${D}${DEEPSTREAM_PATH}/lib/libnvds_riva_tts.so
+    patchelf --replace-needed libgrpc++.so.1.54 $grpcpp_soname ${D}${DEEPSTREAM_PATH}/lib/libnvds_riva_asr_grpc.so
+    bbnote "Patching libprotobuf NEEDED to $protobuf_soname"
+    patchelf --replace-needed libprotobuf.so.3.21.12.0 $protobuf_soname ${D}${DEEPSTREAM_PATH}/lib/libnvds_riva_asr_grpc.so
+    patchelf --replace-needed libprotobuf.so.3.21.12.0 $protobuf_soname ${D}${DEEPSTREAM_PATH}/lib/libnvds_riva_tts.so
+    patchelf --replace-needed libprotobuf.so.3.21.12.0 $protobuf_soname ${D}${DEEPSTREAM_PATH}/lib/libnvds_riva_audio_proto.so
+    bbnote "Patching libprotobuf-lite NEEDED to $libprotobuf_lite_soname"
+    patchelf --replace-needed libprotobuf-lite.so.3.21.12.0 $libprotobuf_lite_soname ${D}${DEEPSTREAM_PATH}/lib/libnvds_riva_tts.so
+    patchelf --replace-needed libprotobuf-lite.so.3.21.12.0 $libprotobuf_lite_soname ${D}${DEEPSTREAM_PATH}/lib/libnvds_riva_asr_grpc.so
+    patchelf --replace-needed libnppial.so libnppial.so.13 ${D}${DEEPSTREAM_PATH}/lib/libnvds_vpicanmatch.so
+    patchelf --replace-needed libnppist.so libnppist.so.13 ${D}${DEEPSTREAM_PATH}/lib/libnvds_vpicanmatch.so
+    bbnote "Patching libjsoncpp NEEDED to $jsoncpp_soname"
+    patchelf --replace-needed libjsoncpp.so.25 $jsoncpp_soname ${D}${DEEPSTREAM_PATH}/lib/libnvds_rest_server.so
+    patchelf --replace-needed libjsoncpp.so.25 $jsoncpp_soname ${D}${libdir}/gstreamer-1.0/deepstream/libnvdsgst_nvmultiurisrcbin.so
+    bbnote "Patching libgpr NEEDED to $gpr_soname"
+    patchelf --replace-needed libgpr.so.31 $gpr_soname ${D}${DEEPSTREAM_PATH}/lib/libnvds_riva_asr_grpc.so
+    patchelf --replace-needed libgpr.so.31 $gpr_soname ${D}${DEEPSTREAM_PATH}/lib/libnvds_riva_tts.so
+    # abseil-cpp 20260107.1 on blacksail builds libabsl_synchronization.so.2601.0.0
+    # (upstream r38.4 targeted .2505.0.0).
+    patchelf --replace-needed libabsl_synchronization.so.2301.0.0 libabsl_synchronization.so.2601.0.0 ${D}${DEEPSTREAM_PATH}/lib/libnvds_riva_asr_grpc.so
+    patchelf --replace-needed libabsl_synchronization.so.2301.0.0 libabsl_synchronization.so.2601.0.0 ${D}${DEEPSTREAM_PATH}/lib/libnvds_riva_tts.so
+    # Optical-flow plugin links VPI 3 (gone on r39.2, which has VPI 4 only) —
+    # drop it, as upstream does, rather than ship a broken NEEDED.
+    rm -f ${D}${DEEPSTREAM_PATH}/lib/libnvds_opticalflow_orin.so
+    # ---XXX
+    cd ${D}${DEEPSTREAM_BASEDIR}
+    ln -s deepstream-8.0 deepstream
+    cd -
+}
+
+INHIBIT_PACKAGE_STRIP = "1"
+INHIBIT_PACKAGE_DEBUG_SPLIT = "1"
+INHIBIT_SYSROOT_STRIP = "1"
+INSANE_SKIP = "dev-so ldflags"
+
+def pkgconf_packages(d):
+    pkgconf = bb.utils.filter('PACKAGECONFIG', 'azure amqp kafka nmos redis triton rivermax realsense', d).split()
+    pn = d.getVar('PN')
+    return ' '.join(['{}-{}'.format(pn, p) for p in pkgconf])
+
+PKGCONF_PACKAGES = "${@pkgconf_packages(d)}"
+
+PACKAGES = "${PN}-samples-data ${PN}-samples ${PN}-dev ${PN}-staticdev ${PN}-sources ${PN}-dbg ${PKGCONF_PACKAGES} ${PACKAGE_BEFORE_PN} ${PN}"
+
+FILES:${PN} = "\
+    ${sysconfdir}/ld.so.conf.d/  \
+    ${libdir}/gstreamer-1.0/deepstream \
+    ${DEEPSTREAM_PATH}/lib \
+    ${DEEPSTREAM_BASEDIR} \
+"
+
+FILES:${PN}-dev = "${DEEPSTREAM_PATH}/sources/includes"
+
+FILES:${PN}-samples = "${bindir}/*"
+FILES:${PN}-samples-data = "\
+    ${DEEPSTREAM_PATH}/samples \
+    ${DEEPSTREAM_PATH}/sources/apps/sample_apps/*/*.txt \
+    ${DEEPSTREAM_PATH}/sources/apps/sample_apps/*/README \
+    ${DEEPSTREAM_PATH}/sources/apps/sample_apps/*/configs/ \
+    ${DEEPSTREAM_PATH}/sources/apps/sample_apps/*/inferserver/ \
+    ${DEEPSTREAM_PATH}/sources/apps/sample_apps/*/csv_files/ \
+"
+
+FILES:${PN}-sources = "${DEEPSTREAM_PATH}/sources"
+
+FILES:${PN}-azure = "${DEEPSTREAM_PATH}/lib/libnvds_azure*"
+FILES:${PN}-nmos = "${DEEPSTREAM_PATH}/lib/lib/libnvds_nmos*"
+FILES:${PN}-triton = "\
+    ${libdir}/gstreamer-1.0/deepstream/libnvdsgst_inferserver.so \
+    ${DEEPSTREAM_PATH}/lib/libnvds_infer_server.so \
+"
+FILES:${PN}-amqp = "${DEEPSTREAM_PATH}/lib/libnvds_amqp*"
+FILES:${PN}-kafka = "${DEEPSTREAM_PATH}/lib/libnvds_kafka*"
+FILES:${PN}-redis = "${DEEPSTREAM_PATH}/lib/libnvds_redis*"
+FILES:${PN}-rivermax = "${libdir}/gstreamer-1.0/deepstream/libnvdsgst_udp.so"
+FILES:${PN}-realsense = "${DEEPSTREAM_PATH}/lib/libnvds_3d_dataloader_realsense.so"
+FILES:${PN}-staticdev = " \
+    ${libdir}/gstreamer-1.0/deepstream/libnvdsgst_multistream_legacy.a \
+    ${DEEPSTREAM_PATH}/lib/libnvds_service_maker_utils.a \
+"
+
+RDEPENDS:${PN} = "libgstnvcustomhelper"
+RDEPENDS:${PN}-samples = "${PN}-samples-data libgstnvcustomhelper"
+RDEPENDS:${PN}-samples-data = "bash"
+RDEPENDS:${PN}-sources = "bash ${PN}-samples-data ${PN}"
+RRECOMMENDS:${PN}-sources += "${PN}-dev"
+RRECOMMENDS:${PN} = "liberation-fonts"

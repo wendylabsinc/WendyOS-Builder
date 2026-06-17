@@ -86,11 +86,17 @@ RDEPENDS:${PN} = " \
 # DeepStream-specific packages (only when WENDYOS_DEEPSTREAM=1)
 # These provide libraries needed by DeepStream GStreamer plugins
 WENDYOS_DEEPSTREAM ?= "0"
+# NOTE: yaml-cpp is intentionally NOT listed here. The DeepStream package
+# (deepstream-8.0 on blacksail / deepstream-7.1 on scarthgap, installed via
+# tegra-image.inc when DEEPSTREAM=1) links libyaml-cpp.so.0.x and DEPENDS the
+# matching yaml-cpp recipe, so its automatic shlib RDEPENDS pulls the
+# (debian-renamed) libyaml-cpp package into the image. A packagegroup can't
+# RDEPEND that renamed name itself — with no build-time dep here, bitbake
+# fails to resolve it at graph time ("Nothing RPROVIDES libyaml-cpp").
 RDEPENDS:${PN} += "${@bb.utils.contains('WENDYOS_DEEPSTREAM', '1', ' \
     tegra-libraries-multimedia-ds \
     tegra-libraries-nvdsseimeta \
     libgstnvcustomhelper \
-    yaml-cpp-070 \
     tensorrt-trtexec-prebuilt \
     ', '', d)}"
 

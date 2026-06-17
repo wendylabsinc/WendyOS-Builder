@@ -5,15 +5,15 @@ wendyos-update binary plus the boot-verify and auto-commit systemd units. The \
 board-specific behaviour lives behind a connector (tegrauefi for Jetson); the \
 engine, artifact format and CLI are board-agnostic. Replaces the Mender client \
 on platforms without meta-mender support (e.g. JetPack 7 / wrynose)."
-HOMEPAGE = "https://github.com/wendylabsinc/wendy-os-update"
+HOMEPAGE = "https://github.com/wendylabsinc/wendyos-update"
 
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://src/${GO_IMPORT}/LICENSE;md5=32329fcd0da888dcffa77ba65b409d5e"
 
-GO_IMPORT = "github.com/wendylabsinc/wendy-os-update"
+GO_IMPORT = "github.com/wendylabsinc/wendyos-update"
 
 SRC_URI = "git://${GO_IMPORT};protocol=https;branch=main;destsuffix=${GO_SRCURI_DESTSUFFIX}"
-SRCREV = "a1f8d0f3b89d368630f99a5f4eda26bbdf5837ea"
+SRCREV = "ac85bad0e49763a2ba81cddc5bf7b8f8092c8324"
 
 inherit go-mod systemd
 
