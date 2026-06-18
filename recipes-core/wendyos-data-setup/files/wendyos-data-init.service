@@ -1,18 +1,11 @@
 [Unit]
 Description=WendyOS /data partition first-boot init (format + grow)
 DefaultDependencies=no
-# Runs after udev has settled, before /data is mounted and before anything
-# that needs /data.
-#
-# NOTE: there is deliberately no ConditionPathExists=/dev/disk/by-partlabel/data
-# here. That condition was evaluated once at job start; on platforms where
-# udev never emits the by-partlabel link (e.g. Jetson Thor / T264) it was
-# never satisfied, so systemd skipped this service entirely — the partition
-# was never formatted and /data never mounted, silently. The script now
-# resolves the partition by scanning libblkid (GPT/fs label) instead of
-# depending on the symlink, so it must always run.
+# Runs after udev has populated /dev/disk/by-partlabel, before /data is
+# mounted and before anything that needs /data.
 After=systemd-udevd.service
 Before=data.mount
+ConditionPathExists=/dev/disk/by-partlabel/data
 
 [Service]
 Type=oneshot
