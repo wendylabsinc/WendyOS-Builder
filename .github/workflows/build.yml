@@ -28,6 +28,11 @@ on:
         type: string
         required: false
         default: ""
+      debug:
+        description: "Enable WENDYOS_DEBUG and WENDYOS_SSHD (debug tools + SSH) on all devices. Auto-enabled on nightly builds; use this to opt in on release builds triggered by promote.yml."
+        type: boolean
+        required: false
+        default: false
 
 # Never let two runs for the same ref overlap: the failing nightly on
 # 2026-06-04 had two main-push runs uploading and publishing the same
@@ -404,10 +409,11 @@ jobs:
         run: ./wendyos/bootstrap.sh
 
       - name: Enable debug and SSH for nightly builds
-        # Release images are production builds — no debug tools, no SSH.
-        # Nightly and workflow_dispatch builds get both so developers can
-        # SSH into CI-flashed devices and use debug tooling out of the box.
-        if: needs.detect-changes.outputs.is-release != 'true' && github.event_name != 'pull_request'
+        # Release images are production builds — no debug tools, no SSH by default.
+        # Nightly and workflow_dispatch builds get both so developers can SSH into
+        # CI-flashed devices and use debug tooling out of the box. Release builds
+        # triggered by promote.yml can opt in via inputs.debug.
+        if: (needs.detect-changes.outputs.is-release != 'true' && github.event_name != 'pull_request') || inputs.debug == true
         run: |
           {
             echo ''
@@ -597,11 +603,11 @@ jobs:
           # type="sdcard"> block, not external-flash.xml.in, and the blacksail
           # bundle no longer ships dosdcard.sh to build it). For those the
           # tegraflash-tar bundle itself is the flash artifact — nothing to do.
-          if [[ -f "$FLASH_WORKDIR/external-flash.xml.in" ]]; then
+          if [[ -f "$FLASH_WORKDIR/external-flash.xml.in" && "$DEVICE" != "jetson-agx-thor" ]]; then
             python3 "$GITHUB_WORKSPACE/wendyos/scripts/make-thor-nvme-img.py" \
               "$FLASH_WORKDIR" "$GITHUB_WORKSPACE/wendyos-nvme.img"
           else
-            echo "No external-flash.xml.in in bundle (storage=$STORAGE); the tegraflash-tar is the flash artifact, skipping offline image."
+            echo "No offline NVMe image for $DEVICE (storage=$STORAGE); the tegraflash-tar is the flash artifact."
           fi
 
       - name: Upload image and emit manifest entry
@@ -624,15 +630,15 @@ jobs:
           fi
 
           BMAP_FILE=""
-          if [[ "$MACHINE" != raspberry* && "$STORAGE" == "nvme" ]]; then
+          if [[ "$MACHINE" != raspberry* && "$STORAGE" == "nvme" && "$DEVICE" != "jetson-agx-thor" ]]; then
             # wendyos-nvme.img: built from the tegraflash-tar bundle by
             # make-thor-nvme-img.py.
             IMAGE_FILE="$GITHUB_WORKSPACE/wendyos-nvme.img"
             bmaptool create "$IMAGE_FILE" > "${IMAGE_FILE}.bmap"
             BMAP_FILE="${IMAGE_FILE}.bmap"
-          elif [[ "$MACHINE" != raspberry* && "$STORAGE" == "emmc" ]]; then
-            # No offline disk image for eMMC (meta-tegra doesn't generate dosdcard.sh for
-            # sdmmc_user devices). The tegraflash bundle is the recovery-flash artifact.
+          elif [[ "$MACHINE" != raspberry* && ( "$STORAGE" == "emmc" || "$DEVICE" == "jetson-agx-thor" ) ]]; then
+            # No offline disk image for eMMC or Thor NVMe; the tegraflash bundle
+            # is the flash artifact.
             IMAGE_FILE="$TEGRAFLASH_BUNDLE"
           else
             # RPi: Mender emits .sdimg; pre-Mender RPi builds produced
