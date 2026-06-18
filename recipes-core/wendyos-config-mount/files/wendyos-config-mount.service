@@ -1,0 +1,16 @@
+[Unit]
+Description=Mount WendyOS config partition (/config)
+DefaultDependencies=no
+# Scan block devices after udev has started; blkid does not need by-label
+# symlinks, but the device nodes themselves must exist.
+After=systemd-udevd.service
+# Must complete before the agent reads provisioning data from /config.
+Before=wendyos-agent.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/wendyos-config-mount.sh
+
+[Install]
+WantedBy=local-fs.target

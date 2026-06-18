@@ -5,10 +5,23 @@ Requires=wendyos-data-init.service
 After=wendyos-data-init.service
 
 [Mount]
-What=/dev/disk/by-partlabel/data
+# Use the ext4 filesystem label (set by `mkfs.ext4 -L data` in
+# wendyos-data-init.sh), not the GPT partition name. The by-partlabel
+# symlink is absent on some platforms (Jetson Thor / T264); the by-label
+# symlink is created by wendyos-data-init.sh as a fallback when udev does
+# not emit it.
+#
+# nofail: downgrades the implicit device-unit BindsTo= to Wants= so a
+# mount failure does not halt boot.
+# x-systemd.device-timeout=5: caps the wait for the device unit at 5 s
+# instead of the default 90 s; wendyos-data-init.service (ordered Before=
+# this unit) has already placed the by-label symlink, so the mount can
+# proceed immediately after the short timeout on platforms where udev does
+# not emit the activation event.
+What=/dev/disk/by-label/data
 Where=/data
 Type=ext4
-Options=defaults,noatime
+Options=defaults,noatime,nofail,x-systemd.device-timeout=5
 
 [Install]
 WantedBy=local-fs.target

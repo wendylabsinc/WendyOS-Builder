@@ -27,6 +27,7 @@ TEGRA_BPMP_SERIAL_LOGGING ?= "0"
 IMAGE_INSTALL:append = " \
     ${@'mender-esp' if d.getVar('WENDYOS_OTA') == 'mender' else ''} \
     packagegroup-wendyos-tegra \
+    wendyos-config-mount \
     gstreamer1.0-plugins-nvvideo4linux2 \
     gstreamer1.0-plugins-nvarguscamerasrc \
     gstreamer1.0-plugins-nvvidconv \

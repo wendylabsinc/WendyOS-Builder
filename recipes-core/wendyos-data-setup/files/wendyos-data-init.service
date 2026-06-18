@@ -1,11 +1,12 @@
 [Unit]
 Description=WendyOS /data partition first-boot init (format + grow)
 DefaultDependencies=no
-# Runs after udev has populated /dev/disk/by-partlabel, before /data is
-# mounted and before anything that needs /data.
+# Runs after udev has started (block device nodes exist), before /data is
+# mounted and before anything that needs /data. No ConditionPathExists on the
+# by-partlabel symlink: that link is absent on some platforms (Jetson Thor /
+# T264) even when the partition exists. The script scans via lsblk/blkid.
 After=systemd-udevd.service
 Before=data.mount
-ConditionPathExists=/dev/disk/by-partlabel/data
 
 [Service]
 Type=oneshot

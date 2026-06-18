@@ -33,9 +33,7 @@ tegraflash_custom_post:append() {
     fi
 }
 
-# Add fstab entry for config partition on Jetson (RPi5 has it in rpi-fstab)
-add_config_fstab() {
-    echo "LABEL=config  /config  vfat  defaults,nofail  0 0" >> ${IMAGE_ROOTFS}${sysconfdir}/fstab
-    mkdir -p ${IMAGE_ROOTFS}/config
-}
-ROOTFS_POSTPROCESS_COMMAND:append:tegra = " add_config_fstab;"
+# The /config mount point and mount service are provided by the
+# wendyos-config-mount package (see recipes-core/wendyos-config-mount/).
+# That service uses blkid instead of a fstab LABEL= entry so it works on
+# platforms where udev does not emit by-label symlinks (e.g. Jetson Thor).
