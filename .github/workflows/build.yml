@@ -403,6 +403,19 @@ jobs:
         # creation; the repo cache seeds repos/ from the AMI's bake-time clones.
         run: ./wendyos/bootstrap.sh
 
+      - name: Enable debug and SSH for nightly builds
+        # Release images are production builds — no debug tools, no SSH.
+        # Nightly and workflow_dispatch builds get both so developers can
+        # SSH into CI-flashed devices and use debug tooling out of the box.
+        if: needs.detect-changes.outputs.is-release != 'true' && github.event_name != 'pull_request'
+        run: |
+          {
+            echo ''
+            echo '# Nightly CI: enable debug tooling and SSH on all devices'
+            echo 'WENDYOS_DEBUG = "1"'
+            echo 'WENDYOS_SSHD = "1"'
+          } >> "$GITHUB_WORKSPACE/build/conf/auto.conf"
+
       # Note: SSTATE_DIR / DL_DIR are pinned to ${TOPDIR}/../{sstate-cache,downloads}
       # by conf/template/include/local/common.inc, which matches the S3 sync paths
       # below, no auto.conf override needed.
