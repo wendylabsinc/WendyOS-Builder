@@ -37,3 +37,39 @@ tegraflash_custom_post:append() {
 # wendyos-config-mount package (see recipes-core/wendyos-config-mount/).
 # That service uses blkid instead of a fstab LABEL= entry so it works on
 # platforms where udev does not emit by-label symlinks (e.g. Jetson Thor).
+
+# On T264 (Thor) udev does not reliably emit block-device activation events,
+# so any mount unit whose What= uses /dev/disk/by-*/ will wait 90 s for a
+# device unit that never becomes active.
+#
+# boot-efi.mount: comes from upstream meta-tegra (fstab entry for the ESP).
+# Thor runs WENDYOS_OTA="wendy" — Mender is absent, so the ESP does not need
+# a persistent runtime mount. Mask it so it is never started.
+#
+# fstab nofail sweep: for any remaining by-* entries that upstream adds (e.g.
+# the ESP entry that generates boot-efi.mount), add nofail + a 5 s device
+# timeout so stale device units don't add 90 s each to boot time.
+mask_boot_efi_mount() {
+    install -d ${IMAGE_ROOTFS}${systemd_system_unitdir}
+    ln -sf /dev/null ${IMAGE_ROOTFS}${systemd_system_unitdir}/boot-efi.mount
+}
+ROOTFS_POSTPROCESS_COMMAND:append:tegra264 = " mask_boot_efi_mount;"
+
+fix_tegra_fstab_device_timeouts() {
+    local fstab="${IMAGE_ROOTFS}${sysconfdir}/fstab"
+    [ -f "${fstab}" ] || return 0
+    # For every line whose device field starts with /dev/disk/by-, append
+    # nofail and x-systemd.device-timeout=5 to the options column (4th field)
+    # unless they are already present.
+    awk '
+        /^[[:space:]]*#/ { print; next }
+        $1 ~ /^\/dev\/disk\/by-/ && $4 !~ /device-timeout/ {
+            sub(/[[:space:]]+[0-9]+[[:space:]]+[0-9]+$/, "")
+            $4 = $4 ",nofail,x-systemd.device-timeout=5"
+            print $0 "\t0 0"
+            next
+        }
+        { print }
+    ' "${fstab}" > "${fstab}.tmp" && mv "${fstab}.tmp" "${fstab}"
+}
+ROOTFS_POSTPROCESS_COMMAND:append:tegra264 = " fix_tegra_fstab_device_timeouts;"
