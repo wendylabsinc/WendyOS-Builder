@@ -4,28 +4,11 @@ Description=WendyOS persistent data partition (/data)
 Requires=wendyos-data-init.service
 After=wendyos-data-init.service
 
-# Resolve the partition by its ext4 *filesystem* label (set by
-# `mkfs.ext4 -L data` in wendyos-data-init.sh), mirroring how /config mounts
-# via LABEL=config. This deliberately does NOT use /dev/disk/by-partlabel/data:
-# that GPT-name link is absent on some platforms (Jetson Thor / T264) even
-# when the partition is fine. wendyos-data-init.service (ordered Before= this
-# unit) guarantees /dev/disk/by-label/data exists — creating it as a fallback
-# if udev itself does not — before this mount is attempted.
 [Mount]
-What=/dev/disk/by-label/data
+What=/dev/disk/by-partlabel/data
 Where=/data
 Type=ext4
-# `nofail` is load-bearing here, not just politeness: a .mount unit whose
-# What= is under /dev automatically gains a hard BindsTo=/Requires= on the
-# backing .device unit, which only goes active when *udev announces* the
-# device. On platforms where udev does not announce it (Jetson Thor / T264),
-# that .device unit never activates and the mount would be blocked forever.
-# `nofail` downgrades the device dependency to a soft Wants=, so systemd still
-# runs `mount`, which resolves /dev/disk/by-label/data (created by
-# wendyos-data-init.service) directly. Consumers that strictly need /data
-# (e.g. wendyos-etc-binds.service) keep their own explicit Requires=data.mount,
-# so `nofail` here does not weaken their ordering guarantees.
-Options=defaults,noatime,nofail
+Options=defaults,noatime
 
 [Install]
 WantedBy=local-fs.target
