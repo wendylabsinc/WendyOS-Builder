@@ -1,0 +1,21 @@
+SUMMARY = "wendyos-update connector config for Raspberry Pi (ubootenv)"
+DESCRIPTION = "Installs /etc/wendyos-update/config.json pinning the wendyos-update \
+OTA client to the ubootenv connector. Auto-detect would also pick it (fw_printenv \
+present + our env layout), but a build-time pin is one less runtime failure mode \
+(the OTA plan's recommendation)."
+LICENSE = "MIT"
+LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
+
+SRC_URI = "file://config.json"
+S = "${WORKDIR}"
+
+COMPATIBLE_MACHINE = "rpi"
+
+do_install() {
+    install -d ${D}${sysconfdir}/wendyos-update
+    install -m 0644 ${WORKDIR}/config.json ${D}${sysconfdir}/wendyos-update/config.json
+}
+
+# The config dir is also created by the wendyos-update recipe (the <phase>.d
+# hook dirs); allow both to ship it.
+FILES:${PN} = "${sysconfdir}/wendyos-update/config.json"

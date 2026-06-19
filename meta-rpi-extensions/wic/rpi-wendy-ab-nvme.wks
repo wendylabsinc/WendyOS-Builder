@@ -1,0 +1,14 @@
+# WendyOS A/B layout for RPi5 NVMe boot, wendyos-update OTA stack.
+# Identical to rpi-wendy-ab.wks but ondisk=nvme0n1. See that file for the full
+# layout rationale and the must-stay-in-sync notes. The matching boot script
+# overrides (nvme load interface + `nvme scan`, /dev/nvme0n1p root base) live
+# in rpi-u-boot-scr.bbappend keyed on :raspberrypi5-nvme.
+#
+#   p1 boot    (FAT)   p2 config (FAT)
+#   p3 rootfsA (ext4)  p4 rootfsB (ext4)   p5 data (ext4, grows last)
+bootloader --ptable gpt
+part /boot   --source bootimg-partition --ondisk nvme0n1 --fstype=vfat --label boot    --active --align 4096 --size 128M --uuid "${WENDYOS_BOOT_PARTUUID}"
+part         --ondisk nvme0n1 --fstype=vfat --label config  --align 4096 --size ${WENDYOS_CONFIG_PART_SIZE_MB}M --uuid "${WENDYOS_CONFIG_PARTUUID}"
+part         --source rootfs  --ondisk nvme0n1 --fstype=ext4 --label rootfsA --align 4096 --size 8192M --uuid "${WENDYOS_ROOT_PARTUUID}"
+part         --source rootfs  --ondisk nvme0n1 --fstype=ext4 --label rootfsB --align 4096 --size 8192M
+part         --ondisk nvme0n1 --fstype=ext4 --label data    --align 4096 --size 512M

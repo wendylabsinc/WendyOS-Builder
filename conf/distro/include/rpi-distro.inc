@@ -10,8 +10,10 @@ WENDYOS_DEEPSTREAM ?= "0"
 WENDYOS_PERSIST_JOURNAL_LOGS ?= "0"
 # WiFi support
 DISTRO_FEATURES:append = " wifi"
-# WKS search path
-WKS_SEARCH_PATH:prepend = "${TD_DISTRO_LAYERDIR}/files/wic:"
+# RPi .wks layouts live in meta-rpi-extensions/wic/ (RPi-specific, with the
+# rest of the RPi support). No WKS_SEARCH_PATH override needed: oe-core's
+# default already searches <layer>/wic for every layer on BBPATH
+# (image_types_wic.bbclass), and meta-rpi-extensions is in the rpi bblayers.
 
 # PARTUUID defaults (overwritten at parse-time by partuuid.bbclass)
 WENDYOS_BOOT_PARTUUID ?= "00000000-0000-0000-0000-000000000000"

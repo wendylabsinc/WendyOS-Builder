@@ -1,0 +1,17 @@
+# WendyOS RPi A/B fstab (wendyos-update OTA stack).
+#
+# Deliberately NO "/" entry: the rootfs slot is A/B and is mounted by the
+# kernel from the root= the boot script (boot-ab.cmd.in) sets per slot, so a
+# fixed root device here would be wrong on the other slot. systemd uses the
+# kernel-mounted root as-is when fstab has no "/" line.
+#
+# /boot is the shared FAT boot partition (firmware + u-boot + boot.scr +
+# uboot.env). It must stay mounted: the ubootenv connector edits
+# /boot/uboot.env via fw_setenv (see wendyos-fw-env / fw_env.config).
+#
+# /data is grown to fill the card on first boot by grow-data-part, which reads
+# this entry; it resolves LABEL=data to the device. /config is the FAT
+# provisioning partition.
+PARTUUID=RPI_BOOT_UUID  /boot    vfat  defaults              0 2
+LABEL=config            /config  vfat  defaults,nofail       0 0
+LABEL=data              /data    ext4  defaults,noatime,nofail  0 2

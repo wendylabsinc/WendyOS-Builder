@@ -42,6 +42,7 @@ RDEPENDS:${PN} = " \
     bash \
     coreutils \
     util-linux-sfdisk \
+    util-linux-findfs \
     parted \
     e2fsprogs-resize2fs \
     e2fsprogs-e2fsck \

@@ -43,3 +43,22 @@ create_config_mountpoint() {
     mkdir -p ${IMAGE_ROOTFS}/config
 }
 ROOTFS_POSTPROCESS_COMMAND:append = " create_config_mountpoint;"
+
+# --- wendyos-update (wendy) image deltas for RPi --------------------------
+# All gated on WENDYOS_OTA == "wendy" so RPi3/4 (Mender) are unaffected; RPi5
+# moves to the wendy stack (raspberrypi5-wendyos.conf sets WENDYOS_OTA="wendy").
+#
+# 1) Drop wendyos-data-setup (pulled by wendyos-update.inc): on RPi the /data
+#    first-boot grow is done by grow-data-part (in packagegroup-wendyos-rpi).
+#    wendyos-data-init only (re)formats a missing/oversized fs, so it would skip
+#    the wic-preformatted ext4 data partition.
+IMAGE_INSTALL:remove = "${@'wendyos-data-setup' if d.getVar('WENDYOS_OTA') == 'wendy' else ''}"
+
+# 2) wendy-stack RPi extras:
+#    - wendyos-fw-env       /etc/fw_env.config so the ubootenv connector's
+#                           fw_setenv reaches uboot.env on the boot FAT.
+#    - wendyos-update-config pins the connector to "ubootenv".
+#    - kernel-image          the boot script ext4loads /boot/${KERNEL_IMAGETYPE}
+#                            from the selected rootfs slot (A/B-safe); meta-
+#                            raspberrypi only deploys the kernel to the FAT.
+IMAGE_INSTALL:append = "${@' wendyos-fw-env wendyos-update-config kernel-image' if d.getVar('WENDYOS_OTA') == 'wendy' else ''}"

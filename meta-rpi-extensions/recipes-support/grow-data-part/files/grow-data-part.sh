@@ -31,6 +31,13 @@ log "Start $(date -Is 2>/dev/null || true)"
 DATA_DEV="$(awk '$1 !~ /^#/ && $2 == "/data" { print $1; exit }' /etc/fstab 2>/dev/null || true)"
 case "$DATA_DEV" in
     /dev/*) ;;
+    # The wendy (wendyos-update) RPi fstab references /data by label so it can
+    # stay machine-agnostic (mmcblk0pN vs nvme0n1pN). Resolve any tag spec to a
+    # device node; Mender's generated fstab uses /dev/* and skips this.
+    LABEL=*|UUID=*|PARTLABEL=*|PARTUUID=*)
+        resolved="$(findfs "$DATA_DEV" 2>/dev/null || true)"
+        [ -n "$resolved" ] || defer "cannot resolve /data spec '$DATA_DEV' yet"
+        DATA_DEV="$resolved" ;;
     *) fail "no usable /data device in /etc/fstab ('$DATA_DEV')" ;;
 esac
 [ -b "$DATA_DEV" ] || defer "$DATA_DEV not present yet"

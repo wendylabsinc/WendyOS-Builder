@@ -1,0 +1,38 @@
+# WendyOS A/B layout for the wendyos-update OTA stack (WENDYOS_OTA = "wendy").
+# Replaces Mender's auto-generated mender-image-sd layout — with no Mender in
+# the build, nothing generates the A/B partitions, so we author them here.
+#
+# GPT. Partition ORDER is load-bearing and is duplicated in two places that
+# MUST stay in sync with it:
+#   - the boot script's slot->partition map
+#     (meta-rpi-extensions/recipes-bsp/rpi-u-boot-scr/files/boot-ab.cmd.in,
+#      via WENDYOS_ROOTFS_PART_A/B in the bbappend), and
+#   - the ubootenv connector resolves slots by the GPT partlabels rootfsA/
+#     rootfsB (label-based, so it does NOT depend on the numbers — but root=
+#     in the boot script does).
+#
+#   p1 boot    (FAT)  RPi firmware + u-boot.bin + boot.scr + config.txt +
+#                     cmdline.txt + uboot.env (the U-Boot environment).
+#   p2 config  (FAT)  first-boot provisioning seed (label "config").
+#   p3 rootfsA (ext4) slot 0  ─┐ both slots flashed with the SAME rootfs so
+#   p4 rootfsB (ext4) slot 1  ─┘ the device is bootable+recoverable from the
+#                              factory and A->B->A is testable immediately.
+#   p5 data    (ext4) persistent /data — LAST so it can grow to fill the card
+#                     on first boot.
+#
+# Notes / open wiring (see docs/plans/wendyos-update-rpi.md):
+#   - The kernel is loaded by boot.scr from the SELECTED slot's rootfs /boot
+#     (A/B-safe), so the rootfs must contain /boot/${KERNEL_IMAGETYPE}.
+#   - /data is created as a small ext4 here; the first-boot grow is done by
+#     grow-data-part (see the plan — wendyos-data-setup's format-trigger does
+#     NOT fire on a wic-preformatted fs). Do NOT add expand-rootfs to an A/B
+#     image: it would grow rootfsA over rootfsB.
+#   - rootfsB/data get wic-generated PARTUUIDs (they are referenced by
+#     partlabel/number, not UUID); boot/config/rootfsA keep the stable
+#     partuuid-rpi values.
+bootloader --ptable gpt
+part /boot   --source bootimg-partition --ondisk mmcblk0 --fstype=vfat --label boot    --active --align 4096 --size 128M --uuid "${WENDYOS_BOOT_PARTUUID}"
+part         --ondisk mmcblk0 --fstype=vfat --label config  --align 4096 --size ${WENDYOS_CONFIG_PART_SIZE_MB}M --uuid "${WENDYOS_CONFIG_PARTUUID}"
+part         --source rootfs  --ondisk mmcblk0 --fstype=ext4 --label rootfsA --align 4096 --size 8192M --uuid "${WENDYOS_ROOT_PARTUUID}"
+part         --source rootfs  --ondisk mmcblk0 --fstype=ext4 --label rootfsB --align 4096 --size 8192M
+part         --ondisk mmcblk0 --fstype=ext4 --label data    --align 4096 --size 512M

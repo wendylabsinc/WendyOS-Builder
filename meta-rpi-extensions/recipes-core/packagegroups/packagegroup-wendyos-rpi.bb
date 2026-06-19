@@ -5,11 +5,15 @@ inherit packagegroup
 
 RDEPENDS:${PN} = " \
     wireless-regdb-static \
-    expand-rootfs \
+    ${@'' if d.getVar('WENDYOS_OTA') == 'wendy' else 'expand-rootfs'} \
     grow-data-part \
     first-boot-timesync \
     pi-bluetooth \
     "
+# expand-rootfs grows the ROOT partition to fill the card — correct for the
+# single-rootfs Mender layout, but fatal for the wendy A/B layout (it would
+# grow rootfsA over rootfsB). Excluded when WENDYOS_OTA="wendy"; grow-data-part
+# (kept) grows /data, the last partition, instead.
 # pi-bluetooth ships hciuart.service, which attaches the onboard BT radio to
 # the system over UART on RPi3/4/5. Upstream meta-raspberrypi already pulls
 # it in via RDEPENDS:bluez5:append:rpi, but declare it explicitly here so we

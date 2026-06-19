@@ -15,3 +15,11 @@
 #SRCREV_OE="<commit-hash>"
 #SRCREV_VIRT="<commit-hash>"
 #SRCREV_RPI="<commit-hash>"
+
+# wendyos-update (Go) needs Go >= 1.26, but scarthgap oe-core is frozen at 1.22.
+# Pull the meta-lts-mixins scarthgap/go branch (Go 1.26.4) as a SECOND checkout
+# alongside the u-boot mixin (each mixin lives on its own branch). The layer is
+# added to BBLAYERS by bblayers/rpi-wendy.inc; its 1.26.4 recipes out-version
+# oe-core's 1.22.12 and win automatically. Pin: SRCREV_LTS_MIXINS_GO
+# (scripts/upstream-repos.env).
+REPOS_EXTRA=("1|${URL_LTS_MIXINS}|meta-lts-mixins-go|${SRCREV_LTS_MIXINS_GO}")

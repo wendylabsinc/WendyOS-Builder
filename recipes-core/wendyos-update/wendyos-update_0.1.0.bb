@@ -2,9 +2,10 @@
 SUMMARY = "WendyOS A/B OTA update client"
 DESCRIPTION = "Generic A/B over-the-air update client for WendyOS. Installs the \
 wendyos-update binary plus the boot-verify and auto-commit systemd units. The \
-board-specific behaviour lives behind a connector (tegrauefi for Jetson); the \
-engine, artifact format and CLI are board-agnostic. Replaces the Mender client \
-on platforms without meta-mender support (e.g. JetPack 7 / wrynose)."
+board-specific behaviour lives behind a connector (tegrauefi for Jetson, \
+ubootenv for Raspberry Pi / U-Boot boards); the engine, artifact format and \
+CLI are board-agnostic. Replaces the Mender client on platforms without \
+meta-mender support (e.g. JetPack 7 / wrynose)."
 HOMEPAGE = "https://github.com/wendylabsinc/wendyos-update"
 
 LICENSE = "MIT"
@@ -12,8 +13,18 @@ LIC_FILES_CHKSUM = "file://src/${GO_IMPORT}/LICENSE;md5=32329fcd0da888dcffa77ba6
 
 GO_IMPORT = "github.com/wendylabsinc/wendyos-update"
 
+# go.bbclass defines GO_SRCURI_DESTSUFFIX on wrynose/blacksail (newer oe-core),
+# but scarthgap's go.bbclass does NOT — there go_do_unpack auto-computes the
+# destsuffix only when the recipe leaves it unset. Our SRC_URI references
+# ${GO_SRCURI_DESTSUFFIX} explicitly, so on scarthgap it expands empty and the
+# git clone lands in WORKDIR and fails ("destination path already exists").
+# Provide a fallback with the SAME value both code paths compute, so this recipe
+# builds on every tree (RPi=scarthgap, Thor=wrynose, Orin=blacksail). ?= defers
+# to go.bbclass where it already sets this.
+GO_SRCURI_DESTSUFFIX ?= "${@os.path.join(os.path.basename(d.getVar('S')), 'src', d.getVar('GO_IMPORT')) + '/'}"
+
 SRC_URI = "git://${GO_IMPORT};protocol=https;branch=main;destsuffix=${GO_SRCURI_DESTSUFFIX}"
-SRCREV = "ac85bad0e49763a2ba81cddc5bf7b8f8092c8324"
+SRCREV = "883a3f3c8904245993dfaf2c0347d8dea7ae011f"
 
 inherit go-mod systemd
 
