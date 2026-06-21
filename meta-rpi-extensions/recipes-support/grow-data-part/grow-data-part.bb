@@ -11,24 +11,24 @@ PR = "r0"
 SRC_URI = " \
     file://grow-data-part.sh \
     file://grow-data-part.service \
-"
+    "
 
-S = "${WORKDIR}"
+S = "${UNPACKDIR}"
 
 inherit systemd
 
 do_install() {
     install -d ${D}${sbindir}
-    install -m 0755 ${WORKDIR}/grow-data-part.sh ${D}${sbindir}/grow-data-part.sh
+    install -m 0755 ${UNPACKDIR}/grow-data-part.sh ${D}${sbindir}/grow-data-part.sh
 
     install -d ${D}${systemd_system_unitdir}
-    install -m 0644 ${WORKDIR}/grow-data-part.service ${D}${systemd_system_unitdir}/grow-data-part.service
+    install -m 0644 ${UNPACKDIR}/grow-data-part.service ${D}${systemd_system_unitdir}/grow-data-part.service
 }
 
 FILES:${PN} += " \
     ${sbindir}/grow-data-part.sh \
     ${systemd_system_unitdir}/grow-data-part.service \
-"
+    "
 
 SYSTEMD_SERVICE:${PN} = "grow-data-part.service"
 SYSTEMD_AUTO_ENABLE = "enable"
@@ -43,10 +43,12 @@ RDEPENDS:${PN} = " \
     coreutils \
     util-linux-sfdisk \
     util-linux-findfs \
+    gptfdisk \
     parted \
     e2fsprogs-resize2fs \
     e2fsprogs-e2fsck \
     udev \
-"
+    "
 
 COMPATIBLE_MACHINE = "rpi"
+

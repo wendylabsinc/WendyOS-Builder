@@ -2,8 +2,15 @@
 #
 # Deliberately NO "/" entry: the rootfs slot is A/B and is mounted by the
 # kernel from the root= the boot script (boot-ab.cmd.in) sets per slot, so a
-# fixed root device here would be wrong on the other slot. systemd uses the
-# kernel-mounted root as-is when fstab has no "/" line.
+# fixed root device here would be wrong on the other slot. The boot script
+# mounts "/" READ-WRITE via `rw` in bootargs (every other WendyOS RPi fstab
+# mounts / with defaults = rw); systemd then uses the kernel-mounted root as-is.
+#
+# /var/volatile tmpfs: shipped by stock oe-core base-files (our custom fstab
+# replaces that file, so carry it). Keeps churny/volatile /var data in RAM,
+# off the SD card. With a read-write rootfs the oe-core volatile-binds
+# (/var/lib, /var/cache, /var/spool, /srv) correctly no-op.
+tmpfs                   /var/volatile  tmpfs  defaults              0 0
 #
 # /boot is the shared FAT boot partition (firmware + u-boot + boot.scr +
 # uboot.env). It must stay mounted: the ubootenv connector edits

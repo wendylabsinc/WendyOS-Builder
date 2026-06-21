@@ -40,11 +40,13 @@ case "$DATA_DEV" in
         DATA_DEV="$resolved" ;;
     *) fail "no usable /data device in /etc/fstab ('$DATA_DEV')" ;;
 esac
+
 [ -b "$DATA_DEV" ] || defer "$DATA_DEV not present yet"
 data_base="$(basename "$DATA_DEV")"
 DATA_NUM="$(sysblk "$data_base" partition)" || defer "cannot read /data partition number"
 DISK="/dev/$(basename "$(readlink -f "/sys/class/block/$data_base/.." 2>/dev/null)")"
 disk_base="$(basename "$DISK")"
+
 [ -b "$DISK" ] || defer "cannot resolve parent disk of /data"
 
 # data_fills_disk: does the kernel see the /data PARTITION reaching (within slack
@@ -62,6 +64,20 @@ data_fills_disk() {
 # partition to the disk end. /data must be unmounted (we run before its mount).
 grow_data_partition() {
     local ext_dev ext_num
+    # GPT (wendy A/B layout): after flashing the wic to a larger card the backup
+    # GPT header is stranded at the wic's end, so the GPT's usable region stops
+    # short of the card and `parted resizepart 100%` fails ("Not all of the space
+    # available ... appears to be used" -> "Unable to satisfy all constraints on
+    # the partition"). parted -s cannot answer its own "fix the GPT?" prompt, so
+    # relocate the backup header to the real disk end with sgdisk -e first, which
+    # makes the full card usable. No-op on MBR (Mender) layouts.
+    if sfdisk -d "$DISK" 2>/dev/null | grep -qi '^label:[[:space:]]*gpt'; then
+        log "GPT: relocating backup header to end of $DISK (sgdisk -e)"
+        sgdisk -e "$DISK" || { log "sgdisk -e failed"; return 1; }
+        partprobe "$DISK" 2>/dev/null || true
+        command -v udevadm >/dev/null 2>&1 && udevadm settle -t 10 2>/dev/null || true
+    fi
+
     # MBR: grow the extended container first so the logical /data can expand.
     ext_dev="$(sfdisk -d "$DISK" 2>/dev/null | awk 'tolower($0) ~ /type=[ ]*0?[5f]([^0-9a-f]|$)/ { print $1; exit }')"
     if [ -n "$ext_dev" ]; then
@@ -94,3 +110,4 @@ grow_data_fs() {
 data_fills_disk || grow_data_partition || fail "could not grow /data partition"
 grow_data_fs && { log "/data fills the device."; exit 0; }
 fail "could not grow /data filesystem"
+

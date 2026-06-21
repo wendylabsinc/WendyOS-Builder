@@ -25,7 +25,7 @@ do_install:append() {
         # slot via boot-ab.cmd.in's root=; /boot stays mounted for fw_setenv's
         # uboot.env; /data + /config by label). Only RPI_BOOT_UUID is
         # substituted; /config and /data use LABEL=.
-        install -m 0644 ${WORKDIR}/rpi-wendy-fstab ${D}${sysconfdir}/fstab
+        install -m 0644 ${UNPACKDIR}/rpi-wendy-fstab ${D}${sysconfdir}/fstab
         sed -i "s/RPI_BOOT_UUID/${WENDYOS_BOOT_PARTUUID}/g" ${D}${sysconfdir}/fstab
     elif [ "${WENDYOS_RPI_UBOOT}" = "1" ]; then
         # Mender-managed MBR layout: boot/A/B/extended{config,data}. The
@@ -37,7 +37,7 @@ do_install:append() {
         # /config entries that don't match this layout, so we skip it here.
         :
     else
-        install -m 0644 ${WORKDIR}/${RPI_FSTAB_TEMPLATE} ${D}${sysconfdir}/fstab
+        install -m 0644 ${UNPACKDIR}/${RPI_FSTAB_TEMPLATE} ${D}${sysconfdir}/fstab
         sed -i "s/RPI_BOOT_UUID/${WENDYOS_BOOT_PARTUUID}/g" ${D}${sysconfdir}/fstab
         sed -i "s/RPI_ROOT_UUID/${WENDYOS_ROOT_PARTUUID}/g" ${D}${sysconfdir}/fstab
     fi
@@ -55,3 +55,4 @@ do_install:append:journal_persist-on() {
         install -d -m 0755 ${D}${localstatedir}/log
     fi
 }
+

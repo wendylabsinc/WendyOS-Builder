@@ -47,20 +47,28 @@ if test "${wendyos_upgrade_available}" = "1"; then
 fi
 
 # --- Slot -> partition ----------------------------------------------------
-# MUST match wic/rpi-wendy-ab*.wks: slot 0 = rootfsA, slot 1 = rootfsB.
+# MUST match files/wic/rpi-wendy-ab*.wks: slot 0 = rootfsA, slot 1 = rootfsB.
 if test "${wendyos_boot_slot}" = "1"; then
     setenv wendyos_root_part @@WENDYOS_ROOTFS_PART_B@@
 else
     setenv wendyos_root_part @@WENDYOS_ROOTFS_PART_A@@
 fi
+
 echo "wendyos: booting slot ${wendyos_boot_slot} (rootfs partition ${wendyos_root_part})"
 
 # --- Kernel cmdline + boot ------------------------------------------------
 # Inherit cmdline.txt args from the firmware-provided FDT /chosen, then point
 # root= at the selected slot (appended last, so it wins over any root= the
 # firmware put in cmdline.txt). The DTB stays the firmware-loaded ${fdt_addr}.
+#
+# `rw`: mount the rootfs read-write. The A/B fstab (rpi-wendy-fstab) has no "/"
+# entry (the slot device varies), so systemd never remounts "/", and without rw
+# here the kernel's default read-only mount sticks -- leaving /etc and /var/lib
+# read-only, which breaks first-boot postinsts, wendyos-hostname, and any service
+# with StateDirectory= (timesyncd, rfkill). Every other WendyOS RPi fstab mounts
+# / with "defaults" (= rw); this is the per-slot-safe equivalent for A/B.
 fdt addr ${fdt_addr} && fdt get value bootargs /chosen bootargs
-setenv bootargs "${bootargs} root=@@WENDYOS_ROOT_DEV_BASE@@${wendyos_root_part} rootwait"
+setenv bootargs "${bootargs} root=@@WENDYOS_ROOT_DEV_BASE@@${wendyos_root_part} rootwait rw"
 
 # Load the kernel from the SELECTED slot's rootfs /boot (A/B-safe: each slot
 # carries its own kernel). A failed load or a returning boot falls through to
@@ -68,5 +76,7 @@ setenv bootargs "${bootargs} root=@@WENDYOS_ROOT_DEV_BASE@@${wendyos_root_part} 
 if ext4load @@WENDYOS_UBOOT_IF@@ @@WENDYOS_UBOOT_DEV@@:${wendyos_root_part} ${kernel_addr_r} /boot/@@KERNEL_IMAGETYPE@@; then
     @@KERNEL_BOOTCMD@@ ${kernel_addr_r} - ${fdt_addr}
 fi
+
 echo "wendyos: slot ${wendyos_boot_slot} failed to boot; resetting"
 reset
+

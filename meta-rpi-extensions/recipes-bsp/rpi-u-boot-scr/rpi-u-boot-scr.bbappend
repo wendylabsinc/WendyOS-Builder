@@ -10,7 +10,7 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
 
 SRC_URI += "${@' file://boot-ab.cmd.in' if d.getVar('WENDYOS_OTA') == 'wendy' else ''}"
 
-# Slot -> rootfs partition number. MUST match wic/rpi-wendy-ab*.wks
+# Slot -> rootfs partition number. MUST match files/wic/rpi-wendy-ab*.wks
 # (p3 = rootfsA = slot 0, p4 = rootfsB = slot 1).
 WENDYOS_ROOTFS_PART_A ?= "3"
 WENDYOS_ROOTFS_PART_B ?= "4"
@@ -48,12 +48,13 @@ do_compile() {
             -e 's/@@WENDYOS_ROOTFS_PART_B@@/${WENDYOS_ROOTFS_PART_B}/' \
             -e 's/@@WENDYOS_BOOTLIMIT@@/${WENDYOS_BOOTLIMIT}/' \
             -e 's#@@WENDYOS_ROOT_DEV_BASE@@#${WENDYOS_ROOT_DEV_BASE}#' \
-            "${WORKDIR}/boot-ab.cmd.in" > "${WORKDIR}/boot.cmd"
+            "${UNPACKDIR}/boot-ab.cmd.in" > "${WORKDIR}/boot.cmd"
     else
         sed -e 's/@@KERNEL_IMAGETYPE@@/${KERNEL_IMAGETYPE}/' \
             -e 's/@@KERNEL_BOOTCMD@@/${KERNEL_BOOTCMD}/' \
             -e 's/@@BOOT_MEDIA@@/${BOOT_MEDIA}/' \
-            "${WORKDIR}/boot.cmd.in" > "${WORKDIR}/boot.cmd"
+            "${UNPACKDIR}/boot.cmd.in" > "${WORKDIR}/boot.cmd"
     fi
     mkimage -A ${UBOOT_ARCH} -T script -C none -n "Boot script" -d "${WORKDIR}/boot.cmd" boot.scr
 }
+

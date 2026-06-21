@@ -7,15 +7,16 @@ LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
 
 SRC_URI = "file://config.json"
-S = "${WORKDIR}"
+S = "${UNPACKDIR}"
 
 COMPATIBLE_MACHINE = "rpi"
 
 do_install() {
     install -d ${D}${sysconfdir}/wendyos-update
-    install -m 0644 ${WORKDIR}/config.json ${D}${sysconfdir}/wendyos-update/config.json
+    install -m 0644 ${UNPACKDIR}/config.json ${D}${sysconfdir}/wendyos-update/config.json
 }
 
 # The config dir is also created by the wendyos-update recipe (the <phase>.d
 # hook dirs); allow both to ship it.
 FILES:${PN} = "${sysconfdir}/wendyos-update/config.json"
+

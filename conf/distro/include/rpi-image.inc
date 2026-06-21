@@ -34,15 +34,35 @@ do_image_wic[depends] += " \
     wic-tools:do_populate_sysroot \
     e2fsprogs-native:do_populate_sysroot \
     gptfdisk-native:do_populate_sysroot \
-"
+    "
+
 do_image_wic[depends] += "${PN}:do_generate_partuuids"
 WIC_CREATE_EXTRA_ARGS ?= "--no-fstab-update"
 
-# Create /config mount point directory (fstab entry is in rpi-fstab)
-create_config_mountpoint() {
+# Create the /config and /data mount point directories (fstab entries are in
+# rpi-fstab / rpi-wendy-fstab). The rootfs is read-only at runtime (A/B slot), so
+# systemd cannot mkdir a missing mount point -- data.mount then fails on a clean
+# fs and the /data bind mounts + Wendy Agent cascade-fail. For Mender, /data is
+# provided by Mender; for the wendy OTA stack wendyos-data-setup is dropped (see
+# below), so /data must be created here. mkdir -p is idempotent, so creating both
+# unconditionally is safe for either stack.
+create_rpi_mountpoints() {
     mkdir -p ${IMAGE_ROOTFS}/config
+    mkdir -p ${IMAGE_ROOTFS}/data
+
+    # Bind-mount targets for the persistent /data volumes (var-lib-wendy.mount,
+    # var-lib-containerd.mount: /data/wendy -> /var/lib/wendy, /data/containerd ->
+    # /var/lib/containerd). Those units use x-systemd.mkdir, but it only creates
+    # the target on a WRITABLE fs; on the read-only A/B rootfs (and with the
+    # volatile /var/lib bind skipped on blacksail systemd 259) it can't, so the
+    # bind mounts fail and wendyos-agent/containerd never start. Pre-create the
+    # targets so the binds succeed regardless of /var/lib writability. (Bind
+    # mounts overlay these empty dirs with the /data sources.)
+    mkdir -p ${IMAGE_ROOTFS}/var/lib/wendy
+    mkdir -p ${IMAGE_ROOTFS}/var/lib/containerd
 }
-ROOTFS_POSTPROCESS_COMMAND:append = " create_config_mountpoint;"
+
+ROOTFS_POSTPROCESS_COMMAND:append = " create_rpi_mountpoints;"
 
 # --- wendyos-update (wendy) image deltas for RPi --------------------------
 # All gated on WENDYOS_OTA == "wendy" so RPi3/4 (Mender) are unaffected; RPi5
@@ -62,3 +82,4 @@ IMAGE_INSTALL:remove = "${@'wendyos-data-setup' if d.getVar('WENDYOS_OTA') == 'w
 #                            from the selected rootfs slot (A/B-safe); meta-
 #                            raspberrypi only deploys the kernel to the FAT.
 IMAGE_INSTALL:append = "${@' wendyos-fw-env wendyos-update-config kernel-image' if d.getVar('WENDYOS_OTA') == 'wendy' else ''}"
+
