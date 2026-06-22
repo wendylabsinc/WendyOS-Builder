@@ -24,7 +24,7 @@ GO_IMPORT = "github.com/wendylabsinc/wendyos-update"
 GO_SRCURI_DESTSUFFIX ?= "${@os.path.join(os.path.basename(d.getVar('S')), 'src', d.getVar('GO_IMPORT')) + '/'}"
 
 SRC_URI = "git://${GO_IMPORT};protocol=https;branch=main;destsuffix=${GO_SRCURI_DESTSUFFIX}"
-SRCREV = "b01d1a855a1f56855295a3adccf08d1595ffc0d6"
+SRCREV = "e9147526ef486129366d62dd11af951adbf5c7f4"
 
 inherit go-mod systemd
 
