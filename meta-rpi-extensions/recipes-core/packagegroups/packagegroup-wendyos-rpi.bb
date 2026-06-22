@@ -18,10 +18,11 @@ RDEPENDS:${PN} = " \
 # the system over UART on RPi3/4/5. Upstream meta-raspberrypi already pulls
 # it in via RDEPENDS:bluez5:append:rpi, but declare it explicitly here so we
 # don't silently lose BT if that bbappend ever changes.
-# rpi-eeprom-config sets PSU_MAX_CURRENT, which is an RPi5-only EEPROM key
-# (tied to BCM2712's PMIC). RPi4 has an EEPROM but PSU_MAX_CURRENT does not
-# apply there; RPi3 has no EEPROM at all. The runtime script skips on non-RPi5.
-# Include the package only on RPi5 to keep it out of RPi4/RPi3 builds.
+# rpi-eeprom-config writes the RPi5 board EEPROM (PSU_MAX_CURRENT, PCIE_PROBE,
+# BOOT_ORDER) so the board boots either SD or NVMe regardless of which image
+# flashed it. These are RPi5-only EEPROM keys (BCM2712); RPi4's EEPROM differs
+# and RPi3 has none, and the runtime script skips on non-RPi5. Include only on
+# RPi5 to keep it out of RPi4/RPi3 builds.
 RDEPENDS:${PN}:append:raspberrypi5 = " rpi-eeprom-config"
 
 # Camera stack. Mirrors stock Raspberry Pi OS so an official CSI camera

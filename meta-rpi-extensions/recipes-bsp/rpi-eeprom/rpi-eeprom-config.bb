@@ -1,5 +1,8 @@
-SUMMARY = "Raspberry Pi 5 EEPROM Power Configuration"
-DESCRIPTION = "Configures Raspberry Pi 5 EEPROM PSU_MAX_CURRENT setting for USB gadget support"
+SUMMARY = "Raspberry Pi 5 board boot EEPROM configuration"
+DESCRIPTION = "Configures the Raspberry Pi 5 board EEPROM (PSU_MAX_CURRENT, PCIE_PROBE, \
+BOOT_ORDER) so the board can boot from either SD or NVMe regardless of which image \
+flashed it. The EEPROM lives in the board's SPI flash and persists across storage \
+swaps, so this configuration is generic rather than storage-specific."
 HOMEPAGE = "https://github.com/wendylabsinc/meta-wendyos-jetson"
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
