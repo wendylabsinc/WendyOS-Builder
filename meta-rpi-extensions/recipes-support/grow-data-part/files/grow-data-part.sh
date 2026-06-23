@@ -1,23 +1,22 @@
 #!/usr/bin/env bash
-# Grow /data to fill the storage device on first boot (offline, no reboot).
+# Grow /data to fill the storage device on first boot, no reboot.
 #
-# On WendyOS RPi the FAT "config" partition sits BEFORE /data (see
-# mender-config-before-data.bbclass), so /data is the LAST partition and can grow
-# straight into the trailing free space on any card. Mender's stock
-# mender-growfs-data is disabled because it cannot resize the MBR *extended*
-# container that holds the logical /data; this oneshot does it
-# (extended container -> /data -> resize2fs).
+# config (FAT) sits BEFORE /data (mender-config-before-data.bbclass), so /data is
+# the LAST partition and grows into the trailing free space. Stock mender-growfs-data
+# is disabled: it can't resize the MBR *extended* container holding the logical /data.
 #
-# The unit orders this before the mount (see grow-data-part.service), so /data is
-# UNMOUNTED here and parted/resize2fs can operate. Idempotent: resize2fs no-ops
-# once /data already fills its partition, so it's safe to run on every boot.
+# Split in two (mirrors Tegra's mender-grow-data + mender-systemd-growfs-data) so the
+# slow ext4 grow stays off the boot path -- see the partition/resize/all case below.
+# Idempotent throughout: safe to run on every boot.
 set -uo pipefail
 
+MODE="${1:-all}"
+
 END_SLACK=8192   # sectors (4 MiB) of trailing slack tolerated as "fills the disk"
-LOG="/run/grow-data-part.log"   # /data and /var/log are not mounted yet
+LOG="/run/grow-data-part.log"   # /data and /var/log may not be mounted yet
 
 touch "$LOG" 2>/dev/null && exec > >(tee -a "$LOG") 2>&1 || true   # journal is the fallback sink
-log()   { echo "[grow-data] $*"; }
+log()   { echo "[grow-data:${MODE}] $*"; }
 defer() { log "$* -- deferring to a later boot."; exit 0; }   # expected, transient
 fail()  { log "ERROR: $*"; exit 1; }                          # surfaced via systemctl --failed
 
@@ -26,8 +25,8 @@ sysblk() { cat "/sys/class/block/$1/$2" 2>/dev/null; }
 
 log "Start $(date -Is 2>/dev/null || true)"
 
-# /data is referenced by raw device path in the Mender-generated fstab and is NOT
-# mounted at this stage; resolve it from fstab (works for whatever number it has).
+# Mender's fstab references /data by raw device path; read it so we don't hardcode
+# the partition number (both phases need the device).
 DATA_DEV="$(awk '$1 !~ /^#/ && $2 == "/data" { print $1; exit }' /etc/fstab 2>/dev/null || true)"
 case "$DATA_DEV" in
     /dev/*) ;;
@@ -35,14 +34,16 @@ case "$DATA_DEV" in
 esac
 [ -b "$DATA_DEV" ] || defer "$DATA_DEV not present yet"
 data_base="$(basename "$DATA_DEV")"
-DATA_NUM="$(sysblk "$data_base" partition)" || defer "cannot read /data partition number"
-DISK="/dev/$(basename "$(readlink -f "/sys/class/block/$data_base/.." 2>/dev/null)")"
-disk_base="$(basename "$DISK")"
-[ -b "$DISK" ] || defer "cannot resolve parent disk of /data"
 
-# data_fills_disk: does the kernel see the /data PARTITION reaching (within slack
-# of) the disk end? Decides whether to (re)grow the partition; the filesystem is
-# grown/verified separately, so this is never trusted as "done" on its own.
+resolve_disk() {
+    DATA_NUM="$(sysblk "$data_base" partition)" || defer "cannot read /data partition number"
+    DISK="/dev/$(basename "$(readlink -f "/sys/class/block/$data_base/.." 2>/dev/null)")"
+    disk_base="$(basename "$DISK")"
+    [ -b "$DISK" ] || defer "cannot resolve parent disk of /data"
+}
+
+# True when the kernel sees the /data PARTITION (not its fs) reaching the disk end
+# within slack. Gates the partition grow only; never treated as "fully grown".
 data_fills_disk() {
     local disk_sz d_start d_sz
     disk_sz="$(sysblk "$disk_base" size  || echo 0)"
@@ -51,11 +52,10 @@ data_fills_disk() {
     [ "$disk_sz" -gt 0 ] && [ $((d_start + d_sz)) -ge $((disk_sz - END_SLACK)) ]
 }
 
-# grow_data_partition: extend the (logical, inside an MBR extended) /data
-# partition to the disk end. /data must be unmounted (we run before its mount).
+# Extend /data to the disk end. It's a logical partition inside an MBR extended
+# container, so the container must be grown first (below).
 grow_data_partition() {
     local ext_dev ext_num
-    # MBR: grow the extended container first so the logical /data can expand.
     ext_dev="$(sfdisk -d "$DISK" 2>/dev/null | awk 'tolower($0) ~ /type=[ ]*0?[5f]([^0-9a-f]|$)/ { print $1; exit }')"
     if [ -n "$ext_dev" ]; then
         ext_num="$(sysblk "$(basename "$ext_dev")" partition)"
@@ -72,18 +72,42 @@ grow_data_partition() {
     data_fills_disk || { log "kernel did not pick up the grown /data partition size"; return 1; }
 }
 
-# grow_data_fs: grow ext4 to fill the partition. resize2fs is idempotent -- it
-# no-ops (cheap superblock read) when already full. It refuses an unclean fs, so
-# on failure run a full offline check (safe: /data is unmounted) and retry once.
-grow_data_fs() {
-    resize2fs "$DATA_DEV" && return 0
-    log "resize2fs refused $DATA_DEV (fs may be unclean); running e2fsck -p -f"
-    e2fsck -p -f "$DATA_DEV"; local ec=$?
+# Repair here while /data is unmounted -- the online resize can't fsck a mounted fs.
+# `e2fsck -p` without -f honours the clean flag, so it's near-instant unless dirty.
+ensure_fs_clean() {
+    e2fsck -p "$DATA_DEV"; local ec=$?
     [ "$ec" -ge 4 ] && { log "e2fsck could not repair $DATA_DEV (rc=$ec)"; return 1; }
-    resize2fs "$DATA_DEV"
+    return 0
 }
 
-# Grow the partition (skipped if already at the disk end) then the filesystem.
-data_fills_disk || grow_data_partition || fail "could not grow /data partition"
-grow_data_fs && { log "/data fills the device."; exit 0; }
-fail "could not grow /data filesystem"
+# Offline phase: grow the partition and leave the fs clean for the online resize.
+# Deliberately no resize2fs here -- that's the slow step, deferred to do_resize.
+do_partition() {
+    resolve_disk
+    data_fills_disk || grow_data_partition || fail "could not grow /data partition"
+    ensure_fs_clean || fail "/data filesystem is unclean and could not be repaired"
+    log "Partition fills the device; /data ready to mount."
+}
+
+# Online phase: resize2fs grows the MOUNTED /data in place. On failure, stay failed
+# so the unit retries next boot.
+do_resize() {
+    resize2fs "$DATA_DEV" && { log "/data filesystem fills the partition."; exit 0; }
+    fail "online resize2fs of $DATA_DEV failed (will retry next boot)"
+}
+
+case "$MODE" in
+    partition) do_partition ;;
+    resize)    do_resize ;;
+    all)       # Manual/recovery: partition grow + e2fsck are valid only while /data
+               # is unmounted; once mounted, only the online resize is safe.
+               if grep -qs ' /data ' /proc/mounts; then
+                   log "/data is mounted; online resize only"
+                   do_resize
+               else
+                   do_partition
+                   resize2fs "$DATA_DEV" && { log "/data fills the device."; exit 0; }
+                   fail "could not grow /data filesystem"
+               fi ;;
+    *) fail "unknown mode '$MODE' (expected: partition | resize | all)" ;;
+esac

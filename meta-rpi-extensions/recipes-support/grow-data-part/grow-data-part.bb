@@ -11,6 +11,7 @@ PR = "r0"
 SRC_URI = " \
     file://grow-data-part.sh \
     file://grow-data-part.service \
+    file://grow-data-fs-online.service \
 "
 
 S = "${WORKDIR}"
@@ -23,21 +24,23 @@ do_install() {
 
     install -d ${D}${systemd_system_unitdir}
     install -m 0644 ${WORKDIR}/grow-data-part.service ${D}${systemd_system_unitdir}/grow-data-part.service
+    install -m 0644 ${WORKDIR}/grow-data-fs-online.service ${D}${systemd_system_unitdir}/grow-data-fs-online.service
 }
 
 FILES:${PN} += " \
     ${sbindir}/grow-data-part.sh \
     ${systemd_system_unitdir}/grow-data-part.service \
+    ${systemd_system_unitdir}/grow-data-fs-online.service \
 "
 
-SYSTEMD_SERVICE:${PN} = "grow-data-part.service"
+# Both phase units auto-enabled so each Mender A/B slot wants them (mechanics in
+# the unit files).
+SYSTEMD_SERVICE:${PN} = "grow-data-part.service grow-data-fs-online.service"
 SYSTEMD_AUTO_ENABLE = "enable"
 
-# Runs offline (before local-fs-pre.target): reads /data from fstab, finds
-# partitions via sysfs. coreutils for cat/readlink -f/basename; util-linux-sfdisk
-# detects the MBR extended partition; parted provides parted + partprobe;
-# e2fsprogs for resize2fs (+ e2fsck only when an unclean fs refuses resize); udev
-# for udevadm settle. awk is assumed present from the base image (busybox/gawk).
+# Runtime tools: coreutils (cat/readlink/basename); util-linux-sfdisk (detect MBR
+# extended partition); parted (parted + partprobe); e2fsprogs (resize2fs + the
+# clean-flag e2fsck); udev (udevadm settle). awk assumed present from the base image.
 RDEPENDS:${PN} = " \
     bash \
     coreutils \
