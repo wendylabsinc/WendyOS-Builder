@@ -256,9 +256,7 @@ dir, /usr/share/nvidia-container-passthrough
 
 # GStreamer NVIDIA custom helper (required by DeepStream)
 # May be in /usr/lib/aarch64-linux-gnu/nvidia/ or /usr/share/nvidia-container-passthrough/
-sym, /usr/lib/aarch64-linux-gnu/nvidia/libgstnvcustomhelper.so
 lib, /usr/lib/aarch64-linux-gnu/nvidia/libgstnvcustomhelper.so.1.0.0
-sym, /usr/lib/aarch64-linux-gnu/nvidia/libgstnvdsseimeta.so
 lib, /usr/lib/aarch64-linux-gnu/nvidia/libgstnvdsseimeta.so.1.0.0
 # Fallback to container passthrough location
 lib, /usr/share/nvidia-container-passthrough/usr/lib/aarch64-linux-gnu/nvidia/libgstnvcustomhelper.so
@@ -361,8 +359,6 @@ lib, /usr/lib/aarch64-linux-gnu/tegra-egl/libEGL_nvidia.so.0
 # DeepStream 7.1 Complete Dependencies
 # ========================================
 lib, /opt/nvidia/deepstream/deepstream-8.0/lib/libcivetweb.so.1.16.0
-sym, /opt/nvidia/deepstream/deepstream-8.0/lib/libcivetweb.so.1
-sym, /opt/nvidia/deepstream/deepstream-8.0/lib/libcivetweb.so
 lib, /opt/nvidia/deepstream/deepstream-8.0/lib/libcustom_A2Vtemplate.so
 lib, /opt/nvidia/deepstream/deepstream-8.0/lib/libcustom_audioimpl.so
 lib, /opt/nvidia/deepstream/deepstream-8.0/lib/libcustom_videoimpl.so
