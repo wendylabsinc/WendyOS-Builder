@@ -29,5 +29,14 @@ SRCREV:raspberrypi5 = "1296a428c67cf103eca482d4a63349661c1b799f"
 # NVMe bits — nvme machine ONLY, appended on top of the shared rc4 SRC_URI above.
 #  - nvme-boot.cfg: SD machine must NOT get CONFIG_ENV_FAT_INTERFACE="nvme"
 #    (its env lives on mmc), so the config is nvme-only.
-SRC_URI:append:raspberrypi5-nvme = " file://nvme-boot.cfg"
-
+#  - 0001-nvme-phys-to-bus.patch: rc4's drivers/nvme/nvme.c programs the
+#    controller with raw CPU phys addresses, but BCM2712's inbound dma-ranges
+#    maps bus 0x10_00000000 -> CPU 0x0, so the controller can't reach its
+#    queues -> nvme_init() times out (-110) despite PCIe link-up + enumeration.
+#    The patch wraps every controller-visible DMA address in dev_phys_to_bus()
+#    (a no-op on identity platforms). Not upstream as of rc4/master; see
+#    docs/docs-ext/rpi5-nvme.md. UNTESTED on hardware — verify on the nvme boot.
+SRC_URI:append:raspberrypi5-nvme = " \
+    file://nvme-boot.cfg \
+    file://0001-nvme-phys-to-bus.patch \
+    "

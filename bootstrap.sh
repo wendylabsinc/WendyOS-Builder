@@ -537,6 +537,13 @@ do
                 printf 'WENDYOS_LAYER_TREE = "%s"\n' "${WENDYOS_LAYER_TREE}"
                 printf 'WENDYOS_META_REPO = "%s"\n\n' "${image_name}"
                 cat "${BOARD_DIR}/${f}"
+
+                # Anchor so `devtool modify` can append its workspace layer: it
+                # edits a literal BBLAYERS assignment in this file and does not
+                # follow `require`, and our board templates only `require` the
+                # shared bblayers/*.inc fragments. Empty append is a no-op for
+                # the resolved layer set. `devtool reset`/`finish` removes it.
+                printf '\nBBLAYERS += ""\n'
             } > "${dst}"
         else
             {
