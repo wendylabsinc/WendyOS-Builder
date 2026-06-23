@@ -12,9 +12,10 @@ Documentation=man:systemd.mount(5)
 RequiresMountsFor=/data
 After=data.mount
 
-# Wait for Mender data partition resize to complete (if enabled)
-# This is safe even if mender-systemd-growfs-data.service doesn't exist
-After=mender-systemd-growfs-data.service
+# Wait for the /data fs grow so first-boot volume data can't hit ENOSPC while the
+# fs is still small. Growers are board-specific, inert where absent:
+# mender-systemd-growfs-data (Tegra), grow-data-fs-online (RPi).
+After=mender-systemd-growfs-data.service grow-data-fs-online.service
 
 # Must be mounted before the agent starts
 Before=wendyos-agent.service

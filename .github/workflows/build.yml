@@ -29,7 +29,12 @@ on:
         required: false
         default: ""
       debug:
-        description: "Enable WENDYOS_DEBUG and WENDYOS_SSHD (debug tools + SSH) on all devices. Auto-enabled on nightly builds; use this to opt in on release builds triggered by promote.yml."
+        description: "Enable WENDYOS_DEBUG (debug tools) on all devices. Auto-enabled on nightly builds; use this to opt in on release builds triggered by promote.yml."
+        type: boolean
+        required: false
+        default: false
+      sshd:
+        description: "Enable WENDYOS_SSHD (SSH server) on all devices. Must be set explicitly — not auto-enabled on nightly builds."
         type: boolean
         required: false
         default: false
@@ -408,17 +413,27 @@ jobs:
         # creation; the repo cache seeds repos/ from the AMI's bake-time clones.
         run: ./wendyos/bootstrap.sh
 
-      - name: Enable debug and SSH for nightly builds
-        # Release images are production builds — no debug tools, no SSH by default.
-        # Nightly and workflow_dispatch builds get both so developers can SSH into
-        # CI-flashed devices and use debug tooling out of the box. Release builds
+      - name: Enable debug for nightly builds
+        # Release images are production builds — no debug tools by default.
+        # Nightly and workflow_dispatch builds get debug tooling so CI-flashed
+        # devices include diagnostic utilities out of the box. Release builds
         # triggered by promote.yml can opt in via inputs.debug.
         if: (needs.detect-changes.outputs.is-release != 'true' && github.event_name != 'pull_request') || inputs.debug == true
         run: |
           {
             echo ''
-            echo '# Nightly CI: enable debug tooling and SSH on all devices'
+            echo '# Nightly CI: enable debug tooling on all devices'
             echo 'WENDYOS_DEBUG = "1"'
+          } >> "$GITHUB_WORKSPACE/build/conf/auto.conf"
+
+      - name: Enable SSH when explicitly requested
+        # SSH is disabled by default (WENDYOS_SSHD ??= "0" in common.inc).
+        # Pass inputs.sshd = true on workflow_dispatch or promote.yml to opt in.
+        if: inputs.sshd == true
+        run: |
+          {
+            echo ''
+            echo '# CI: enable SSH server on all devices (explicitly requested)'
             echo 'WENDYOS_SSHD = "1"'
           } >> "$GITHUB_WORKSPACE/build/conf/auto.conf"
 
