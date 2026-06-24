@@ -1,7 +1,7 @@
 # RPi local config for the blacksail-tree experiment.
 #
-# Go 1.26 is native on blacksail (no meta-lts-mixins-go), so the
-# rpi5-sd-blacksail board's repos.overrides omits that REPOS_EXTRA clone.
+# Go 1.26 is native on blacksail (no meta-lts-mixins-go), so the blacksail RPi
+# boards' repos.overrides omit that REPOS_EXTRA clone.
 WENDYOS_PERSIST_JOURNAL_LOGS = "0"
 
 # U-Boot: blacksail-native oe-core U-Boot 2026.04, no version pin needed.
