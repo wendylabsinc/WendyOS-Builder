@@ -1,0 +1,20 @@
+# Per-board repo overrides for rpi4-sd-scarthgap (LEGACY scarthgap fallback).
+#
+# wendyos-update OTA on the frozen scarthgap tree, kept as a rollback until rpi4
+# is confirmed on blacksail (then DELETE this board). Uncomment a SRCREV_* below
+# to pin an upstream layer.
+
+#SRCREV_BITBAKE="<commit-hash>"
+#SRCREV_OECORE="<commit-hash>"
+#SRCREV_METAYOCTO="<commit-hash>"
+#SRCREV_OE="<commit-hash>"
+#SRCREV_VIRT="<commit-hash>"
+#SRCREV_RPI="<commit-hash>"
+
+# wendyos-update (Go) needs Go >= 1.26, but scarthgap oe-core is frozen at 1.22.
+# Pull the meta-lts-mixins scarthgap/go branch (Go 1.26.4) as a SECOND checkout.
+# The layer is added to BBLAYERS by bblayers/rpi-wendy.inc; its 1.26.4 recipes
+# out-version oe-core's 1.22.12 and win automatically. Pin: SRCREV_LTS_MIXINS_GO
+# (scripts/upstream-repos.env).
+REPOS_EXTRA=("1|${URL_LTS_MIXINS}|meta-lts-mixins-go|${SRCREV_LTS_MIXINS_GO}")
+
