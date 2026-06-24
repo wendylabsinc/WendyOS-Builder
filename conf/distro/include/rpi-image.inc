@@ -8,9 +8,15 @@ IMAGE_INSTALL:append = " \
     packagegroup-wendyos-rpi \
     "
 
-# Note: ext4 is kept in IMAGE_FSTYPES because Mender's mender-image-sd
-# needs an ext4 rootfs for the A/B slot layout. RPi3 stays on wic-only
-# via its machine-conf IMAGE_FSTYPES override.
+# Mender RPi (rpi3/4) ships Mender's own sdimg (mender-image-sd) as the disk
+# image; ext4 is kept for the A/B slots. But meta-raspberrypi's base IMAGE_FSTYPES
+# (rpi-base.inc: "...wic.bz2 wic.bmap") also pulls in those legacy wic types, which
+# trigger do_image_wic with no usable WKS_FILE (it defaults to
+# sdimage-raspberrypi.wks, which is not on the WKS_SEARCH_PATH) -> do_image_wic
+# fails. They're redundant with Mender's sdimg (same reason rpi-sdimg is removed
+# in raspberrypi-common-wendyos.inc), so drop them on the Mender path. rpi5 (wendy)
+# keeps its own "wic" + rpi-wendy-ab.wks, so gate on WENDYOS_OTA == "mender".
+IMAGE_FSTYPES:remove = "${@'wic.bz2 wic.bmap' if d.getVar('WENDYOS_OTA') == 'mender' else ''}"
 
 # Remove Tegra-only packages added by tegra-image.inc or wendyos-image.bb.
 # Layer separation removes these recipes from the parse tree, but IMAGE_INSTALL
