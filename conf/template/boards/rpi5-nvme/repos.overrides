@@ -14,11 +14,11 @@ WENDYOS_LAYER_TREE="blacksail"
 # Split-poky on blacksail (oe-core master: LAYERSERIES_CORENAMES="wrynose
 # blacksail", LAYERSERIES_COMPAT_core="blacksail"; meta-yocto + bitbake master).
 SRCREV_BITBAKE="30ccfbb849ec80cddb4383d198a1441af0ea760a"
-# WARNING: bumping SRCREV_OECORE may move U-Boot past 2026.04, which SILENTLY
-# disables the version-pinned meta-rpi-extensions/recipes-bsp/u-boot/
-# u-boot_2026.04.bbappend (RPi5 NVMe rc4 bump + phys->bus DMA patch). On any bump,
-# check the U-Boot version; re-version that bbappend (or rename it to
-# u-boot_%.bbappend once all RPi boards are on blacksail).
+# NOTE: the RPi5 NVMe bbappend (meta-rpi-extensions/recipes-bsp/u-boot/
+# u-boot_%.bbappend) force-pins blacksail rpi5 U-Boot to v2026.07-rc4 (SRCREV
+# 1296a428) + the phys->bus DMA patch, independent of this oe-core pin. So bumping
+# SRCREV_OECORE will NOT move rpi5 U-Boot — revisit/repin that bbappend's SRCREV
+# when you want rpi5 on a newer U-Boot.
 SRCREV_OECORE="294409c4bfe392471509d4cb6c1e6fb1063d2b3b"
 SRCREV_METAYOCTO="f49de2f33e37ca971d64215cc1a3669312e1e7c3"
 
