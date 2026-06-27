@@ -1,17 +1,33 @@
-# Per-board repo version overrides for rpi3-sd.
+# Per-board repo overrides for rpi3-sd (blacksail tree).
 #
-# Sourced by bootstrap.sh after the default URL_*/SRCREV_* values are set,
-# but before the repos[] array is built. Uncomment a line below to pin
-# this board to a different commit of an upstream layer.
+# RPi3 (SD) on the blacksail OE series (fleet unification with rpi4 + rpi5 + the
+# Jetsons). The legacy scarthgap board is rpi3-sd-scarthgap, kept as a fallback
+# until rpi3 is confirmed on blacksail. See docs/plans/wendyos-update-rpi.md.
 #
-# Also available (see bootstrap.sh):
-#   URL_<name>           override a source URL (e.g. to use a fork)
-#   REPOS_EXTRA=(...)    append extra clones that coexist with defaults,
-#                        each entry "enabled|url|folder|commit"
+# WENDYOS_LAYER_TREE="blacksail" makes bootstrap clone every upstream repo under
+# repos/blacksail/ (parallel to repos/scarthgap/). Base-stack SRCREVs mirror the
+# Thor blacksail canary (jetson-agx-thor/repos.overrides), resolved 2026-06-15;
+# identical to rpi4-sd / rpi5-sd.
+WENDYOS_LAYER_TREE="blacksail"
 
-#SRCREV_BITBAKE="<commit-hash>"
-#SRCREV_OECORE="<commit-hash>"
-#SRCREV_METAYOCTO="<commit-hash>"
-#SRCREV_OE="<commit-hash>"
-#SRCREV_VIRT="<commit-hash>"
-#SRCREV_RPI="<commit-hash>"
+# Split-poky on blacksail (oe-core master: LAYERSERIES_CORENAMES="wrynose
+# blacksail", LAYERSERIES_COMPAT_core="blacksail"; meta-yocto + bitbake master).
+SRCREV_BITBAKE="30ccfbb849ec80cddb4383d198a1441af0ea760a"
+SRCREV_OECORE="294409c4bfe392471509d4cb6c1e6fb1063d2b3b"
+SRCREV_METAYOCTO="f49de2f33e37ca971d64215cc1a3669312e1e7c3"
+
+# meta-openembedded + meta-virtualization master still declare wrynose (not
+# blacksail) — bridged via blacksail-compat.inc. Re-pin + drop the bridge once
+# upstream bumps.
+SRCREV_OE="5d90e6543de4d1c39424956c67ff1925a39bf3c8"
+SRCREV_VIRT="022f4356d4a9b389f51472d40a9330aa59f6bb9a"
+
+# meta-raspberrypi: bumped to upstream master (scarthgap-era default is too old
+# for blacksail oe-core). Same pin as rpi4-sd / rpi5-sd. Pinned for reproducibility.
+SRCREV_RPI="0c76b0feadbe2afa4cec4cd497636e94eca30ec3"
+
+# NOTE: like rpi4 (and unlike rpi5), rpi3 (BCM2837) gets NO U-Boot override — the
+# rc4 bump + NVMe patch in u-boot_%.bbappend are raspberrypi5-scoped, so rpi3
+# builds STOCK blacksail U-Boot 2026.04. No meta-lts-mixins (blacksail U-Boot is
+# native), no meta-lts-mixins-go (blacksail Go is 1.26 native).
+

@@ -31,6 +31,13 @@ WENDYOS_ROOT_DEV_BASE:raspberrypi5-nvme = "/dev/nvme0n1p"
 WENDYOS_UBOOT_IF:raspberrypi5-nvme      = "nvme"
 WENDYOS_UBOOT_PRECMD:raspberrypi5-nvme  = "nvme scan"
 
+# RPi3 (BCM2837) boots MBR only, so its A/B wks (rpi-wendy-ab-mbr.wks) puts the
+# two rootfs slots on PRIMARY partitions p2/p3 (boot=p1; config/data are logical
+# p5/p6 inside the extended partition) — NOT the GPT p3/p4 the defaults assume.
+# SD card, so the mmc / mmcblk0 device defaults still hold.
+WENDYOS_ROOTFS_PART_A:raspberrypi3-64 = "2"
+WENDYOS_ROOTFS_PART_B:raspberrypi3-64 = "3"
+
 # Re-run if any of the templated knobs change.
 do_compile[vardeps] += "WENDYOS_OTA WENDYOS_ROOTFS_PART_A WENDYOS_ROOTFS_PART_B \
                         WENDYOS_BOOTLIMIT WENDYOS_ROOT_DEV_BASE WENDYOS_UBOOT_IF \

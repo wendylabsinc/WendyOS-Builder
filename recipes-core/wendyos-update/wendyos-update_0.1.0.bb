@@ -24,7 +24,9 @@ GO_IMPORT = "github.com/wendylabsinc/wendyos-update"
 GO_SRCURI_DESTSUFFIX ?= "${@os.path.join(os.path.basename(d.getVar('S')), 'src', d.getVar('GO_IMPORT')) + '/'}"
 
 SRC_URI = "git://${GO_IMPORT};protocol=https;branch=main;destsuffix=${GO_SRCURI_DESTSUFFIX}"
-SRCREV = "e9147526ef486129366d62dd11af951adbf5c7f4"
+# eb136e93: ubootenv connector resolves A/B slots by filesystem LABEL when no GPT
+# partlabel (rpi3/MBR). Behavior-preserving on GPT (rpi4/5) + Tegra — see review.
+SRCREV = "eb136e93af0ca1801358f6a3079581295d435de4"
 
 inherit go-mod systemd
 
