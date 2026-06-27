@@ -8,6 +8,10 @@ set -Eeuo pipefail
 
 UUID_FILE="/etc/wendyos/device-uuid"
 DEVICE_NAME_FILE="/etc/wendyos/device-name"
+# Explicit, literal hostname set at runtime via the agent's SetHostname RPC
+# (wendy device rename). When present and valid it is used verbatim, with no
+# "wendyos-" prefix, taking precedence over the device-name and UUID sources.
+EXPLICIT_HOSTNAME_FILE="/etc/wendy-agent/hostname"
 PREFIX="wendyos"
 STATE_DIR="/etc/wendyos"
 STATE_HOSTNAME_FILE="${STATE_DIR}/hostname"
@@ -22,6 +26,14 @@ log() {
 is_valid_uuid() {
     local v="${1,,}"
     [[ "$v" =~ ^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$ ]]
+}
+
+# Validate a literal hostname as a single DNS label: starts with a lowercase
+# letter, then lowercase letters/digits/hyphens, not ending in a hyphen, 1-63
+# characters. Mirrors validHostname in the wendy-agent (services/hostname.go).
+is_valid_hostname() {
+    local v="$1"
+    [[ "$v" =~ ^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$ ]]
 }
 
 # Primary source: device UUID
@@ -55,9 +67,20 @@ get_legacy_id() {
     echo "$device_id"
 }
 
-# Generate hostname from device name (preferred) or UUID/legacy ID (fallback)
+# Generate hostname from an explicit literal hostname (preferred), the
+# human-readable device name, or a UUID/legacy ID (fallback)
 generate_hostname() {
-    local device_name uuid short_id legacy
+    local explicit device_name uuid short_id legacy
+
+    # An explicit hostname set via 'wendy device rename' wins and is used
+    # verbatim, with no "wendyos-" prefix.
+    if [ -f "$EXPLICIT_HOSTNAME_FILE" ]; then
+        explicit=$(cat "$EXPLICIT_HOSTNAME_FILE" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
+        if [ -n "$explicit" ] && is_valid_hostname "$explicit"; then
+            echo "$explicit"
+            return
+        fi
+    fi
 
     # Try to use the human-readable device name first
     if [ -f "$DEVICE_NAME_FILE" ]; then
