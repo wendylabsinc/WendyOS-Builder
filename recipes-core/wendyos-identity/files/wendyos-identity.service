@@ -2,7 +2,13 @@
 Description=WendyOS mDNS Setup
 After=network.target wendyos-usbgadget.service wendyos-uuid-generate.service wendyos-device-name-generate.service wendyos-etc-binds.service
 Before=avahi-daemon.service
-Wants=wendyos-etc-binds.service
+# Wants (not just After): avahi-daemon is socket-activated, and our
+# Before=avahi-daemon can pull this unit into an early activation. After= only
+# orders against units already in the transaction, so without Wants= the
+# generators might not be pulled in and we could publish before they run (the
+# original bug). Wants= keeps them bound + ordered, without failing identity if a
+# generator hiccups (the publisher self-heals the UUID and skips an absent name).
+Wants=wendyos-etc-binds.service wendyos-uuid-generate.service wendyos-device-name-generate.service
 
 [Service]
 Type=oneshot

@@ -1,8 +1,16 @@
 [Unit]
 Description=WendyOS Device UUID Generation
-DefaultDependencies=no
-After=local-fs.target data.mount wendyos-etc-binds.service
-Wants=wendyos-etc-binds.service
+# MUST run after /etc/wendyos is the persistent bind from /data
+# (wendyos-etc-binds), otherwise the UUID is written to the rootfs and then
+# shadowed by the bind -> identity finds nothing and mDNS advertises the
+# WENDY_DEVICE_ID placeholder. The previous DefaultDependencies=no +
+# WantedBy=sysinit.target put this at the very front of boot, which formed an
+# ordering cycle with etc-binds (gated on a slow data.mount) that systemd broke
+# by running this BEFORE the bind. Keep it in the normal phase and make the bind
+# a hard requirement so a slow/late /data can never reintroduce the inversion.
+After=wendyos-etc-binds.service
+Requires=wendyos-etc-binds.service
+Before=wendyos-device-name-generate.service wendyos-identity.service
 
 [Service]
 Type=oneshot
@@ -12,4 +20,5 @@ StandardOutput=journal
 StandardError=journal
 
 [Install]
-WantedBy=sysinit.target
+WantedBy=multi-user.target
+

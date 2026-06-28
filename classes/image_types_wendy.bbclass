@@ -32,6 +32,14 @@ WENDY_ARTIFACT_VERSION ?= "${DISTRO_VERSION}"
 WENDY_ARTIFACT_NAME ?= "${IMAGE_BASENAME}-${MACHINE}-${WENDY_ARTIFACT_VERSION}"
 WENDY_ARTIFACT_COMPRESSION ?= "zstd"
 
+# Output is ${IMAGE_NAME}.wendy (NOT ${IMAGE_NAME}${IMAGE_NAME_SUFFIX}). Modern
+# oe-core already folds IMAGE_NAME_SUFFIX into IMAGE_NAME (IMAGE_LINK_NAME =
+# ...${IMAGE_NAME_SUFFIX}, IMAGE_NAME = ${IMAGE_LINK_NAME}${IMAGE_VERSION_SUFFIX}),
+# so every stock IMAGE_CMD writes ${IMAGE_NAME}.<type>. create_symlinks() also
+# looks for exactly ${IMAGE_NAME}.<type>. Appending the suffix again gave a
+# doubled ".rootfs.rootfs.wendy" and no stable symlink on boards that keep the
+# default suffix (RPi). It was masked on Tegra only because those machine confs
+# set IMAGE_NAME_SUFFIX="" for wendy.
 IMAGE_CMD:wendy () {
     if [ -z "${WENDYOS_BOARD_ID}" ]; then
         bbfatal "image_types_wendy: WENDYOS_BOARD_ID is unset; cannot set the artifact's compatible device"
@@ -42,9 +50,10 @@ IMAGE_CMD:wendy () {
         --version ${WENDY_ARTIFACT_VERSION} \
         --device ${WENDYOS_BOARD_ID} \
         --compression ${WENDY_ARTIFACT_COMPRESSION} \
-        -o ${IMGDEPLOYDIR}/${IMAGE_NAME}${IMAGE_NAME_SUFFIX}.wendy
+        -o ${IMGDEPLOYDIR}/${IMAGE_NAME}.wendy
 }
 
 # IMAGE_ID embeds a timestamp; excluding it keeps the artifact's signature
 # stable across otherwise-identical rebuilds.
 IMAGE_CMD:wendy[vardepsexclude] += "IMAGE_ID"
+

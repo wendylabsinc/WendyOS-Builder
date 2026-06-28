@@ -1045,9 +1045,10 @@ for NVMe).
 **Warning**: This will erase all data on the target device!
 
 For SD card builds, insert the flashed card into the Raspberry Pi and power on. For NVMe
-builds (RPi5 only), ensure the NVMe drive is connected via a PCIe adapter and that the EEPROM boot order is
-configured to boot from NVMe (see `rpi-eeprom-nvme-config` package included in the NVMe
-machine).
+builds (RPi5 only), connect the NVMe drive via a PCIe adapter. The board EEPROM is configured
+generically by the `rpi-eeprom-config` package (included on every RPi5 image) to boot either
+SD or NVMe — it sets `BOOT_ORDER=0xf461` (SD then NVMe), `PCIE_PROBE=1`, and `PSU_MAX_CURRENT`
+— so the same board boots whichever medium is present regardless of which image flashed it.
 
 ## QEMU (ARM64)
 

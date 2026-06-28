@@ -1,0 +1,50 @@
+# WendyOS A/B layout for the wendyos-update OTA stack (WENDYOS_OTA = "wendy"),
+# MBR variant for Raspberry Pi 3. The BCM2837 GPU bootrom can only read an
+# MBR-partitioned FAT32 boot partition — GPT support landed later in the Pi 4
+# EEPROM bootloader — so the GPT rpi-wendy-ab.wks is not usable on a Pi 3.
+#
+# MBR has only 4 primary slots, and an A/B image needs 5 partitions, so wic
+# auto-creates an extended partition (p4) and places the overflow as logical
+# partitions from p5 (see oe-core wic direct.py). The resulting geometry mirrors
+# the proven Mender RPi3 layout exactly:
+#
+#   p1 boot    (FAT,  primary)  RPi firmware + u-boot.bin + boot.scr + config.txt
+#                               + cmdline.txt + uboot.env (the U-Boot environment).
+#   p2 rootfsA (ext4, primary)  slot 0  ─┐ both slots flashed with the SAME rootfs
+#   p3 rootfsB (ext4, primary)  slot 1  ─┘ so the device is bootable + recoverable
+#                                          from the factory and A->B->A is testable
+#                                          immediately.
+#   p4 (extended container, auto-created by wic)
+#   p5 config  (FAT,  logical)  first-boot provisioning seed (label "config").
+#   p6 data    (ext4, logical)  persistent /data — LAST so it can grow to fill the
+#                               card on first boot.
+#
+# Partition ORDER is load-bearing and is duplicated in two places that MUST stay
+# in sync with it:
+#   - the boot script's slot->partition map (rpi-u-boot-scr.bbappend, via
+#     WENDYOS_ROOTFS_PART_A/B = 2/3 for :raspberrypi3-64 — NOT the GPT 3/4), and
+#   - the ubootenv connector resolves slots by the label rootfsA/rootfsB. Under
+#     MBR there are no GPT partlabels, so it falls back to the ext4 FILESYSTEM
+#     label `--label` writes below (wendyos-update commit eb136e93).
+#
+# Everything is referenced by LABEL, never PARTUUID/--uuid: under MBR the kernel
+# exposes PARTUUIDs as <disk-signature>-<partno> (not the UUIDv4 partuuid-rpi
+# generates), and wic rejects --uuid on msdos. The matching fstab is
+# rpi-wendy-mbr-fstab (LABEL=boot for /boot, vs PARTUUID in the GPT fstab).
+#
+# Notes (see docs/plans/wendyos-update-rpi.md):
+#   - The kernel is loaded by boot.scr from the SELECTED slot's rootfs /boot
+#     (A/B-safe), so the rootfs must contain /boot/${KERNEL_IMAGETYPE}.
+#   - /data is created as a small ext4 here; the first-boot grow is done by
+#     grow-data-part (wendyos-data-setup's format-trigger does NOT fire on a
+#     wic-preformatted fs). Do NOT add expand-rootfs to an A/B image: it would
+#     grow rootfsA over rootfsB.
+#   - Two 8192M rootfs slots + boot + config + data need a >=18 GB card; size
+#     the slots down here if the rpi3 fleet uses smaller media.
+bootloader --ptable msdos
+part /boot   --source bootimg-partition --ondisk mmcblk0 --fstype=vfat --label boot    --active --align 4096 --size 128M
+part         --source rootfs            --ondisk mmcblk0 --fstype=ext4 --label rootfsA  --align 4096 --size 8192M
+part         --source rootfs            --ondisk mmcblk0 --fstype=ext4 --label rootfsB  --align 4096 --size 8192M
+part         --ondisk mmcblk0 --fstype=vfat --label config --align 4096 --size ${WENDYOS_CONFIG_PART_SIZE_MB}M
+part         --ondisk mmcblk0 --fstype=ext4 --label data   --align 4096 --size 512M
+

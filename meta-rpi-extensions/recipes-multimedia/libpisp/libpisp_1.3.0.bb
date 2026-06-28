@@ -23,11 +23,22 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=3417a46e992fdf62e5759fba9baef7a7 \
 SRC_URI = "git://github.com/raspberrypi/libpisp.git;protocol=https;branch=main"
 SRCREV = "9ba67e6680f03f31f2b1741a53e8fd549be82cbe"
 
-# Explicit S for git fetches: unlike meta-raspberrypi master (which runs on a
-# newer bitbake), the bitbake revision WendyOS pins does not default S to the
-# git checkout dir. Matches libcamera_0.4.0.bb / libcamera-apps_git.bb here.
-S = "${WORKDIR}/git"
+# Source dir for the git fetch — tree-dependent:
+#   - blacksail+: leave S unset. bitbake.conf defaults it to ${UNPACKDIR}/${BP},
+#     where the newer git fetcher unpacks. Do NOT set S to anything mentioning
+#     WORKDIR — newer oe-core rejects it ("S should be set relative to UNPACKDIR"),
+#     and that check scans the raw S string, so even an unused inline-python
+#     branch containing "${WORKDIR}" trips it.
+#   - scarthgap: older bitbake unpacks git to ${WORKDIR}/git and its default S
+#     doesn't point there, so set it (no such check on scarthgap). Setting it
+#     from anonymous python keeps the WORKDIR token out of any S value on
+#     blacksail (there d.getVar('S') stays the WORKDIR-free default).
+python () {
+    if 'scarthgap' in (d.getVar('LAYERSERIES_CORENAMES') or '').split():
+        d.setVar('S', '${WORKDIR}/git')
+}
 
 DEPENDS = "nlohmann-json"
 
 inherit meson pkgconfig
+

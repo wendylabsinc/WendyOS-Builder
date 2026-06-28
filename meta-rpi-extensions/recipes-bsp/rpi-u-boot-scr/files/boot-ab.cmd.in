@@ -1,0 +1,82 @@
+# WendyOS A/B trial-boot script (wendyos-update OTA stack, env-in-FAT).
+#
+# Templated by rpi-u-boot-scr.bbappend (@@...@@ -> bitbake vars), compiled to
+# boot.scr by mkimage. Selects the A/B rootfs slot from the U-Boot env and
+# implements trial boot with an in-script bootcount: stock meta-raspberrypi
+# U-Boot, environment stored as uboot.env on the FAT boot partition (no U-Boot
+# patches). Mirrors meta-mender-raspberrypi's mechanics under WendyOS variable
+# names. The on-device connector (wendyos-update internal/connector/ubootenv)
+# reads/writes the same vars via fw_setenv from Linux.
+#
+# Env-var contract (kept identical to the connector):
+#   wendyos_boot_slot          0|1  slot to boot (0=rootfsA, 1=rootfsB)
+#   wendyos_upgrade_available  0|1  a trial boot is armed
+#   bootcount / bootlimit      trial attempt counter / budget
+@@WENDYOS_UBOOT_PRECMD@@
+
+# --- First-boot env init (idempotent) -------------------------------------
+# Stock U-Boot has none of our vars compiled in; seed sane defaults. Persist
+# once (only if uboot.env is absent) so fw_setenv on the Linux side has a file
+# to edit before the first OTA.
+if test "${wendyos_boot_slot}" = ""; then setenv wendyos_boot_slot 0; fi
+if test "${wendyos_upgrade_available}" = ""; then setenv wendyos_upgrade_available 0; fi
+if test "${bootlimit}" = ""; then setenv bootlimit @@WENDYOS_BOOTLIMIT@@; fi
+if test "${bootcount}" = ""; then setenv bootcount 0; fi
+if test ! -e @@WENDYOS_UBOOT_IF@@ @@WENDYOS_UBOOT_DEV@@:1 uboot.env; then saveenv; fi
+
+# --- Trial boot -----------------------------------------------------------
+# Only while an update is armed (set by `wendyos-update install`) do we count
+# attempts. A healthy boot is finalized by `wendyos-update commit`, which clears
+# the flag and zeroes the counter from Linux. A slot that never commits keeps
+# climbing bootcount until it exceeds bootlimit, then we fall back to the other
+# slot (clearing the flag — matches mender_altbootcmd).
+if test "${wendyos_upgrade_available}" = "1"; then
+    setexpr bootcount ${bootcount} + 1
+    saveenv
+    if test ${bootcount} -gt ${bootlimit}; then
+        echo "wendyos: trial slot ${wendyos_boot_slot} exhausted (bootcount=${bootcount} > bootlimit=${bootlimit}); falling back"
+        if test "${wendyos_boot_slot}" = "0"; then
+            setenv wendyos_boot_slot 1
+        else
+            setenv wendyos_boot_slot 0
+        fi
+        setenv wendyos_upgrade_available 0
+        setenv bootcount 0
+        saveenv
+    fi
+fi
+
+# --- Slot -> partition ----------------------------------------------------
+# MUST match files/wic/rpi-wendy-ab*.wks: slot 0 = rootfsA, slot 1 = rootfsB.
+if test "${wendyos_boot_slot}" = "1"; then
+    setenv wendyos_root_part @@WENDYOS_ROOTFS_PART_B@@
+else
+    setenv wendyos_root_part @@WENDYOS_ROOTFS_PART_A@@
+fi
+
+echo "wendyos: booting slot ${wendyos_boot_slot} (rootfs partition ${wendyos_root_part})"
+
+# --- Kernel cmdline + boot ------------------------------------------------
+# Inherit cmdline.txt args from the firmware-provided FDT /chosen, then point
+# root= at the selected slot (appended last, so it wins over any root= the
+# firmware put in cmdline.txt). The DTB stays the firmware-loaded ${fdt_addr}.
+#
+# `rw`: mount the rootfs read-write. The A/B fstab (rpi-wendy-fstab) has no "/"
+# entry (the slot device varies), so systemd never remounts "/", and without rw
+# here the kernel's default read-only mount sticks -- leaving /etc and /var/lib
+# read-only, which breaks first-boot postinsts, wendyos-hostname, and any service
+# with StateDirectory= (timesyncd, rfkill). Every other WendyOS RPi fstab mounts
+# / with "defaults" (= rw); this is the per-slot-safe equivalent for A/B.
+fdt addr ${fdt_addr} && fdt get value bootargs /chosen bootargs
+setenv bootargs "${bootargs} root=@@WENDYOS_ROOT_DEV_BASE@@${wendyos_root_part} rootwait rw"
+
+# Load the kernel from the SELECTED slot's rootfs /boot (A/B-safe: each slot
+# carries its own kernel). A failed load or a returning boot falls through to
+# reset, which during a trial advances bootcount toward the fall-back above.
+if ext4load @@WENDYOS_UBOOT_IF@@ @@WENDYOS_UBOOT_DEV@@:${wendyos_root_part} ${kernel_addr_r} /boot/@@KERNEL_IMAGETYPE@@; then
+    @@KERNEL_BOOTCMD@@ ${kernel_addr_r} - ${fdt_addr}
+fi
+
+echo "wendyos: slot ${wendyos_boot_slot} failed to boot; resetting"
+reset
+

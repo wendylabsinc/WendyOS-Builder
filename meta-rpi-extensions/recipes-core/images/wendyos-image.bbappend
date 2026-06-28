@@ -9,7 +9,9 @@
 # `inherit` here loses: it runs before the deferred IMGCLASSES inherit.)
 # meta-rpi-extensions is only layered for RPi, so this stays RPi-only; on an image
 # without extra partitions the reorder is a no-op.
-IMAGE_CLASSES:append = " mender-config-before-data"
+# Mender-only: reorders Mender's generated A/B sdimg. Skipped for the wendy OTA
+# stack, which uses a hand-authored wks (rpi-wendy-ab.wks) with its own ordering.
+IMAGE_CLASSES:append = "${@'' if d.getVar('WENDYOS_OTA') == 'wendy' else ' mender-config-before-data'}"
 #
 # mender-config-before-data.bbclass places the FAT "config" partition BEFORE
 # /data, so the on-disk layout is: boot(p1) rootfsA(p2) rootfsB(p3) extended(p4)
@@ -25,4 +27,8 @@ fix_config_fstab_rpi() {
         "${MENDER_STORAGE_DEVICE_BASE}5" /config vfat defaults,nofail 0 0 \
         >> ${IMAGE_ROOTFS}${sysconfdir}/fstab
 }
-ROOTFS_POSTPROCESS_COMMAND:append:rpi = " fix_config_fstab_rpi;"
+# Mender-only: rewrites the /config fstab line for Mender's generated layout.
+# MUST NOT run for wendy — it would overwrite rpi-wendy-fstab's correct
+# "LABEL=config /config" with "${MENDER_STORAGE_DEVICE_BASE}5 /config", which in
+# the wendy A/B layout is the /data partition (p5), not /config (p2).
+ROOTFS_POSTPROCESS_COMMAND:append:rpi = "${@'' if d.getVar('WENDYOS_OTA') == 'wendy' else ' fix_config_fstab_rpi;'}"

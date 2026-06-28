@@ -36,3 +36,13 @@ LAYERSERIES_COMPAT_networking-layer:append = "${_BLACKSAIL_COMPAT}"
 LAYERSERIES_COMPAT_filesystems-layer:append = "${_BLACKSAIL_COMPAT}"
 LAYERSERIES_COMPAT_multimedia-layer:append = "${_BLACKSAIL_COMPAT}"
 LAYERSERIES_COMPAT_virtualization-layer:append = "${_BLACKSAIL_COMPAT}"
+
+# [NOTE]
+# meta-raspberrypi's blacksail bridge is intentionally NOT here.
+# LAYERSERIES_COMPAT is snapshotted + checked during the layer.conf loop
+# (cookerdata.py), BEFORE this file (a local.conf postfile) is parsed — so a
+# bridge here is too late to be seen. It lives in bblayers/rpi-blacksail.inc
+# (a bblayers include, parsed in time). The meta-oe/meta-virt appends above are
+# likewise ineffective for the *gate*, but those layers already intersect
+# LAYERSERIES_CORENAMES on "wrynose", so they pass without a bridge anyway.
+

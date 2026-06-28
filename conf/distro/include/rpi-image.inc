@@ -8,9 +8,15 @@ IMAGE_INSTALL:append = " \
     packagegroup-wendyos-rpi \
     "
 
-# Note: ext4 is kept in IMAGE_FSTYPES because Mender's mender-image-sd
-# needs an ext4 rootfs for the A/B slot layout. RPi3 stays on wic-only
-# via its machine-conf IMAGE_FSTYPES override.
+# Mender RPi (rpi3/4) ships Mender's own sdimg (mender-image-sd) as the disk
+# image; ext4 is kept for the A/B slots. But meta-raspberrypi's base IMAGE_FSTYPES
+# (rpi-base.inc: "...wic.bz2 wic.bmap") also pulls in those legacy wic types, which
+# trigger do_image_wic with no usable WKS_FILE (it defaults to
+# sdimage-raspberrypi.wks, which is not on the WKS_SEARCH_PATH) -> do_image_wic
+# fails. They're redundant with Mender's sdimg (same reason rpi-sdimg is removed
+# in raspberrypi-common-wendyos.inc), so drop them on the Mender path. rpi5 (wendy)
+# keeps its own "wic" + rpi-wendy-ab.wks, so gate on WENDYOS_OTA == "mender".
+IMAGE_FSTYPES:remove = "${@'wic.bz2 wic.bmap' if d.getVar('WENDYOS_OTA') == 'mender' else ''}"
 
 # Remove Tegra-only packages added by tegra-image.inc or wendyos-image.bb.
 # Layer separation removes these recipes from the parse tree, but IMAGE_INSTALL
@@ -34,12 +40,52 @@ do_image_wic[depends] += " \
     wic-tools:do_populate_sysroot \
     e2fsprogs-native:do_populate_sysroot \
     gptfdisk-native:do_populate_sysroot \
-"
+    "
+
 do_image_wic[depends] += "${PN}:do_generate_partuuids"
 WIC_CREATE_EXTRA_ARGS ?= "--no-fstab-update"
 
-# Create /config mount point directory (fstab entry is in rpi-fstab)
-create_config_mountpoint() {
+# Create the /config and /data mount point directories (fstab entries are in
+# rpi-fstab / rpi-wendy-fstab). The rootfs is read-only at runtime (A/B slot), so
+# systemd cannot mkdir a missing mount point -- data.mount then fails on a clean
+# fs and the /data bind mounts + Wendy Agent cascade-fail. For Mender, /data is
+# provided by Mender; for the wendy OTA stack wendyos-data-setup is dropped (see
+# below), so /data must be created here. mkdir -p is idempotent, so creating both
+# unconditionally is safe for either stack.
+create_rpi_mountpoints() {
     mkdir -p ${IMAGE_ROOTFS}/config
+    mkdir -p ${IMAGE_ROOTFS}/data
+
+    # Bind-mount targets for the persistent /data volumes (var-lib-wendy.mount,
+    # var-lib-containerd.mount: /data/wendy -> /var/lib/wendy, /data/containerd ->
+    # /var/lib/containerd). Those units use x-systemd.mkdir, but it only creates
+    # the target on a WRITABLE fs; on the read-only A/B rootfs (and with the
+    # volatile /var/lib bind skipped on blacksail systemd 259) it can't, so the
+    # bind mounts fail and wendyos-agent/containerd never start. Pre-create the
+    # targets so the binds succeed regardless of /var/lib writability. (Bind
+    # mounts overlay these empty dirs with the /data sources.)
+    mkdir -p ${IMAGE_ROOTFS}/var/lib/wendy
+    mkdir -p ${IMAGE_ROOTFS}/var/lib/containerd
 }
-ROOTFS_POSTPROCESS_COMMAND:append = " create_config_mountpoint;"
+
+ROOTFS_POSTPROCESS_COMMAND:append = " create_rpi_mountpoints;"
+
+# --- wendyos-update (wendy) image deltas for RPi --------------------------
+# All gated on WENDYOS_OTA == "wendy" so RPi3/4 (Mender) are unaffected; RPi5
+# moves to the wendy stack (raspberrypi5-wendyos.conf sets WENDYOS_OTA="wendy").
+#
+# 1) Drop wendyos-data-setup (pulled by wendyos-update.inc): on RPi the /data
+#    first-boot grow is done by grow-data-part (in packagegroup-wendyos-rpi).
+#    wendyos-data-init only (re)formats a missing/oversized fs, so it would skip
+#    the wic-preformatted ext4 data partition.
+IMAGE_INSTALL:remove = "${@'wendyos-data-setup' if d.getVar('WENDYOS_OTA') == 'wendy' else ''}"
+
+# 2) wendy-stack RPi extras:
+#    - wendyos-fw-env       /etc/fw_env.config so the ubootenv connector's
+#                           fw_setenv reaches uboot.env on the boot FAT.
+#    - wendyos-update-config pins the connector to "ubootenv".
+#    - kernel-image          the boot script ext4loads /boot/${KERNEL_IMAGETYPE}
+#                            from the selected rootfs slot (A/B-safe); meta-
+#                            raspberrypi only deploys the kernel to the FAT.
+IMAGE_INSTALL:append = "${@' wendyos-fw-env wendyos-update-config kernel-image' if d.getVar('WENDYOS_OTA') == 'wendy' else ''}"
+
