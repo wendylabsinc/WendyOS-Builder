@@ -33,6 +33,12 @@ type ManifestEntry struct {
 	RecoveryPath     string `json:"recovery_path,omitempty"`
 	RecoverySize     int64  `json:"recovery_size,omitempty"`
 	RecoveryChecksum string `json:"recovery_checksum,omitempty"`
+
+	// Flashpack is the Thor (jetson-agx-thor) USB-recovery flash artifact
+	// (a .tar.zst the wendy CLI downloads, extracts and flashes).
+	FlashpackPath     string `json:"flashpack_path,omitempty"`
+	FlashpackSize     int64  `json:"flashpack_size,omitempty"`
+	FlashpackChecksum string `json:"flashpack_checksum,omitempty"`
 }
 
 func (e *ManifestEntry) validate() error {

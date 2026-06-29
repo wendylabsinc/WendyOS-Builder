@@ -112,6 +112,9 @@ type VersionMetadata struct {
 	RecoveryPath       string     `json:"recovery_path,omitempty"`
 	RecoveryChecksum   string     `json:"recovery_checksum,omitempty"`
 	RecoverySizeBytes  int64      `json:"recovery_size_bytes,omitempty"`
+	FlashpackPath      string     `json:"flashpack_path,omitempty"`
+	FlashpackChecksum  string     `json:"flashpack_checksum,omitempty"`
+	FlashpackSizeBytes int64      `json:"flashpack_size_bytes,omitempty"`
 	BmapPath           string     `json:"bmap_path,omitempty"`
 	// Storage-specific image paths for devices that produce multiple artifacts
 	// (e.g. jetson-orin-nano which ships both an NVMe and an SD card image).
@@ -982,6 +985,7 @@ func main() {
 	localFile := flag.String("file", "", "Local file path to upload")
 	otaUpdateFile := flag.String("ota-update", "", "Local OTA update file path to upload")
 	recoveryFile := flag.String("recovery-file", "", "Optional recovery/tegraflash file path to upload")
+	flashpackFile := flag.String("flashpack-file", "", "Optional Thor flashpack (.tar.zst) file path to upload")
 	bmapFile := flag.String("bmap-file", "", "Optional .bmap block-map file to upload alongside the OS image")
 	storage := flag.String("storage", "", "Storage type for multi-artifact devices: nvme or sd (omit for single-storage devices)")
 	updateOnly := flag.Bool("update-only", false, "Only update manifests without uploading")
@@ -1065,6 +1069,9 @@ func main() {
 		if *recoveryFile != "" {
 			log.Fatal("--recovery-file is not supported for firmware uploads")
 		}
+		if *flashpackFile != "" {
+			log.Fatal("--flashpack-file is not supported for firmware uploads")
+		}
 	} else if *createDevice {
 		// For creating a device, we only need the device type
 		if err := validateDeviceType(*deviceType); err != nil {
@@ -1144,6 +1151,13 @@ func main() {
 			if *recoveryFile != "" {
 				if err := validateFileExists(*recoveryFile); err != nil {
 					log.WithError(err).Fatal("Invalid recovery file")
+				}
+			}
+
+			// Validate flashpack file if provided
+			if *flashpackFile != "" {
+				if err := validateFileExists(*flashpackFile); err != nil {
+					log.WithError(err).Fatal("Invalid flashpack file")
 				}
 			}
 
@@ -1238,6 +1252,7 @@ func main() {
 			entry.ZstPath, entry.ZstChecksum, entry.ZstSize,
 			entry.OTAUpdatePath, entry.OTAUpdateSize, entry.OTAUpdateChecksum,
 			entry.RecoveryPath, entry.RecoverySize, entry.RecoveryChecksum,
+			entry.FlashpackPath, entry.FlashpackSize, entry.FlashpackChecksum,
 			entry.Storage, entry.Nightly, entry.Stability, *notifyDiscord, true,
 		)
 		return
@@ -1352,6 +1367,13 @@ func main() {
 			recoveryFileChan = processFileAsync(ctx, *recoveryFile, "recovery")
 		}
 
+		// Process flashpack file if provided (already .tar.zst — not recompressed)
+		var flashpackFileChan <-chan fileProcessResult
+		if *flashpackFile != "" {
+			log.Info("Processing flashpack file...")
+			flashpackFileChan = processFileAsync(ctx, *flashpackFile, "flashpack")
+		}
+
 		// Wait for main file processing
 		var mainResult fileProcessResult
 		if mainFileChan != nil {
@@ -1382,6 +1404,16 @@ func main() {
 			log.Info("Recovery file processed successfully")
 		}
 
+		// Wait for flashpack file processing
+		var flashpackResult fileProcessResult
+		if flashpackFileChan != nil {
+			flashpackResult = <-flashpackFileChan
+			if flashpackResult.err != nil {
+				log.WithError(flashpackResult.err).Fatal("Failed to process flashpack file")
+			}
+			log.Info("Flashpack file processed successfully")
+		}
+
 		// Upload files in parallel
 		log.Info("Starting parallel uploads...")
 
@@ -1398,6 +1430,11 @@ func main() {
 		var recoveryUploadChan <-chan uploadResult
 		if recoveryResult.compressedPath != "" {
 			recoveryUploadChan = uploadFileAsync(ctx, bucket, recoveryResult.compressedPath, *deviceType, *version)
+		}
+
+		var flashpackUploadChan <-chan uploadResult
+		if flashpackResult.compressedPath != "" {
+			flashpackUploadChan = uploadFileAsync(ctx, bucket, flashpackResult.compressedPath, *deviceType, *version)
 		}
 
 		// bmap is a small XML file; upload it in parallel with the others.
@@ -1458,6 +1495,15 @@ func main() {
 			log.Info("Recovery file uploaded successfully")
 		}
 
+		var flashpackUpload uploadResult
+		if flashpackUploadChan != nil {
+			flashpackUpload = <-flashpackUploadChan
+			if flashpackUpload.err != nil {
+				log.WithError(flashpackUpload.err).Fatal("Failed to upload flashpack file")
+			}
+			log.Info("Flashpack file uploaded successfully")
+		}
+
 		var bmapUpload uploadResult
 		if bmapUploadChan != nil {
 			bmapUpload = <-bmapUploadChan
@@ -1513,6 +1559,9 @@ func main() {
 				RecoveryPath:      recoveryUpload.path,
 				RecoverySize:      recoveryUpload.size,
 				RecoveryChecksum:  recoveryResult.checksum,
+				FlashpackPath:     flashpackUpload.path,
+				FlashpackSize:     flashpackUpload.size,
+				FlashpackChecksum: flashpackResult.checksum,
 			}
 			if err := writeManifestEntry(*metadataOut, entry); err != nil {
 				log.WithError(err).Fatal("Failed to write manifest entry")
@@ -1529,6 +1578,7 @@ func main() {
 			zstUpload.path, zstChecksum, zstUpload.size,
 			otaUpdateUpload.path, otaUpdateUpload.size, otaUpdateResult.checksum,
 			recoveryUpload.path, recoveryUpload.size, recoveryResult.checksum,
+			flashpackUpload.path, flashpackUpload.size, flashpackResult.checksum,
 			*storage, *nightly, *stability, *notifyDiscord, *skipMasterManifest,
 		)
 	} else {
@@ -1603,7 +1653,7 @@ func main() {
 			recoverySize = recoveryAttrs.Size
 		}
 
-		updateManifests(ctx, bucket, *deviceType, *version, imagePath, attrs.Size, mainChecksum, "", "", "", 0, otaUpdatePath, otaUpdateSize, otaUpdateChecksum, recoveryPath, recoverySize, recoveryChecksum, *storage, *nightly, *stability, *notifyDiscord, *skipMasterManifest)
+		updateManifests(ctx, bucket, *deviceType, *version, imagePath, attrs.Size, mainChecksum, "", "", "", 0, otaUpdatePath, otaUpdateSize, otaUpdateChecksum, recoveryPath, recoverySize, recoveryChecksum, "", 0, "", *storage, *nightly, *stability, *notifyDiscord, *skipMasterManifest)
 	}
 }
 
@@ -1778,7 +1828,7 @@ func uploadFile(ctx context.Context, bucket *storage.BucketHandle, localPath, de
 	return destinationPath, nil
 }
 
-func updateManifests(ctx context.Context, bucket *storage.BucketHandle, deviceType, version, filePath string, fileSize int64, fileChecksum string, bmapPath string, zstPath, zstChecksum string, zstSize int64, otaUpdatePath string, otaUpdateSize int64, otaUpdateChecksum string, recoveryPath string, recoverySize int64, recoveryChecksum string, storage string, isNightly bool, stability string, notifyDiscord bool, skipMasterManifest bool) {
+func updateManifests(ctx context.Context, bucket *storage.BucketHandle, deviceType, version, filePath string, fileSize int64, fileChecksum string, bmapPath string, zstPath, zstChecksum string, zstSize int64, otaUpdatePath string, otaUpdateSize int64, otaUpdateChecksum string, recoveryPath string, recoverySize int64, recoveryChecksum string, flashpackPath string, flashpackSize int64, flashpackChecksum string, storage string, isNightly bool, stability string, notifyDiscord bool, skipMasterManifest bool) {
 	logger := log.WithFields(logrus.Fields{
 		"device_type":     deviceType,
 		"version":         version,
@@ -1804,7 +1854,7 @@ func updateManifests(ctx context.Context, bucket *storage.BucketHandle, deviceTy
 
 	if skipMasterManifest {
 		logger.Info("Updating device manifest (master manifest will be updated by a separate publish job)")
-		if err := updateDeviceManifest(ctx, deviceLogger, bucket, deviceType, version, filePath, fileSize, fileChecksum, bmapPath, zstPath, zstChecksum, zstSize, otaUpdatePath, otaUpdateSize, otaUpdateChecksum, recoveryPath, recoverySize, recoveryChecksum, storage, isNightly); err != nil {
+		if err := updateDeviceManifest(ctx, deviceLogger, bucket, deviceType, version, filePath, fileSize, fileChecksum, bmapPath, zstPath, zstChecksum, zstSize, otaUpdatePath, otaUpdateSize, otaUpdateChecksum, recoveryPath, recoverySize, recoveryChecksum, flashpackPath, flashpackSize, flashpackChecksum, storage, isNightly); err != nil {
 			logger.WithError(err).Fatal("Failed to update device manifest")
 		}
 	} else {
@@ -1826,7 +1876,7 @@ func updateManifests(ctx context.Context, bucket *storage.BucketHandle, deviceTy
 
 		go func() {
 			defer wg.Done()
-			deviceErrChan <- updateDeviceManifest(ctx, deviceLogger, bucket, deviceType, version, filePath, fileSize, fileChecksum, bmapPath, zstPath, zstChecksum, zstSize, otaUpdatePath, otaUpdateSize, otaUpdateChecksum, recoveryPath, recoverySize, recoveryChecksum, storage, isNightly)
+			deviceErrChan <- updateDeviceManifest(ctx, deviceLogger, bucket, deviceType, version, filePath, fileSize, fileChecksum, bmapPath, zstPath, zstChecksum, zstSize, otaUpdatePath, otaUpdateSize, otaUpdateChecksum, recoveryPath, recoverySize, recoveryChecksum, flashpackPath, flashpackSize, flashpackChecksum, storage, isNightly)
 		}()
 
 		go func() {
@@ -2024,7 +2074,7 @@ func copyManifestArtifact(ctx context.Context, logger *logrus.Entry, bucket *sto
 	return destPath
 }
 
-func updateDeviceManifest(ctx context.Context, logger *logrus.Entry, bucket *storage.BucketHandle, deviceType, version, filePath string, fileSize int64, fileChecksum string, bmapPath string, zstPath, zstChecksum string, zstSize int64, otaUpdatePath string, otaUpdateSize int64, otaUpdateChecksum string, recoveryPath string, recoverySize int64, recoveryChecksum string, storageType string, isNightly bool) error {
+func updateDeviceManifest(ctx context.Context, logger *logrus.Entry, bucket *storage.BucketHandle, deviceType, version, filePath string, fileSize int64, fileChecksum string, bmapPath string, zstPath, zstChecksum string, zstSize int64, otaUpdatePath string, otaUpdateSize int64, otaUpdateChecksum string, recoveryPath string, recoverySize int64, recoveryChecksum string, flashpackPath string, flashpackSize int64, flashpackChecksum string, storageType string, isNightly bool) error {
 	manifestPath := fmt.Sprintf("manifests/%s.json", deviceType)
 	logger = logger.WithField("manifest_path", manifestPath)
 	logger.Info("Processing device manifest")
@@ -2203,6 +2253,18 @@ func updateDeviceManifest(ctx context.Context, logger *logrus.Entry, bucket *sto
 				"recovery_size":     recoverySize,
 				"recovery_checksum": recoveryChecksum,
 			}).Info("Updating recovery file metadata")
+		}
+
+		// Update flashpack fields only if provided
+		if flashpackPath != "" {
+			versionMetadata.FlashpackPath = flashpackPath
+			versionMetadata.FlashpackChecksum = flashpackChecksum
+			versionMetadata.FlashpackSizeBytes = flashpackSize
+			logger.WithFields(logrus.Fields{
+				"flashpack_path":     flashpackPath,
+				"flashpack_size":     flashpackSize,
+				"flashpack_checksum": flashpackChecksum,
+			}).Info("Updating flashpack metadata")
 		}
 
 		// Validate that at least one file is provided
