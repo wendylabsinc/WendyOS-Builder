@@ -625,6 +625,25 @@ jobs:
             echo "No offline NVMe image for $DEVICE (storage=$STORAGE); the tegraflash-tar is the flash artifact."
           fi
 
+      - name: Build Thor flashpack
+        # Pack the extracted tegraflash-tar into the single .tar.zst the wendy CLI
+        # flashes (see make-thor-flashpack.sh). The NVIDIA flash tools it runs are
+        # i386, so this x86_64 runner needs i386 runtime libs.
+        if: github.event_name != 'pull_request' && matrix.device == 'jetson-agx-thor'
+        env:
+          UPLOAD_VERSION: ${{ needs.detect-changes.outputs.version }}
+        run: |
+          set -euo pipefail
+          FLASH_WORKDIR="$GITHUB_WORKSPACE/flash-work"   # extracted tegraflash-tar from the previous step
+          sudo dpkg --add-architecture i386
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libc6:i386 libstdc++6:i386 zlib1g:i386 device-tree-compiler zstd
+          "$GITHUB_WORKSPACE/wendyos/scripts/make-thor-flashpack.sh" \
+            --bundle-dir "$FLASH_WORKDIR" \
+            --out "$GITHUB_WORKSPACE/thor-flashpack" \
+            --version "$UPLOAD_VERSION"
+          echo "FLASHPACK_FILE=$GITHUB_WORKSPACE/thor-flashpack/wendyos-${UPLOAD_VERSION}-jetson-agx-thor.flashpack.tar.zst" >> "$GITHUB_ENV"
+
       - name: Upload image and emit manifest entry
         if: github.event_name != 'pull_request'
         env:
@@ -699,6 +718,12 @@ jobs:
           # type); legacy mender builds use .tegraflash.tar.gz — resolved above.
           if [[ -n "$TEGRAFLASH_BUNDLE" ]]; then
             ARGS+=(--recovery-file "$TEGRAFLASH_BUNDLE")
+          fi
+
+          # Thor: attach the flashpack built in the previous step so the publisher
+          # uploads it and records flashpack_path/checksum/size in the manifest.
+          if [[ "$DEVICE" == "jetson-agx-thor" && -n "${FLASHPACK_FILE:-}" && -f "$FLASHPACK_FILE" ]]; then
+            ARGS+=(--flashpack-file "$FLASHPACK_FILE")
           fi
 
           # Devices with multiple storage variants pass --storage so the manifest
