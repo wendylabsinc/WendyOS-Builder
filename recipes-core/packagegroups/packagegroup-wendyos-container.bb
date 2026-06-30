@@ -8,7 +8,7 @@ inherit packagegroup
 # Core container runtime packages
 RDEPENDS:${PN} = " \
     containerd-opencontainers \
-    runc-opencontainers \
+    crun \
     cni \
     cni-config \
     iptables \
