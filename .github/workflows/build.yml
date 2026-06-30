@@ -737,8 +737,15 @@ jobs:
             ARGS+=(--bmap-file "$BMAP_FILE")
           fi
 
-          # Include Mender OTA artifact if the build produced one
-          OTA_FILE=$(find "$DEPLOY_DIR" -maxdepth 1 -name "wendyos-image-${MACHINE}*.mender" -print -quit 2>/dev/null || true)
+          # Include the OTA update artifact if the build produced one. A board
+          # runs either the Mender stack (.mender) or the wendyos-update stack
+          # (.wendy), never both — it is gated by WENDYOS_OTA — so both feed the
+          # same --ota-update slot / ota_update_path; the device's OTA client
+          # interprets the artifact. Neither extension is recompressed by the
+          # publisher (only .img/.wic/.sdimg are), so each uploads as-is.
+          OTA_FILE=$(find "$DEPLOY_DIR" -maxdepth 1 \
+            \( -name "wendyos-image-${MACHINE}*.mender" -o -name "wendyos-image-${MACHINE}*.wendy" \) \
+            -print -quit 2>/dev/null || true)
           if [[ -n "$OTA_FILE" ]]; then
             ARGS+=(--ota-update "$OTA_FILE")
           fi
