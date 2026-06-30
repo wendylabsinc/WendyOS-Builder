@@ -63,6 +63,36 @@ get_current_version() {
     echo "${current_version}"
 }
 
+# Get the raw, unmodified version string reported by the installed binary.
+# `wendy-agent --version` prints exactly the build's version.Version on its own
+# line (e.g. "dev", "2026.06.30-133859-dev", or "2026.06.17-194156"). Unlike
+# get_current_version() this preserves the "-dev" suffix so is_dev_build() can
+# see it. Falls back to the stored version file only if the binary won't run.
+get_raw_current_version() {
+    local raw_version=""
+
+    if [ -f "${INSTALL_DIR}/${BINARY_NAME}" ] && "${INSTALL_DIR}/${BINARY_NAME}" --version >/dev/null 2>&1; then
+        raw_version=$("${INSTALL_DIR}/${BINARY_NAME}" --version 2>&1 | head -1 | tr -d '[:space:]')
+    elif [ -f "${VERSION_FILE}" ]; then
+        raw_version=$(head -1 "${VERSION_FILE}" | tr -d '[:space:]')
+    fi
+
+    echo "${raw_version}"
+}
+
+# Report whether a version string is a development build. Mirrors version.IsDev
+# in the Go CLI (WDY-1770): a dev build is the literal "dev" default or any CI
+# branch build carrying the "-dev" suffix (e.g. "2026.06.30-133859-dev"). Dev
+# builds are treated as the latest version and must never be overwritten by the
+# on-boot auto-updater, so developers debugging against a dev/branch build keep
+# it instead of getting silently replaced with the latest stable release.
+is_dev_build() {
+    case "$1" in
+        dev|*-dev) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 # Get latest stable version from GitHub (excludes pre-releases)
 get_latest_version() {
     local api_url="https://api.github.com/repos/${GITHUB_REPO}/releases/latest"
@@ -191,6 +221,17 @@ main() {
         log "Wendy-agent not installed, performing initial download"
         perform_update
         exit $?
+    fi
+
+    # Never overwrite a dev build (WDY-1770). A developer deliberately installed
+    # a dev/branch build to debug against; the auto-updater must leave it in
+    # place rather than replacing it with the latest stable release. This
+    # mirrors the CLI/Agent fix that stops prompting/pushing such overwrites.
+    local raw_version
+    raw_version=$(get_raw_current_version)
+    if is_dev_build "${raw_version}"; then
+        log "Installed agent is a dev build (${raw_version:-unknown}), skipping auto-update"
+        exit 0
     fi
 
     # Check if update is needed
