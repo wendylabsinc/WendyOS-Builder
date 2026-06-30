@@ -27,9 +27,12 @@
 #     grow-data-part (see the plan — wendyos-data-setup's format-trigger does
 #     NOT fire on a wic-preformatted fs). Do NOT add expand-rootfs to an A/B
 #     image: it would grow rootfsA over rootfsB.
-#   - rootfsB/data get wic-generated PARTUUIDs (they are referenced by
-#     partlabel/number, not UUID); boot/config/rootfsA keep the stable
-#     partuuid-rpi values.
+#   - boot/config/rootfsA carry partuuid-rpi UUIDs; rootfsB/data get
+#     wic-generated ones. NOTE these UUIDs are NOT stable across builds
+#     (partuuid-rpi caches them per build dir), so nothing the rootfs carries
+#     across an OTA may reference them: /boot is mounted by LABEL, not PARTUUID
+#     (WDY-1768), and the slots are selected by partlabel/number. The --uuid
+#     here only stamps the GPT entry; it is no longer load-bearing for mounting.
 bootloader --ptable gpt
 part /boot   --source bootimg-partition --ondisk mmcblk0 --fstype=vfat --label boot    --active --align 4096 --size 128M --uuid "${WENDYOS_BOOT_PARTUUID}"
 part         --ondisk mmcblk0 --fstype=vfat --label config  --align 4096 --size ${WENDYOS_CONFIG_PART_SIZE_MB}M --uuid "${WENDYOS_CONFIG_PARTUUID}"
