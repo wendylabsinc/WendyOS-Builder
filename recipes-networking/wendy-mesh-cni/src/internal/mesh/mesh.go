@@ -61,3 +61,18 @@ func Add(netns string, containerIP net.IP, a config.MeshArgs) error {
 	}
 	return nil
 }
+
+// Del removes the host rule for this container IP. The netns route is torn down
+// automatically when the namespace is destroyed, so Del only touches the host.
+// Idempotent: a missing rule (or missing chain) is not an error.
+func Del(containerIP net.IP, a config.MeshArgs) error {
+	ipt, err := iptables.NewWithProtocol(iptables.ProtocolIPv4)
+	if err != nil {
+		return fmt.Errorf("iptables init: %w", err)
+	}
+	err = ipt.DeleteIfExists(iptTable, meshChain, ruleSpec(containerIP, a.ServiceCIDR)...)
+	if err != nil {
+		return fmt.Errorf("deleting mesh accept rule: %w", err)
+	}
+	return nil
+}

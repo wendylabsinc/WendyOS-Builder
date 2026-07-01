@@ -147,3 +147,19 @@ func TestAddIsIdempotent(t *testing.T) {
 		t.Fatalf("second Add (retry) should be idempotent, got error: %v", err)
 	}
 }
+
+func TestDelIsIdempotent(t *testing.T) {
+	if _, err := netlink.LinkList(); err != nil {
+		t.Skip("needs CAP_NET_ADMIN")
+	}
+	args := config.MeshArgs{Enabled: true, ServiceCIDR: "10.99.0.0/16", Gateway: "10.88.0.1"}
+	ip := net.ParseIP("10.88.0.9")
+	// Del with nothing installed must not error.
+	if err := Del(ip, args); err != nil {
+		t.Fatalf("first Del errored: %v", err)
+	}
+	// Del again must also not error.
+	if err := Del(ip, args); err != nil {
+		t.Fatalf("second Del errored: %v", err)
+	}
+}
