@@ -27,7 +27,14 @@ WENDYOS_AGENT_SHA256  ??= "72b08b61bb26ab4ce9693e19fe5f44d7108f7ddbea58747024982
 # dots: 2026.06.10-142200 -> 2026.06.10.142200.
 PV = "${@d.getVar('WENDYOS_AGENT_VERSION').replace('-', '.')}"
 
-SRC_URI = "https://github.com/wendylabsinc/WendyOS/releases/download/${WENDYOS_AGENT_VERSION}/wendy-agent-linux-arm64-${WENDYOS_AGENT_VERSION}.tar.gz;name=agent \
+# Release asset architecture. The upstream release publishes one tarball per
+# arch (wendy-agent-linux-<arch>-<version>.tar.gz). Default to arm64 for
+# Tegra/RPi; the x86 machines override this to amd64. CI passes the matching
+# WENDYOS_AGENT_SHA256 for whichever tarball this build fetches.
+WENDYOS_AGENT_RELEASE_ARCH = "arm64"
+WENDYOS_AGENT_RELEASE_ARCH:x86-wendyos = "amd64"
+
+SRC_URI = "https://github.com/wendylabsinc/WendyOS/releases/download/${WENDYOS_AGENT_VERSION}/wendy-agent-linux-${WENDYOS_AGENT_RELEASE_ARCH}-${WENDYOS_AGENT_VERSION}.tar.gz;name=agent \
            file://wendyos-agent.service \
            file://wendyos-agent-updater.service \
            file://wendyos-agent-updater.timer \
@@ -42,57 +49,16 @@ inherit systemd
 SYSTEMD_SERVICE:${PN} = "wendyos-agent.service wendyos-agent-updater.service wendyos-agent-updater.timer"
 SYSTEMD_AUTO_ENABLE:${PN} = "enable"
 
-do_compile() {
-    case "${TARGET_ARCH}" in
-        x86_64|x86-64)
-            AGENT_RELEASE_ARCH="amd64"
-            ;;
-        aarch64|arm64)
-            AGENT_RELEASE_ARCH="arm64"
-            ;;
-        *)
-            bbfatal "Unsupported TARGET_ARCH for wendy-agent: ${TARGET_ARCH}"
-            ;;
-    esac
-
-    bbnote "Downloading wendy-agent binary for ${TARGET_ARCH} (${AGENT_RELEASE_ARCH})..."
-
-    # Get the latest stable release from GitHub (excludes pre-releases)
-    RELEASES_URL="https://api.github.com/repos/wendylabsinc/wendy-agent/releases/latest"
-
-    # Fetch latest stable release
-    wget -q -O ${B}/release.json "${RELEASES_URL}" || \
-        curl -sL -o ${B}/release.json "${RELEASES_URL}" || \
-        bbfatal "Failed to fetch latest release from GitHub"
-
-    # Extract download URL for the target binary (match .tar.gz files only).
-    # Asset naming: wendy-agent-linux-amd64-*.tar.gz or wendy-agent-linux-arm64-*.tar.gz
-    DOWNLOAD_URL=$(cat ${B}/release.json | \
-        grep -o '"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]*wendy-agent-linux-'"${AGENT_RELEASE_ARCH}"'[^"]*\.tar\.gz[^"]*"' | \
-        head -1 | cut -d'"' -f4)
-
-    if [ -z "${DOWNLOAD_URL}" ]; then
-        bbfatal "Failed to find wendy-agent-linux-${AGENT_RELEASE_ARCH} binary in release"
-    fi
-
-    bbnote "Downloading from: ${DOWNLOAD_URL}"
-
-    # Download the binary archive
-    wget -O ${B}/wendy-agent.tar.gz "${DOWNLOAD_URL}" || \
-        curl -L -o ${B}/wendy-agent.tar.gz "${DOWNLOAD_URL}" || \
-        bbfatal "Failed to download wendy-agent binary"
-
-    # Extract the archive
-    tar -xzf ${B}/wendy-agent.tar.gz -C ${B}
-
-    # Find and prepare the binary (exclude wendy-cli)
-    if [ ! -f ${B}/wendy-agent ]; then
-        BINARY=$(find ${B} -name wendy-agent -type f ! -path "*/wendy-cli*" | head -1)
-        if [ -n "${BINARY}" ]; then
-            mv "${BINARY}" ${B}/wendy-agent
-        else
-            bbfatal "wendy-agent binary not found in archive"
-        fi
+do_install() {
+    # Install the pre-built binary (fetched + checksum-verified by do_fetch)
+    # into /usr/local/bin so it lives alongside runtime updates written by
+    # wendyos-agent-updater.sh. The tarball unpacks to
+    # wendy-agent-linux-<arch>/wendy-agent; find it rather than hard-coding the
+    # inner directory so a future asset layout change fails loudly here instead
+    # of silently shipping nothing.
+    BINARY=$(find ${S} -type f -name wendy-agent ! -path "*/wendy-cli*" | head -1)
+    if [ -z "${BINARY}" ]; then
+        bbfatal "wendy-agent binary not found in unpacked release archive"
     fi
 
     install -d ${D}/usr/local/bin
