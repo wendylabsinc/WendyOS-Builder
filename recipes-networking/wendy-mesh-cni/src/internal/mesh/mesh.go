@@ -42,11 +42,13 @@ func Add(netns string, containerIP net.IP, a config.MeshArgs) error {
 		return fmt.Errorf("parsing gateway %q", a.Gateway)
 	}
 
-	// Route inside the container's network namespace.
+	// Route inside the container's network namespace. RouteReplace (not
+	// RouteAdd) so a retried CNI ADD against the same netns is idempotent
+	// instead of failing with EEXIST.
 	if err := ns.WithNetNSPath(netns, func(ns.NetNS) error {
-		return netlink.RouteAdd(&netlink.Route{Dst: dst, Gw: gw})
+		return netlink.RouteReplace(&netlink.Route{Dst: dst, Gw: gw})
 	}); err != nil {
-		return fmt.Errorf("adding netns route: %w", err)
+		return fmt.Errorf("installing netns route: %w", err)
 	}
 
 	// Host filter rule (idempotent AppendUnique) scoped to this container IP.
