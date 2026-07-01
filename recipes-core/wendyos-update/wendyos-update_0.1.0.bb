@@ -24,14 +24,21 @@ GO_IMPORT = "github.com/wendylabsinc/wendyos-update"
 GO_SRCURI_DESTSUFFIX ?= "${@os.path.join(os.path.basename(d.getVar('S')), 'src', d.getVar('GO_IMPORT')) + '/'}"
 
 SRC_URI = "git://${GO_IMPORT};protocol=https;branch=main;destsuffix=${GO_SRCURI_DESTSUFFIX}"
+# 627463ef (main, PR #4): tegrauefi MarkGood now confirms the booted slot with
+# `nvbootctrl -t rootfs mark-boot-successful`. WendyOS does not ship NVIDIA's
+# nv_update_verifier.service, so nothing was confirming a healthy boot — the
+# Tegra A/B trial never completed, so a slot that dies before userspace stayed
+# active instead of the firmware falling back (hard brick). This closes the
+# confirm half of the trial cycle (RPi already disarms its U-Boot trial in
+# MarkGood). Builds on:
 # 8bba71c6: ubootenv refuses a slot swap when /boot is not a mountpoint, so the
 # trial arm can no longer silently no-op against a shadow uboot.env on the rootfs
-# (pairs with the /boot-by-LABEL + nofail fstab change, WDY-1768). Builds on
+# (pairs with the /boot-by-LABEL + nofail fstab change, WDY-1768).
 # 16614b4b: WDY-1742 verify-boot fix (BootIsCompromised checks only the booted
 # slot — kills the Orin Nano stale-inactive-slot false-positive, validated
 # against the real r39.2 efivar format) + structured per-slot `status` and the
 # `switch` verb.
-SRCREV = "8bba71c67152a717c300ffffca445bef276a09dd"
+SRCREV = "627463ef30ca7f8251475560c83fd90cdb21ee16"
 
 inherit go-mod systemd
 
