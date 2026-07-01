@@ -982,6 +982,14 @@ driver packaging are not enabled yet. When `WENDYOS_NVIDIA_DGPU = "1"`, the imag
 includes a lightweight CDI generation service that no-ops unless an NVIDIA driver
 and `nvidia-ctk` are present.
 
+ROCm is also optional on x86. The base image ships the open AMD graphics stack,
+but ROCm userland is installed only from a configured WendyOS driver feed via
+`packagegroup-wendyos-rocm`. The installer schedules ROCm automatically only for
+AMD Ryzen AI / AI Max APUs that match AMD's current Ryzen ROCm support matrix,
+such as Ryzen AI 9 HX 370-class and Ryzen AI Max+ 395-class systems. AMD's Ryzen
+ROCm install guide currently requires a 6.14-1018 OEM-or-newer class kernel, so
+older WendyOS x86 kernels will skip ROCm installation until the kernel is updated.
+
 ### x86 Build
 
 ```bash
