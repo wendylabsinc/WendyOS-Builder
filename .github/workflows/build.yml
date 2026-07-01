@@ -647,7 +647,13 @@ jobs:
           MACHINE: ${{ steps.vars.outputs.machine }}
           STORAGE: ${{ matrix.storage }}
         run: |
-          FLASH_WORKDIR="$GITHUB_WORKSPACE/flash-work"
+          # Per-MACHINE, freshly wiped staging dir. A fixed shared path
+          # ($GITHUB_WORKSPACE/flash-work) on persistent snapshot runners with no
+          # cleanup let one Jetson's extracted tegraflash-tar leak into the next
+          # build, so an AGX image could be assembled and shipped under the Orin
+          # Nano key. Scope by MACHINE and wipe so every build starts clean.
+          FLASH_WORKDIR="$GITHUB_WORKSPACE/flash-work/${MACHINE}"
+          rm -rf "$FLASH_WORKDIR"
           mkdir -p "$FLASH_WORKDIR"
 
           # All Jetsons run the wendy/blacksail OTA stack (WENDYOS_OTA=wendy):
@@ -666,9 +672,14 @@ jobs:
           # type="sdcard"> block, not external-flash.xml.in, and the blacksail
           # bundle no longer ships dosdcard.sh to build it). For those the
           # tegraflash-tar bundle itself is the flash artifact — nothing to do.
+          # Write the offline NVMe image into the MACHINE-scoped deploy dir, not a
+          # fixed workspace path, so the upload step can never pick up another
+          # Jetson's image. Remove any prior copy first.
+          NVME_IMG="$DEPLOY_DIR/wendyos-image-${MACHINE}-nvme.img"
+          rm -f "$NVME_IMG"
           if [[ -f "$FLASH_WORKDIR/external-flash.xml.in" && "$DEVICE" != "jetson-agx-thor" ]]; then
             python3 "$GITHUB_WORKSPACE/wendyos/scripts/make-thor-nvme-img.py" \
-              "$FLASH_WORKDIR" "$GITHUB_WORKSPACE/wendyos-nvme.img"
+              "$FLASH_WORKDIR" "$NVME_IMG"
           else
             echo "No offline NVMe image for $DEVICE (storage=$STORAGE); the tegraflash-tar is the flash artifact."
           fi
@@ -680,9 +691,10 @@ jobs:
         if: github.event_name != 'pull_request' && matrix.device == 'jetson-agx-thor'
         env:
           UPLOAD_VERSION: ${{ needs.detect-changes.outputs.version }}
+          MACHINE: ${{ steps.vars.outputs.machine }}
         run: |
           set -euo pipefail
-          FLASH_WORKDIR="$GITHUB_WORKSPACE/flash-work"   # extracted tegraflash-tar from the previous step
+          FLASH_WORKDIR="$GITHUB_WORKSPACE/flash-work/${MACHINE}"   # MACHINE-scoped, matches the generate step
           sudo dpkg --add-architecture i386
           sudo apt-get update -qq
           sudo apt-get install -y -qq libc6:i386 libstdc++6:i386 zlib1g:i386 device-tree-compiler zstd
@@ -714,9 +726,14 @@ jobs:
 
           BMAP_FILE=""
           if [[ "$MACHINE" != raspberry* && "$STORAGE" == "nvme" && "$DEVICE" != "jetson-agx-thor" ]]; then
-            # wendyos-nvme.img: built from the tegraflash-tar bundle by
-            # make-thor-nvme-img.py.
-            IMAGE_FILE="$GITHUB_WORKSPACE/wendyos-nvme.img"
+            # MACHINE-scoped image written by the generate step (never a fixed
+            # shared path). Fail hard if this run did not produce it, rather than
+            # uploading a stale image left behind by another Jetson build.
+            IMAGE_FILE="$DEPLOY_DIR/wendyos-image-${MACHINE}-nvme.img"
+            if [[ ! -f "$IMAGE_FILE" ]]; then
+              echo "::error::NVMe image not produced this run for ${DEVICE} (${MACHINE}): ${IMAGE_FILE} missing. Refusing to upload a possibly-stale image." >&2
+              exit 1
+            fi
             bmaptool create "$IMAGE_FILE" > "${IMAGE_FILE}.bmap"
             BMAP_FILE="${IMAGE_FILE}.bmap"
           elif [[ "$MACHINE" != raspberry* && ( "$STORAGE" == "emmc" || "$DEVICE" == "jetson-agx-thor" ) ]]; then
