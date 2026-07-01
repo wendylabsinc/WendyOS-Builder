@@ -37,6 +37,20 @@ WENDYOS_DEBUG_FEATURES ?= " \
     "
 IMAGE_FEATURES += "${@oe.utils.ifelse(d.getVar('WENDYOS_DEBUG') == '1', d.getVar('WENDYOS_DEBUG_FEATURES'), '')}"
 
+# No interactive login on an attached monitor+keyboard unless WENDYOS_DEBUG = "1".
+# systemd ships an enabled getty@tty1.service, and logind spawns further gettys
+# on VT switch (autovt@ttyN resolves to the getty@ template). Root is already
+# locked on release builds (no empty-root-password above), but the prompt itself
+# is still an attack surface on a product device, so drop the enablement symlink
+# and mask the template — masking getty@.service masks every instance, including
+# logind's autovt spawns. Serial consoles (serial-getty@, SERIAL_CONSOLES) are
+# deliberately untouched so UART access stays available for field debugging.
+disable_vt_login() {
+    rm -f ${IMAGE_ROOTFS}${sysconfdir}/systemd/system/getty.target.wants/getty@tty1.service
+    ln -sf /dev/null ${IMAGE_ROOTFS}${sysconfdir}/systemd/system/getty@.service
+}
+ROOTFS_POSTPROCESS_COMMAND += "${@oe.utils.ifelse(d.getVar('WENDYOS_DEBUG') == '1', '', 'disable_vt_login;')}"
+
 # Optional runtime package management (rpm/dnf in the rootfs).
 # Disabled by default — image is updated atomically via Mender A/B.
 # Set WENDYOS_ENABLE_PACKAGE_MANAGEMENT = "1" in local.conf or distro to enable.
