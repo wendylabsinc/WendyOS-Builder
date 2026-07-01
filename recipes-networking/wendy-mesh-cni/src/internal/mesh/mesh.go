@@ -62,6 +62,23 @@ func Add(netns string, containerIP net.IP, a config.MeshArgs) error {
 	return nil
 }
 
+// Check verifies the host rule exists for this container IP. (The netns route
+// is best-effort; the host rule is the authoritative, inspectable artifact.)
+func Check(netns string, containerIP net.IP, a config.MeshArgs) error {
+	ipt, err := iptables.NewWithProtocol(iptables.ProtocolIPv4)
+	if err != nil {
+		return fmt.Errorf("iptables init: %w", err)
+	}
+	ok, err := ipt.Exists(iptTable, meshChain, ruleSpec(containerIP, a.ServiceCIDR)...)
+	if err != nil {
+		return fmt.Errorf("checking mesh rule: %w", err)
+	}
+	if !ok {
+		return fmt.Errorf("mesh accept rule missing for %s", containerIP)
+	}
+	return nil
+}
+
 // Del removes the host rule for this container IP. The netns route is torn down
 // automatically when the namespace is destroyed, so Del only touches the host.
 // Idempotent: a missing rule (or missing chain) is not an error.

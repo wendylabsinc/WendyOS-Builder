@@ -148,6 +148,21 @@ func TestAddIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestCheckPassesAfterAdd(t *testing.T) {
+	targetNS, _ := meshAddFixture(t)
+
+	containerIP := net.ParseIP("10.88.0.7")
+	args := config.MeshArgs{
+		Enabled: true, ServiceCIDR: "10.99.0.0/16", Gateway: "10.88.0.1",
+	}
+	if err := Add(targetNS.Path(), containerIP, args); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if err := Check(targetNS.Path(), containerIP, args); err != nil {
+		t.Fatalf("Check after Add should pass: %v", err)
+	}
+}
+
 func TestDelIsIdempotent(t *testing.T) {
 	if _, err := netlink.LinkList(); err != nil {
 		t.Skip("needs CAP_NET_ADMIN")
