@@ -120,7 +120,7 @@ EOF
 
 ###
 # Parse command-line arguments
-OPT_DEBUG=1
+OPT_DEBUG=0
 OPT_HISTORY=0
 for arg in "$@"; do
     case "${arg}" in
