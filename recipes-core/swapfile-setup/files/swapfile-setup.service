@@ -1,7 +1,10 @@
 [Unit]
 Description=Setup swap file on data partition
 Documentation=man:swapon(8)
-# Ensure data partition is mounted and filesystem is fully expanded
+# Order after /data is mounted, before allocating swap. Deliberately NOT after the
+# RPi online resize (grow-data-fs-online): it's slow and off the boot path, but swap
+# is on the sysinit critical path -- waiting would re-block boot. swapfile-setup.sh
+# df-guards and retries next boot if /data isn't grown yet.
 RequiresMountsFor=/data
 After=data.mount mender-systemd-growfs-data.service
 Before=swap.target

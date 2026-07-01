@@ -10,7 +10,9 @@ WENDYOS_DEEPSTREAM ?= "0"
 
 SRC_URI = " \
     file://l4t.csv \
+    file://l4t-blacksail.csv \
     file://l4t-deepstream.csv \
+    file://l4t-deepstream-blacksail.csv \
     file://devices-wendyos.csv \
     file://wendyos-cdi-generate.service \
     file://wendyos-cuda-detect.service \
@@ -28,13 +30,31 @@ do_install() {
     # Install CSV files to the NVIDIA container runtime config directory
     install -d ${D}${sysconfdir}/nvidia-container-runtime/host-files-for-container.d
 
-    # Install base l4t.csv (CUDA/PyTorch libraries)
-    install -m 0644 ${UNPACKDIR}/l4t.csv ${D}${sysconfdir}/nvidia-container-runtime/host-files-for-container.d/
+    # Install base l4t.csv (CUDA/PyTorch container libraries). Host paths are
+    # BSP-specific, so two variants (same pattern as the DeepStream CSV):
+    #   scarthgap/JP6   -> l4t.csv           (CUDA 12.6 + cuDNN 9.3.0)
+    #   blacksail/JP7.2 -> l4t-blacksail.csv (CUDA 13.2 + cuDNN 9.20.0)
+    # Both install under the same target name so exactly one is active.
+    if [ "${WENDYOS_LAYER_TREE}" = "blacksail" ]; then
+        basecsv="l4t-blacksail.csv"
+    else
+        basecsv="l4t.csv"
+    fi
+    install -m 0644 ${UNPACKDIR}/${basecsv} ${D}${sysconfdir}/nvidia-container-runtime/host-files-for-container.d/l4t.csv
 
     # Install DeepStream CSV if enabled
     if [ "${WENDYOS_DEEPSTREAM}" = "1" ]; then
-        bbnote "Installing DeepStream l4t-deepstream.csv"
-        install -m 0644 ${UNPACKDIR}/l4t-deepstream.csv ${D}${sysconfdir}/nvidia-container-runtime/host-files-for-container.d/
+        # CUDA/DeepStream host paths are BSP-specific, so we ship two CSVs:
+        #   scarthgap/JP6   -> l4t-deepstream.csv           (CUDA 12.6 + DeepStream 7.1)
+        #   blacksail/JP7.2 -> l4t-deepstream-blacksail.csv (CUDA 13.2 + DeepStream 8.0)
+        # Both install under the same target name so exactly one is active.
+        if [ "${WENDYOS_LAYER_TREE}" = "blacksail" ]; then
+            dscsv="l4t-deepstream-blacksail.csv"
+        else
+            dscsv="l4t-deepstream.csv"
+        fi
+        bbnote "Installing DeepStream CSV: ${dscsv}"
+        install -m 0644 ${UNPACKDIR}/${dscsv} ${D}${sysconfdir}/nvidia-container-runtime/host-files-for-container.d/l4t-deepstream.csv
 
         # Create multiarch compatibility symlinks for GStreamer DeepStream plugins
         # This allows the CDI GST_PLUGIN_PATH to work with both Yocto and Debian/Ubuntu conventions

@@ -1,55 +1,77 @@
 #!/bin/bash
-# WendyOS mDNS UUID and Device Name Update Script
-# Updates the Avahi service file with the device UUID and human-readable name
+# WendyOS mDNS identity publisher.
+#
+# Sets the id/name/displayname TXT records in the Avahi service file to the
+# current device identity by replacing each record's VALUE in place — NOT by
+# one-shot placeholder substitution, and NOT by rewriting the whole file.
+#
+# Why value-replacement:
+#   - Idempotent + self-correcting: a value left by an earlier run (the original
+#     WENDY_DEVICE_NAME placeholder, or a stale/`unknown-device` name) is matched
+#     and replaced, instead of being permanently stuck once the placeholder was
+#     consumed. That stuck-placeholder bug is what left mDNS advertising
+#     name=unknown-device on a clean first boot.
+#   - Preserves records the wendy-agent manages at RUNTIME — the service port,
+#     the tls=true/false record (UpdateAvahiForProvisioning), and fqdn
+#     (updateAvahiDeviceName). A from-scratch rewrite here would revert the
+#     provisioned advertisement on the next reboot.
+set -u
 
 UUID_FILE="/etc/wendyos/device-uuid"
 DEVICE_NAME_FILE="/etc/wendyos/device-name"
 SERVICE_FILE="/etc/avahi/services/wendyos-mdns.service"
 
-# Wait for UUID and device name files to exist (in case of race condition)
+# Wait briefly for the identity files (the generators are ordered before us, but
+# stay defensive against a slow /data bind).
 for i in {1..10}; do
-    if [ -f "$UUID_FILE" ] && [ -f "$DEVICE_NAME_FILE" ]; then
-        break
-    fi
+    [ -f "$UUID_FILE" ] && [ -f "$DEVICE_NAME_FILE" ] && break
     sleep 1
 done
 
-if [ ! -f "$UUID_FILE" ]; then
-    echo "Error: UUID file not found at $UUID_FILE"
-    exit 1
-fi
-
-if [ ! -f "$DEVICE_NAME_FILE" ]; then
-    echo "Warning: Device name file not found at $DEVICE_NAME_FILE, using fallback"
-    # Don't exit - we'll use the fallback in the device name read step
-fi
-
 if [ ! -f "$SERVICE_FILE" ]; then
-    echo "Error: Avahi service file not found at $SERVICE_FILE"
-    exit 1
+    echo "Avahi service file $SERVICE_FILE not found; nothing to publish"
+    exit 0
 fi
 
-# Read the UUID
-UUID=$(cat "$UUID_FILE")
-
-# Read the device name
-DEVICE_NAME=$(cat "$DEVICE_NAME_FILE" 2>/dev/null || echo "unknown-device")
-
-# Generate display name (Title Case with spaces)
-DISPLAY_NAME=$(echo "$DEVICE_NAME" | sed 's/-/ /g' | awk '{for(i=1;i<=NF;i++) $i=toupper(substr($i,1,1)) tolower(substr($i,2));}1')
-
-# Replace placeholders in service file
-sed -i "s|WENDY_DEVICE_ID|$UUID|g" "$SERVICE_FILE"
-sed -i "s|WENDY_DEVICE_NAME|$DEVICE_NAME|g" "$SERVICE_FILE"
-sed -i "s|WENDY_DISPLAY_NAME|$DISPLAY_NAME|g" "$SERVICE_FILE"
-
-echo "Updated mDNS service with device UUID: $UUID"
-echo "Updated mDNS service with device name: $DEVICE_NAME ($DISPLAY_NAME)"
-logger -t wendyos-identity "Updated mDNS service with UUID: $UUID, name: $DEVICE_NAME"
-
-# Reload Avahi to pick up changes if it's running
-if systemctl is-active --quiet avahi-daemon; then
-    avahi-daemon --reload || true
+# Self-heal the UUID if the generator didn't produce it (ordered before us, after
+# the /data bind, so this lands on persistent /data).
+if [ ! -f "$UUID_FILE" ]; then
+    echo "Warning: $UUID_FILE missing; generating one (self-heal)"
+    mkdir -p "$(dirname "$UUID_FILE")"
+    uuidgen | tr '[:upper:]' '[:lower:]' > "$UUID_FILE"
+    chmod 644 "$UUID_FILE"
 fi
+UUID=$(tr -d '[:space:]' < "$UUID_FILE")
+
+# Replace a TXT record's value in place: <txt-record>KEY=...</txt-record>.
+# [^<]* matches the current value up to the closing tag, so it overwrites a
+# placeholder, a stale name, or a real name alike. Other records are untouched.
+# The "display" prefix means the name= pattern never matches displayname=.
+set_txt() {
+    sed -i -E "s|(<txt-record>$1=)[^<]*|\1$2|g" "$SERVICE_FILE"
+}
+
+set_txt id "$UUID"
+
+# Only set name/displayname when we actually have a device name; otherwise leave
+# whatever is there (placeholder or a prior good value) for a later run — never
+# burn a junk fallback into the advertisement.
+DEVICE_NAME=""
+if [ -s "$DEVICE_NAME_FILE" ]; then
+    DEVICE_NAME=$(tr -d '[:space:]' < "$DEVICE_NAME_FILE")
+    DISPLAY_NAME=$(echo "$DEVICE_NAME" | sed 's/-/ /g' | awk '{for(i=1;i<=NF;i++) $i=toupper(substr($i,1,1)) tolower(substr($i,2));}1')
+    set_txt name "$DEVICE_NAME"
+    set_txt displayname "$DISPLAY_NAME"
+    echo "Published mDNS identity: id=$UUID name=$DEVICE_NAME ($DISPLAY_NAME)"
+else
+    echo "Warning: $DEVICE_NAME_FILE missing; left name/displayname for a later run"
+fi
+logger -t wendyos-identity "Published mDNS identity: id=$UUID name=${DEVICE_NAME:-<unset>}"
+
+# Pick up the change if Avahi is already running. We are ordered Before=
+# avahi-daemon, so it usually isn't up yet and reads the file on its own start;
+# this covers the already-running case.
+systemctl try-reload-or-restart avahi-daemon 2>/dev/null || true
 
 exit 0
+

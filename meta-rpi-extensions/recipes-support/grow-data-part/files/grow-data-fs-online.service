@@ -1,0 +1,22 @@
+[Unit]
+Description=WendyOS grow /data filesystem online to fill its partition (first boot)
+# Phase 2: the slow resize2fs, run ONLINE on the mounted /data so discovery, the
+# agent and every /data consumer come up at data.mount instead of minutes later.
+# Phase 1 already grew the partition; this fills it. Idempotent: no-ops when full.
+DefaultDependencies=no
+Requires=data.mount
+After=data.mount
+BindsTo=data.mount
+Conflicts=shutdown.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Generous (a multi-GiB resize on a slow card takes minutes) but off the boot path,
+# yet finite so a wedged resize2fs fails and retries next boot rather than hangs.
+TimeoutStartSec=1800
+ExecStart=/usr/sbin/grow-data-part.sh resize
+
+[Install]
+WantedBy=multi-user.target
+

@@ -1,26 +1,39 @@
-
-# [Note]
-# This recipe fetches the wendyos-agent binary from GitHub at build time
-# inside do_compile using wget/curl, bypassing SRC_URI checksums and breaking
-# build reproducibility (two builds may produce different binaries).
-# It also uses 'SRCREV = "${AUTOREV}"'' for the source repo.
-#
-# [Fix]
-# Pin the binary download URL and its sha256sum in SRC_URI, or use a proper
-# recipe with SRC_URI[sha256sum].
-# Runtime self-update should remain in wendyos-agent-updater.service,
-# not at build time.
-
 SUMMARY = "WendyOS Agent"
 DESCRIPTION = "WendyOS agent binary for device management"
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
 
-SRC_URI = "file://wendyos-agent.service \
+# The wendyos-agent binary is published per-release in wendylabsinc/WendyOS.
+#
+# CI resolves the latest *stable* release (tag + asset sha256) and passes them
+# in via WENDYOS_AGENT_VERSION / WENDYOS_AGENT_SHA256 (whitelisted through
+# BB_ENV_PASSTHROUGH_ADDITIONS in the Makefile). Pinning both the version and
+# the checksum makes the fetch reproducible AND lets sstate notice a new
+# release: the version is embedded in SRC_URI and the checksum, so both become
+# part of the do_fetch task signature. A new release therefore changes the
+# signature and re-runs the fetch instead of serving a stale cached binary --
+# which is exactly the bug this recipe used to have when it downloaded the
+# binary inside do_compile (invisible to BitBake's hashing).
+#
+# The ??= defaults are the fallback for local builds with no env override:
+# they pin a known-good version so local builds stay reproducible. Bump them
+# when you want local builds to track a newer agent; CI always overrides them
+# with the latest stable release.
+WENDYOS_AGENT_VERSION ??= "2026.06.17-194156"
+WENDYOS_AGENT_SHA256  ??= "72b08b61bb26ab4ce9693e19fe5f44d7108f7ddbea587470249821302c3f24b9"
+
+# Surface the resolved agent version as the package version for traceability
+# (e.g. in the image manifest). Hyphens are not valid in PV, so map them to
+# dots: 2026.06.10-142200 -> 2026.06.10.142200.
+PV = "${@d.getVar('WENDYOS_AGENT_VERSION').replace('-', '.')}"
+
+SRC_URI = "https://github.com/wendylabsinc/WendyOS/releases/download/${WENDYOS_AGENT_VERSION}/wendy-agent-linux-arm64-${WENDYOS_AGENT_VERSION}.tar.gz;name=agent \
+           file://wendyos-agent.service \
            file://wendyos-agent-updater.service \
            file://wendyos-agent-updater.timer \
            file://wendyos-agent-updater.sh \
            file://download-wendyos-agent.sh"
+SRC_URI[agent.sha256sum] = "${WENDYOS_AGENT_SHA256}"
 
 S = "${UNPACKDIR}"
 
@@ -82,15 +95,8 @@ do_compile() {
         fi
     fi
 
-    chmod +x ${B}/wendy-agent
-    bbnote "wendy-agent binary ready"
-}
-
-do_install() {
-    # Install the pre-downloaded binary into /usr/local/bin so it lives
-    # alongside runtime updates written by wendyos-agent-updater.sh.
     install -d ${D}/usr/local/bin
-    install -m 0755 ${B}/wendy-agent ${D}/usr/local/bin/wendy-agent
+    install -m 0755 "${BINARY}" ${D}/usr/local/bin/wendy-agent
 
     # Install systemd services
     install -d ${D}${systemd_system_unitdir}
@@ -116,11 +122,18 @@ FILES:${PN} = "/usr/local/bin/wendy-agent \
                /var/lib/wendyos-agent \
                /var/lib/wendy-agent"
 
-# Allow network access during build
-do_compile[network] = "1"
-
-# Skip QA checks for pre-built binary
-INSANE_SKIP:${PN} += "already-stripped"
+# Skip QA checks for the pre-built, vendored binary:
+#   already-stripped - upstream ships a stripped release binary.
+#   buildpaths       - the agent is a Go binary built in WendyOS's own CI
+#                      (also GitHub Actions), so it embeds /home/runner/...
+#                      build paths that we cannot trim out of a binary we did
+#                      not compile. blacksail promotes buildpaths to a fatal
+#                      ERROR_QA, which is why this only surfaces on the cold
+#                      blacksail Jetson builds. The embedded path is inert
+#                      debug metadata on-device. Proper fix is upstream
+#                      building the agent with `go build -trimpath`; drop this
+#                      skip once releases ship trimmed binaries.
+INSANE_SKIP:${PN} += "already-stripped buildpaths"
 
 # Runtime dependencies
 # curl/wget needed for auto-updater, tar for extraction

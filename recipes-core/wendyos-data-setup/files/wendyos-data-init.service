@@ -1,0 +1,16 @@
+[Unit]
+Description=WendyOS /data partition first-boot init (format + grow)
+DefaultDependencies=no
+# Runs after udev has populated /dev/disk/by-partlabel, before /data is
+# mounted and before anything that needs /data.
+After=systemd-udevd.service
+Before=data.mount
+ConditionPathExists=/dev/disk/by-partlabel/data
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/wendyos-data-init.sh
+
+[Install]
+WantedBy=local-fs.target

@@ -19,7 +19,7 @@ IMAGE_FSTYPES += " ext4"
 IMAGE_VERSION_SUFFIX ?= "${DISTRO_VERSION}"
 
 # Mender artifact name and configuration live in conf/distro/include/mender.inc,
-# which is conditionally required when WENDYOS_MENDER = "1" (see wendyos.conf).
+# which is conditionally required when WENDYOS_OTA = "mender" (see wendyos.conf).
 # Defining them here unconditionally would leave dangling vars on machines
 # where Mender is disabled (Thor, QEMU, RPi).
 
@@ -68,11 +68,11 @@ IMAGE_INSTALL:append = " \
     gstreamer1.0-libav \
     "
 
-# Mender userspace packages — gated on WENDYOS_MENDER (set in wendyos.conf
-# and overridable per-machine). python3-pip-jetson-config lives in
-# meta-tegra-extensions, so it's split out as Tegra-only.
+# Mender userspace packages — gated on WENDYOS_OTA == "mender" (set in
+# wendyos.conf and overridable per-machine). python3-pip-jetson-config
+# lives in meta-tegra-extensions, so it's split out as Tegra-only.
 IMAGE_INSTALL:append = " \
-    ${@'mender-configure mender-connect' if d.getVar('WENDYOS_MENDER') == '1' else ''} \
+    ${@'mender-configure mender-connect' if d.getVar('WENDYOS_OTA') == 'mender' else ''} \
     ${@'python3-pip-jetson-config' if 'tegra' in d.getVar('MACHINEOVERRIDES').split(':') else ''} \
     "
 
@@ -107,7 +107,8 @@ IMAGE_ROOTFS_EXTRA_SPACE:append = "${@bb.utils.contains("DISTRO_FEATURES", "syst
 # A space-separated list of variable names that BitBake prints in the
 # "Build Configuration" banner at the start of a build.
 BUILDCFG_VARS += " \
-    WENDYOS_MENDER \
+    WENDYOS_OTA \
+    WENDYOS_DATA_PART \
     WENDYOS_DEBUG \
     WENDYOS_DEBUG_UART \
     WENDYOS_SSHD \
@@ -125,5 +126,3 @@ BUILDCFG_VARS += " \
 require ${@'conf/distro/include/qemu-image.inc' if 'qemuall' in d.getVar('MACHINEOVERRIDES').split(':') else ''}
 require ${@'conf/distro/include/tegra-image.inc' if 'tegra' in d.getVar('MACHINEOVERRIDES').split(':') else ''}
 require ${@'conf/distro/include/rpi-image.inc' if 'rpi' in d.getVar('MACHINEOVERRIDES').split(':') else ''}
-require ${@'conf/distro/include/rpi-nvme-image.inc' if 'raspberrypi5-nvme' in d.getVar('MACHINEOVERRIDES').split(':') else ''}
-require ${@'conf/distro/include/x86-image.inc' if 'x86-wendyos' in d.getVar('MACHINEOVERRIDES').split(':') else ''}

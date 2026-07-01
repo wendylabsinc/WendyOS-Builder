@@ -17,6 +17,7 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 SRC_URI += " \
     file://usb-gadget.cfg \
     file://usb-gadget-builtin.cfg \
+    file://usb-serial.cfg \
     file://0001-crypto-scatterwalk-Backport-memcpy_sglist.patch \
     file://0002-crypto-algif_aead-use-memcpy_sglist-instead-of-null-skcipher.patch \
     file://0003-crypto-algif_aead-Revert-to-operating-out-of-place-CVE-2026-31431.patch \

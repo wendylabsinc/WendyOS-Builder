@@ -1,0 +1,14 @@
+[Unit]
+Description=WendyOS persistent data partition (/data)
+# Format/grow on first boot must complete before we mount.
+Requires=wendyos-data-init.service
+After=wendyos-data-init.service
+
+[Mount]
+What=/dev/disk/by-partlabel/data
+Where=/data
+Type=ext4
+Options=defaults,noatime
+
+[Install]
+WantedBy=local-fs.target

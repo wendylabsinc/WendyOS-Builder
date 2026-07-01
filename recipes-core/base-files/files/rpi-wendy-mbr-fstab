@@ -1,0 +1,24 @@
+# WendyOS RPi A/B fstab — MBR variant (raspberrypi3, BCM2837 MBR-only bootrom).
+#
+# Identical in intent to rpi-wendy-fstab, but /boot is referenced by LABEL, not
+# PARTUUID: under MBR the kernel exposes PARTUUIDs as <disk-signature>-<partno>,
+# so the UUIDv4 that partuuid-rpi generates never resolves (see rpi-wendy-ab-mbr.wks
+# and rpi-mbr-fstab). config/data already use LABEL=, so only /boot differs.
+#
+# Deliberately NO "/" entry: the rootfs slot is A/B and is mounted by the kernel
+# from the root= that boot-ab.cmd.in sets per slot, so a fixed root device here
+# would be wrong on the other slot. The boot script mounts "/" READ-WRITE via
+# `rw` in bootargs.
+#
+# /boot is the shared FAT boot partition (firmware + u-boot + boot.scr +
+# uboot.env). It must stay mounted: the ubootenv connector edits /boot/uboot.env
+# via fw_setenv (see wendyos-fw-env / fw_env.config).
+#
+# /data is grown to fill the card on first boot by grow-data-part, which reads
+# this entry; it resolves LABEL=data to the device. /config is the FAT
+# provisioning partition.
+tmpfs        /var/volatile  tmpfs  defaults                 0 0
+LABEL=boot   /boot          vfat   defaults                 0 2
+LABEL=config /config        vfat   defaults,nofail          0 0
+LABEL=data   /data          ext4   defaults,noatime,nofail  0 2
+

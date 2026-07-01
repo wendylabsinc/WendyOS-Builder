@@ -4,20 +4,31 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: "Release tag to create (e.g. v1.2.3)"
+        description: "Release version to create, e.g. 1.2.3 (no 'v' prefix; one is stripped if given)"
         type: string
         required: true
       source_nightly:
-        description: "Nightly tag to promote from"
+        description: "Nightly tag to promote from (empty = most recent nightly-* tag)"
         type: string
         required: false
-        default: nightly
+        default: ""
+      debug:
+        description: "Enable debug tools in the release build (WENDYOS_DEBUG)."
+        type: boolean
+        required: false
+        default: false
+      sshd:
+        description: "Enable SSH server in the release build (WENDYOS_SSHD)."
+        type: boolean
+        required: false
+        default: false
 
 jobs:
   promote:
-    name: Promote ${{ inputs.source_nightly }} to ${{ inputs.release_tag }}
+    name: Promote ${{ inputs.source_nightly || 'latest nightly' }} to ${{ inputs.release_tag }}
     permissions:
       contents: write
+      actions: write
     runs-on:
       - runs-on
       - family=c7i-flex.8xlarge
@@ -33,25 +44,97 @@ jobs:
         env:
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
-          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9] ]]; then
-            echo "ERROR: release_tag must start with vMAJOR.MINOR.PATCH (got: $RELEASE_TAG)"
+          set -euo pipefail
+          # Versions are plain MAJOR.MINOR.PATCH everywhere (git tags, GitHub
+          # releases, GCS manifests). Strip a leading 'v' typed out of habit.
+          TAG="${RELEASE_TAG#v}"
+          if [[ ! "$TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "ERROR: release_tag must be MAJOR.MINOR.PATCH (got: $RELEASE_TAG)"
             exit 1
           fi
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
 
       - name: Resolve nightly commit and push release tag
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ inputs.release_tag }}
           SOURCE_NIGHTLY: ${{ inputs.source_nightly }}
         run: |
-          # Resolve the exact commit the nightly tag points to.
-          if ! SHA=$(git rev-parse "refs/tags/${SOURCE_NIGHTLY}^{commit}" 2>/dev/null); then
-            git fetch origin "refs/tags/${SOURCE_NIGHTLY}:refs/tags/${SOURCE_NIGHTLY}"
-            SHA=$(git rev-parse "refs/tags/${SOURCE_NIGHTLY}^{commit}")
-          fi
-          echo "Promoting commit $SHA to $RELEASE_TAG"
+          set -euo pipefail
+          git fetch --tags --quiet
 
-          git tag "$RELEASE_TAG" "$SHA"
-          git push origin "$RELEASE_TAG"
-          # Pushing a v* tag triggers release.yml, which rebuilds using the warm
-          # sstate cache, publishes to GCS, and creates the GitHub release.
+          # Default to the most recent nightly: nightly-YYYYMMDDTHHMMSS sorts
+          # chronologically as a string.
+          if [[ -z "$SOURCE_NIGHTLY" ]]; then
+            SOURCE_NIGHTLY=$(git tag -l 'nightly-*' | sort | tail -1)
+            if [[ -z "$SOURCE_NIGHTLY" ]]; then
+              echo "ERROR: no nightly-* tags found; pass source_nightly explicitly."
+              exit 1
+            fi
+            echo "Resolved latest nightly: $SOURCE_NIGHTLY"
+          fi
+
+          SHA=$(git rev-parse "refs/tags/${SOURCE_NIGHTLY}^{commit}")
+          echo "Promoting commit $SHA ($SOURCE_NIGHTLY) to $TAG"
+
+          # The tag-triggered release build publishes with the tag as the
+          # version and fails if it disagrees with DISTRO_VERSION baked into
+          # the image. Catch that here, before any tag exists.
+          DISTRO_VERSION=$(git show "$SHA:conf/distro/wendyos.conf" | grep 'DISTRO_VERSION' | head -1 | sed 's/.*"\(.*\)"/\1/')
+          if [[ "$TAG" != "$DISTRO_VERSION" ]]; then
+            echo "ERROR: release tag $TAG != DISTRO_VERSION=$DISTRO_VERSION at $SOURCE_NIGHTLY ($SHA)."
+            echo "Bump DISTRO_VERSION in conf/distro/wendyos.conf, let a nightly build, then promote that."
+            exit 1
+          fi
+
+          if git rev-parse "refs/tags/${TAG}" >/dev/null 2>&1 || \
+             git ls-remote --exit-code origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists, skipping create/push."
+          else
+            git tag "$TAG" "$SHA"
+            git push origin "$TAG"
+          fi
+
+      - name: Create GitHub release
+        id: create_release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG already exists."
+            echo "created=false" >> "$GITHUB_OUTPUT"
+          else
+            gh release create "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "WendyOS $TAG" \
+              --generate-notes
+            echo "created=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Trigger release build
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          DEBUG_FLAG: ${{ inputs.debug }}
+          SSHD_FLAG: ${{ inputs.sshd }}
+        run: |
+          # GITHUB_TOKEN tag pushes don't trigger other workflows (GitHub limitation),
+          # so we explicitly dispatch build.yml on the release tag here.
+          gh workflow run build.yml \
+            --ref "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --field debug="$DEBUG_FLAG" \
+            --field sshd="$SSHD_FLAG"
+
+      - name: Send Discord announcement
+        if: steps.create_release.outputs.created == 'true'
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
+        run: |
+          [[ -z "${DISCORD_WEBHOOK_URL}" ]] && exit 0
+          RELEASE_URL="https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
+          jq -n --arg msg "**WendyOS ${TAG}** is out! Full changelog and downloads: ${RELEASE_URL}" '{content: $msg}' | \
+            curl -fsS -o /dev/null \
+              -H "Content-Type: application/json" \
+              -d @- \
+              "$DISCORD_WEBHOOK_URL"

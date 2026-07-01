@@ -3,6 +3,10 @@ name: Build WendyOS Images
 on:
   push:
     branches: [main]
+    tags:
+      # Release tags are plain MAJOR.MINOR.PATCH - no 'v' prefix anywhere
+      # (git tags, GitHub releases, and GCS manifests all use the same string).
+      - '[0-9]+.[0-9]+.[0-9]+'
   pull_request:
   workflow_dispatch:
     inputs:
@@ -24,6 +28,25 @@ on:
         type: string
         required: false
         default: ""
+      debug:
+        description: "Enable WENDYOS_DEBUG (debug tools) on all devices. Auto-enabled on nightly builds; use this to opt in on release builds triggered by promote.yml."
+        type: boolean
+        required: false
+        default: false
+      sshd:
+        description: "Enable WENDYOS_SSHD (SSH server) on all devices. Must be set explicitly — not auto-enabled on nightly builds."
+        type: boolean
+        required: false
+        default: false
+
+# Never let two runs for the same ref overlap: the failing nightly on
+# 2026-06-04 had two main-push runs uploading and publishing the same
+# version concurrently (4 writers per device manifest). PR runs cancel
+# superseded builds; main/tag runs queue instead so a publish in progress
+# is never killed halfway.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -39,11 +62,44 @@ jobs:
     outputs:
       matrix: ${{ steps.set.outputs.matrix }}
       devices: ${{ steps.set.outputs.devices }}
+      version: ${{ steps.version.outputs.version }}
+      is-release: ${{ steps.version.outputs.is-release }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           ref: ${{ inputs.version }}
+
+      # Compute the build version exactly once so every matrix job and the
+      # publish job agree on a single version string for the whole run.
+      #   tag push        -> MAJOR.MINOR.PATCH (the tag itself, no 'v')
+      #   main / dispatch -> nightly-YYYYMMDDTHHMMSS
+      - id: version
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [[ "$REF_TYPE" == "tag" ]]; then
+            VERSION="${REF_NAME#v}"
+            if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "ERROR: release tag must be MAJOR.MINOR.PATCH (got: $REF_NAME)" >&2
+              exit 1
+            fi
+            # The published version must match what the image believes it is.
+            # promote.yml checks this before tagging; this guards manual tags.
+            DISTRO_VERSION=$(grep 'DISTRO_VERSION' conf/distro/wendyos.conf | head -1 | sed 's/.*"\(.*\)"/\1/')
+            if [[ "$VERSION" != "$DISTRO_VERSION" ]]; then
+              echo "ERROR: tag $REF_NAME does not match DISTRO_VERSION=$DISTRO_VERSION in conf/distro/wendyos.conf" >&2
+              exit 1
+            fi
+            echo "is-release=true" >> "$GITHUB_OUTPUT"
+          else
+            VERSION="nightly-$(date -u +%Y%m%dT%H%M%S)"
+            echo "is-release=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Build version: $VERSION"
 
       - id: set
         env:
@@ -62,7 +118,6 @@ jobs:
             {"device":"jetson-agx-orin","storage":"nvme"},
             {"device":"jetson-agx-orin","storage":"emmc"},
             {"device":"jetson-orin-nano","storage":"nvme"},
-            {"device":"jetson-orin-nano","storage":"sd"},
             {"device":"jetson-agx-thor","storage":"nvme"}
           ]'
           # Collapse to one line so it can be written to $GITHUB_OUTPUT, which
@@ -213,7 +268,16 @@ jobs:
         uses: runs-on/snapshot@v1
         with:
           path: ${{ github.workspace }}/sstate-cache
-          volume_size: 150
+          # The snapshot lineage is shared by every matrix job (keyed on this
+          # path + branch), so the volume converges to the union of all nine
+          # boards' sstate and nothing prunes it. 150 GB filled up once the
+          # Thor board joined the matrix, killing builds with BitBake's
+          # STOPTASKS disk monitor. Note runs-on/snapshot discards a snapshot
+          # SMALLER than volume_size and starts a blank volume instead, so
+          # raising this forces one cold run (sstate re-restored from S3) and
+          # snapshots at the new size from then on. EBS snapshot cost scales
+          # with used blocks, not volume size, so headroom is nearly free.
+          volume_size: 400
 
       - name: Make L1 EBS mount writable
         run: sudo chmod -R a+rwX "$GITHUB_WORKSPACE/sstate-cache"
@@ -298,6 +362,26 @@ jobs:
           # downloads/ is not in the L1 snapshot, so always restore from S3.
           run_sync "restore downloads" "${src_downloads_glob}" "$GITHUB_WORKSPACE/downloads/" "$GITHUB_WORKSPACE/downloads"
 
+          # S3 sync only transfers files, so empty directories are lost on the
+          # round-trip. A bare git mirror with fully-packed refs has an empty
+          # refs/ dir, and git refuses to recognize the repo without it
+          # ("fatal: not a git repository"). BitBake then re-clones every git2
+          # mirror from upstream — and fails the build outright when upstream
+          # is down (e.g. iso-codes on salsa.debian.org). Recreate refs/, and
+          # drop any mirror git still can't read together with its .done
+          # marker so BitBake falls back to the mirror tarball or upstream
+          # instead of choking on a broken clonedir.
+          if [[ -d "$GITHUB_WORKSPACE/downloads/git2" ]]; then
+            for repo in "$GITHUB_WORKSPACE/downloads/git2"/*/; do
+              [[ -f "$repo/HEAD" ]] || continue
+              mkdir -p "$repo/refs"
+              if ! git -C "$repo" rev-parse --git-dir >/dev/null 2>&1; then
+                echo "::warning::Dropping unreadable git mirror $repo"
+                rm -rf "$repo" "${repo%/}.done"
+              fi
+            done
+          fi
+
       # ---------- Build ----------
 
       - name: Derive build variables
@@ -314,7 +398,6 @@ jobs:
             jetson-agx-orin:nvme) BOARD=jetson-agx-orin;       MACHINE=jetson-agx-orin-devkit-nvme-wendyos ;;
             jetson-agx-orin:emmc) BOARD=jetson-agx-orin-emmc;  MACHINE=jetson-agx-orin-devkit-emmc-wendyos ;;
             jetson-orin-nano:nvme) BOARD=jetson-orin-nano-nvme; MACHINE=jetson-orin-nano-devkit-nvme-wendyos ;;
-            jetson-orin-nano:sd)  BOARD=jetson-orin-nano-sd;   MACHINE=jetson-orin-nano-devkit-wendyos ;;
             jetson-agx-thor:nvme) BOARD=jetson-agx-thor;       MACHINE=jetson-agx-thor-devkit-nvme-wendyos ;;
             *) echo "Unknown device/storage: $DEVICE/$STORAGE"; exit 1 ;;
           esac
@@ -330,9 +413,65 @@ jobs:
         # creation; the repo cache seeds repos/ from the AMI's bake-time clones.
         run: ./wendyos/bootstrap.sh
 
+      - name: Enable debug for nightly builds
+        # Release images are production builds — no debug tools by default.
+        # Nightly and workflow_dispatch builds get debug tooling so CI-flashed
+        # devices include diagnostic utilities out of the box. Release builds
+        # triggered by promote.yml can opt in via inputs.debug.
+        if: (needs.detect-changes.outputs.is-release != 'true' && github.event_name != 'pull_request') || inputs.debug == true
+        run: |
+          {
+            echo ''
+            echo '# Nightly CI: enable debug tooling on all devices'
+            echo 'WENDYOS_DEBUG = "1"'
+          } >> "$GITHUB_WORKSPACE/build/conf/auto.conf"
+
+      - name: Enable SSH when explicitly requested
+        # SSH is disabled by default (WENDYOS_SSHD ??= "0" in common.inc).
+        # Pass inputs.sshd = true on workflow_dispatch or promote.yml to opt in.
+        if: inputs.sshd == true
+        run: |
+          {
+            echo ''
+            echo '# CI: enable SSH server on all devices (explicitly requested)'
+            echo 'WENDYOS_SSHD = "1"'
+          } >> "$GITHUB_WORKSPACE/build/conf/auto.conf"
+
       # Note: SSTATE_DIR / DL_DIR are pinned to ${TOPDIR}/../{sstate-cache,downloads}
       # by conf/template/include/local/common.inc, which matches the S3 sync paths
       # below, no auto.conf override needed.
+
+      # Resolve the latest *stable* wendyos-agent release (tag + asset sha256)
+      # and export them so the wendyos-agent recipe pins this exact version.
+      # This is what makes "ship the latest agent on every run" actually work:
+      # the recipe embeds the version + checksum in SRC_URI, so a new release
+      # changes the do_fetch signature and sstate re-fetches instead of reusing
+      # a stale cached binary. Authenticated to avoid the 60/hr anon API limit.
+      - name: Resolve latest wendyos-agent version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          release_json="$(curl -sSfL \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/wendylabsinc/WendyOS/releases/latest")"
+
+          version="$(jq -r '.tag_name' <<<"$release_json")"
+          sha="$(jq -r '.assets[]
+            | select(.name | test("^wendy-agent-linux-arm64-.*\\.tar\\.gz$"))
+            | .digest' <<<"$release_json" | sed 's/^sha256://')"
+
+          if [[ -z "$version" || "$version" == "null" || -z "$sha" || "$sha" == "null" ]]; then
+            echo "Failed to resolve wendyos-agent version/sha (version='$version' sha='$sha')" >&2
+            exit 1
+          fi
+
+          echo "Resolved wendyos-agent $version (sha256=$sha)"
+          {
+            echo "WENDYOS_AGENT_VERSION=$version"
+            echo "WENDYOS_AGENT_SHA256=$sha"
+          } >> "$GITHUB_ENV"
 
       - name: Build image
         working-directory: ${{ github.workspace }}/wendyos
@@ -344,6 +483,22 @@ jobs:
       # L1 snapshots are saved automatically by runs-on/snapshot at workflow
       # end. L2 (S3) we push explicitly so other matrix entries / future
       # runners can prime from it.
+
+      # Re-assume the role for a fresh STS token before uploading. The
+      # credentials configured at job start expire after the default 1h
+      # session, and a cold blacksail build now runs longer than that — so by
+      # the time we reach the upload the original token is dead ("ExpiredToken:
+      # The provided token has expired"). Bumping role-duration-seconds alone
+      # would also require raising the IAM role's MaxSessionDuration; refreshing
+      # here is self-contained and gives the upload a full fresh hour.
+      # if: always() mirrors the save step so the cache still uploads after a
+      # failed build.
+      - name: Refresh AWS credentials for cache upload
+        if: always()
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_BUILD_CACHE_ROLE_ARN }}
+          aws-region: ${{ vars.WENDYOS_BUILD_CACHE_REGION }}
 
       - name: Save sstate-cache and downloads to S3 (L2)
         if: always()
@@ -404,6 +559,10 @@ jobs:
 
       # --- Upload image and update device manifest (master manifest is handled by the publish job) ---
 
+      - name: Fix deploy directory permissions
+        if: github.event_name != 'pull_request'
+        run: sudo chown -R "$(id -u):$(id -g)" "${{ github.workspace }}/build/tmp/deploy" 2>/dev/null || true
+
       - name: Authenticate to Google Cloud
         if: github.event_name != 'pull_request'
         uses: google-github-actions/auth@v2
@@ -415,166 +574,210 @@ jobs:
         if: github.event_name != 'pull_request'
         uses: google-github-actions/setup-gcloud@v2
 
-      - name: Checkout publisher
-        if: github.event_name != 'pull_request'
-        uses: actions/checkout@v4
-        with:
-          repository: wendylabsinc/wendy-os-publisher
-          path: wendy-os-publisher
-
       - name: Set up Go
         if: github.event_name != 'pull_request'
         uses: actions/setup-go@v5
         with:
-          go-version-file: wendy-os-publisher/go.mod
+          go-version-file: wendyos/tools/publisher/go.mod
+          cache-dependency-path: wendyos/tools/publisher/go.sum
 
       - name: Install flashable image dependencies (Jetson only)
         if: github.event_name != 'pull_request' && startsWith(matrix.device, 'jetson-')
-        env:
-          DEVICE: ${{ matrix.device }}
         run: |
           sudo apt-get update
-          sudo apt-get install -y device-tree-compiler
-          # simg2img converts Android sparse ext4 images to raw; needed by
-          # make-thor-nvme-img.py to write APP/APP_b into the Thor NVMe image.
-          if [[ "$DEVICE" == "jetson-agx-thor" ]]; then
-            sudo apt-get install -y android-tools-fsutils
-          fi
+          # simg2img (android-sdk-libsparse-utils) converts Android sparse ext4
+          # images to raw; make-thor-nvme-img.py needs it to write APP/APP_b into
+          # the offline disk image. Every blacksail Jetson (Thor + all Orins on
+          # WENDYOS_OTA=wendy) now builds its NVMe/SD image via that script, so
+          # install it for all Jetson devices rather than Thor alone.
+          sudo apt-get install -y device-tree-compiler android-sdk-libsparse-utils
 
       - name: Generate flashable image (Jetson)
         if: github.event_name != 'pull_request' && startsWith(matrix.device, 'jetson-')
         env:
           DEPLOY_DIR: ${{ github.workspace }}/build/tmp/deploy/images/${{ steps.vars.outputs.machine }}
           MACHINE: ${{ steps.vars.outputs.machine }}
-          DEVICE: ${{ matrix.device }}
           STORAGE: ${{ matrix.storage }}
         run: |
           FLASH_WORKDIR="$GITHUB_WORKSPACE/flash-work"
           mkdir -p "$FLASH_WORKDIR"
 
-          if [[ "$DEVICE" == "jetson-agx-thor" ]]; then
-            # Thor (JP7/L4T r38.4.x / T264): the tegraflash-tar bundle does not
-            # include doexternal.sh.  make-thor-nvme-img.py reimplements the same
-            # offline GPT image creation by parsing external-flash.xml.in and
-            # writing each partition's binary at the correct sector offset.
-            # The resulting wendyos-nvme.img is the primary artifact for
-            # `wendy os install` (dd-based provisioning); the tegraflash-tar
-            # bundle remains available as the recovery-flash artifact.
-            TEGRAFLASH_TAR="$DEPLOY_DIR/wendyos-image-${MACHINE}.tegraflash-tar"
-            tar -xf "$TEGRAFLASH_TAR" -C "$FLASH_WORKDIR"
-            python3 "$GITHUB_WORKSPACE/scripts/make-thor-nvme-img.py" \
+          # All Jetsons run the wendy/blacksail OTA stack (WENDYOS_OTA=wendy):
+          # IMAGE_FSTYPES emits a single 'tegraflash-tar' bundle that does NOT
+          # ship the doexternal.sh / dosdcard.sh helper scripts.
+          # make-thor-nvme-img.py reimplements their offline GPT image creation
+          # by parsing external-flash.xml.in and writing each partition's binary
+          # at the correct sector offset. The resulting wendyos-nvme.img is the
+          # primary artifact for `wendy os install` (dd-based provisioning);
+          # the tegraflash-tar bundle remains the recovery-flash artifact.
+          TEGRAFLASH_TAR="$DEPLOY_DIR/wendyos-image-${MACHINE}.tegraflash-tar"
+          tar -xf "$TEGRAFLASH_TAR" -C "$FLASH_WORKDIR"
+          # external-flash.xml.in describes the external NVMe boot/root device.
+          # eMMC builds are internal-only and ship no such layout; the SD-card
+          # Orin Nano is not a CI target (its layout lives in a <device
+          # type="sdcard"> block, not external-flash.xml.in, and the blacksail
+          # bundle no longer ships dosdcard.sh to build it). For those the
+          # tegraflash-tar bundle itself is the flash artifact — nothing to do.
+          if [[ -f "$FLASH_WORKDIR/external-flash.xml.in" && "$DEVICE" != "jetson-agx-thor" ]]; then
+            python3 "$GITHUB_WORKSPACE/wendyos/scripts/make-thor-nvme-img.py" \
               "$FLASH_WORKDIR" "$GITHUB_WORKSPACE/wendyos-nvme.img"
-            exit 0
+          else
+            echo "No offline NVMe image for $DEVICE (storage=$STORAGE); the tegraflash-tar is the flash artifact."
           fi
 
-          TEGRAFLASH_FILE="$DEPLOY_DIR/wendyos-image-${MACHINE}.tegraflash.tar.gz"
-          tar -xzf "$TEGRAFLASH_FILE" -C "$FLASH_WORKDIR"
-          # The SD/eMMC tegraflash tarballs don't bundle config-partition.fat32.img
-          # (it's only included via the NVMe external XML path). Without it, the
-          # tegrasign step can't process images_list.xml fully and never writes
-          # signed/flash.xml.tmp, causing generateflashindex to fail.
-          if [[ "$STORAGE" != "nvme" && ! -f "$FLASH_WORKDIR/config-partition.fat32.img" ]]; then
-            cp "$DEPLOY_DIR/config-partition.fat32.img" "$FLASH_WORKDIR/"
-          fi
-          # For SD/eMMC machines PARTITION_LAYOUT_EXTERNAL="" causes mender_flash_layout_adjust
-          # to be a no-op, leaving the literal string DATAFILE in flash.xml.bin. tegrasign
-          # then fails to write signed/flash.xml.tmp because no file named DATAFILE exists.
-          # Provide it so tegrasign can produce signed/flash.xml.tmp and generateflashindex
-          # can build flash.idx from it.
-          if [[ "$STORAGE" != "nvme" ]]; then
-            DATAIMG=$(find "$DEPLOY_DIR" -maxdepth 1 -name "wendyos-image-*.dataimg" -print -quit 2>/dev/null || true)
-            if [[ -n "$DATAIMG" && ! -f "$FLASH_WORKDIR/DATAFILE" ]]; then
-              cp "$DATAIMG" "$FLASH_WORKDIR/DATAFILE"
-            fi
-          fi
-          cd "$FLASH_WORKDIR"
-          case "$STORAGE" in
-            nvme)  sudo ./doexternal.sh -s 64G "$GITHUB_WORKSPACE/wendyos-nvme.img" ;;
-            # eMMC uses sdmmc_user device type; meta-tegra never generates dosdcard.sh for it.
-            # The tegraflash tarball is the correct recovery-flash artifact for eMMC.
-            emmc) : ;;
-            sd)   sudo ./dosdcard.sh "$GITHUB_WORKSPACE/wendyos-sd.img" ;;
-          esac
+      - name: Build Thor flashpack
+        # Pack the extracted tegraflash-tar into the single .tar.zst the wendy CLI
+        # flashes (see make-thor-flashpack.sh). The NVIDIA flash tools it runs are
+        # i386, so this x86_64 runner needs i386 runtime libs.
+        if: github.event_name != 'pull_request' && matrix.device == 'jetson-agx-thor'
+        env:
+          UPLOAD_VERSION: ${{ needs.detect-changes.outputs.version }}
+        run: |
+          set -euo pipefail
+          FLASH_WORKDIR="$GITHUB_WORKSPACE/flash-work"   # extracted tegraflash-tar from the previous step
+          sudo dpkg --add-architecture i386
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libc6:i386 libstdc++6:i386 zlib1g:i386 device-tree-compiler zstd
+          "$GITHUB_WORKSPACE/wendyos/scripts/make-thor-flashpack.sh" \
+            --bundle-dir "$FLASH_WORKDIR" \
+            --out "$GITHUB_WORKSPACE/thor-flashpack" \
+            --version "$UPLOAD_VERSION"
+          echo "FLASHPACK_FILE=$GITHUB_WORKSPACE/thor-flashpack/wendyos-${UPLOAD_VERSION}-jetson-agx-thor.flashpack.tar.zst" >> "$GITHUB_ENV"
 
-      - name: Upload image and update device manifest
+      - name: Upload image and emit manifest entry
         if: github.event_name != 'pull_request'
         env:
           DEPLOY_DIR: ${{ github.workspace }}/build/tmp/deploy/images/${{ steps.vars.outputs.machine }}
           MACHINE: ${{ steps.vars.outputs.machine }}
           DEVICE: ${{ matrix.device }}
           STORAGE: ${{ matrix.storage }}
+          IS_RELEASE: ${{ needs.detect-changes.outputs.is-release }}
+          UPLOAD_VERSION: ${{ needs.detect-changes.outputs.version }}
         run: |
-          VERSION=$(grep 'DISTRO_VERSION' "$GITHUB_WORKSPACE/wendyos/conf/distro/wendyos.conf" | head -1 | sed 's/.*"\(.*\)"/\1/')
           TOKEN=$(gcloud auth print-access-token)
 
-          if [[ "$MACHINE" != raspberry* && "$STORAGE" == "nvme" ]]; then
-            # Covers Thor (wendyos-nvme.img from make-thor-nvme-img.py) and all
-            # other NVMe Jetsons (wendyos-nvme.img from doexternal.sh).
-            IMAGE_FILE="$GITHUB_WORKSPACE/wendyos-nvme.img"
-          elif [[ "$MACHINE" != raspberry* && "$STORAGE" == "emmc" ]]; then
-            # No offline disk image for eMMC (meta-tegra doesn't generate dosdcard.sh for
-            # sdmmc_user devices). The tegraflash tarball is the recovery-flash artifact.
-            IMAGE_FILE="$DEPLOY_DIR/wendyos-image-${MACHINE}.tegraflash.tar.gz"
-          elif [[ "$MACHINE" != raspberry* && "$STORAGE" == "sd" ]]; then
-            IMAGE_FILE="$GITHUB_WORKSPACE/wendyos-sd.img"
-          else
-            IMAGE_FILE="$DEPLOY_DIR/wendyos-image-${MACHINE}.rootfs.wic"
+          # The wendy/blacksail OTA stack emits a single tegraflash-tar bundle;
+          # it doubles as the eMMC image and the Jetson recovery-flash artifact.
+          TEGRAFLASH_BUNDLE=""
+          if [[ "$MACHINE" != raspberry* ]]; then
+            TEGRAFLASH_BUNDLE="$DEPLOY_DIR/wendyos-image-${MACHINE}.tegraflash-tar"
           fi
 
+          BMAP_FILE=""
+          if [[ "$MACHINE" != raspberry* && "$STORAGE" == "nvme" && "$DEVICE" != "jetson-agx-thor" ]]; then
+            # wendyos-nvme.img: built from the tegraflash-tar bundle by
+            # make-thor-nvme-img.py.
+            IMAGE_FILE="$GITHUB_WORKSPACE/wendyos-nvme.img"
+            bmaptool create "$IMAGE_FILE" > "${IMAGE_FILE}.bmap"
+            BMAP_FILE="${IMAGE_FILE}.bmap"
+          elif [[ "$MACHINE" != raspberry* && ( "$STORAGE" == "emmc" || "$DEVICE" == "jetson-agx-thor" ) ]]; then
+            # No offline disk image for eMMC or Thor NVMe; the tegraflash bundle
+            # is the flash artifact.
+            IMAGE_FILE="$TEGRAFLASH_BUNDLE"
+          else
+            # RPi: Mender emits .sdimg; pre-Mender RPi builds produced
+            # .rootfs.wic. Prefer sdimg, fall back to wic.
+            if [[ -f "$DEPLOY_DIR/wendyos-image-${MACHINE}.sdimg" ]]; then
+              # Resolve the Yocto symlink to the real file before gzipping;
+              # gzip fails with ELOOP when the symlink chain is too deep.
+              # Use -f to suppress the "has N other links" error from Yocto hard links.
+              SDIMG_REAL=$(readlink -f "$DEPLOY_DIR/wendyos-image-${MACHINE}.sdimg")
+              # Generate bmap before gzip — bmaptool operates on the raw image.
+              bmaptool create "$SDIMG_REAL" > "${SDIMG_REAL}.bmap"
+              BMAP_FILE="${SDIMG_REAL}.bmap"
+              gzip -f "$SDIMG_REAL"
+              IMAGE_FILE="${SDIMG_REAL}.gz"
+            else
+              IMAGE_FILE="$DEPLOY_DIR/wendyos-image-${MACHINE}.rootfs.wic"
+              bmaptool create "$IMAGE_FILE" > "${IMAGE_FILE}.bmap"
+              BMAP_FILE="${IMAGE_FILE}.bmap"
+            fi
+          fi
+
+          # Upload-only: files are pushed to GCS here, but ALL manifest writes
+          # are deferred to the single serialised publish job. Parallel matrix
+          # entries must never read-modify-write shared manifests (412 races,
+          # lost updates). The entry JSON below is the handoff.
+          ENTRY_FILE="$GITHUB_WORKSPACE/manifest-entry-${DEVICE}-${STORAGE}.json"
           ARGS=(
             --device "$DEVICE"
-            --version "${VERSION}-nightly"
+            --version "$UPLOAD_VERSION"
             --file "$IMAGE_FILE"
-            --nightly
-            --skip-master-manifest
             --access-token "$TOKEN"
+            --upload-only
+            --metadata-out "$ENTRY_FILE"
           )
+
+          if [[ "$IS_RELEASE" != "true" ]]; then
+            ARGS+=(--nightly)
+          fi
 
           # For all Jetson targets, include the tegraflash bundle as the recovery file
           # (used for USB recovery-mode flashing via tegraflash.py / initrd-flash).
-          # Thor uses .tegraflash-tar (JP7/r38.4.x renamed the type); others use .tegraflash.tar.gz.
-          if [[ "$MACHINE" != raspberry* ]]; then
-            if [[ "$DEVICE" == "jetson-agx-thor" ]]; then
-              ARGS+=(--recovery-file "$DEPLOY_DIR/wendyos-image-${MACHINE}.tegraflash-tar")
-            else
-              ARGS+=(--recovery-file "$DEPLOY_DIR/wendyos-image-${MACHINE}.tegraflash.tar.gz")
-            fi
+          # wendy/blacksail builds use .tegraflash-tar (JP7/r38.4.x renamed the
+          # type); legacy mender builds use .tegraflash.tar.gz — resolved above.
+          if [[ -n "$TEGRAFLASH_BUNDLE" ]]; then
+            ARGS+=(--recovery-file "$TEGRAFLASH_BUNDLE")
+          fi
+
+          # Thor: attach the flashpack built in the previous step so the publisher
+          # uploads it and records flashpack_path/checksum/size in the manifest.
+          if [[ "$DEVICE" == "jetson-agx-thor" && -n "${FLASHPACK_FILE:-}" && -f "$FLASHPACK_FILE" ]]; then
+            ARGS+=(--flashpack-file "$FLASHPACK_FILE")
           fi
 
           # Devices with multiple storage variants pass --storage so the manifest
           # records the correct per-storage-type paths.
-          if [[ "$DEVICE" == "jetson-orin-nano" || "$DEVICE" == "jetson-agx-orin" ]]; then
+          if [[ "$DEVICE" == "jetson-orin-nano" || "$DEVICE" == "jetson-agx-orin" || "$DEVICE" == "raspberry-pi-5" ]]; then
             ARGS+=(--storage "$STORAGE")
           fi
 
-          # Include Mender OTA artifact if the build produced one
-          OTA_FILE=$(find "$DEPLOY_DIR" -maxdepth 1 -name "wendyos-image-${MACHINE}*.mender" -print -quit 2>/dev/null || true)
+          # Include bmap if one was generated for this image type.
+          if [[ -n "$BMAP_FILE" ]]; then
+            ARGS+=(--bmap-file "$BMAP_FILE")
+          fi
+
+          # Include the OTA update artifact if the build produced one. A board
+          # runs either the Mender stack (.mender) or the wendyos-update stack
+          # (.wendy), never both — it is gated by WENDYOS_OTA — so both feed the
+          # same --ota-update slot / ota_update_path; the device's OTA client
+          # interprets the artifact. Neither extension is recompressed by the
+          # publisher (only .img/.wic/.sdimg are), so each uploads as-is.
+          OTA_FILE=$(find "$DEPLOY_DIR" -maxdepth 1 \
+            \( -name "wendyos-image-${MACHINE}*.mender" -o -name "wendyos-image-${MACHINE}*.wendy" \) \
+            -print -quit 2>/dev/null || true)
           if [[ -n "$OTA_FILE" ]]; then
             ARGS+=(--ota-update "$OTA_FILE")
           fi
 
-          cd "$GITHUB_WORKSPACE/wendy-os-publisher/cmd"
-          # Outer retry handles 412 races when multiple storage variants for the
-          # same device write to the same device manifest concurrently.
-          # 10 attempts with jitter breaks lockstep between competing builds.
-          for attempt in 1 2 3 4 5 6 7 8 9 10; do
-            if go run upload_and_manifest.go "${ARGS[@]}"; then
-              break
-            fi
-            if [ "$attempt" -lt 10 ]; then
-              JITTER=$((RANDOM % 30))
-              SLEEP_TIME=$((attempt * 20 + JITTER))
-              echo "Outer attempt $attempt failed, sleeping ${SLEEP_TIME}s before retry..."
-              sleep "$SLEEP_TIME"
-            else
-              echo "All outer attempts exhausted"
-              exit 1
-            fi
-          done
+          cd "$GITHUB_WORKSPACE/wendyos/tools/publisher"
+          # No retry loop: uploads go to unique per-version paths (no shared
+          # state to race on) and the publisher's storage client already
+          # retries transient errors internally.
+          go run . "${ARGS[@]}"
 
+      - name: Upload manifest entry artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: manifest-entry-${{ matrix.device }}-${{ matrix.storage }}
+          path: manifest-entry-${{ matrix.device }}-${{ matrix.storage }}.json
+          if-no-files-found: error
+          retention-days: 7
+          # v4 artifacts are immutable per name; without this, re-running a
+          # failed build job 409s on the artifact left by the earlier attempt.
+          overwrite: true
+
+  # ---------------------------------------------------------------------------
+  # publish: the ONLY writer of GCS manifests. Build jobs upload files and
+  # hand over manifest-entry artifacts; this job applies them one at a time,
+  # so device and master manifests never see concurrent read-modify-writes
+  # from CI. Runs for nightly (main/dispatch) and release (tag) builds.
+  # !cancelled(): publish whatever subset of devices built successfully.
+  # ---------------------------------------------------------------------------
   publish:
-    name: Update master manifest
-    needs: build
+    name: Publish manifests
+    needs: [detect-changes, build]
     if: ${{ !cancelled() && github.event_name != 'pull_request' }}
     concurrency:
       group: update-master-manifest
@@ -603,79 +806,129 @@ jobs:
           path: wendyos
           ref: ${{ inputs.version }}
 
-      - name: Checkout publisher
-        uses: actions/checkout@v4
-        with:
-          repository: wendylabsinc/wendy-os-publisher
-          path: wendy-os-publisher
-
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: wendy-os-publisher/go.mod
+          go-version-file: wendyos/tools/publisher/go.mod
+          cache-dependency-path: wendyos/tools/publisher/go.sum
+
+      - name: Download manifest entries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: manifest-entry-*
+          path: manifest-entries
+          merge-multiple: true
+
+      - name: Write device manifests
+        id: apply
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          entries=("$GITHUB_WORKSPACE"/manifest-entries/*.json)
+          if [[ ${#entries[@]} -eq 0 ]]; then
+            echo "::warning::No manifest entries found (did every build fail?); nothing to publish."
+            echo "published=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "published=true" >> "$GITHUB_OUTPUT"
+          TOKEN=$(gcloud auth print-access-token)
+          cd "$GITHUB_WORKSPACE/wendyos/tools/publisher"
+          # Build once; up to 15 invocations follow across this step and the
+          # master manifest step ($RUNNER_TEMP persists between steps).
+          go build -o "$RUNNER_TEMP/publisher" .
+          # Applied strictly one at a time: this job is the only manifest
+          # writer, so there is nothing to race against and no retry loop.
+          for entry in "${entries[@]}"; do
+            echo "::group::apply $(basename "$entry")"
+            cat "$entry"
+            "$RUNNER_TEMP/publisher" --apply-metadata "$entry" --access-token "$TOKEN"
+            echo "::endgroup::"
+          done
 
       - name: Update master manifest
         run: |
-          VERSION=$(grep 'DISTRO_VERSION' "$GITHUB_WORKSPACE/wendyos/conf/distro/wendyos.conf" | head -1 | sed 's/.*"\(.*\)"/\1/')
+          set -euo pipefail
+          shopt -s nullglob
+          entries=("$GITHUB_WORKSPACE"/manifest-entries/*.json)
+          if [[ ${#entries[@]} -eq 0 ]]; then
+            echo "No manifest entries; skipping master manifest update."
+            exit 0
+          fi
           TOKEN=$(gcloud auth print-access-token)
-
-          cd "$GITHUB_WORKSPACE/wendy-os-publisher/cmd"
-          for DEVICE in raspberry-pi-3 raspberry-pi-4 raspberry-pi-5 jetson-agx-orin jetson-orin-nano jetson-agx-thor; do
-            # Outer shell retry handles transient 412 bursts from concurrent writers
-            # (e.g. Cloud Function draining a Pub/Sub backlog). The publisher already
-            # retries internally 10x with exponential backoff; this adds 5 extra rounds.
-            for attempt in 1 2 3 4 5; do
-              if go run upload_and_manifest.go \
-                --device "$DEVICE" \
-                --version "${VERSION}-nightly" \
-                --nightly \
-                --master-manifest-only \
-                --access-token "$TOKEN"; then
-                break
-              fi
-              if [ "$attempt" -lt 5 ]; then
-                echo "Outer attempt $attempt failed for $DEVICE, sleeping before retry..."
-                sleep $((attempt * 30))
-              else
-                echo "All outer attempts exhausted for $DEVICE"
-                exit 1
-              fi
-            done
+          cd "$GITHUB_WORKSPACE/wendyos/tools/publisher"
+          # Reuse the binary from the previous step; rebuild only if missing
+          # (e.g. this step re-run in isolation).
+          [[ -x "$RUNNER_TEMP/publisher" ]] || go build -o "$RUNNER_TEMP/publisher" .
+          # One master-manifest write per device that actually published
+          # (storage variants of a device share one device manifest, hence
+          # unique_by). Devices whose builds failed keep their previous
+          # latest pointers instead of being bumped to a version they
+          # never produced.
+          readarray -t rows < <(jq -sc '[.[] | {device, version, nightly}] | unique_by(.device) | .[]' "${entries[@]}")
+          for row in "${rows[@]}"; do
+            DEVICE=$(jq -r .device <<<"$row")
+            VERSION=$(jq -r .version <<<"$row")
+            NIGHTLY=$(jq -r .nightly <<<"$row")
+            ARGS=(
+              --device "$DEVICE"
+              --version "$VERSION"
+              --master-manifest-only
+              --access-token "$TOKEN"
+            )
+            if [[ "$NIGHTLY" == "true" ]]; then
+              ARGS+=(--nightly)
+            fi
+            "$RUNNER_TEMP/publisher" "${ARGS[@]}" </dev/null
           done
 
+      - name: Tag nightly pre-release on GitHub
+        # Nightly builds only: release tags already exist (created by promote.yml).
+        # Skipped when zero entries were published (every build failed) - never
+        # tag and announce a nightly that has no images behind it.
+        if: ${{ success() && github.ref_type != 'tag' && steps.apply.outputs.published == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.detect-changes.outputs.version }}
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE/wendyos"
+
+          # -f/--force for idempotency: a re-run of this job re-tags the same
+          # commit with the same nightly-<timestamp> version.
+          git tag -f "$VERSION"
+          git push origin "$VERSION" --force
+
+          if gh release view "$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $VERSION already exists (job re-run), skipping create."
+          else
+            gh release create "$VERSION" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "WendyOS $VERSION" \
+              --generate-notes \
+              --prerelease
+          fi
+
+          # Keep the releases page tidy: retain the 7 most recent nightly
+          # pre-releases. Git tags are kept forever for traceability and
+          # promotion; nightly-YYYYMMDDTHHMMSS sorts chronologically.
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName,isPrerelease \
+            --jq '[.[] | select(.isPrerelease and (.tagName | startswith("nightly-"))) | .tagName] | sort | reverse | .[7:][]' |
+            while read -r old; do
+              echo "Pruning old nightly pre-release $old (tag kept)"
+              gh release delete "$old" --yes --repo "$GITHUB_REPOSITORY"
+            done
+
       - name: Send Discord announcement
-        if: ${{ success() }}
+        # Nightly builds only: release announcements are sent by promote.yml.
+        if: ${{ success() && github.ref_type != 'tag' && steps.apply.outputs.published == 'true' }}
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_NIGHTLY_WEBHOOK_URL }}
-          VERSION_FILE: ${{ github.workspace }}/wendyos/conf/distro/wendyos.conf
+          VERSION: ${{ needs.detect-changes.outputs.version }}
         run: |
           [[ -z "${DISCORD_WEBHOOK_URL}" ]] && exit 0
-          VERSION=$(grep 'DISTRO_VERSION' "$VERSION_FILE" | head -1 | sed 's/.*"\(.*\)"/\1/')
-          RELEASE_URL="https://github.com/${GITHUB_REPOSITORY}/releases/tag/nightly"
-          jq -n --arg msg "**WendyOS ${VERSION}-nightly** is out! Full changelog and downloads: ${RELEASE_URL}" '{content: $msg}' | \
+          RELEASE_URL="https://github.com/${GITHUB_REPOSITORY}/releases/tag/${VERSION}"
+          jq -n --arg msg "**WendyOS ${VERSION}** is out! Full changelog and downloads: ${RELEASE_URL}" '{content: $msg}' | \
             curl -fsS -o /dev/null \
               -H "Content-Type: application/json" \
               -d @- \
               "$DISCORD_WEBHOOK_URL"
-
-      - name: Tag nightly pre-release on GitHub
-        if: ${{ success() }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          VERSION=$(grep 'DISTRO_VERSION' "$GITHUB_WORKSPACE/wendyos/conf/distro/wendyos.conf" | head -1 | sed 's/.*"\(.*\)"/\1/')
-          TAG="nightly"
-
-          gh release delete "$TAG" --yes --repo "$GITHUB_REPOSITORY" 2>/dev/null || true
-
-          cd "$GITHUB_WORKSPACE/wendyos"
-          git tag -f "$TAG"
-          git tag -f "${VERSION}-nightly"
-          git push origin "$TAG" --force
-          git push origin "${VERSION}-nightly" --force
-
-          gh release create "$TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "Nightly ${VERSION}-nightly ($(date -u +%Y-%m-%d))" \
-            --generate-notes \
-            --prerelease

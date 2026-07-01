@@ -4,11 +4,18 @@ Documentation=man:systemd.swap(5)
 # Require swapfile-setup service to run first
 Requires=swapfile-setup.service
 After=swapfile-setup.service
+# Swap is an optimization, not a boot requirement: if swapfile-setup skipped
+# creation (e.g. /data too small), the file is absent — skip this unit cleanly
+# instead of failing activation.
+ConditionPathExists=/data/swapfile
 
 [Swap]
 What=/data/swapfile
 Options=sw
-Priority=-2
+# No explicit Priority: systemd's Priority= only accepts 0..32767, so a
+# negative value is rejected with a warning and ignored. The intent here is
+# "low priority, used last" — which is exactly what the kernel assigns by
+# default when no priority is given, so we omit it.
 
 [Install]
 WantedBy=swap.target

@@ -5,7 +5,6 @@
 # QEMU uses simple single-partition layout without Mender A/B partitions
 # IMPORTANT: Must be unset (not empty string) to prevent mender-maybe-setup from inheriting mender-setup
 unset MENDER_FEATURES_ENABLE
-MENDER_CONNECT_ENABLE = "0"
 
 # QEMU rootfs size configuration (in KB)
 # Override in local.conf: QEMU_ROOTFS_SIZE = "1048576"  # 1GB

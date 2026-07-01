@@ -36,3 +36,15 @@ RDEPENDS:${PN}:append:tegra = " \
         '' \
         )} \
     "
+
+# OP-TEE test / token-inspection tooling (Jetson hardware only):
+# optee-test = xtest (TA conformance suite, incl. PKCS#11) + its regression TAs.
+# opensc = pkcs11-tool, which drives the PKCS#11 token via the standard
+# Cryptoki module /usr/lib/libckteec.so.0.
+RDEPENDS:${PN}:append:tegra = " \
+    ${@oe.utils.ifelse( \
+        d.getVar('WENDYOS_DEBUG') == '1', \
+        'optee-test opensc', \
+        '' \
+        )} \
+    "

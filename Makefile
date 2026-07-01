@@ -177,7 +177,7 @@ build: _check-machine _check-setup _ensure-volumes
 		cd $(PROJECT_DIR) && \
 		. ./$(BUILD_DIR)/.wendyos-env && \
 		source ./repos/$$WENDYOS_LAYER_TREE/openembedded-core/oe-init-build-env $(BUILD_DIR) && \
-		BB_ENV_PASSTHROUGH_ADDITIONS="MACHINE" MACHINE=$(MACHINE) bitbake $(IMAGE_TARGET); \
+		BB_ENV_PASSTHROUGH_ADDITIONS="MACHINE WENDYOS_AGENT_VERSION WENDYOS_AGENT_SHA256" MACHINE=$(MACHINE) bitbake $(IMAGE_TARGET); \
 	elif [ "$$(uname)" = "Darwin" ]; then \
 		docker run \
 			--rm -t \
@@ -194,7 +194,7 @@ build: _check-machine _check-setup _ensure-volumes
 				cd $(DOCKER_WORKDIR) && \
 				. ./$(BUILD_DIR)/.wendyos-env && \
 				source ./repos/$$WENDYOS_LAYER_TREE/openembedded-core/oe-init-build-env $(BUILD_DIR) && \
-				BB_ENV_PASSTHROUGH_ADDITIONS="MACHINE" MACHINE=$(MACHINE) bitbake $(IMAGE_TARGET) \
+				BB_ENV_PASSTHROUGH_ADDITIONS="MACHINE WENDYOS_AGENT_VERSION WENDYOS_AGENT_SHA256" MACHINE=$(MACHINE) bitbake $(IMAGE_TARGET) \
 			'; \
 	else \
 		cd $(DOCKER_DIR) && docker run \
@@ -210,7 +210,7 @@ build: _check-machine _check-setup _ensure-volumes
 				cd $(DOCKER_WORKDIR) && \
 				. ./$(BUILD_DIR)/.wendyos-env && \
 				source ./repos/$$WENDYOS_LAYER_TREE/openembedded-core/oe-init-build-env $(BUILD_DIR) && \
-				BB_ENV_PASSTHROUGH_ADDITIONS="MACHINE" MACHINE=$(MACHINE) bitbake $(IMAGE_TARGET) \
+				BB_ENV_PASSTHROUGH_ADDITIONS="MACHINE WENDYOS_AGENT_VERSION WENDYOS_AGENT_SHA256" MACHINE=$(MACHINE) bitbake $(IMAGE_TARGET) \
 			'; \
 	fi
 	@printf "\n"
@@ -241,7 +241,7 @@ build-sdk: _check-machine _check-setup _ensure-volumes
 				cd $(DOCKER_WORKDIR) && \
 				. ./$(BUILD_DIR)/.wendyos-env && \
 				source ./repos/$$WENDYOS_LAYER_TREE/openembedded-core/oe-init-build-env $(BUILD_DIR) && \
-				BB_ENV_PASSTHROUGH_ADDITIONS="MACHINE" MACHINE=$(MACHINE) bitbake $(IMAGE_TARGET) -c populate_sdk \
+				BB_ENV_PASSTHROUGH_ADDITIONS="MACHINE WENDYOS_AGENT_VERSION WENDYOS_AGENT_SHA256" MACHINE=$(MACHINE) bitbake $(IMAGE_TARGET) -c populate_sdk \
 			'; \
 	else \
 		cd $(DOCKER_DIR) && docker run \
@@ -257,7 +257,7 @@ build-sdk: _check-machine _check-setup _ensure-volumes
 				cd $(DOCKER_WORKDIR) && \
 				. ./$(BUILD_DIR)/.wendyos-env && \
 				source ./repos/$$WENDYOS_LAYER_TREE/openembedded-core/oe-init-build-env $(BUILD_DIR) && \
-				BB_ENV_PASSTHROUGH_ADDITIONS="MACHINE" MACHINE=$(MACHINE) bitbake $(IMAGE_TARGET) -c populate_sdk \
+				BB_ENV_PASSTHROUGH_ADDITIONS="MACHINE WENDYOS_AGENT_VERSION WENDYOS_AGENT_SHA256" MACHINE=$(MACHINE) bitbake $(IMAGE_TARGET) -c populate_sdk \
 			'; \
 	fi
 	@printf "\n"

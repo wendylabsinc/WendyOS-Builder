@@ -27,8 +27,8 @@ fi
 # Add GST_PLUGIN_PATH environment variable if not present
 # This tells GStreamer inside the container where to find DeepStream plugins
 if ! grep -q "GST_PLUGIN_PATH=" "$CDI_SPEC"; then
-    # Add GST_PLUGIN_PATH after NVIDIA_VISIBLE_DEVICES
-    sed -i 's|NVIDIA_VISIBLE_DEVICES=void|NVIDIA_VISIBLE_DEVICES=void\n  - GST_PLUGIN_PATH=/usr/lib/aarch64-linux-gnu/gstreamer-1.0/deepstream|g' "$CDI_SPEC"
+    # Insert GST_PLUGIN_PATH as a sibling of NVIDIA_VISIBLE_DEVICES
+    sed -i -E 's|^([[:space:]]*)- NVIDIA_VISIBLE_DEVICES=void$|\1- NVIDIA_VISIBLE_DEVICES=void\n\1- GST_PLUGIN_PATH=/usr/lib/aarch64-linux-gnu/gstreamer-1.0/deepstream|' "$CDI_SPEC"
     echo "Added GST_PLUGIN_PATH to CDI spec"
 fi
 

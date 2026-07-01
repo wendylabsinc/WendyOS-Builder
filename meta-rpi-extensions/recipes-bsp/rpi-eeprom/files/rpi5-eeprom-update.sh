@@ -1,7 +1,14 @@
 #!/bin/bash
 #
-# Raspberry Pi 5 EEPROM Power Configuration Script
-# Updates PSU_MAX_CURRENT to 3000mA for proper USB gadget operation
+# Raspberry Pi 5 board boot configuration
+#
+# Sets the board-level EEPROM keys so the SAME board can boot either SD or NVMe,
+# regardless of which image flashed it. The EEPROM lives in the Pi's SPI flash
+# and persists across storage swaps, so this config is generic (NOT storage- or
+# image-specific):
+#   PSU_MAX_CURRENT=3000  full USB/peripheral current (USB gadget, NVMe HAT)
+#   PCIE_PROBE=1          probe PCIe at boot so non-HAT+ NVMe adapters are seen
+#   BOOT_ORDER=0xf461     SD -> NVMe -> USB -> restart (boot whatever is present)
 #
 
 set -e
@@ -61,19 +68,21 @@ main() {
         exit 1
     fi
 
-    # Extract current PSU_MAX_CURRENT value
-    CURRENT_PSU_CURRENT=$(echo "${CURRENT_CONFIG}" | grep "^PSU_MAX_CURRENT=" | cut -d'=' -f2 || echo "")
-
-    if [ -z "${CURRENT_PSU_CURRENT}" ]; then
-        log_message "PSU_MAX_CURRENT not found in current configuration, will add it"
-        NEEDS_UPDATE=1
-    elif [ "${CURRENT_PSU_CURRENT}" != "3000" ]; then
-        log_message "Current PSU_MAX_CURRENT=${CURRENT_PSU_CURRENT}, needs update to 3000"
-        NEEDS_UPDATE=1
-    else
-        log_message "PSU_MAX_CURRENT already set to 3000, no update needed"
-        NEEDS_UPDATE=0
-    fi
+    # Flag NEEDS_UPDATE if any board-boot key differs from the desired value.
+    NEEDS_UPDATE=0
+    check_setting() {
+        local key="$1" want="$2" current
+        current=$(echo "${CURRENT_CONFIG}" | grep "^${key}=" | cut -d'=' -f2 || true)
+        if [ "${current}" != "${want}" ]; then
+            log_message "${key}: current='${current}', needs update to '${want}'"
+            NEEDS_UPDATE=1
+        else
+            log_message "${key} already set to ${want}, no update needed"
+        fi
+    }
+    check_setting PSU_MAX_CURRENT 3000
+    check_setting PCIE_PROBE 1
+    check_setting BOOT_ORDER 0xf461
 
     if [ ${NEEDS_UPDATE} -eq 1 ]; then
         log_message "Updating EEPROM configuration..."
@@ -115,9 +124,14 @@ main() {
             exit 1
         fi
 
-        # Update or add PSU_MAX_CURRENT setting
-        sed -i '/^PSU_MAX_CURRENT=/d' "${WORK_TMPDIR}/bootconf.txt"
-        echo "PSU_MAX_CURRENT=3000" >> "${WORK_TMPDIR}/bootconf.txt"
+        # Update or add the board-boot settings (drop any existing lines first,
+        # then append the desired values).
+        sed -i '/^PSU_MAX_CURRENT=/d;/^PCIE_PROBE=/d;/^BOOT_ORDER=/d' "${WORK_TMPDIR}/bootconf.txt"
+        {
+            echo "PSU_MAX_CURRENT=3000"
+            echo "PCIE_PROBE=1"
+            echo "BOOT_ORDER=0xf461"
+        } >> "${WORK_TMPDIR}/bootconf.txt"
 
         # Create new EEPROM image with updated config
         if ! rpi-eeprom-config "${FIRMWARE_PATH}" --config "${WORK_TMPDIR}/bootconf.txt" --out "${WORK_TMPDIR}/pieeprom-new.bin"; then

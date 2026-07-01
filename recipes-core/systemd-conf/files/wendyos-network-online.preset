@@ -1,0 +1,12 @@
+# WendyOS: network-online.target provider policy (NetworkManager mode).
+#
+# With NetworkManager as the active network manager, NetworkManager-wait-online
+# already provides network-online.target. systemd-networkd-wait-online would
+# also be pulled in and *fail*: by default it waits for every networkd-managed
+# link to come online, including the Tegra camera-over-ethernet NICs (mgbe*)
+# that normally have no carrier. It times out, exits 1, and shows up red in
+# `systemctl --failed` even though the target itself is reached fine.
+#
+# Keep it from being auto-enabled. Numbered low (15-) so it wins over the
+# systemd vendor preset that would otherwise enable it.
+disable systemd-networkd-wait-online.service

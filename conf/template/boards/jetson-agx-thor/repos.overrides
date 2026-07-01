@@ -3,42 +3,56 @@
 # Sourced by bootstrap.sh after the default URL_*/SRCREV_* values are set
 # (from scripts/upstream-repos.env), but before the repos[] array is built.
 #
-# Thor pins to the wrynose Yocto series — meta-tegra has no Thor support
-# on scarthgap or earlier, and oe-core whinlatter is missing
-# c710879b4c ("kernel.bbclass: remove dependency on initramfs when not
-# bundled"), which we need so the kernel <-> initramfs cycle resolves
-# cleanly without a workaround. wrynose oe-core has that fix.
+# === BLACKSAIL / JetPack 7.2 / L4T R39.2.0 EXPERIMENT (feature/jp7.2-support) ===
+# Thor is the canary for unifying all three Jetson boards onto JetPack 7.2.
+# meta-tegra's wip-l4t-r39.2.0 branch is the first JP7 line to support both
+# the Orin family AND Thor simultaneously (per its
+# docs/release-notes/JetPack-7.2-L4T-R39.2.0-Notes.md), and it declares
+# LAYERSERIES_COMPAT = "blacksail" — the in-development Yocto series after
+# wrynose (6.0). So the whole stack moves to blacksail-era pins.
 #
-# Setting WENDYOS_LAYER_TREE here causes bootstrap.sh to clone all upstream
-# repos under repos/wrynose/ (parallel to repos/scarthgap/ used by Orin/
-# RPi/QEMU boards), and the Makefile sources oe-init-build-env from inside
-# that tree.
-WENDYOS_LAYER_TREE="wrynose"
+# This is an EXPERIMENT to find what breaks: blacksail is a moving dev target
+# and several layers (meta-openembedded, meta-virtualization) have NOT yet
+# declared blacksail compatibility upstream. We bridge that with gated
+# LAYERSERIES_COMPAT:append overrides in
+# conf/template/include/local/blacksail-compat.inc (required from local.conf).
+#
+# Isolation: WENDYOS_LAYER_TREE="blacksail" makes bootstrap.sh clone every
+# upstream repo under repos/blacksail/ — parallel to repos/wrynose/ (the
+# validated r38.4/JP7.1 Thor fallback on main) and repos/scarthgap/ (Orin/
+# RPi/QEMU). The validated trees are never touched; revert = git checkout main.
+#
+# All SRCREVs below were resolved from upstream HEADs on 2026-06-15
+# (git ls-remote). Pinned for reproducibility since blacksail/master move.
+WENDYOS_LAYER_TREE="blacksail"
 
-# bitbake follows version-numbered tags/branches (2.x); wrynose oe-core
-# requires BB_MIN_VERSION 2.18.0, so we pin to a 2.19.0 master commit.
-SRCREV_BITBAKE="df3295f016a74a1414b8af5adb9f2a3967c365b6"
-SRCREV_OECORE="42fa856a00ac16b2a7a83d7ecfa60a5be192b16c"
-SRCREV_METAYOCTO="904846ae078ee20de073040ebb77c86e19250f56"
-SRCREV_OE="420222862f5a6d95023b8f5f3b7e1808b2264ef9"
+# Split-poky composition on blacksail. oe-core master declares
+# LAYERSERIES_CORENAMES = "wrynose blacksail" and LAYERSERIES_COMPAT_core =
+# "blacksail"; meta-yocto master + bitbake master (2.19.0, >= oe-core's
+# BB_MIN_VERSION 2.18.0) match it.
+SRCREV_BITBAKE="30ccfbb849ec80cddb4383d198a1441af0ea760a"
+SRCREV_OECORE="294409c4bfe392471509d4cb6c1e6fb1063d2b3b"
+SRCREV_METAYOCTO="f49de2f33e37ca971d64215cc1a3669312e1e7c3"
 
-# meta-virtualization has no wrynose branch upstream as of 2026-05-08
-# (the remote ships scarthgap, styhead, walnascar, whinlatter, master only).
-# Master is healthy so we pin master HEAD here while waiting for an official
-# wrynose branch. Re-pin to origin/wrynose once upstream ships one.
-SRCREV_VIRT="4ba5825ee16fcded87f4d555b4ed7a7615dc67ac"
+# meta-openembedded master HEAD. NOTE: master still declares
+# LAYERSERIES_COMPAT = "whinlatter wrynose" (NOT blacksail) as of 2026-06-15
+# — bridged via blacksail-compat.inc. Re-pin to an upstream commit that
+# declares blacksail once meta-oe bumps, then drop the override.
+SRCREV_OE="5d90e6543de4d1c39424956c67ff1925a39bf3c8"
 
-# meta-tegra master-l4t-r38.4.x (Thor / L4T 38.4.0 / JetPack 7.1).
-# Branch declares LAYERSERIES_COMPAT = "whinlatter wrynose", so the same
-# commit works for both.
-SRCREV_TEGRA="1f28e68deca6773059da8635f0353aff23340790"
+# meta-virtualization master HEAD. Same situation: master declares
+# LAYERSERIES_COMPAT = "wrynose" only — bridged via blacksail-compat.inc.
+SRCREV_VIRT="022f4356d4a9b389f51472d40a9330aa59f6bb9a"
 
-# meta-tegra-community must follow the wrynose / Thor branch — its
-# scarthgap branch declares LAYERSERIES_COMPAT_tegra-community = "scarthgap"
-# only and would refuse to load in a wrynose build. The
-# master-l4t-r38.4.x branch declares "whinlatter wrynose".
-SRCREV_TEGRA_COMM="f8df91a000aa74f50a78b0fe4b60a65c90fd9ca7"
+# meta-tegra wip-l4t-r39.2.0 (JetPack 7.2 / L4T R39.2.0, Thor + Orin family).
+# conf/layer.conf declares LAYERSERIES_COMPAT_tegra = "blacksail".
+SRCREV_TEGRA="d0b2f4d81dc3cd286a6cfd244044a20cc61ebfe5"
 
-# Mender SRCREVs are intentionally NOT overridden as there is no wrynose
-# support yet.
-# To reconsider once upstream ships the expected branch.
+# meta-tegra-community wip-l4t-r39.2.0; conf/layer.conf declares
+# LAYERSERIES_COMPAT_tegra-community = "blacksail". LAYERDEPENDS pulls in
+# openembedded-layer + meta-python, which is why those must be made
+# blacksail-compatible (see blacksail-compat.inc).
+SRCREV_TEGRA_COMM="931db8c0f56eefbfb028d340ade0953b91006d54"
+
+# Mender SRCREVs are intentionally NOT overridden — JetPack 7 has no Mender
+# support; Thor uses the wendyos-update OTA stack (WENDYOS_OTA = "wendy").
