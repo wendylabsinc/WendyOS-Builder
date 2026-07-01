@@ -39,6 +39,14 @@ type ManifestEntry struct {
 	FlashpackPath     string `json:"flashpack_path,omitempty"`
 	FlashpackSize     int64  `json:"flashpack_size,omitempty"`
 	FlashpackChecksum string `json:"flashpack_checksum,omitempty"`
+
+	// SBOM is the image-level SPDX Software Bill of Materials bundle
+	// (a .spdx.tar.zst produced by the create-spdx class). It is an audit
+	// artifact, not something the OTA client flashes; recording it in the
+	// manifest just makes it discoverable alongside the image it describes.
+	SBOMPath     string `json:"sbom_path,omitempty"`
+	SBOMSize     int64  `json:"sbom_size,omitempty"`
+	SBOMChecksum string `json:"sbom_checksum,omitempty"`
 }
 
 func (e *ManifestEntry) validate() error {

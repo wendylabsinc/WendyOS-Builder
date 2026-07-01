@@ -115,7 +115,15 @@ type VersionMetadata struct {
 	FlashpackPath      string     `json:"flashpack_path,omitempty"`
 	FlashpackChecksum  string     `json:"flashpack_checksum,omitempty"`
 	FlashpackSizeBytes int64      `json:"flashpack_size_bytes,omitempty"`
-	BmapPath           string     `json:"bmap_path,omitempty"`
+	// SBOM is the image-level SPDX Software Bill of Materials bundle
+	// (.spdx.tar.zst from the create-spdx class). It describes the OS image
+	// contents and is not storage-specific, so a single top-level field
+	// (last writer wins across storage variants) is sufficient. Older CLIs
+	// ignore these unknown fields.
+	SBOMPath      string `json:"sbom_path,omitempty"`
+	SBOMChecksum  string `json:"sbom_checksum,omitempty"`
+	SBOMSizeBytes int64  `json:"sbom_size_bytes,omitempty"`
+	BmapPath      string `json:"bmap_path,omitempty"`
 	// Storage-specific image paths for devices that produce multiple artifacts
 	// (e.g. jetson-orin-nano which ships both an NVMe and an SD card image).
 	// Path above stays set to the NVMe image for backwards compatibility with
@@ -987,6 +995,7 @@ func main() {
 	recoveryFile := flag.String("recovery-file", "", "Optional recovery/tegraflash file path to upload")
 	flashpackFile := flag.String("flashpack-file", "", "Optional Thor flashpack (.tar.zst) file path to upload")
 	bmapFile := flag.String("bmap-file", "", "Optional .bmap block-map file to upload alongside the OS image")
+	sbomFile := flag.String("sbom", "", "Optional SPDX SBOM bundle (.spdx.tar.zst) to upload alongside the OS image and record in the manifest")
 	storage := flag.String("storage", "", "Storage type for multi-artifact devices: nvme or sd (omit for single-storage devices)")
 	updateOnly := flag.Bool("update-only", false, "Only update manifests without uploading")
 	skipMasterManifest := flag.Bool("skip-master-manifest", false, "Skip master manifest update (a separate job will handle it)")
@@ -1071,6 +1080,9 @@ func main() {
 		}
 		if *flashpackFile != "" {
 			log.Fatal("--flashpack-file is not supported for firmware uploads")
+		}
+		if *sbomFile != "" {
+			log.Fatal("--sbom is not supported for firmware uploads")
 		}
 	} else if *createDevice {
 		// For creating a device, we only need the device type
@@ -1167,6 +1179,13 @@ func main() {
 					log.WithError(err).Fatal("Invalid bmap file")
 				}
 			}
+
+			// Validate SBOM file if provided
+			if *sbomFile != "" {
+				if err := validateFileExists(*sbomFile); err != nil {
+					log.WithError(err).Fatal("Invalid SBOM file")
+				}
+			}
 		}
 	}
 
@@ -1253,6 +1272,7 @@ func main() {
 			entry.OTAUpdatePath, entry.OTAUpdateSize, entry.OTAUpdateChecksum,
 			entry.RecoveryPath, entry.RecoverySize, entry.RecoveryChecksum,
 			entry.FlashpackPath, entry.FlashpackSize, entry.FlashpackChecksum,
+			entry.SBOMPath, entry.SBOMSize, entry.SBOMChecksum,
 			entry.Storage, entry.Nightly, entry.Stability, *notifyDiscord, true,
 		)
 		return
@@ -1374,6 +1394,13 @@ func main() {
 			flashpackFileChan = processFileAsync(ctx, *flashpackFile, "flashpack")
 		}
 
+		// Process SBOM file if provided (already .spdx.tar.zst — not recompressed)
+		var sbomFileChan <-chan fileProcessResult
+		if *sbomFile != "" {
+			log.Info("Processing SBOM file...")
+			sbomFileChan = processFileAsync(ctx, *sbomFile, "sbom")
+		}
+
 		// Wait for main file processing
 		var mainResult fileProcessResult
 		if mainFileChan != nil {
@@ -1414,6 +1441,16 @@ func main() {
 			log.Info("Flashpack file processed successfully")
 		}
 
+		// Wait for SBOM file processing
+		var sbomResult fileProcessResult
+		if sbomFileChan != nil {
+			sbomResult = <-sbomFileChan
+			if sbomResult.err != nil {
+				log.WithError(sbomResult.err).Fatal("Failed to process SBOM file")
+			}
+			log.Info("SBOM file processed successfully")
+		}
+
 		// Upload files in parallel
 		log.Info("Starting parallel uploads...")
 
@@ -1435,6 +1472,11 @@ func main() {
 		var flashpackUploadChan <-chan uploadResult
 		if flashpackResult.compressedPath != "" {
 			flashpackUploadChan = uploadFileAsync(ctx, bucket, flashpackResult.compressedPath, *deviceType, *version)
+		}
+
+		var sbomUploadChan <-chan uploadResult
+		if sbomResult.compressedPath != "" {
+			sbomUploadChan = uploadFileAsync(ctx, bucket, sbomResult.compressedPath, *deviceType, *version)
 		}
 
 		// bmap is a small XML file; upload it in parallel with the others.
@@ -1513,6 +1555,15 @@ func main() {
 			log.Info("Bmap file uploaded successfully")
 		}
 
+		var sbomUpload uploadResult
+		if sbomUploadChan != nil {
+			sbomUpload = <-sbomUploadChan
+			if sbomUpload.err != nil {
+				log.WithError(sbomUpload.err).Fatal("Failed to upload SBOM file")
+			}
+			log.Info("SBOM file uploaded successfully")
+		}
+
 		var zstUpload uploadResult
 		if zstUploadChan != nil {
 			zstUpload = <-zstUploadChan
@@ -1562,6 +1613,9 @@ func main() {
 				FlashpackPath:     flashpackUpload.path,
 				FlashpackSize:     flashpackUpload.size,
 				FlashpackChecksum: flashpackResult.checksum,
+				SBOMPath:          sbomUpload.path,
+				SBOMSize:          sbomUpload.size,
+				SBOMChecksum:      sbomResult.checksum,
 			}
 			if err := writeManifestEntry(*metadataOut, entry); err != nil {
 				log.WithError(err).Fatal("Failed to write manifest entry")
@@ -1579,6 +1633,7 @@ func main() {
 			otaUpdateUpload.path, otaUpdateUpload.size, otaUpdateResult.checksum,
 			recoveryUpload.path, recoveryUpload.size, recoveryResult.checksum,
 			flashpackUpload.path, flashpackUpload.size, flashpackResult.checksum,
+			sbomUpload.path, sbomUpload.size, sbomResult.checksum,
 			*storage, *nightly, *stability, *notifyDiscord, *skipMasterManifest,
 		)
 	} else {
@@ -1653,7 +1708,7 @@ func main() {
 			recoverySize = recoveryAttrs.Size
 		}
 
-		updateManifests(ctx, bucket, *deviceType, *version, imagePath, attrs.Size, mainChecksum, "", "", "", 0, otaUpdatePath, otaUpdateSize, otaUpdateChecksum, recoveryPath, recoverySize, recoveryChecksum, "", 0, "", *storage, *nightly, *stability, *notifyDiscord, *skipMasterManifest)
+		updateManifests(ctx, bucket, *deviceType, *version, imagePath, attrs.Size, mainChecksum, "", "", "", 0, otaUpdatePath, otaUpdateSize, otaUpdateChecksum, recoveryPath, recoverySize, recoveryChecksum, "", 0, "", "", 0, "", *storage, *nightly, *stability, *notifyDiscord, *skipMasterManifest)
 	}
 }
 
@@ -1828,7 +1883,7 @@ func uploadFile(ctx context.Context, bucket *storage.BucketHandle, localPath, de
 	return destinationPath, nil
 }
 
-func updateManifests(ctx context.Context, bucket *storage.BucketHandle, deviceType, version, filePath string, fileSize int64, fileChecksum string, bmapPath string, zstPath, zstChecksum string, zstSize int64, otaUpdatePath string, otaUpdateSize int64, otaUpdateChecksum string, recoveryPath string, recoverySize int64, recoveryChecksum string, flashpackPath string, flashpackSize int64, flashpackChecksum string, storage string, isNightly bool, stability string, notifyDiscord bool, skipMasterManifest bool) {
+func updateManifests(ctx context.Context, bucket *storage.BucketHandle, deviceType, version, filePath string, fileSize int64, fileChecksum string, bmapPath string, zstPath, zstChecksum string, zstSize int64, otaUpdatePath string, otaUpdateSize int64, otaUpdateChecksum string, recoveryPath string, recoverySize int64, recoveryChecksum string, flashpackPath string, flashpackSize int64, flashpackChecksum string, sbomPath string, sbomSize int64, sbomChecksum string, storage string, isNightly bool, stability string, notifyDiscord bool, skipMasterManifest bool) {
 	logger := log.WithFields(logrus.Fields{
 		"device_type":     deviceType,
 		"version":         version,
@@ -1854,7 +1909,7 @@ func updateManifests(ctx context.Context, bucket *storage.BucketHandle, deviceTy
 
 	if skipMasterManifest {
 		logger.Info("Updating device manifest (master manifest will be updated by a separate publish job)")
-		if err := updateDeviceManifest(ctx, deviceLogger, bucket, deviceType, version, filePath, fileSize, fileChecksum, bmapPath, zstPath, zstChecksum, zstSize, otaUpdatePath, otaUpdateSize, otaUpdateChecksum, recoveryPath, recoverySize, recoveryChecksum, flashpackPath, flashpackSize, flashpackChecksum, storage, isNightly); err != nil {
+		if err := updateDeviceManifest(ctx, deviceLogger, bucket, deviceType, version, filePath, fileSize, fileChecksum, bmapPath, zstPath, zstChecksum, zstSize, otaUpdatePath, otaUpdateSize, otaUpdateChecksum, recoveryPath, recoverySize, recoveryChecksum, flashpackPath, flashpackSize, flashpackChecksum, sbomPath, sbomSize, sbomChecksum, storage, isNightly); err != nil {
 			logger.WithError(err).Fatal("Failed to update device manifest")
 		}
 	} else {
@@ -1876,7 +1931,7 @@ func updateManifests(ctx context.Context, bucket *storage.BucketHandle, deviceTy
 
 		go func() {
 			defer wg.Done()
-			deviceErrChan <- updateDeviceManifest(ctx, deviceLogger, bucket, deviceType, version, filePath, fileSize, fileChecksum, bmapPath, zstPath, zstChecksum, zstSize, otaUpdatePath, otaUpdateSize, otaUpdateChecksum, recoveryPath, recoverySize, recoveryChecksum, flashpackPath, flashpackSize, flashpackChecksum, storage, isNightly)
+			deviceErrChan <- updateDeviceManifest(ctx, deviceLogger, bucket, deviceType, version, filePath, fileSize, fileChecksum, bmapPath, zstPath, zstChecksum, zstSize, otaUpdatePath, otaUpdateSize, otaUpdateChecksum, recoveryPath, recoverySize, recoveryChecksum, flashpackPath, flashpackSize, flashpackChecksum, sbomPath, sbomSize, sbomChecksum, storage, isNightly)
 		}()
 
 		go func() {
@@ -2074,7 +2129,7 @@ func copyManifestArtifact(ctx context.Context, logger *logrus.Entry, bucket *sto
 	return destPath
 }
 
-func updateDeviceManifest(ctx context.Context, logger *logrus.Entry, bucket *storage.BucketHandle, deviceType, version, filePath string, fileSize int64, fileChecksum string, bmapPath string, zstPath, zstChecksum string, zstSize int64, otaUpdatePath string, otaUpdateSize int64, otaUpdateChecksum string, recoveryPath string, recoverySize int64, recoveryChecksum string, flashpackPath string, flashpackSize int64, flashpackChecksum string, storageType string, isNightly bool) error {
+func updateDeviceManifest(ctx context.Context, logger *logrus.Entry, bucket *storage.BucketHandle, deviceType, version, filePath string, fileSize int64, fileChecksum string, bmapPath string, zstPath, zstChecksum string, zstSize int64, otaUpdatePath string, otaUpdateSize int64, otaUpdateChecksum string, recoveryPath string, recoverySize int64, recoveryChecksum string, flashpackPath string, flashpackSize int64, flashpackChecksum string, sbomPath string, sbomSize int64, sbomChecksum string, storageType string, isNightly bool) error {
 	manifestPath := fmt.Sprintf("manifests/%s.json", deviceType)
 	logger = logger.WithField("manifest_path", manifestPath)
 	logger.Info("Processing device manifest")
@@ -2265,6 +2320,20 @@ func updateDeviceManifest(ctx context.Context, logger *logrus.Entry, bucket *sto
 				"flashpack_size":     flashpackSize,
 				"flashpack_checksum": flashpackChecksum,
 			}).Info("Updating flashpack metadata")
+		}
+
+		// Update SBOM fields only if provided. The SBOM describes the OS image
+		// contents (identical across storage variants), so it is a single
+		// top-level field with last-writer-wins semantics — no per-storage split.
+		if sbomPath != "" {
+			versionMetadata.SBOMPath = sbomPath
+			versionMetadata.SBOMChecksum = sbomChecksum
+			versionMetadata.SBOMSizeBytes = sbomSize
+			logger.WithFields(logrus.Fields{
+				"sbom_path":     sbomPath,
+				"sbom_size":     sbomSize,
+				"sbom_checksum": sbomChecksum,
+			}).Info("Updating SBOM metadata")
 		}
 
 		// Validate that at least one file is provided
