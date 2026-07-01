@@ -11,11 +11,11 @@ SRC_URI:append = " \
     file://rpi-wendy-mbr-fstab \
     "
 
-# RPi4/5 boot from a GPT image and reference partitions by PARTUUID (rpi-fstab,
-# placeholders RPI_BOOT_UUID / RPI_ROOT_UUID get substituted below).
-# RPi3 boots from MBR (BCM2837 GPU bootrom limitation) and references
-# partitions by filesystem label; the MBR template has no placeholders, so the
-# substitution sed lines below are no-ops on that path.
+# RPi4/5 boot from a GPT image. /boot is referenced by filesystem LABEL (stable
+# across builds — see WDY-1768); only the rootfs "/" still uses a substituted
+# PARTUUID placeholder (RPI_ROOT_UUID, rpi-fstab only). RPi3 boots from MBR
+# (BCM2837 GPU bootrom limitation) and references partitions by label too; its
+# MBR template has no placeholder, so the RPI_ROOT_UUID sed is a no-op there.
 #
 # Pinned to :raspberrypi3-64 to mirror the override used in rpi-cmdline.bbappend
 # (see comment there). WendyOS only ships the 64-bit RPi3 image; if a 32-bit
@@ -23,9 +23,10 @@ SRC_URI:append = " \
 RPI_FSTAB_TEMPLATE = "rpi-fstab"
 RPI_FSTAB_TEMPLATE:raspberrypi3-64 = "rpi-mbr-fstab"
 
-# The wendy A/B fstab is GPT (PARTUUID=RPI_BOOT_UUID for /boot) on RPi4/5; RPi3's
-# MBR variant references /boot by LABEL instead (PARTUUID won't resolve on MBR —
-# see rpi-wendy-mbr-fstab). Same :raspberrypi3-64 pin rationale as above.
+# The wendy A/B fstab references /boot by LABEL on both GPT (RPi4/5) and MBR
+# (RPi3): a baked PARTUUID drifts across builds since OTA only rewrites the
+# rootfs slot and never re-partitions (WDY-1768), and PARTUUID won't resolve on
+# MBR anyway. Same :raspberrypi3-64 pin rationale as above.
 RPI_WENDY_FSTAB_TEMPLATE = "rpi-wendy-fstab"
 RPI_WENDY_FSTAB_TEMPLATE:raspberrypi3-64 = "rpi-wendy-mbr-fstab"
 
@@ -34,11 +35,9 @@ do_install:append() {
         # wendyos-update A/B layout (RPi3/4/5): no Mender postprocess to generate
         # fstab. Install our A/B fstab (no "/" entry — the kernel mounts the
         # slot via boot-ab.cmd.in's root=; /boot stays mounted for fw_setenv's
-        # uboot.env; /data + /config by label). On RPi4/5 (GPT) RPI_BOOT_UUID is
-        # substituted for /boot; on RPi3 (MBR) the template uses LABEL=boot and
-        # the sed is a harmless no-op. /config and /data always use LABEL=.
+        # uboot.env). /boot, /config and /data are all referenced by LABEL, so
+        # there is no placeholder to substitute on this path (WDY-1768).
         install -m 0644 ${UNPACKDIR}/${RPI_WENDY_FSTAB_TEMPLATE} ${D}${sysconfdir}/fstab
-        sed -i "s/RPI_BOOT_UUID/${WENDYOS_BOOT_PARTUUID}/g" ${D}${sysconfdir}/fstab
     elif [ "${WENDYOS_RPI_UBOOT}" = "1" ]; then
         # Mender-managed MBR layout: boot/A/B/extended{config,data}. The
         # poky-stock /etc/fstab (already installed by base-files's own
@@ -49,14 +48,15 @@ do_install:append() {
         # /config entries that don't match this layout, so we skip it here.
         :
     else
+        # /boot and /config are referenced by LABEL; only the rootfs "/" uses a
+        # substituted PARTUUID here (WDY-1768).
         install -m 0644 ${UNPACKDIR}/${RPI_FSTAB_TEMPLATE} ${D}${sysconfdir}/fstab
-        sed -i "s/RPI_BOOT_UUID/${WENDYOS_BOOT_PARTUUID}/g" ${D}${sysconfdir}/fstab
         sed -i "s/RPI_ROOT_UUID/${WENDYOS_ROOT_PARTUUID}/g" ${D}${sysconfdir}/fstab
     fi
 }
 
 # Trigger a rebuild whenever the inputs to fstab generation change
-do_install[vardeps] += " WENDYOS_BOOT_PARTUUID WENDYOS_ROOT_PARTUUID RPI_FSTAB_TEMPLATE RPI_WENDY_FSTAB_TEMPLATE WENDYOS_RPI_UBOOT WENDYOS_OTA"
+do_install[vardeps] += " WENDYOS_ROOT_PARTUUID RPI_FSTAB_TEMPLATE RPI_WENDY_FSTAB_TEMPLATE WENDYOS_RPI_UBOOT WENDYOS_OTA"
 
 # systemd persistent log
 # If /var/log is a symlink into /var/volatile/log, journald cannot persist logs
