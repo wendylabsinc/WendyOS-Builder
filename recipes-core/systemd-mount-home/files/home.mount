@@ -13,7 +13,14 @@ Before=local-fs.target
 What=/data/home
 Where=/home
 Type=none
-Options=bind
+# x-systemd.mkdir creates the /data/home bind source before mounting. On a
+# freshly initialised /data (first boot, or after data-init reinitialises a
+# bad fs) the source does not exist yet, and a bind mount of a missing source
+# fails — leaving /home as the empty rootfs skeleton and breaking the wendy
+# user's persistent home (and, via linger, user@1000.service). Every other
+# /data bind mount (var-lib-containerd, var-lib-tee, var-lib-wendy, var-log)
+# already uses this; home.mount was the lone exception.
+Options=bind,x-systemd.mkdir
 
 [Install]
 WantedBy=local-fs.target
