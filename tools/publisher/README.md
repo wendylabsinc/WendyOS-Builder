@@ -89,6 +89,23 @@ For devices that require recovery packages (e.g., Jetson devices):
 
 Both files will be uploaded and checksummed. The manifest will contain paths and checksums for both.
 
+### SBOM (Software Bill of Materials)
+
+Attach the image-level SPDX SBOM bundle produced by the Yocto `create-spdx`
+class (`.spdx.tar.zst`, found in the image deploy dir):
+```bash
+./upload_and_manifest \
+  --device jetson-agx-orin \
+  --version 1.0.0 \
+  --file /path/to/image.zip \
+  --sbom /path/to/wendyos-image-jetson-agx-orin.spdx.tar.zst
+```
+
+The SBOM is uploaded as-is (already compressed, never recompressed) and recorded
+in the manifest under `sbom_path` / `sbom_checksum` / `sbom_size_bytes`. It
+describes the OS image contents, so it is a single top-level field (not split
+per storage variant) and is never treated as a flashable payload.
+
 ### Nightly Builds
 
 Upload a nightly/untested build:
