@@ -16,19 +16,37 @@ SRCREV_rspec = "6999a89a76a0329f440d5740497bedb9dd431297"
 SRCREV_yajl = "f344d21280c3e4094919fd318bc5ce75da91fc06"
 
 SRCREV_FORMAT = "crun_rspec"
-# Use literal "git" destsuffixes and an explicit S (scarthgap style) rather than
-# master's ${BB_GIT_DEFAULT_DESTSUFFIX} so this parses cleanly on scarthgap.
+# Nest the vendored sub-repos under the crun git checkout via
+# ${BB_GIT_DEFAULT_DESTSUFFIX} (upstream master's form). On blacksail
+# bitbake.conf sets it to "${BP}" and the crun repo unpacks there; on scarthgap
+# the older fetcher ignores the variable and unpacks crun to "git", so the
+# BB_GIT_DEFAULT_DESTSUFFIX ?= "git" fallback below resolves these destsuffixes
+# to the same "git/libocispec..." tree. S is handled tree-aware below.
+BB_GIT_DEFAULT_DESTSUFFIX ?= "git"
 SRC_URI = "git://github.com/containers/crun.git;branch=main;name=crun;protocol=https \
-           git://github.com/containers/libocispec.git;branch=main;name=libocispec;destsuffix=git/libocispec;protocol=https \
-           git://github.com/opencontainers/runtime-spec.git;branch=main;name=rspec;destsuffix=git/libocispec/runtime-spec;protocol=https \
-           git://github.com/opencontainers/image-spec.git;branch=main;name=ispec;destsuffix=git/libocispec/image-spec;protocol=https \
-           git://github.com/containers/yajl.git;branch=main;name=yajl;destsuffix=git/libocispec/yajl;protocol=https \
+           git://github.com/containers/libocispec.git;branch=main;name=libocispec;destsuffix=${BB_GIT_DEFAULT_DESTSUFFIX}/libocispec;protocol=https \
+           git://github.com/opencontainers/runtime-spec.git;branch=main;name=rspec;destsuffix=${BB_GIT_DEFAULT_DESTSUFFIX}/libocispec/runtime-spec;protocol=https \
+           git://github.com/opencontainers/image-spec.git;branch=main;name=ispec;destsuffix=${BB_GIT_DEFAULT_DESTSUFFIX}/libocispec/image-spec;protocol=https \
+           git://github.com/containers/yajl.git;branch=main;name=yajl;destsuffix=${BB_GIT_DEFAULT_DESTSUFFIX}/libocispec/yajl;protocol=https \
            file://0001-libocispec-correctly-parse-JSON-schema-references.patch;patchdir=libocispec \
            file://0002-libocispec-fix-array-items-parsing.patch;patchdir=libocispec \
           "
 
 PV = "1.28.0+git"
-S = "${WORKDIR}/git"
+
+# Source dir for the git fetch — tree-dependent (see libpisp for the same split):
+#   - blacksail+: leave S unset. bitbake.conf defaults it to ${UNPACKDIR}/${BP}
+#     and BB_GIT_DEFAULT_DESTSUFFIX to ${BP}, so the crun checkout lands exactly
+#     there. Do NOT set S to anything mentioning WORKDIR — newer oe-core's
+#     do_qa_unpack fatals on S = "${WORKDIR}/git" (and on any "${WORKDIR}" in S),
+#     and it scans the raw S string, so even an unused branch would trip it.
+#   - scarthgap: the older fetcher unpacks crun to ${WORKDIR}/git and its default
+#     S doesn't point there, so set it (no such check on scarthgap). Setting it
+#     from anonymous python keeps the WORKDIR token out of S on blacksail.
+python () {
+    if 'scarthgap' in (d.getVar('LAYERSERIES_CORENAMES') or '').split():
+        d.setVar('S', '${WORKDIR}/git')
+}
 
 inherit autotools-brokensep pkgconfig features_check
 
