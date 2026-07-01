@@ -16,50 +16,21 @@ LIC_FILES_CHKSUM = "file://src/${GO_IMPORT}/LICENSE;md5=382861ee89f2ea998f59ae54
 # In-repo Go source (committed under src/, incl. vendor/). Built offline.
 GO_IMPORT = "github.com/wendylabsinc/wendyos-builder/wendy-mesh-cni"
 
-FILESEXTRAPATHS:prepend := "${THISDIR}:"
+FILESEXTRAPATHS:prepend := "${THISDIR}/src:"
 
-# --- SRC_URI layout note (read before touching subdir=/S/GO_SRCDIR) ---
-# BitBake's local (file://) fetcher unpacks via a plain recursive copy
-# (bb.fetch2.FetchMethod.unpack -> generic fetch2 unpack: `cp -fpPRH "<src>"
-# "<destdir>"`, run with cwd=<subdir-or-rootdir>). cp -R preserves the
-# *basename of the source path*, it does not dump the source's contents
-# into destdir. So a single-entry SRC_URI naming the whole "src" directory,
-# e.g. `file://src;subdir=X`, always lands the tree at
-# ${WORKDIR}/X/src/... -- an extra "src" segment is unavoidably re-added.
-# That extra segment is exactly what broke this recipe before: the old
-# `SRC_URI = "file://src;subdir=${BP}/src/${GO_IMPORT}"` landed the tree one
-# level *deeper* than declared, at .../${GO_IMPORT}/src/{go.mod,LICENSE,...},
-# while S/GO_SRCDIR/LIC_FILES_CHKSUM all pointed one directory short of that.
-#
-# go.bbclass requires the module root at ${S}/src/${GO_IMPORT} (GOPATH-style:
-# go_do_configure does `ln -snf ${S}/src ${B}/`; go-mod.bbclass runs
-# do_compile with cwd ${B}/src/${GO_WORKDIR} == ${B}/src/${GO_IMPORT}, which
-# resolves through that symlink to ${S}/src/${GO_IMPORT} -- exactly where
-# go.mod must sit; go_do_install also hardcodes `${S}/src/${GO_IMPORT}` as
-# its tar source). That path structure is not overridable without patching
-# go.bbclass, so S must supply it.
-#
-# To land go.mod etc. directly at ${S}/src/${GO_IMPORT} (not one level
-# nested under a redundant "src") without renaming the on-disk src/
-# directory (recipes-networking/wendy-mesh-cni/src/ must stay put --
-# .superpowers/sdd/run-tests.sh and go-c.sh hardcode that path), we fetch
-# src/'s children individually. Each child keeps ITS OWN basename (cmd,
-# go.mod, go.sum, internal, LICENSE, vendor), so cp -R drops each one
-# directly into subdir= with no extra wrapper directory:
-#   file://src/cmd;subdir=${BP}/src/${GO_IMPORT}       -> .../${GO_IMPORT}/cmd
-#   file://src/go.mod;subdir=${BP}/src/${GO_IMPORT}    -> .../${GO_IMPORT}/go.mod
-#   ... (go.sum, internal, LICENSE, vendor likewise)
-# giving exactly ${WORKDIR}/${BP}/src/${GO_IMPORT}/{cmd,go.mod,go.sum,
-# internal,LICENSE,vendor} == ${S}/src/${GO_IMPORT}/... once S = ${WORKDIR}/${BP}
-# (the bitbake.conf default, unchanged here). Verified by hand-copying with
-# the same `cp -fpPRH` invocation fetch2 uses -- see task report.
+# fetch2 rule: a file:// url whose path contains no '/' is copied straight into
+# subdir= (no destdir reconstruction); cp -R then preserves the basename. So
+# each slash-free entry below lands at ${WORKDIR}/${BP}/src/${GO_IMPORT}/<name>
+# == ${S}/src/${GO_IMPORT}/<name>, which is the module root go.bbclass hardcodes
+# (go_do_configure `ln -snf ${S}/src ${B}/`, go_do_install `tar -C ${S}/src/${GO_IMPORT}`).
+# The files are resolved via FILESEXTRAPATHS=${THISDIR}/src above.
 SRC_URI = "\
-    file://src/cmd;subdir=${BP}/src/${GO_IMPORT} \
-    file://src/go.mod;subdir=${BP}/src/${GO_IMPORT} \
-    file://src/go.sum;subdir=${BP}/src/${GO_IMPORT} \
-    file://src/internal;subdir=${BP}/src/${GO_IMPORT} \
-    file://src/LICENSE;subdir=${BP}/src/${GO_IMPORT} \
-    file://src/vendor;subdir=${BP}/src/${GO_IMPORT} \
+    file://cmd;subdir=${BP}/src/${GO_IMPORT} \
+    file://go.mod;subdir=${BP}/src/${GO_IMPORT} \
+    file://go.sum;subdir=${BP}/src/${GO_IMPORT} \
+    file://internal;subdir=${BP}/src/${GO_IMPORT} \
+    file://LICENSE;subdir=${BP}/src/${GO_IMPORT} \
+    file://vendor;subdir=${BP}/src/${GO_IMPORT} \
     "
 
 GO_SRCDIR = "${S}/src/${GO_IMPORT}"
