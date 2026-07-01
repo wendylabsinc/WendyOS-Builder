@@ -15,6 +15,9 @@ import (
 
 // containerIPFromPrev returns the first IPv4 address the previous plugin assigned.
 func containerIPFromPrev(nc *config.NetConf) (net.IP, *current.Result, error) {
+	if nc.PrevResult == nil {
+		return nil, nil, fmt.Errorf("no prevResult: wendy-mesh must be chained after a plugin that provides one")
+	}
 	res, err := current.NewResultFromResult(nc.PrevResult)
 	if err != nil {
 		return nil, nil, fmt.Errorf("parsing prevResult: %w", err)
