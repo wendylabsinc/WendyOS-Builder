@@ -27,7 +27,14 @@ WENDYOS_AGENT_SHA256  ??= "72b08b61bb26ab4ce9693e19fe5f44d7108f7ddbea58747024982
 # dots: 2026.06.10-142200 -> 2026.06.10.142200.
 PV = "${@d.getVar('WENDYOS_AGENT_VERSION').replace('-', '.')}"
 
-SRC_URI = "https://github.com/wendylabsinc/WendyOS/releases/download/${WENDYOS_AGENT_VERSION}/wendy-agent-linux-arm64-${WENDYOS_AGENT_VERSION}.tar.gz;name=agent \
+# Release asset architecture. The upstream release publishes one tarball per
+# arch (wendy-agent-linux-<arch>-<version>.tar.gz). Default to arm64 for
+# Tegra/RPi; the x86 machines override this to amd64. CI passes the matching
+# WENDYOS_AGENT_SHA256 for whichever tarball this build fetches.
+WENDYOS_AGENT_RELEASE_ARCH = "arm64"
+WENDYOS_AGENT_RELEASE_ARCH:x86-wendyos = "amd64"
+
+SRC_URI = "https://github.com/wendylabsinc/WendyOS/releases/download/${WENDYOS_AGENT_VERSION}/wendy-agent-linux-${WENDYOS_AGENT_RELEASE_ARCH}-${WENDYOS_AGENT_VERSION}.tar.gz;name=agent \
            file://wendyos-agent.service \
            file://wendyos-agent-updater.service \
            file://wendyos-agent-updater.timer \
@@ -46,7 +53,7 @@ do_install() {
     # Install the pre-built binary (fetched + checksum-verified by do_fetch)
     # into /usr/local/bin so it lives alongside runtime updates written by
     # wendyos-agent-updater.sh. The tarball unpacks to
-    # wendy-agent-linux-arm64/wendy-agent; find it rather than hard-coding the
+    # wendy-agent-linux-<arch>/wendy-agent; find it rather than hard-coding the
     # inner directory so a future asset layout change fails loudly here instead
     # of silently shipping nothing.
     BINARY=$(find ${S} -type f -name wendy-agent ! -path "*/wendy-cli*" | head -1)

@@ -1,0 +1,13 @@
+[Unit]
+Description=WendyOS NVIDIA dGPU CDI generation
+After=local-fs.target
+ConditionPathExistsGlob=/dev/nvidia*
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/generate-nvidia-cdi.sh
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

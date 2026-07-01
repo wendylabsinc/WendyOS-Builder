@@ -118,6 +118,7 @@ BUILDCFG_VARS += " \
     WENDYOS_PERSIST_JOURNAL_LOGS \
     WENDYOS_UPDATE_BOOTLOADER \
     WENDYOS_DEEPSTREAM \
+    WENDYOS_NVIDIA_DGPU \
     "
 
 # Include hardware-specific image configuration

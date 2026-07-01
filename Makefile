@@ -75,7 +75,7 @@ help:
 	@printf "  make build          - Build the complete WendyOS image ($(IMAGE_TARGET))\n"
 	@printf "  make build-sdk      - Build the SDK for application development\n"
 	@printf "  make shell          - Open interactive shell in build container\n"
-	@printf "  make deploy         - Copy tegraflash tarball to host (macOS only)\n"
+	@printf "  make deploy         - Copy build artifacts to host (macOS only)\n"
 	@printf "\n"
 	@printf "$(GREEN)Flash Commands:$(NC)\n"
 	@printf "  make flash-to-external - Interactive: create .img and flash to external drive\n"
@@ -103,13 +103,15 @@ help:
 	@printf "  make build MACHINE=jetson-agx-orin-devkit-nvme-wendyos  # Build for AGX Orin NVMe\n"
 	@printf "  make build MACHINE=jetson-agx-orin-devkit-emmc-wendyos  # Build for AGX Orin onboard eMMC\n"
 	@printf "  make build MACHINE=raspberrypi5-wendyos       # Build for RPi5\n"
+	@printf "  make setup BOARD=generic-x86-64               # First time setup for generic x86_64 PC\n"
+	@printf "  make build MACHINE=genericx86-64-wendyos      # Build for generic x86_64 PC\n"
 	@printf "  make shell                                    # Interactive development\n"
 	@printf "  make flash-to-external                        # Interactive flash\n"
 	@printf "  make flash-to-external FLASH_DEVICE=/dev/disk4 FLASH_CONFIRM=yes  # Non-interactive\n"
 	@printf "\n"
 	@if [ "$$(uname)" = "Darwin" ]; then \
 		printf "$(YELLOW)macOS Note:$(NC) Build artifacts stored in Docker volumes (case-sensitive)\n"; \
-		printf "            Use 'make deploy' to copy tegraflash tarball after build.\n\n"; \
+		printf "            Use 'make deploy' to copy build artifacts after build.\n\n"; \
 	fi
 
 #
@@ -322,7 +324,7 @@ volumes-remove:
 		fi
 
 #
-# Deploy tegraflash tarball (macOS)
+# Deploy build artifacts from Docker volume (macOS)
 #
 deploy: _check-machine
 	@if [ "$$(uname)" != "Darwin" ]; then \
@@ -330,7 +332,7 @@ deploy: _check-machine
 		printf "  $(PROJECT_DIR)/build/tmp/deploy/images/$(MACHINE)/\n"; \
 		exit 0; \
 	fi
-	@printf "$(CYAN)Copying tegraflash tarball from Docker volume...$(NC)\n"
+	@printf "$(CYAN)Copying build artifacts from Docker volume...$(NC)\n"
 	@mkdir -p $(PROJECT_DIR)/deploy
 	@rm -f $(PROJECT_DIR)/deploy/wendyos.img
 	@docker run --rm -t \
@@ -338,15 +340,26 @@ deploy: _check-machine
 		-v $(PROJECT_DIR)/deploy:/output \
 		$(DOCKER_REPO):$(DOCKER_TAG) \
 		/bin/bash -c '\
-			TARBALL="/build-volume/deploy/images/$(MACHINE)/$(IMAGE_TARGET)-$(MACHINE).tegraflash.tar.gz"; \
-			if [ -f "$$TARBALL" ]; then \
-				rsync -ahL --progress "$$TARBALL" /output/; \
-			else \
-				echo "Error: tegraflash tarball not found. Run make build first."; \
+			set -e; \
+			OUTDIR="/build-volume/deploy/images/$(MACHINE)"; \
+			COPIED=0; \
+			for ARTIFACT in \
+				"$(IMAGE_TARGET)-$(MACHINE).rootfs.wic" \
+				"$(IMAGE_TARGET)-$(MACHINE).rootfs.wic.bmap" \
+				"$(IMAGE_TARGET)-$(MACHINE).sdimg" \
+				"$(IMAGE_TARGET)-$(MACHINE).tegraflash.tar.gz"; \
+			do \
+				if [ -f "$$OUTDIR/$$ARTIFACT" ]; then \
+					rsync -ahL --progress "$$OUTDIR/$$ARTIFACT" /output/; \
+					COPIED=1; \
+				fi; \
+			done; \
+			if [ "$$COPIED" -eq 0 ]; then \
+				echo "Error: no supported deploy artifact found in $$OUTDIR. Run make build first."; \
 				exit 1; \
 			fi \
 		'
-	@printf "$(GREEN)Tegraflash tarball copied to: $(PROJECT_DIR)/deploy/$(NC)\n"
+	@printf "$(GREEN)Artifacts copied to: $(PROJECT_DIR)/deploy/$(NC)\n"
 
 #
 # Flash Commands
@@ -356,7 +369,26 @@ flash-to-external: _check-machine
 	@printf "$(CYAN)==================$(NC)\n\n"
 	@OS_TYPE=$$(uname); \
 	if [ "$$OS_TYPE" = "Darwin" ]; then DD_BS="4m"; else DD_BS="4M"; fi; \
-	if echo "$(MACHINE)" | grep -q "raspberrypi"; then \
+	if echo "$(MACHINE)" | grep -q "genericx86"; then \
+		WIC_IMG="$(PROJECT_DIR)/build/tmp/deploy/images/$(MACHINE)/$(IMAGE_TARGET)-$(MACHINE).rootfs.wic"; \
+		DEPLOY_WIC_IMG="$(PROJECT_DIR)/deploy/$(IMAGE_TARGET)-$(MACHINE).rootfs.wic"; \
+		if [ "$$OS_TYPE" = "Darwin" ] && [ ! -f "$$WIC_IMG" ] && [ ! -f "$$DEPLOY_WIC_IMG" ]; then \
+			printf "Fetching wic image from Docker volume...\n"; \
+			$(MAKE) deploy; \
+		fi; \
+		if [ -f "$$WIC_IMG" ]; then \
+			SRC="$$WIC_IMG"; \
+		elif [ -f "$$DEPLOY_WIC_IMG" ]; then \
+			SRC="$$DEPLOY_WIC_IMG"; \
+		else \
+			printf "$(RED)Error: wic image not found in $(PROJECT_DIR)/build/tmp/deploy/images/$(MACHINE)/ or $(PROJECT_DIR)/deploy/$(NC)\n"; \
+			printf "Run 'make build MACHINE=$(MACHINE)' first.\n"; \
+			exit 1; \
+		fi; \
+		mkdir -p "$(PROJECT_DIR)/deploy"; \
+		cp "$$SRC" "$(PROJECT_DIR)/deploy/wendyos.img"; \
+		printf "$(GREEN)x86_64 wic image ready: $(PROJECT_DIR)/deploy/wendyos.img$(NC)\n\n"; \
+	elif echo "$(MACHINE)" | grep -q "raspberrypi"; then \
 		SDIMG="$(PROJECT_DIR)/build/tmp/deploy/images/$(MACHINE)/$(IMAGE_TARGET)-$(MACHINE).sdimg"; \
 		WIC_IMG="$(PROJECT_DIR)/build/tmp/deploy/images/$(MACHINE)/$(IMAGE_TARGET)-$(MACHINE).rootfs.wic"; \
 		if [ -f "$$SDIMG" ]; then \
