@@ -11,6 +11,7 @@ RDEPENDS:${PN} = " \
     runc-opencontainers \
     cni \
     cni-config \
+    ${@bb.utils.contains('WENDYOS_MESH', '1', 'wendy-mesh-cni', '', d)} \
     iptables \
     iptables-modules \
     ca-certificates \
