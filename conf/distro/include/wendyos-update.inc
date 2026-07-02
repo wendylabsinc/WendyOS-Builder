@@ -8,6 +8,10 @@
 #   - image_types_wendy:   defines the "wendy" IMAGE_FSTYPE that produces
 #                          the .wendy OTA artifact via `wendyos-update pack`.
 
+# Pin the rootfs image size so image == A/B slot == .wendy payload and
+# nightly == release, byte for byte (docs/plans/fixed-rootfs-sizes.md).
+require conf/distro/include/wendyos-rootfs-size.inc
+
 # Scope to the product image only (:pn-wendyos-image): this inc is
 # required at distro scope, so a bare :append would also hit the Tegra
 # flashing-helper images (tegra-espimage, the initramfs images), each

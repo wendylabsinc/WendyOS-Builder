@@ -39,12 +39,14 @@
 #     grow-data-part (wendyos-data-setup's format-trigger does NOT fire on a
 #     wic-preformatted fs). Do NOT add expand-rootfs to an A/B image: it would
 #     grow rootfsA over rootfsB.
-#   - Two 8192M rootfs slots + boot + config + data need a >=18 GB card; size
-#     the slots down here if the rpi3 fleet uses smaller media.
+# Minimum media: 32 GB. The rootfs slots are a fixed 8 GiB each (--fixed-size,
+# matching WENDYOS_ROOTFS_SIZE_KB in wendyos-rootfs-size.inc) so image == slot
+# == .wendy OTA payload; wic fails the build if the rootfs outgrows a slot
+# (docs/plans/fixed-rootfs-sizes.md).
 bootloader --ptable msdos
 part /boot   --source bootimg-partition --ondisk mmcblk0 --fstype=vfat --label boot    --active --align 4096 --size 128M
-part         --source rootfs            --ondisk mmcblk0 --fstype=ext4 --label rootfsA  --align 4096 --size 8192M
-part         --source rootfs            --ondisk mmcblk0 --fstype=ext4 --label rootfsB  --align 4096 --size 8192M
+part         --source rootfs            --ondisk mmcblk0 --fstype=ext4 --label rootfsA  --align 4096 --fixed-size 8192M
+part         --source rootfs            --ondisk mmcblk0 --fstype=ext4 --label rootfsB  --align 4096 --fixed-size 8192M
 part         --ondisk mmcblk0 --fstype=vfat --label config --align 4096 --size ${WENDYOS_CONFIG_PART_SIZE_MB}M
 part         --ondisk mmcblk0 --fstype=ext4 --label data   --align 4096 --size 512M
 
