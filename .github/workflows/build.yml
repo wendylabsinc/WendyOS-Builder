@@ -323,22 +323,43 @@ jobs:
           fi
           echo "repos: private reflink snapshot at $priv"
 
-      # Back build/tmp with the launcher's NVMe scratch mount via a symlink,
-      # rather than pointing Yocto's TMPDIR at it. Setting TMPDIR=/wendy/build-tmp
-      # also relocates DEPLOY_DIR (Yocto default ${TMPDIR}/deploy), so images
-      # would land in /wendy/build-tmp/deploy while every upload/packaging step
-      # reads $GITHUB_WORKSPACE/build/tmp/deploy — the images would be invisible
-      # to them (only surfaces on non-PR builds, which run those steps). The
-      # symlink keeps TMPDIR at its default (build/tmp) so all build/tmp/* paths
-      # stay valid, while the bytes live on the NVMe scratch.
+      # Back build/tmp with the launcher's NVMe scratch mount. Two constraints
+      # must hold together, and each of the two prior attempts satisfied only one:
+      #
+      #   1. Yocto's pseudo (fakeroot) records canonical absolute paths and does
+      #      NOT tolerate TMPDIR being (or sitting behind) a symlink. Leaving
+      #      TMPDIR at its default while symlinking build/tmp -> /wendy/build-tmp
+      #      made rootfs-time postinstall scriptlets run under pseudo fail
+      #      ("Postinstall scriptlets of ['rpcbind'] have failed" at do_rootfs)
+      #      on every board and branch (self-hosted only).
+      #   2. The upload/packaging steps read $GITHUB_WORKSPACE/build/tmp/deploy.
+      #      A bare TMPDIR=/wendy/build-tmp override also moves DEPLOY_DIR there
+      #      (Yocto default ${TMPDIR}/deploy), so images become invisible to
+      #      those steps (surfaces on non-PR builds, which run them).
+      #
+      # A bind mount would give a real path for both, but the runner has no
+      # passwordless sudo. So: set TMPDIR explicitly to the real scratch path
+      # (pseudo uses the canonical /wendy/build-tmp, never a symlink) AND also
+      # symlink build/tmp -> /wendy/build-tmp so the shell-level upload steps'
+      # $GITHUB_WORKSPACE/build/tmp/deploy paths still resolve. Bitbake never
+      # uses the symlink (TMPDIR is pinned), so pseudo stays happy.
       - name: Back build/tmp with the platform NVMe scratch
         run: |
           set -euo pipefail
+          # Pin TMPDIR to the real scratch path for bitbake/pseudo.
+          {
+            echo ''
+            echo '# wendy-ci: back TMPDIR with the platform NVMe scratch'
+            echo 'TMPDIR = "/wendy/build-tmp"'
+          } >> "$GITHUB_WORKSPACE/build/conf/auto.conf"
+          # Alias build/tmp -> the same path so upload steps that read
+          # $GITHUB_WORKSPACE/build/tmp/deploy resolve to the real artifacts.
           # bootstrap created build/ but not build/tmp yet (bitbake makes it on
-          # first run); remove any stray dir, then symlink onto the scratch mount.
+          # first run); clear any stray dir/symlink, then symlink onto scratch.
+          mkdir -p /wendy/build-tmp
           rm -rf "$GITHUB_WORKSPACE/build/tmp"
           ln -sfn /wendy/build-tmp "$GITHUB_WORKSPACE/build/tmp"
-          echo "linked $GITHUB_WORKSPACE/build/tmp -> /wendy/build-tmp"
+          echo "TMPDIR pinned to /wendy/build-tmp; build/tmp aliased to it"
 
       - name: Enable debug for nightly builds
         # Release images are production builds — no debug tools by default.
