@@ -1,6 +1,6 @@
 SUMMARY = "Systemd mount unit for persistent OP-TEE secure storage"
 DESCRIPTION = "Bind mounts /var/lib/tee from /data/tee so OP-TEE secure storage \
-(PKCS#11 tokens, device keys, certificates) persists across Mender A/B OTA updates. \
+(PKCS#11 tokens, device keys, certificates) persists across A/B OTA updates. \
 Without this, the default /var/lib/tee on the rootfs would be wiped on every A/B \
 partition switch, destroying the device's OP-TEE-backed cryptographic identity."
 LICENSE = "MIT"

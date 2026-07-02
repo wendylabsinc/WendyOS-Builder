@@ -4,9 +4,6 @@ Documentation=man:systemd.mount(5)
 # Ensure data partition is mounted and filesystem is fully expanded
 RequiresMountsFor=/data
 After=data.mount
-# Wait for Mender data partition resize to complete (if enabled)
-# This is safe even if mender-systemd-growfs-data.service doesn't exist
-After=mender-systemd-growfs-data.service
 Before=local-fs.target
 
 [Mount]
