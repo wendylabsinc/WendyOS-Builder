@@ -24,7 +24,15 @@ GO_IMPORT = "github.com/wendylabsinc/wendyos-update"
 GO_SRCURI_DESTSUFFIX ?= "${@os.path.join(os.path.basename(d.getVar('S')), 'src', d.getVar('GO_IMPORT')) + '/'}"
 
 SRC_URI = "git://${GO_IMPORT};protocol=https;branch=main;destsuffix=${GO_SRCURI_DESTSUFFIX}"
-# 61c46bc4 (main, PR #5): the boot verifier confirms EVERY healthy boot to the
+# b1f3315a (main): install rejects an OTA payload larger than the target A/B
+# slot up front (blockdev.DeviceCapacity seek-to-end pre-flight, exit 3, nothing
+# written) — the connector-side last line of defense behind the meta-edgeos
+# fixed-rootfs-size pin (wendyos-rootfs-size.inc). Builds on:
+# 8fb341c0 (PR #2): merges WDY-1775 — ubootenv resolves MBR (rpi3) A/B slots by
+# partition number (an OTA rootfs write wipes the ext4 fs label; the partition
+# number is the only durable slot identity on MBR). GPT (rpi4/5) unchanged.
+# Builds on:
+# 61c46bc (PR #5): the boot verifier confirms EVERY healthy boot to the
 # firmware (`nvbootctrl -t rootfs mark-boot-successful`, connector.BootConfirmer).
 # With rootfs A/B redundancy enabled, Jetson UEFI arms a boot-validation
 # watchdog on every boot and resets the SoC ~2 min into userspace unless the
@@ -44,7 +52,7 @@ SRC_URI = "git://${GO_IMPORT};protocol=https;branch=main;destsuffix=${GO_SRCURI_
 # slot — kills the Orin Nano stale-inactive-slot false-positive, validated
 # against the real r39.2 efivar format) + structured per-slot `status` and the
 # `switch` verb.
-SRCREV = "8fb341c0b63389fc5686ce1174d410c096ebde44"
+SRCREV = "b1f3315a4d1392f7aca5171672d8a998fa6e9614"
 
 inherit go-mod systemd
 
