@@ -233,18 +233,17 @@ jobs:
           ref: ${{ inputs.version }}
 
       # Point the three build caches at the tenant's persistent NVMe pool.
-      # common.inc pins DL_DIR/SSTATE_DIR to ${TOPDIR}/../{downloads,sstate-cache}
-      # and bootstrap.sh clones layers under ./repos, all siblings of build/ in
-      # the workspace — so symlinking those siblings onto the cache makes the
-      # existing paths resolve onto NVMe with no build-logic changes. Must run
-      # before bootstrap so the repos clones land in the cache. sstate-cache and
-      # downloads are content-hashed and race-tolerant across the matrix; repos/
-      # is not — the bootstrap step below is flock-serialized to protect it.
+      # common.inc pins DL_DIR/SSTATE_DIR to ${TOPDIR}/../{downloads,sstate-cache},
+      # siblings of build/ in the workspace — so symlinking those onto the cache
+      # makes the existing paths resolve onto NVMe with no build-logic changes.
+      # Both are content-hashed and race-tolerant across the matrix. repos/ is
+      # NOT race-tolerant and is handled separately (private reflink snapshot) in
+      # the bootstrap step below.
       - name: Wire caches to persistent NVMe
         run: |
           set -euo pipefail
           base=/opt/wendy-cache/wendyos-builder
-          for d in sstate-cache downloads repos; do
+          for d in sstate-cache downloads; do
             ln -sfn "$base/$d" "$GITHUB_WORKSPACE/$d"
             echo "linked $GITHUB_WORKSPACE/$d -> $base/$d"
           done
@@ -271,20 +270,58 @@ jobs:
           echo "board=$BOARD" >> "$GITHUB_OUTPUT"
           echo "machine=$MACHINE" >> "$GITHUB_OUTPUT"
 
-      - name: Bootstrap build environment
+      # Isolate repos/ per job so no two runs can rewrite one another's layer
+      # tree. The matrix shares one seed on the NVMe cache and clone_repos does
+      # git fetch/checkout there — unsafe under concurrency, and a cross-run
+      # checkout at a different SRCREV would corrupt an in-flight build. reflink
+      # (XFS reflink=1 on this pool) gives each job an instant, space-free
+      # copy-on-write snapshot of the seed; the build reads only that private
+      # copy. reflink can't cross filesystems, so the snapshot lives on the pool
+      # and is symlinked into the workspace. WENDYOS_HOST_BUILD (job env) keeps
+      # bootstrap in host-build mode (no Docker image build).
+      - name: Bootstrap build environment (repos isolated via reflink)
         working-directory: ${{ github.workspace }}
         env:
           BOARD: ${{ steps.vars.outputs.board }}
-        # WENDYOS_HOST_BUILD (job env) keeps bootstrap in host-build mode: it
-        # skips the Docker image creation and clones the upstream layers straight
-        # into the symlinked repos/ on the NVMe cache.
-        #
-        # The matrix shares one repos/ tree on that cache and clone_repos does
-        # git fetch/checkout there, which is unsafe under concurrency. flock
-        # serializes just this bootstrap step across concurrent matrix jobs: a
-        # warm tree is a fast fetch + no-op checkout (every job in a run pins the
-        # same SRCREVs), and the long build phase below still runs fully parallel.
-        run: flock /opt/wendy-cache/wendyos-builder/repos.lock ./wendyos/bootstrap.sh
+          IS_PR: ${{ github.event_name == 'pull_request' }}
+          PRIV_TAG: ${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.device }}-${{ matrix.storage }}
+        run: |
+          set -euo pipefail
+          # The launcher bind-mounts each declared cache subdir individually, so
+          # only sstate-cache/, downloads/ and repos/ are writable — the parent
+          # dir is not. Keep the seed, per-job snapshots, and the lock all inside
+          # the writable repos/ mount (same XFS, so reflink still applies).
+          base=/opt/wendy-cache/wendyos-builder/repos
+          seed="$base/seed"
+          priv="$base/runs/$PRIV_TAG"
+          mkdir -p "$seed" "$base/runs"
+          exec 9>"$base/.lock"
+          if [[ "$IS_PR" == "true" ]]; then
+            # PR: never write the shared seed. Take a read-consistent snapshot
+            # under a shared lock, then advance only the private copy.
+            flock -s 9
+            rm -rf "$priv"
+            cp -a --reflink=always "$seed" "$priv"
+            flock -u 9
+            ln -sfn "$priv" "$GITHUB_WORKSPACE/repos"
+            ./wendyos/bootstrap.sh
+          else
+            # main/tag/dispatch: advance the seed to this run's SRCREVs and
+            # snapshot it, both under an exclusive lock, so the seed stays warm
+            # for future snapshots. bootstrap runs against the seed (symlink),
+            # then we swap the symlink for the private snapshot at the same path
+            # (make build re-sources oe-init from ./repos, so the swap is
+            # transparent). Held only for the fast bootstrap + snapshot.
+            flock -x 9
+            ln -sfn "$seed" "$GITHUB_WORKSPACE/repos"
+            ./wendyos/bootstrap.sh
+            rm -f "$GITHUB_WORKSPACE/repos"
+            rm -rf "$priv"
+            cp -a --reflink=always "$seed" "$priv"
+            ln -sfn "$priv" "$GITHUB_WORKSPACE/repos"
+            flock -u 9
+          fi
+          echo "repos: private reflink snapshot at $priv"
 
       # bootstrap.sh has written build/conf/auto.conf by now; redirect TMPDIR
       # onto the launcher's adaptive build/tmp backing (NVMe scratch) so build/
@@ -648,6 +685,16 @@ jobs:
           # v4 artifacts are immutable per name; without this, re-running a
           # failed build job 409s on the artifact left by the earlier attempt.
           overwrite: true
+
+      # Remove this job's private repos snapshot from the persistent pool. The
+      # ephemeral workspace is discarded automatically, but the reflink copy
+      # lives on the cache pool, so it must be cleaned up explicitly (CoW means
+      # only the blocks that diverged from the seed are freed).
+      - name: Release private repos snapshot
+        if: always()
+        env:
+          PRIV_TAG: ${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.device }}-${{ matrix.storage }}
+        run: rm -rf "/opt/wendy-cache/wendyos-builder/repos/runs/$PRIV_TAG"
 
   # ---------------------------------------------------------------------------
   # publish: the ONLY writer of GCS manifests. Build jobs upload files and

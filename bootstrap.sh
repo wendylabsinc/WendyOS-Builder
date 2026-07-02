@@ -273,6 +273,18 @@ function clone_repos() {
                 }
             fi
 
+            # Fast path: SRCREVs are immutable pinned SHAs, so if the checkout
+            # is already at the target commit there is nothing to fetch — skip
+            # the network round-trip. This matters on the shared CI cache, where
+            # a warm build would otherwise re-fetch every layer repo for nothing.
+            if [[ "${srcrev}" =~ ^[0-9a-f]{40}$ ]] \
+               && git rev-parse -q --verify "${srcrev}^{commit}" >/dev/null 2>&1 \
+               && [[ "$(git rev-parse HEAD 2>/dev/null)" == "${srcrev}" ]]; then
+                printf "[ok] '%s' at %s (no fetch)\n" "${folder}" "${srcrev}"
+                cd ..
+                continue
+            fi
+
             # fetch latest refs from remote
             git fetch origin >> "${LOG_FILE}" 2>&1 || {
                 printf "[error] Failed to fetch '%s'\n" "${folder}"
