@@ -5,6 +5,11 @@
 # ci/packer/wendyos-builder.pkr.hcl (CI runner AMI), so the package list
 # stays in one place.
 #
+# NOTE: the CI *build runner image* is migrating to wendylabsinc/ci. New
+# build-environment package changes for CI should be made there
+# (repositories/WendyOS-Builder/install-build-deps.sh); mirror them here only
+# for the legacy AWS AMI until the build.yml cutover. See ci/README.md.
+#
 # Idempotent: safe to re-run. Must be invoked as root (or via sudo).
 
 set -euo pipefail

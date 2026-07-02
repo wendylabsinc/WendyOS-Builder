@@ -1,5 +1,10 @@
 # Packer template for the WendyOS CI runner AMI.
 #
+# NOTE: this AWS/RunsOn AMI is being replaced by the self-hosted runner image in
+# wendylabsinc/ci (repositories/WendyOS-Builder/). Make build-runner-image
+# changes there; this template is legacy and removed at the build.yml cutover.
+# See ci/README.md.
+#
 # Bakes the Yocto host prerequisites (apt packages, locales) into a custom
 # Ubuntu 24.04 AMI so the GitHub Actions build matrix can skip the per-run
 # `docker build` + apt-get cycle entirely. Optionally pre-clones the upstream

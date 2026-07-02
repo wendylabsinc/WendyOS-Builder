@@ -311,11 +311,21 @@ function clone_repos() {
         fi
 
         # we need to checkout (either new clone or update)
-        git checkout "${srcrev}" >> "${LOG_FILE}" 2>&1 || {
-            printf "[error] Failed to checkout %s in '%s'\n" "${srcrev}" "${folder}"
-            cd ..
-            return 1
-        }
+        if ! git checkout "${srcrev}" >> "${LOG_FILE}" 2>&1; then
+            # The SRCREV may not be reachable from any current branch tip — e.g.
+            # the upstream branch it lived on was deleted or force-pushed (as
+            # happened with meta-tegra's wip-l4t-r39.2.0 branch). A plain clone /
+            # `git fetch origin` only retrieves current refs, so the pinned
+            # commit is absent locally even though the object still exists on the
+            # server. Fetch it directly by SHA, then retry the checkout.
+            printf "[refetch] '%s': %s not reachable via refs; fetching by SHA\n" "${folder}" "${srcrev}"
+            if ! { git fetch origin "${srcrev}" >> "${LOG_FILE}" 2>&1 && \
+                   git checkout "${srcrev}" >> "${LOG_FILE}" 2>&1; }; then
+                printf "[error] Failed to checkout %s in '%s'\n" "${srcrev}" "${folder}"
+                cd ..
+                return 1
+            fi
+        fi
 
         cd ..
     done
