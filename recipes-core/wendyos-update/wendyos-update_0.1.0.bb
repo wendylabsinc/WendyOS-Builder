@@ -44,7 +44,7 @@ SRC_URI = "git://${GO_IMPORT};protocol=https;branch=main;destsuffix=${GO_SRCURI_
 # slot — kills the Orin Nano stale-inactive-slot false-positive, validated
 # against the real r39.2 efivar format) + structured per-slot `status` and the
 # `switch` verb.
-SRCREV = "61c46bc157a2e89c633b1cf0faf257f2e535af5c"
+SRCREV = "8fb341c0b63389fc5686ce1174d410c096ebde44"
 
 inherit go-mod systemd
 
