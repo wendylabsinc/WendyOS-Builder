@@ -736,6 +736,65 @@ func TestSetZstPath(t *testing.T) {
 	})
 }
 
+func TestApplyFlashpack(t *testing.T) {
+	t.Run("no storage lands on top-level only", func(t *testing.T) {
+		m := &VersionMetadata{}
+		applyFlashpack(m, "", "images/x/thor.flashpack.tar.zst", "abc123", 1024)
+		if m.FlashpackPath != "images/x/thor.flashpack.tar.zst" || m.FlashpackChecksum != "abc123" || m.FlashpackSizeBytes != 1024 {
+			t.Errorf("top-level flashpack = %q/%q/%d", m.FlashpackPath, m.FlashpackChecksum, m.FlashpackSizeBytes)
+		}
+		if m.NVMEFlashpackPath != "" || m.EMMCFlashpackPath != "" {
+			t.Errorf("storage-specific fields should be empty, got %+v", m)
+		}
+	})
+
+	t.Run("nvme sets per-storage and top-level", func(t *testing.T) {
+		m := &VersionMetadata{}
+		applyFlashpack(m, "nvme", "images/x/nvme.flashpack.tar.zst", "abc123", 1024)
+		if m.NVMEFlashpackPath != "images/x/nvme.flashpack.tar.zst" || m.NVMEFlashpackChecksum != "abc123" || m.NVMEFlashpackSizeBytes != 1024 {
+			t.Errorf("NVMe flashpack = %q/%q/%d", m.NVMEFlashpackPath, m.NVMEFlashpackChecksum, m.NVMEFlashpackSizeBytes)
+		}
+		if m.FlashpackPath != "images/x/nvme.flashpack.tar.zst" {
+			t.Errorf("FlashpackPath = %q, want NVMe flashpack mirrored", m.FlashpackPath)
+		}
+	})
+
+	t.Run("emmc does not clobber nvme top-level", func(t *testing.T) {
+		m := &VersionMetadata{}
+		applyFlashpack(m, "nvme", "images/x/nvme.flashpack.tar.zst", "abc123", 1024)
+		applyFlashpack(m, "emmc", "images/x/emmc.flashpack.tar.zst", "def456", 512)
+		if m.EMMCFlashpackPath != "images/x/emmc.flashpack.tar.zst" || m.EMMCFlashpackChecksum != "def456" || m.EMMCFlashpackSizeBytes != 512 {
+			t.Errorf("eMMC flashpack = %q/%q/%d", m.EMMCFlashpackPath, m.EMMCFlashpackChecksum, m.EMMCFlashpackSizeBytes)
+		}
+		if m.FlashpackPath != "images/x/nvme.flashpack.tar.zst" {
+			t.Errorf("FlashpackPath = %q, want NVMe flashpack preserved", m.FlashpackPath)
+		}
+	})
+
+	t.Run("emmc before nvme leaves top-level for nvme", func(t *testing.T) {
+		m := &VersionMetadata{}
+		applyFlashpack(m, "emmc", "images/x/emmc.flashpack.tar.zst", "def456", 512)
+		if m.FlashpackPath != "" {
+			t.Errorf("FlashpackPath = %q, want empty until NVMe publishes", m.FlashpackPath)
+		}
+		applyFlashpack(m, "nvme", "images/x/nvme.flashpack.tar.zst", "abc123", 1024)
+		if m.FlashpackPath != "images/x/nvme.flashpack.tar.zst" {
+			t.Errorf("FlashpackPath = %q, want NVMe flashpack", m.FlashpackPath)
+		}
+		if m.EMMCFlashpackPath != "images/x/emmc.flashpack.tar.zst" {
+			t.Errorf("EMMCFlashpackPath = %q, want eMMC preserved", m.EMMCFlashpackPath)
+		}
+	})
+
+	t.Run("empty flashpack path is a no-op", func(t *testing.T) {
+		m := &VersionMetadata{FlashpackPath: "existing", FlashpackChecksum: "cs", FlashpackSizeBytes: 99}
+		applyFlashpack(m, "nvme", "", "", 0)
+		if m.FlashpackPath != "existing" || m.FlashpackChecksum != "cs" || m.NVMEFlashpackPath != "" {
+			t.Errorf("empty flashpackPath should not change anything, got %+v", m)
+		}
+	})
+}
+
 func TestCompressSeekableZstdRoundTrips(t *testing.T) {
 	// Build a known payload that spans multiple frames (> seekableFrameSize would
 	// be slow in tests; use a small payload and verify the whole thing round-trips).
