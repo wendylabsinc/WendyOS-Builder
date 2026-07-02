@@ -25,6 +25,11 @@
 # DEFAULTS map in the bundle's .env.initrd-flash, so signing needs no EEPROM or
 # ECID read. The resulting flashpack is therefore pinned to that module SKU.
 #
+# Trust boundary: the bundle is CI-internal input, produced minutes earlier by
+# this same pipeline's Yocto build. Executing its tooling (env files, helper
+# scripts, tegraflash, the NVIDIA binaries) is this script's purpose — anyone
+# who can tamper with the bundle already controls the build outputs themselves.
+#
 # Usage:
 #   make-t234-flashpack.sh --bundle-dir <extracted-tar> --out <dir> --version <ver>
 #                          [--device <name>] [--storage <nvme|emmc>]
@@ -112,6 +117,7 @@ eval "$body"
 log "Step 1: sign boot chain + partition images, generate RCM-boot blob (no device)"
 # ---------------------------------------------------------------------------
 rm -rf signed rcmboot_blob bootloader_staging secureflash.xml boardvars.sh
+log "zero-key signing (unfused hardware only; fused boards need real keys)"
 # shellcheck disable=SC2153  # DTBFILE/EMC_BCT/... come from the sourced .env.initrd-flash
 "./$FLASH_HELPER" --no-flash --sign -u "" -v "" \
     flash.xml.in "$DTBFILE" "$EMC_BCT" "$ODMDATA" "$LNXFILE" "$ROOTFS_IMAGE" \
@@ -202,15 +208,15 @@ done
 # stage2/flash — the final layout XML plus every partition image it references
 # (from the rootfs-device sections; boot-device firmware travels in flashpkg).
 # Signed images live in signed/, unsigned ones (rootfs, esp, config) in the
-# bundle root — same lookup order as initrd-flash's copy_signed_binaries.
+# bundle root — same lookup order as initrd-flash's copy_signed_binaries,
+# but extracting the one field we need instead of eval'ing the line.
 # Hardlink when possible: the rootfs image is multi-GB and nothing writes to
 # the sources between here and the pack step.
 stage_image() { ln -f "$1" "$2" 2>/dev/null || cp "$1" "$2"; }
 cp initrd-flash.xml "$FP/stage2/flash/"
 missing=0
 while read -r line; do
-    partfile=""
-    eval "$line"
+    partfile="$(printf '%s' "$line" | sed -n 's/.*;partfile="\([^"]*\)".*/\1/p')"
     [ -n "$partfile" ] || continue
     [ -e "$FP/stage2/flash/$partfile" ] && continue
     if [ -e "signed/$partfile" ]; then
@@ -299,7 +305,7 @@ VERSION="$VERSION" DEVICE="$DEVICE" STORAGE="$STORAGE" MACHINE="$MACHINE" \
     BOOT_DEVICE_TYPE="$BOOT_DEVICE_TYPE" ROOTFS_IMAGE="$ROOTFS_IMAGE" \
     EXTERNAL_ROOTFS_DRIVE="$EXTERNAL_ROOTFS_DRIVE" FP="$FP" \
     python3 - <<'PY'
-import os, json, hashlib, pathlib, re
+import os, json, hashlib, pathlib, re, sys
 fp = pathlib.Path(os.environ["FP"])
 def sha(p):
     h = hashlib.sha256()
@@ -319,7 +325,9 @@ for line in (fp / "stage1" / "rcmbootcmd.txt").read_text().splitlines():
     dls = re.findall(r"--download\s+(\S+)\s+(\S+)", line)
     if dls:
         phases.append([{"type": t, "file": f"stage1/{f}"} for t, f in dls])
-assert len(phases) == 2, f"expected 2 rcm phases, got {len(phases)}"
+if len(phases) != 2:
+    sys.exit(f"ERR: expected 2 rcm phases in rcmbootcmd.txt, got {len(phases)} — "
+             "the BSP changed the RCM boot contract; the wendy CLI needs updating too")
 m = {
     "schema": 1,
     "family": "t234",

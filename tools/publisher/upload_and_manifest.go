@@ -1182,6 +1182,11 @@ func main() {
 				if err := validateFileExists(*flashpackFile); err != nil {
 					log.WithError(err).Fatal("Invalid flashpack file")
 				}
+				// No sd_flashpack_* manifest fields exist; fail before the
+				// upload so the blob can't land in the bucket unrecorded.
+				if *storage == "sd" {
+					log.Fatal("--flashpack-file is not supported with --storage sd (no manifest field to record it)")
+				}
 			}
 
 			// Validate bmap file if provided
