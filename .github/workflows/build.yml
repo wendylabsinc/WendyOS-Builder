@@ -323,17 +323,22 @@ jobs:
           fi
           echo "repos: private reflink snapshot at $priv"
 
-      # bootstrap.sh has written build/conf/auto.conf by now; redirect TMPDIR
-      # onto the launcher's adaptive build/tmp backing (NVMe scratch) so build/
-      # never fills the container's smaller overlay.
-      - name: Use platform adaptive build/tmp
+      # Back build/tmp with the launcher's NVMe scratch mount via a symlink,
+      # rather than pointing Yocto's TMPDIR at it. Setting TMPDIR=/wendy/build-tmp
+      # also relocates DEPLOY_DIR (Yocto default ${TMPDIR}/deploy), so images
+      # would land in /wendy/build-tmp/deploy while every upload/packaging step
+      # reads $GITHUB_WORKSPACE/build/tmp/deploy — the images would be invisible
+      # to them (only surfaces on non-PR builds, which run those steps). The
+      # symlink keeps TMPDIR at its default (build/tmp) so all build/tmp/* paths
+      # stay valid, while the bytes live on the NVMe scratch.
+      - name: Back build/tmp with the platform NVMe scratch
         run: |
           set -euo pipefail
-          {
-            echo ''
-            echo '# wendy-ci: use the platform adaptive build/tmp backing'
-            echo 'TMPDIR = "/wendy/build-tmp"'
-          } >> "$GITHUB_WORKSPACE/build/conf/auto.conf"
+          # bootstrap created build/ but not build/tmp yet (bitbake makes it on
+          # first run); remove any stray dir, then symlink onto the scratch mount.
+          rm -rf "$GITHUB_WORKSPACE/build/tmp"
+          ln -sfn /wendy/build-tmp "$GITHUB_WORKSPACE/build/tmp"
+          echo "linked $GITHUB_WORKSPACE/build/tmp -> /wendy/build-tmp"
 
       - name: Enable debug for nightly builds
         # Release images are production builds — no debug tools by default.
