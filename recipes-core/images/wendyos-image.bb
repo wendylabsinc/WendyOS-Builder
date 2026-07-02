@@ -37,17 +37,21 @@ WENDYOS_DEBUG_FEATURES ?= " \
     "
 IMAGE_FEATURES += "${@oe.utils.ifelse(d.getVar('WENDYOS_DEBUG') == '1', d.getVar('WENDYOS_DEBUG_FEATURES'), '')}"
 
-# No interactive login on an attached monitor+keyboard unless WENDYOS_DEBUG = "1".
-# systemd ships an enabled getty@tty1.service, and logind spawns further gettys
-# on VT switch (autovt@ttyN resolves to the getty@ template). Root is already
-# locked on release builds (no empty-root-password above), but the prompt itself
-# is still an attack surface on a product device, so drop the enablement symlink
-# and mask the template — masking getty@.service masks every instance, including
-# logind's autovt spawns. Serial consoles (serial-getty@, SERIAL_CONSOLES) are
-# deliberately untouched so UART access stays available for field debugging.
+# No monitor+keyboard login on release (WENDYOS_DEBUG != "1"). Masking getty@ is
+# fatal here: systemd's 90-systemd.preset enables it and the rootfs preset-all
+# pass rejects "enable a masked unit". So preset-disable the template (a 10- file
+# wins over 90-) and zero logind's auto-VTs, which also stops the autovt@ VT-switch
+# spawns a preset alone can't reach. serial-getty@ (SERIAL_CONSOLES) stays enabled
+# so UART access remains available for field debugging.
 disable_vt_login() {
+    # Drop any getty@tty1 enablement a postinst may have force-created (e.g. Also=).
     rm -f ${IMAGE_ROOTFS}${sysconfdir}/systemd/system/getty.target.wants/getty@tty1.service
-    ln -sf /dev/null ${IMAGE_ROOTFS}${sysconfdir}/systemd/system/getty@.service
+    install -d ${IMAGE_ROOTFS}${systemd_unitdir}/system-preset
+    printf 'disable getty@.service\ndisable autovt@.service\n' \
+        > ${IMAGE_ROOTFS}${systemd_unitdir}/system-preset/10-wendyos-no-vt-login.preset
+    install -d ${IMAGE_ROOTFS}${systemd_unitdir}/logind.conf.d
+    printf '[Login]\nNAutoVTs=0\nReserveVT=0\n' \
+        > ${IMAGE_ROOTFS}${systemd_unitdir}/logind.conf.d/10-wendyos-no-autovt.conf
 }
 ROOTFS_POSTPROCESS_COMMAND += "${@oe.utils.ifelse(d.getVar('WENDYOS_DEBUG') == '1', '', 'disable_vt_login;')}"
 
