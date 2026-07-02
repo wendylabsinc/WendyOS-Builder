@@ -205,8 +205,9 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # build: per-device Yocto image build.
-  # Runner uses c8id.8xlarge (32 vCPU,64 GiB, 1.9 TB local nvme so we don't 
-  # bump into EBS storage throughput caps.
+  # Runs on the self-hosted ephemeral-runner platform (wendylabsinc/ci). Each
+  # job is a fresh podman container on a box with a persistent NVMe cache
+  # (sstate/downloads/repos) bind-mounted at /opt/wendy-cache/wendyos-builder.
   # ---------------------------------------------------------------------------
   build:
     name: Build ${{ matrix.device }} (${{ matrix.storage }})
@@ -214,173 +215,38 @@ jobs:
     if: needs.detect-changes.outputs.devices != ''
     permissions:
       contents: read
+      # GitHub mints the OIDC token (not the runner), so GCP Workload Identity
+      # Federation still works on the self-hosted platform.
       id-token: write
-    runs-on:
-      - runs-on
-      - family=c8id.8xlarge
-      - spot=false
-      # Custom AMI built by .github/workflows/build-ami.yml. Has the Yocto
-      # host prerequisites preinstalled and upstream layer repos pre-cloned at
-      # the SRCREVs pinned by scripts/upstream-repos.env, so this job skips
-      # apt-get and 'docker build' entirely.
-      - image=wendyos-builder
-      - run-id=${{ github.run_id }}-${{ matrix.device }}-${{ matrix.storage }}
+    runs-on: [self-hosted, linux, x64, wendyos-builder]
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.detect-changes.outputs.matrix) }}
     env:
-      CACHE_BUCKET: ${{ vars.WENDYOS_BUILD_CACHE_BUCKET }}
-      CACHE_REGION: ${{ vars.WENDYOS_BUILD_CACHE_REGION }}
       WENDYOS_HOST_BUILD: "1"
-      WENDYOS_REPO_CACHE_DIR: /opt/wendyos-cache/repos
 
     steps:
-      - name: Fix workspace permissions
-        run: sudo chown "$(id -u):$(id -g)" "$GITHUB_WORKSPACE"
-
       - name: Checkout
         uses: actions/checkout@v4
         with:
           path: wendyos
           ref: ${{ inputs.version }}
 
-      # ---------- Build cache: two-layer ----------
-      # L1 (per-runner snapshot): runs-on/snapshot mounts an EBS volume at
-      #     sstate-cache/ and downloads/ and snapshots it on workflow end.
-      #     Fast path, survives across runs on the same runner family
-      #     without copying anything.
-      # L2 (S3 mirror):  shared across every matrix entry / runner family,
-      #     and acts as the fallback when the snapshot misses (cold runner).
-      # We deliberately snapshot ONLY sstate-cache/ and downloads/, never
-      # build/, build/ contains mender per-run state that previously made
-      # workspace-wide snapshots flaky. sstate is content-hashed so it is
-      # always safe to reuse.
-
-      - name: Pre-create snapshot mount points
-        # runs-on/snapshot requires the target path to already exist; it
-        # mounts an EBS volume on top, it does not create the directory.
-        run: |
-          mkdir -p \
-            "$GITHUB_WORKSPACE/sstate-cache" \
-            "$GITHUB_WORKSPACE/downloads"
-
-      - name: Restore sstate-cache snapshot (L1)
-        uses: runs-on/snapshot@v1
-        with:
-          path: ${{ github.workspace }}/sstate-cache
-          # The snapshot lineage is shared by every matrix job (keyed on this
-          # path + branch), so the volume converges to the union of all nine
-          # boards' sstate and nothing prunes it. 150 GB filled up once the
-          # Thor board joined the matrix, killing builds with BitBake's
-          # STOPTASKS disk monitor. Note runs-on/snapshot discards a snapshot
-          # SMALLER than volume_size and starts a blank volume instead, so
-          # raising this forces one cold run (sstate re-restored from S3) and
-          # snapshots at the new size from then on. EBS snapshot cost scales
-          # with used blocks, not volume size, so headroom is nearly free.
-          volume_size: 400
-
-      - name: Make L1 EBS mount writable
-        run: sudo chmod -R a+rwX "$GITHUB_WORKSPACE/sstate-cache"
-
-      - name: Configure AWS credentials for build cache
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_BUILD_CACHE_ROLE_ARN }}
-          aws-region: ${{ vars.WENDYOS_BUILD_CACHE_REGION }}
-
-      - name: Restore sstate-cache and downloads from S3 (L2)
+      # Point the three build caches at the tenant's persistent NVMe pool.
+      # common.inc pins DL_DIR/SSTATE_DIR to ${TOPDIR}/../{downloads,sstate-cache},
+      # siblings of build/ in the workspace — so symlinking those onto the cache
+      # makes the existing paths resolve onto NVMe with no build-logic changes.
+      # Both are content-hashed and race-tolerant across the matrix. repos/ is
+      # NOT race-tolerant and is handled separately (private reflink snapshot) in
+      # the bootstrap step below.
+      - name: Wire caches to persistent NVMe
         run: |
           set -euo pipefail
-          # Prefer s5cmd (parallel S3 client baked into the AMI). Fall back
-          # to `aws s3 sync` so this step keeps working through the AMI rebuild
-          # window after install-build-deps.sh changes land.
-          # NOTE: deliberately no `|| true` — a real failure (IAM regression,
-          # bucket typo, etc.) should fail the step loudly. s5cmd exits 0 when
-          # there's simply nothing to transfer.
-          if command -v s5cmd >/dev/null 2>&1; then
-            s3_sync() {
-              # --size-only matches the prior aws-cli behavior; sstate filenames
-              # are content-hashed so size is a reliable freshness check.
-              s5cmd sync --size-only "$1" "$2"
-            }
-            src_sstate_glob="s3://${CACHE_BUCKET}/sstate-cache/*"
-            src_downloads_glob="s3://${CACHE_BUCKET}/downloads/*"
-          else
-            echo "::warning::s5cmd not found on runner; falling back to aws s3 sync"
-            s3_sync() {
-              aws s3 sync --no-progress --size-only "$1" "$2"
-            }
-            src_sstate_glob="s3://${CACHE_BUCKET}/sstate-cache/"
-            src_downloads_glob="s3://${CACHE_BUCKET}/downloads/"
-          fi
-
-          # Wrap each sync with timing + before/after size so the step is
-          # self-documenting even on no-op runs.
-          run_sync() {
-            local label="$1" src="$2" dst="$3" local_dir="$4"
-            echo "::group::$label"
-            echo "src=$src"
-            echo "dst=$dst"
-            if [[ -d "$local_dir" ]]; then
-              echo "local before: $(du -sh "$local_dir" 2>/dev/null | cut -f1) ($(find "$local_dir" -type f 2>/dev/null | wc -l) files)"
-            fi
-            local start; start=$(date +%s)
-            s3_sync "$src" "$dst"
-            echo "elapsed: $(( $(date +%s) - start ))s"
-            if [[ -d "$local_dir" ]]; then
-              echo "local after:  $(du -sh "$local_dir" 2>/dev/null | cut -f1) ($(find "$local_dir" -type f 2>/dev/null | wc -l) files)"
-            fi
-            echo "::endgroup::"
-          }
-
-          # If the L1 EBS snapshot already restored a non-trivial sstate-cache,
-          # skip the L2 sstate restore — at warm-cache scale (>200k objects)
-          # the redundant HEAD requests cost more than they save.
-          # NOTE: counted with a pipe-free idiom on purpose. `find ... | head | wc -l`
-          # under `set -o pipefail` aborts on warm caches because head closes
-          # stdin early and find SIGPIPEs — the exact case we're trying to detect.
-          # maxdepth 5 covers both the legacy flat layout (sstate-cache/<aa>/<bb>/file)
-          # and the per-tree partitioned layout introduced with split-poky
-          # (sstate-cache/<tree>/<aa>/<bb>/file). Future-proof for one extra
-          # nesting level if BitBake ever changes its hash directory scheme.
-          warm_threshold=500
-          sstate_files=0
-          if [[ -d "$GITHUB_WORKSPACE/sstate-cache" ]]; then
-            while IFS= read -r _; do
-              sstate_files=$((sstate_files + 1))
-              if [[ "$sstate_files" -ge "$warm_threshold" ]]; then break; fi
-            done < <(find "$GITHUB_WORKSPACE/sstate-cache" -mindepth 2 -maxdepth 5 -type f -print 2>/dev/null)
-          fi
-
-          if [[ "$sstate_files" -lt "$warm_threshold" ]]; then
-            echo "Cold sstate-cache (${sstate_files} files seen); restoring from S3"
-            run_sync "restore sstate-cache" "${src_sstate_glob}" "$GITHUB_WORKSPACE/sstate-cache/" "$GITHUB_WORKSPACE/sstate-cache"
-          else
-            echo "Warm sstate-cache (>=${warm_threshold} files seen via L1 snapshot); skipping S3 restore"
-          fi
-
-          # downloads/ is not in the L1 snapshot, so always restore from S3.
-          run_sync "restore downloads" "${src_downloads_glob}" "$GITHUB_WORKSPACE/downloads/" "$GITHUB_WORKSPACE/downloads"
-
-          # S3 sync only transfers files, so empty directories are lost on the
-          # round-trip. A bare git mirror with fully-packed refs has an empty
-          # refs/ dir, and git refuses to recognize the repo without it
-          # ("fatal: not a git repository"). BitBake then re-clones every git2
-          # mirror from upstream — and fails the build outright when upstream
-          # is down (e.g. iso-codes on salsa.debian.org). Recreate refs/, and
-          # drop any mirror git still can't read together with its .done
-          # marker so BitBake falls back to the mirror tarball or upstream
-          # instead of choking on a broken clonedir.
-          if [[ -d "$GITHUB_WORKSPACE/downloads/git2" ]]; then
-            for repo in "$GITHUB_WORKSPACE/downloads/git2"/*/; do
-              [[ -f "$repo/HEAD" ]] || continue
-              mkdir -p "$repo/refs"
-              if ! git -C "$repo" rev-parse --git-dir >/dev/null 2>&1; then
-                echo "::warning::Dropping unreadable git mirror $repo"
-                rm -rf "$repo" "${repo%/}.done"
-              fi
-            done
-          fi
+          base=/opt/wendy-cache/wendyos-builder
+          for d in sstate-cache downloads; do
+            ln -sfn "$base/$d" "$GITHUB_WORKSPACE/$d"
+            echo "linked $GITHUB_WORKSPACE/$d -> $base/$d"
+          done
 
       # ---------- Build ----------
 
@@ -404,14 +270,70 @@ jobs:
           echo "board=$BOARD" >> "$GITHUB_OUTPUT"
           echo "machine=$MACHINE" >> "$GITHUB_OUTPUT"
 
-      - name: Bootstrap build environment
+      # Isolate repos/ per job so no two runs can rewrite one another's layer
+      # tree. The matrix shares one seed on the NVMe cache and clone_repos does
+      # git fetch/checkout there — unsafe under concurrency, and a cross-run
+      # checkout at a different SRCREV would corrupt an in-flight build. reflink
+      # (XFS reflink=1 on this pool) gives each job an instant, space-free
+      # copy-on-write snapshot of the seed; the build reads only that private
+      # copy. reflink can't cross filesystems, so the snapshot lives on the pool
+      # and is symlinked into the workspace. WENDYOS_HOST_BUILD (job env) keeps
+      # bootstrap in host-build mode (no Docker image build).
+      - name: Bootstrap build environment (repos isolated via reflink)
         working-directory: ${{ github.workspace }}
         env:
           BOARD: ${{ steps.vars.outputs.board }}
-        # WENDYOS_HOST_BUILD and WENDYOS_REPO_CACHE_DIR are inherited from the
-        # job-level env block above. Host-build mode skips the Docker image
-        # creation; the repo cache seeds repos/ from the AMI's bake-time clones.
-        run: ./wendyos/bootstrap.sh
+          IS_PR: ${{ github.event_name == 'pull_request' }}
+          PRIV_TAG: ${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.device }}-${{ matrix.storage }}
+        run: |
+          set -euo pipefail
+          # The launcher bind-mounts each declared cache subdir individually, so
+          # only sstate-cache/, downloads/ and repos/ are writable — the parent
+          # dir is not. Keep the seed, per-job snapshots, and the lock all inside
+          # the writable repos/ mount (same XFS, so reflink still applies).
+          base=/opt/wendy-cache/wendyos-builder/repos
+          seed="$base/seed"
+          priv="$base/runs/$PRIV_TAG"
+          mkdir -p "$seed" "$base/runs"
+          exec 9>"$base/.lock"
+          if [[ "$IS_PR" == "true" ]]; then
+            # PR: never write the shared seed. Take a read-consistent snapshot
+            # under a shared lock, then advance only the private copy.
+            flock -s 9
+            rm -rf "$priv"
+            cp -a --reflink=always "$seed" "$priv"
+            flock -u 9
+            ln -sfn "$priv" "$GITHUB_WORKSPACE/repos"
+            ./wendyos/bootstrap.sh
+          else
+            # main/tag/dispatch: advance the seed to this run's SRCREVs and
+            # snapshot it, both under an exclusive lock, so the seed stays warm
+            # for future snapshots. bootstrap runs against the seed (symlink),
+            # then we swap the symlink for the private snapshot at the same path
+            # (make build re-sources oe-init from ./repos, so the swap is
+            # transparent). Held only for the fast bootstrap + snapshot.
+            flock -x 9
+            ln -sfn "$seed" "$GITHUB_WORKSPACE/repos"
+            ./wendyos/bootstrap.sh
+            rm -f "$GITHUB_WORKSPACE/repos"
+            rm -rf "$priv"
+            cp -a --reflink=always "$seed" "$priv"
+            ln -sfn "$priv" "$GITHUB_WORKSPACE/repos"
+            flock -u 9
+          fi
+          echo "repos: private reflink snapshot at $priv"
+
+      # bootstrap.sh has written build/conf/auto.conf by now; redirect TMPDIR
+      # onto the launcher's adaptive build/tmp backing (NVMe scratch) so build/
+      # never fills the container's smaller overlay.
+      - name: Use platform adaptive build/tmp
+        run: |
+          set -euo pipefail
+          {
+            echo ''
+            echo '# wendy-ci: use the platform adaptive build/tmp backing'
+            echo 'TMPDIR = "/wendy/build-tmp"'
+          } >> "$GITHUB_WORKSPACE/build/conf/auto.conf"
 
       - name: Enable debug for nightly builds
         # Release images are production builds — no debug tools by default.
@@ -438,8 +360,8 @@ jobs:
           } >> "$GITHUB_WORKSPACE/build/conf/auto.conf"
 
       # Note: SSTATE_DIR / DL_DIR are pinned to ${TOPDIR}/../{sstate-cache,downloads}
-      # by conf/template/include/local/common.inc, which matches the S3 sync paths
-      # below, no auto.conf override needed.
+      # by conf/template/include/local/common.inc, which resolve onto the NVMe
+      # cache via the symlinks wired above — no auto.conf override needed.
 
       # Resolve the latest *stable* wendyos-agent release (tag + asset sha256)
       # and export them so the wendyos-agent recipe pins this exact version.
@@ -477,98 +399,29 @@ jobs:
         working-directory: ${{ github.workspace }}/wendyos
         env:
           MACHINE: ${{ steps.vars.outputs.machine }}
-        run: make build MACHINE="$MACHINE"
-
-      # ---------- Build cache: save to S3 ----------------------------------
-      # L1 snapshots are saved automatically by runs-on/snapshot at workflow
-      # end. L2 (S3) we push explicitly so other matrix entries / future
-      # runners can prime from it.
-
-      # Re-assume the role for a fresh STS token before uploading. The
-      # credentials configured at job start expire after the default 1h
-      # session, and a cold blacksail build now runs longer than that — so by
-      # the time we reach the upload the original token is dead ("ExpiredToken:
-      # The provided token has expired"). Bumping role-duration-seconds alone
-      # would also require raising the IAM role's MaxSessionDuration; refreshing
-      # here is self-contained and gives the upload a full fresh hour.
-      # if: always() mirrors the save step so the cache still uploads after a
-      # failed build.
-      - name: Refresh AWS credentials for cache upload
-        if: always()
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_BUILD_CACHE_ROLE_ARN }}
-          aws-region: ${{ vars.WENDYOS_BUILD_CACHE_REGION }}
-
-      - name: Save sstate-cache and downloads to S3 (L2)
-        if: always()
-        env:
-          GH_EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
-          # --size-only avoids re-uploading sstate siblings whose mtime drifted
-          # but content matches. Sstate filenames are content-hashed, so file
-          # size is a reliable freshness check.
-          # NOTE: deliberately no `|| true` — a real failure (IAM regression,
-          # bucket typo, etc.) should fail the step loudly. s5cmd exits 0 when
-          # there's simply nothing to transfer.
-          if command -v s5cmd >/dev/null 2>&1; then
-            s3_save() {
-              s5cmd sync --size-only "$1" "$2"
-            }
-            sstate_src="$GITHUB_WORKSPACE/sstate-cache/*"
-            downloads_src="$GITHUB_WORKSPACE/downloads/*"
-          else
-            echo "::warning::s5cmd not found on runner; falling back to aws s3 sync"
-            s3_save() {
-              aws s3 sync --no-progress --size-only "$1" "$2"
-            }
-            sstate_src="$GITHUB_WORKSPACE/sstate-cache/"
-            downloads_src="$GITHUB_WORKSPACE/downloads/"
-          fi
-
-          run_save() {
-            local label="$1" src="$2" dst="$3" local_dir="$4"
-            echo "::group::$label"
-            echo "src=$src"
-            echo "dst=$dst"
-            if [[ -d "$local_dir" ]]; then
-              echo "local: $(du -sh "$local_dir" 2>/dev/null | cut -f1) ($(find "$local_dir" -type f 2>/dev/null | wc -l) files)"
-            fi
-            local start; start=$(date +%s)
-            s3_save "$src" "$dst"
-            echo "elapsed: $(( $(date +%s) - start ))s"
-            echo "::endgroup::"
+          # Tegra builds on the shared NVMe cache intermittently fail their
+          # first (colder) attempt — transient do_fetch and sstate/recipe-sysroot
+          # population glitches — and pass on retry (validated: both Orin and
+          # Thor needed one). The retry is cheap: sstate and downloads persist,
+          # so the second pass reuses everything the first produced.
+          make build MACHINE="$MACHINE" || {
+            echo "::warning::make build failed on first attempt; retrying once"
+            make build MACHINE="$MACHINE"
           }
 
-          if [[ -d "$GITHUB_WORKSPACE/sstate-cache" ]]; then
-            run_save "save sstate-cache" "${sstate_src}" "s3://${CACHE_BUCKET}/sstate-cache/" "$GITHUB_WORKSPACE/sstate-cache"
-          else
-            echo "No sstate-cache directory present; skipping sstate upload"
-          fi
-
-          # Skip the downloads/ upload on PR builds: PRs only need to *read*
-          # the cache, and a PR that pulls a brand-new source tarball is rare.
-          # When merged to main, that build re-fetches and writes back. Saves
-          # ~minutes of upload churn on every PR.
-          if [[ "$GH_EVENT_NAME" != "pull_request" && -d "$GITHUB_WORKSPACE/downloads" ]]; then
-            run_save "save downloads" "${downloads_src}" "s3://${CACHE_BUCKET}/downloads/" "$GITHUB_WORKSPACE/downloads"
-          else
-            echo "Skipping downloads/ upload (event=${GH_EVENT_NAME})"
-          fi
+      # The persistent NVMe cache is written in place by the build (sstate,
+      # downloads, repos are symlinked onto it) — no upload/save step needed.
 
       # --- Upload image and update device manifest (master manifest is handled by the publish job) ---
-
-      - name: Fix deploy directory permissions
-        if: github.event_name != 'pull_request'
-        run: sudo chown -R "$(id -u):$(id -g)" "${{ github.workspace }}/build/tmp/deploy" 2>/dev/null || true
 
       # SBOMs are generated by the create-spdx class (enabled in
       # conf/distro/wendyos.conf) as a byproduct of every image build, so they
       # exist on PRs too. Stage them into a flat dir for the artifact upload
-      # (and, on non-PR builds, for the publisher --sbom flag below). sudo/-L:
-      # on PRs the deploy dir is root-owned (the chown step above is skipped)
-      # and the SPDX files are versioned symlinks.
+      # (and, on non-PR builds, for the publisher --sbom flag below). No sudo:
+      # the self-hosted runner has no passwordless sudo, and in host-build mode
+      # the deploy tree is runner-owned. -L dereferences the versioned symlinks.
       - name: Stage SPDX SBOM artifacts
         id: sbom
         env:
@@ -582,11 +435,10 @@ jobs:
           # bundle + both JSON documents are captured by these two patterns.
           for pat in '*.spdx.tar.zst' '*.spdx.json'; do
             while IFS= read -r -d '' f; do
-              sudo cp -Lf "$f" "$STAGE/"
+              cp -Lf "$f" "$STAGE/"
               found=1
-            done < <(sudo find "$DEPLOY_DIR" -maxdepth 1 -name "$pat" -print0 2>/dev/null || true)
+            done < <(find "$DEPLOY_DIR" -maxdepth 1 -name "$pat" -print0 2>/dev/null || true)
           done
-          sudo chown -R "$(id -u):$(id -g)" "$STAGE"
           if [[ "$found" -eq 1 ]]; then
             echo "Staged SBOM files:"; ls -la "$STAGE"
             # The .spdx.tar.zst bundle is the canonical, self-contained SBOM
@@ -629,16 +481,10 @@ jobs:
           go-version-file: wendyos/tools/publisher/go.mod
           cache-dependency-path: wendyos/tools/publisher/go.sum
 
-      - name: Install flashable image dependencies (Jetson only)
-        if: github.event_name != 'pull_request' && startsWith(matrix.device, 'jetson-')
-        run: |
-          sudo apt-get update
-          # simg2img (android-sdk-libsparse-utils) converts Android sparse ext4
-          # images to raw; make-thor-nvme-img.py needs it to write APP/APP_b into
-          # the offline disk image. Every blacksail Jetson (Thor + all Orins on
-          # WENDYOS_OTA=wendy) now builds its NVMe/SD image via that script, so
-          # install it for all Jetson devices rather than Thor alone.
-          sudo apt-get install -y device-tree-compiler android-sdk-libsparse-utils
+      # Jetson flash-packaging deps (device-tree-compiler, android-sdk-libsparse-utils
+      # for simg2img, i386 runtime libs for the Thor NVIDIA flash tools) are baked
+      # into the self-hosted runner image — see wendylabsinc/ci. The runner has no
+      # passwordless sudo, so there is no apt-get step here.
 
       - name: Generate flashable image (Jetson)
         if: github.event_name != 'pull_request' && startsWith(matrix.device, 'jetson-')
@@ -695,9 +541,8 @@ jobs:
         run: |
           set -euo pipefail
           FLASH_WORKDIR="$GITHUB_WORKSPACE/flash-work/${MACHINE}"   # MACHINE-scoped, matches the generate step
-          sudo dpkg --add-architecture i386
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq libc6:i386 libstdc++6:i386 zlib1g:i386 device-tree-compiler zstd
+          # i386 runtime libs for the NVIDIA flash tools are baked into the
+          # runner image (wendylabsinc/ci); no apt-get here (no passwordless sudo).
           "$GITHUB_WORKSPACE/wendyos/scripts/make-thor-flashpack.sh" \
             --bundle-dir "$FLASH_WORKDIR" \
             --out "$GITHUB_WORKSPACE/thor-flashpack" \
@@ -841,6 +686,16 @@ jobs:
           # failed build job 409s on the artifact left by the earlier attempt.
           overwrite: true
 
+      # Remove this job's private repos snapshot from the persistent pool. The
+      # ephemeral workspace is discarded automatically, but the reflink copy
+      # lives on the cache pool, so it must be cleaned up explicitly (CoW means
+      # only the blocks that diverged from the seed are freed).
+      - name: Release private repos snapshot
+        if: always()
+        env:
+          PRIV_TAG: ${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.device }}-${{ matrix.storage }}
+        run: rm -rf "/opt/wendy-cache/wendyos-builder/repos/runs/$PRIV_TAG"
+
   # ---------------------------------------------------------------------------
   # publish: the ONLY writer of GCS manifests. Build jobs upload files and
   # hand over manifest-entry artifacts; this job applies them one at a time,
@@ -858,11 +713,12 @@ jobs:
     permissions:
       contents: write
       id-token: write
-    runs-on:
-      - runs-on
-      - family=c7i-flex.8xlarge
-      - spot=false
-      - run-id=${{ github.run_id }}-publish
+    # Light job (manifest writes + release tagging, no Yocto): stays on a
+    # GitHub-hosted runner for now. Moving it self-hosted needs broader CI work
+    # first — the platform is one-tenant-per-repo today, so it would otherwise
+    # ride the heavy builder tenant (64Gi reserve, a build concurrency slot) and
+    # need gh baked into that image. Revisit once a right-sized publish slice exists.
+    runs-on: ubuntu-latest
     steps:
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
