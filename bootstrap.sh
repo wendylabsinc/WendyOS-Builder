@@ -273,6 +273,18 @@ function clone_repos() {
                 }
             fi
 
+            # Fast path: SRCREVs are immutable pinned SHAs, so if the checkout
+            # is already at the target commit there is nothing to fetch — skip
+            # the network round-trip. This matters on the shared CI cache, where
+            # a warm build would otherwise re-fetch every layer repo for nothing.
+            if [[ "${srcrev}" =~ ^[0-9a-f]{40}$ ]] \
+               && git rev-parse -q --verify "${srcrev}^{commit}" >/dev/null 2>&1 \
+               && [[ "$(git rev-parse HEAD 2>/dev/null)" == "${srcrev}" ]]; then
+                printf "[ok] '%s' at %s (no fetch)\n" "${folder}" "${srcrev}"
+                cd ..
+                continue
+            fi
+
             # fetch latest refs from remote
             git fetch origin >> "${LOG_FILE}" 2>&1 || {
                 printf "[error] Failed to fetch '%s'\n" "${folder}"
@@ -311,11 +323,21 @@ function clone_repos() {
         fi
 
         # we need to checkout (either new clone or update)
-        git checkout "${srcrev}" >> "${LOG_FILE}" 2>&1 || {
-            printf "[error] Failed to checkout %s in '%s'\n" "${srcrev}" "${folder}"
-            cd ..
-            return 1
-        }
+        if ! git checkout "${srcrev}" >> "${LOG_FILE}" 2>&1; then
+            # The SRCREV may not be reachable from any current branch tip — e.g.
+            # the upstream branch it lived on was deleted or force-pushed (as
+            # happened with meta-tegra's wip-l4t-r39.2.0 branch). A plain clone /
+            # `git fetch origin` only retrieves current refs, so the pinned
+            # commit is absent locally even though the object still exists on the
+            # server. Fetch it directly by SHA, then retry the checkout.
+            printf "[refetch] '%s': %s not reachable via refs; fetching by SHA\n" "${folder}" "${srcrev}"
+            if ! { git fetch origin "${srcrev}" >> "${LOG_FILE}" 2>&1 && \
+                   git checkout "${srcrev}" >> "${LOG_FILE}" 2>&1; }; then
+                printf "[error] Failed to checkout %s in '%s'\n" "${srcrev}" "${folder}"
+                cd ..
+                return 1
+            fi
+        fi
 
         cd ..
     done
