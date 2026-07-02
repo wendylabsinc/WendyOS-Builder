@@ -41,13 +41,36 @@ IMAGE_FEATURES += "${@oe.utils.ifelse(d.getVar('WENDYOS_DEBUG') == '1', d.getVar
 # systemd ships an enabled getty@tty1.service, and logind spawns further gettys
 # on VT switch (autovt@ttyN resolves to the getty@ template). Root is already
 # locked on release builds (no empty-root-password above), but the prompt itself
-# is still an attack surface on a product device, so drop the enablement symlink
-# and mask the template — masking getty@.service masks every instance, including
-# logind's autovt spawns. Serial consoles (serial-getty@, SERIAL_CONSOLES) are
-# deliberately untouched so UART access stays available for field debugging.
+# is still an attack surface on a product device.
+#
+# Do NOT mask getty@.service here: `systemctl --root preset-all` (run by
+# rootfs-postcommands' systemd_handle_machine_id during rootfs assembly)
+# errors on a masked unit it has an enable preset for, failing do_rootfs
+# ("Failed to preset all unit: ... is masked"). Instead:
+#   - a system-preset that DISABLES getty@ outranks systemd's default
+#     enable preset, so preset-all neither errors nor re-enables it;
+#   - the enablement symlink is removed for the assembled image;
+#   - a drop-in condition neuters logind's autovt@ttyN spawns (they start
+#     the getty@ template directly, ignoring enablement) — the unit starts,
+#     the condition fails, no prompt appears, nothing loops.
+# Serial consoles (serial-getty@, SERIAL_CONSOLES) are deliberately
+# untouched so UART access stays available for field debugging. To restore
+# VT logins on a device: touch /etc/wendyos/enable-vt-login, re-enable
+# getty@tty1, reboot.
 disable_vt_login() {
     rm -f ${IMAGE_ROOTFS}${sysconfdir}/systemd/system/getty.target.wants/getty@tty1.service
-    ln -sf /dev/null ${IMAGE_ROOTFS}${sysconfdir}/systemd/system/getty@.service
+    install -d ${IMAGE_ROOTFS}${sysconfdir}/systemd/system-preset
+    cat > ${IMAGE_ROOTFS}${sysconfdir}/systemd/system-preset/50-wendyos-no-vt-login.preset <<EOF
+disable getty@.service
+disable getty@*.service
+EOF
+    install -d ${IMAGE_ROOTFS}${sysconfdir}/systemd/system/getty@.service.d
+    cat > ${IMAGE_ROOTFS}${sysconfdir}/systemd/system/getty@.service.d/10-wendyos-no-vt-login.conf <<EOF
+[Unit]
+# VT logins disabled on release builds (wendyos-image.bb disable_vt_login).
+# Touch this file and reboot to get a VT login prompt for debugging.
+ConditionPathExists=/etc/wendyos/enable-vt-login
+EOF
 }
 ROOTFS_POSTPROCESS_COMMAND += "${@oe.utils.ifelse(d.getVar('WENDYOS_DEBUG') == '1', '', 'disable_vt_login;')}"
 
