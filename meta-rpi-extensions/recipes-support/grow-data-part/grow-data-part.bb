@@ -1,8 +1,8 @@
 SUMMARY = "Grow /data to fill the storage device on first boot (RPi)"
 DESCRIPTION = "First-boot oneshot that grows /data to fill the storage device, \
 no reboot. /data is the last partition because config is placed before it by \
-mender-config-before-data.bbclass; this also grows the MBR extended container that \
-Mender's mender-growfs-data cannot, and relocates the GPT backup header (wendy A/B \
+the rpi-wendy-ab*.wks layouts; this also grows the MBR extended container and \
+relocates the GPT backup header (wendy A/B \
 layout) so the partition can reach the disk end. Split in two phases: the fast \
 partition grow runs offline before data.mount (grow-data-part.service), the slow \
 ext4 resize2fs runs online afterwards off the boot path (grow-data-fs-online.service)."

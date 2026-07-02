@@ -815,7 +815,7 @@ jobs:
           # For all Jetson targets, include the tegraflash bundle as the recovery file
           # (used for USB recovery-mode flashing via tegraflash.py / initrd-flash).
           # wendy/blacksail builds use .tegraflash-tar (JP7/r38.4.x renamed the
-          # type); legacy mender builds use .tegraflash.tar.gz — resolved above.
+          # type from the older .tegraflash.tar.gz) — resolved above.
           if [[ -n "$TEGRAFLASH_BUNDLE" ]]; then
             ARGS+=(--recovery-file "$TEGRAFLASH_BUNDLE")
           fi
@@ -848,14 +848,13 @@ jobs:
             ARGS+=(--bmap-file "$BMAP_FILE")
           fi
 
-          # Include the OTA update artifact if the build produced one. A board
-          # runs either the Mender stack (.mender) or the wendyos-update stack
-          # (.wendy), never both — it is gated by WENDYOS_OTA — so both feed the
-          # same --ota-update slot / ota_update_path; the device's OTA client
-          # interprets the artifact. Neither extension is recompressed by the
-          # publisher (only .img/.wic/.sdimg are), so each uploads as-is.
+          # Include the OTA update artifact if the build produced one. Boards
+          # run the wendyos-update stack (.wendy), gated by WENDYOS_OTA, feeding
+          # the --ota-update slot / ota_update_path; the device's OTA client
+          # interprets the artifact. The extension is not recompressed by the
+          # publisher (only .img/.wic/.sdimg are), so it uploads as-is.
           OTA_FILE=$(find "$DEPLOY_DIR" -maxdepth 1 \
-            \( -name "wendyos-image-${MACHINE}*.mender" -o -name "wendyos-image-${MACHINE}*.wendy" \) \
+            -name "wendyos-image-${MACHINE}*.wendy" \
             -print -quit 2>/dev/null || true)
           if [[ -n "$OTA_FILE" ]]; then
             ARGS+=(--ota-update "$OTA_FILE")

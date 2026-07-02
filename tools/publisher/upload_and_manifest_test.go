@@ -224,7 +224,6 @@ func TestIsOSImage(t *testing.T) {
 		{"archive.tgz", true},
 		{"compressed.xz", true},
 		{"compressed.zst", true},
-		{"update.mender", true},
 		{"document.pdf", false},
 		{"text.txt", false},
 		{"script.sh", false},
@@ -321,7 +320,7 @@ func TestDeviceManifestSerialization(t *testing.T) {
 				SizeBytes:          1024 * 1024,
 				IsLatest:           true,
 				IsNightly:          false,
-				OTAUpdatePath:      "images/test-device/1.0.0/update.mender.xz",
+				OTAUpdatePath:      "images/test-device/1.0.0/update.wendy.xz",
 				OTAUpdateChecksum:  "def456",
 				OTAUpdateSizeBytes: 512 * 1024,
 			},
@@ -597,8 +596,8 @@ func TestSetBmapPath(t *testing.T) {
 
 func TestApplyOTAUpdate(t *testing.T) {
 	const (
-		nvmeOTA = "images/jetson-orin-nano/v1/wendyos-image-jetson-orin-nano-devkit-nvme-wendyos.mender"
-		sdOTA   = "images/jetson-orin-nano/v1/wendyos-image-jetson-orin-nano-devkit-wendyos.mender"
+		nvmeOTA = "images/jetson-orin-nano/v1/wendyos-image-jetson-orin-nano-devkit-nvme-wendyos.wendy"
+		sdOTA   = "images/jetson-orin-nano/v1/wendyos-image-jetson-orin-nano-devkit-wendyos.wendy"
 	)
 
 	t.Run("nvme routes to nvme field and seeds default", func(t *testing.T) {

@@ -27,9 +27,3 @@ alias la='ls -A'
 # WendyOS specific commands
 alias wendyos-version='cat /etc/wendyos-build-id 2>/dev/null || echo "Build ID not available"'
 alias wendyos-uuid='cat /etc/wendyos/device-uuid 2>/dev/null || echo "UUID not available"'
-
-# Mender commands (if mender is installed)
-if command -v mender >/dev/null 2>&1; then
-    alias mender-status='mender show-artifact'
-    alias mender-check='mender check-update'
-fi

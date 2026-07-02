@@ -38,4 +38,4 @@ SRCREV_RPI="0c76b0feadbe2afa4cec4cd497636e94eca30ec3"
 #
 # Deliberately NO meta-lts-mixins-go REPOS_EXTRA (blacksail Go is 1.26 native),
 # and the bblayers omit meta-lts-mixins entirely (blacksail U-Boot is 2026.04
-# native). meta-tegra* / Mender SRCREVs are irrelevant to RPi and left default.
+# native). meta-tegra* / OTA SRCREVs are irrelevant to RPi and left default.

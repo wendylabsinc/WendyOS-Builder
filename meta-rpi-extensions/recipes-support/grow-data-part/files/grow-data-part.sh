@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Grow /data to fill the storage device on first boot, no reboot.
 #
-# config (FAT) sits BEFORE /data (mender-config-before-data.bbclass), so /data is
-# the LAST partition and grows into the trailing free space. Stock mender-growfs-data
+# config (FAT) sits BEFORE /data (rpi-wendy-ab*.wks), so /data is
+# the LAST partition and grows into the trailing free space. A naive online grower
 # is disabled: it can't resize the MBR *extended* container holding the logical /data.
 #
-# Split in two (mirrors Tegra's mender-grow-data + mender-systemd-growfs-data) so the
+# Split in two (offline partition grow + online resize) so the
 # slow ext4 grow stays off the boot path -- see the partition/resize/all case below:
 #   partition : offline, before data.mount -- grow the PARTITION + leave the fs clean
 #   resize    : online, after data.mount   -- the slow resize2fs, off the boot path
@@ -28,10 +28,9 @@ sysblk() { cat "/sys/class/block/$1/$2" 2>/dev/null; }
 
 log "Start $(date -Is 2>/dev/null || true)"
 
-# Mender's generated fstab references /data by raw device path; the wendy
-# (wendyos-update) RPi fstab references it by label so it stays machine-agnostic
-# (mmcblk0pN vs nvme0n1pN). Read it (both phases need the device) and resolve any
-# tag spec to a device node; the /dev/* form skips this.
+# The wendy (wendyos-update) RPi fstab references /data by label so it stays
+# machine-agnostic (mmcblk0pN vs nvme0n1pN). Read it (both phases need the
+# device) and resolve any tag spec to a device node; the /dev/* form skips this.
 DATA_DEV="$(awk '$1 !~ /^#/ && $2 == "/data" { print $1; exit }' /etc/fstab 2>/dev/null || true)"
 case "$DATA_DEV" in
     /dev/*) ;;
@@ -39,7 +38,7 @@ case "$DATA_DEV" in
         resolved="$(findfs "$DATA_DEV" 2>/dev/null || true)"
         [ -n "$resolved" ] || defer "cannot resolve /data spec '$DATA_DEV' yet"
         DATA_DEV="$resolved" ;;
-    "") # No /data entry at all: a single-root board (rpi3 mender-fstab, rpi4
+    "") # No /data entry at all: a single-root board (legacy rpi3/rpi4
         # rpi-fstab) where root growth is handled elsewhere (expand-rootfs-rpi).
         # grow-data-part ships in the shared rpi packagegroup, so it runs here
         # too -- nothing to grow, so succeed quietly instead of failing the unit.
@@ -68,7 +67,7 @@ data_fills_disk() {
 
 # Extend the /data partition to the disk end. /data must be unmounted (run before
 # its mount). Handles both layouts: GPT (wendy A/B) needs the backup header moved
-# to the real disk end first; MBR (Mender) needs the extended container grown first.
+# to the real disk end first; MBR needs the extended container grown first.
 grow_data_partition() {
     local ext_dev ext_num
     # GPT (wendy A/B layout): after flashing the wic to a larger card the backup
@@ -77,7 +76,7 @@ grow_data_partition() {
     # available ... appears to be used" -> "Unable to satisfy all constraints on
     # the partition"). parted -s cannot answer its own "fix the GPT?" prompt, so
     # relocate the backup header to the real disk end with sgdisk -e first, which
-    # makes the full card usable. No-op on MBR (Mender) layouts.
+    # makes the full card usable. No-op on MBR layouts.
     if sfdisk -d "$DISK" 2>/dev/null | grep -qi '^label:[[:space:]]*gpt'; then
         log "GPT: relocating backup header to end of $DISK (sgdisk -e)"
         sgdisk -e "$DISK" || { log "sgdisk -e failed"; return 1; }
