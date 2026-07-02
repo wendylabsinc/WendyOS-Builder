@@ -714,8 +714,6 @@ jobs:
               --out "$FLASHPACK_OUT" \
               --version "$UPLOAD_VERSION"
           else
-            # --device/--storage from the matrix so the artifact name has one
-            # source of truth (otherwise the script derives them from MACHINE).
             "$GITHUB_WORKSPACE/wendyos/scripts/make-t234-flashpack.sh" \
               --bundle-dir "$FLASH_WORKDIR" \
               --out "$FLASHPACK_OUT" \

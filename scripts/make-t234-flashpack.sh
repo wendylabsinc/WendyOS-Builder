@@ -11,28 +11,13 @@
 # is an executable the host must run — stage2/tools/ scripts are optional
 # Linux-host conveniences.)
 #
-# This mirrors initrd-flash's T234 branch (sign_binaries_t234 +
-# copy_bootloader_files_t234 + the write_to_device_t234 XML rewrite) but stops
-# before it touches USB. The device-connected phases are the host's job:
-#   stage 1: send stage1/ files per rcmbootcmd.txt over USB recovery (the
-#            tegrarcm_v2 RCM protocol) to boot the flashing initrd
-#   stage 2: write stage2/flashpkg.ext4 to the "flashpkg" mass-storage LUN the
-#            initrd exports (delivers command_sequence + boot firmware), then
-#            write the partitions in stage2/flash/initrd-flash.xml to the
-#            exported rootfs block device
-#
 # The board identity (BOARDID/FAB/BOARDSKU/BOARDREV/CHIPREV) comes from the
 # DEFAULTS map in the bundle's .env.initrd-flash, so signing needs no EEPROM or
 # ECID read. The resulting flashpack is therefore pinned to that module SKU.
 #
-# Trust boundary: the bundle is CI-internal input, produced minutes earlier by
-# this same pipeline's Yocto build. Executing its tooling (env files, helper
-# scripts, tegraflash, the NVIDIA binaries) is this script's purpose — anyone
-# who can tamper with the bundle already controls the build outputs themselves.
-#
 # Usage:
 #   make-t234-flashpack.sh --bundle-dir <extracted-tar> --out <dir> --version <ver>
-#                          [--device <name>] [--storage <nvme|emmc>]
+#                          --device <name> --storage <nvme|emmc>
 #
 #   --bundle-dir  a directory holding an extracted *.tegraflash-tar (contains
 #                 initrd-flash, tegra234-flash-helper.sh, .env.initrd-flash,
@@ -42,9 +27,8 @@
 #   --out         where the flashpack/ tree and the .tar are written.
 #   --version     WendyOS version string recorded in the manifest (e.g. 0.16.0
 #                 or nightly-20260629T...). Names the output tar.
-#   --device      published device name; derived from MACHINE when omitted
-#                 (jetson-agx-orin-devkit-nvme-wendyos -> jetson-agx-orin).
-#   --storage     rootfs storage; derived from MACHINE when omitted.
+#   --device      published device name (e.g. jetson-agx-orin).
+#   --storage     rootfs storage (nvme or emmc). Names the output tar.
 #
 # Output:
 #   <out>/flashpack/                                              the assembled tree
@@ -69,6 +53,8 @@ done
 [ -n "$BUNDLE_DIR" ] || err "--bundle-dir is required"
 [ -n "$OUT" ]        || err "--out is required"
 [ -n "$VERSION" ]    || err "--version is required"
+[ -n "$DEVICE" ]     || err "--device is required"
+[ -n "$STORAGE" ]    || err "--storage is required"
 
 here="$(cd "$BUNDLE_DIR" && pwd)"
 OUT="$(mkdir -p "$OUT" && cd "$OUT" && pwd)"
@@ -84,15 +70,6 @@ set +u
 set -u
 [ "${CHIPID:-}" = "0x23" ] || err "bundle is not T234 (CHIPID=${CHIPID:-unset}); use make-thor-flashpack.sh for T264"
 [ -f "$FLASH_HELPER" ]     || err "$FLASH_HELPER missing from bundle"
-
-if [ -z "$DEVICE" ] || [ -z "$STORAGE" ]; then
-    if [[ "$MACHINE" =~ ^(jetson-[a-z0-9-]+)-devkit-(nvme|emmc)-wendyos$ ]]; then
-        DEVICE="${DEVICE:-${BASH_REMATCH[1]}}"
-        STORAGE="${STORAGE:-${BASH_REMATCH[2]}}"
-    else
-        err "cannot derive --device/--storage from MACHINE=$MACHINE; pass them explicitly"
-    fi
-fi
 
 # Board identity pinned at build time; with BOARDID/FAB set the helper skips
 # its EEPROM/ECID device queries and signing runs fully offline. Empty
@@ -179,9 +156,8 @@ fi
 # Pre-signed layouts name the sparse image; convert back to the raw image name.
 simgname="${ROOTFS_IMAGE%.*}.img"
 # shellcheck disable=SC2086  # $datased is intentionally a sed arg, split on space
-sed -i.bak -e"s,$simgname,$ROOTFS_IMAGE," -e"s,APPFILE_b,$ROOTFS_IMAGE," -e"s,APPFILE,$ROOTFS_IMAGE," \
+sed -i -e"s,$simgname,$ROOTFS_IMAGE," -e"s,APPFILE_b,$ROOTFS_IMAGE," -e"s,APPFILE,$ROOTFS_IMAGE," \
     -e"s,DTB_FILE,kernel_$DTBFILE," $datased initrd-flash.xml
-rm -f initrd-flash.xml.bak
 
 # ---------------------------------------------------------------------------
 log "Step 5: assemble flashpack tree"
@@ -254,17 +230,12 @@ echo "PENDING: expecting command sequence from host" > "$PKG/status"
 # stage2/flashpkg.ext4 — the same tree as a ready-made 128 MiB ext4 image,
 # byte-writable straight onto the flashpkg LUN (which the initrd creates at
 # exactly 128 MiB). Lets macOS hosts skip ext4 filesystem authoring entirely.
-if command -v mke2fs >/dev/null 2>&1; then
-    pkgtmp="$(mktemp -d)"
-    mkdir "$pkgtmp/flashpkg"
-    cp -R "$PKG/." "$pkgtmp/flashpkg/"
-    truncate -s 128M "$FP/stage2/flashpkg.ext4" 2>/dev/null || \
-        dd if=/dev/zero of="$FP/stage2/flashpkg.ext4" bs=1M count=128 status=none
-    mke2fs -q -F -t ext4 -d "$pkgtmp" "$FP/stage2/flashpkg.ext4" || err "mke2fs failed for flashpkg.ext4"
-    rm -rf "$pkgtmp"
-else
-    err "mke2fs not found (install e2fsprogs); required to prebuild flashpkg.ext4"
-fi
+pkgtmp="$(mktemp -d)"
+mkdir "$pkgtmp/flashpkg"
+cp -R "$PKG/." "$pkgtmp/flashpkg/"
+truncate -s 128M "$FP/stage2/flashpkg.ext4"
+mke2fs -q -F -t ext4 -d "$pkgtmp" "$FP/stage2/flashpkg.ext4" || err "mke2fs failed for flashpkg.ext4"
+rm -rf "$pkgtmp"
 
 # stage2/tools — host-side helper scripts (bash/python, no NVIDIA binaries);
 # usable directly on a Linux host, reference material elsewhere.
@@ -283,8 +254,7 @@ for f in mb1_t234_prod_aligned_sigheader.bin.encrypt \
 done
 [ -s "$FP/stage1/blob.bin" ] || err "blob.bin is empty"
 grep -q "download bct_br" "$FP/stage1/rcmbootcmd.txt" || err "rcmbootcmd.txt has no bct_br download"
-[ "$(stat -c%s "$FP/stage2/flashpkg.ext4" 2>/dev/null || stat -f%z "$FP/stage2/flashpkg.ext4")" = 134217728 ] \
-    || err "flashpkg.ext4 is not exactly 128 MiB"
+[ "$(stat -c%s "$FP/stage2/flashpkg.ext4")" = 134217728 ] || err "flashpkg.ext4 is not exactly 128 MiB"
 [ -s "$PKG/bootloader/partitions.conf" ]   || err "flashpkg bootloader/partitions.conf missing"
 [ -s "$PKG/bootloader/boot_device_type" ]  || err "flashpkg bootloader/boot_device_type missing"
 echo "  boot device: $BOOT_DEVICE_TYPE, rootfs device: $ROOTFS_DEVICE"
