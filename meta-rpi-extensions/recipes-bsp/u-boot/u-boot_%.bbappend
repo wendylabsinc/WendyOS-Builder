@@ -32,6 +32,12 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
 SRC_URI:raspberrypi5 = "git://source.denx.de/u-boot/u-boot.git;protocol=https;branch=master"
 SRCREV:raspberrypi5 = "1296a428c67cf103eca482d4a63349661c1b799f"
 
+# All rpi5 boards (SD + NVMe): require a stop-string to abort autoboot so a
+# floating debug-UART RX (RP1 PL011 on GPIO14/15, dtoverlay=uart0) cannot drop a
+# probe-less board to the U-Boot prompt. See files/autoboot-keyed.cfg. Scoped to
+# :raspberrypi5 -- rpi3/4 use the biased mini-UART and are unaffected.
+SRC_URI:append:raspberrypi5 = " file://autoboot-keyed.cfg"
+
 SRC_URI:append:raspberrypi5-nvme = " \
     file://nvme-boot.cfg \
     file://0001-nvme-phys-to-bus.patch \
