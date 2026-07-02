@@ -1,9 +1,10 @@
 
 # Flash Image Size Configurations for WendyOS
 #
-# This file defines custom partition sizes for NVMe flash images.
-# The image size is controlled by TEGRA_EXTERNAL_DEVICE_SECTORS,
-# and APP partition sizes are controlled by ROOTFSPART_SIZE_DEFAULT.
+# This file defines custom partition sizes for Tegra flash images.
+# Device size is set by TEGRA_EXTERNAL_DEVICE_SECTORS; the A/B rootfs (APP)
+# slot size is set by MENDER_STORAGE_TOTAL_SIZE_MB (see below — NOT
+# ROOTFSPART_SIZE_DEFAULT, which Mender's tegra-mender-setup overrides).
 #
 # Usage: Set WENDYOS_FLASH_IMAGE_SIZE in local.conf or distro config
 #        Values: "4GB", "8GB", "16GB", "32GB", "64GB" (default: "8GB")
@@ -21,23 +22,16 @@ TEGRA_EXTERNAL_DEVICE_SECTORS:64GB = "125000000"
 # Override based on WENDYOS_FLASH_IMAGE_SIZE
 TEGRA_EXTERNAL_DEVICE_SECTORS = "${TEGRA_EXTERNAL_DEVICE_SECTORS:${WENDYOS_FLASH_IMAGE_SIZE}}"
 
-# APP partition sizes (bytes) for different image sizes
-# These values account for:
-# - Fixed partitions (boot, recovery, esp, UDA, reserved): ~1.5GB
-# - 100MB safety buffer for GPT overhead
-# - Remaining space split between APP and APP_b partitions
+# Storage budget (in MiB — Mender multiplies by 1048576) that the A/B rootfs
+# slots are carved from. Mender sizes EACH slot as
+#   (MENDER_STORAGE_TOTAL_SIZE_MB - MENDER_DATA_PART_SIZE_MB[512]) / 2,
+# so THIS value — not the device size (TEGRA_EXTERNAL_DEVICE_SECTORS above) —
+# sets the per-slot rootfs size; leftover device space flows to the
+# auto-growing /data. The rootfs partition size is frozen at flash and CANNOT
+# be changed by an OTA, so it must be right here.
 #
-# Formula per APP partition: ((total_bytes - fixed_bytes - buffer) / 2)
-
-# Mender storage size in MB for different image sizes
-# Mender uses this to calculate APP partition sizes automatically
-# Note: These values are adjusted to account for Tegra fixed partitions (~1.5GB)
-# and include safety margin for GPT overhead
-#
-# Formula: (total_size_gb - tegra_fixed_partitions_gb - safety_margin_gb) * 1000
-#   4GB:  (4.0 - 0.7 - 0.1) * 1000 = 3200 MB
-#   8GB:  (8.0 - 1.5 - 0.1) * 1000 = 6400 MB
-#  16GB: (16.0 - 3.1 - 0.1) * 1000 = 12800 MB
-#  32GB: (32.0 - 6.2 - 0.1) * 1000 = 25700 MB
-#  64GB: (64.0 - 12.5 - 0.5) * 1000 = 51000 MB
-MENDER_STORAGE_TOTAL_SIZE_MB = "${@{'4GB': '3200', '8GB': '6400', '16GB': '12800', '32GB': '25700', '64GB': '51000'}.get(d.getVar('WENDYOS_FLASH_IMAGE_SIZE'), '6400')}"
+#   per-slot MiB = (value - 512) / 2
+#   64GB -> 25088 => 12288 MiB = 12.0 GiB/slot   (Jetson target)
+#           alt 33280 => 16.0 GiB/slot; old 51000 => 24.65 GiB/slot (oversized)
+#   4/8/16/32GB buckets keep their historical fill-the-device values.
+MENDER_STORAGE_TOTAL_SIZE_MB = "${@{'4GB': '3200', '8GB': '6400', '16GB': '12800', '32GB': '25700', '64GB': '25088'}.get(d.getVar('WENDYOS_FLASH_IMAGE_SIZE'), '6400')}"

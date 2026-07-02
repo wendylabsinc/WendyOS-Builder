@@ -43,8 +43,8 @@
 #     the slots down here if the rpi3 fleet uses smaller media.
 bootloader --ptable msdos
 part /boot   --source bootimg-partition --ondisk mmcblk0 --fstype=vfat --label boot    --active --align 4096 --size 128M
-part         --source rootfs            --ondisk mmcblk0 --fstype=ext4 --label rootfsA  --align 4096 --size 8192M
-part         --source rootfs            --ondisk mmcblk0 --fstype=ext4 --label rootfsB  --align 4096 --size 8192M
+part         --source rootfs            --ondisk mmcblk0 --fstype=ext4 --label rootfsA  --align 4096 --fixed-size ${WENDYOS_ROOTFS_SLOT_SIZE_MB}M
+part         --source rootfs            --ondisk mmcblk0 --fstype=ext4 --label rootfsB  --align 4096 --fixed-size ${WENDYOS_ROOTFS_SLOT_SIZE_MB}M
 part         --ondisk mmcblk0 --fstype=vfat --label config --align 4096 --size ${WENDYOS_CONFIG_PART_SIZE_MB}M
 part         --ondisk mmcblk0 --fstype=ext4 --label data   --align 4096 --size 512M
 

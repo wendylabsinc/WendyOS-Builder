@@ -27,6 +27,19 @@ MENDER_BOOT_PART_SIZE_MB     = "100"
 MENDER_DATA_PART_SIZE_MB     = "256"
 MENDER_STORAGE_TOTAL_SIZE_MB = "7528"
 
+# --- WendyOS A/B rootfs slot size (wendyos-update stack) ------------------
+# Single knob for the RPi A/B rootfs slots (RPi3/4/5). Drives both the wic
+# --fixed-size slots in rpi-wendy-ab*.wks AND the rootfs filesystem, so the ext4
+# is built to exactly fill the slot (A/B images are never resized at runtime;
+# the slot is frozen at flash — an OTA cannot change it).
+WENDYOS_ROOTFS_SLOT_SIZE_MB ?= "8192"
+# wic only expands wks vars listed in WICVARS — register it so the
+# rpi-wendy-ab*.wks `--fixed-size ${WENDYOS_ROOTFS_SLOT_SIZE_MB}M` resolves.
+WICVARS:append = " WENDYOS_ROOTFS_SLOT_SIZE_MB"
+# ext4 payload = IMAGE_ROOTFS_SIZE + IMAGE_ROOTFS_EXTRA_SPACE; wendyos-image.bb
+# adds +4096 KiB (systemd), so subtract it to land the image on the slot exactly.
+IMAGE_ROOTFS_SIZE ?= "${@int(d.getVar('WENDYOS_ROOTFS_SLOT_SIZE_MB')) * 1024 - 4096}"
+
 # --- WendyOS config partition (placed BEFORE /data) ----------------------
 # Small FAT32 "config" partition that `wendy os install` seeds with first-boot
 # provisioning (WiFi, device name, pre-enrolled identity). wendy-agent consumes
