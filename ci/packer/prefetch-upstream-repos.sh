@@ -41,8 +41,6 @@ prefetch_tree() {
         [meta-tegra]="${URL_TEGRA}|${SRCREV_TEGRA}"
         [meta-tegra-community]="${URL_TEGRA_COMM}|${SRCREV_TEGRA_COMM}"
         [meta-virtualization]="${URL_VIRT}|${SRCREV_VIRT}"
-        [meta-mender]="${URL_MENDER}|${SRCREV_MENDER}"
-        [meta-mender-community]="${URL_MENDER_COMM}|${SRCREV_MENDER_COMM}"
         [meta-raspberrypi]="${URL_RPI}|${SRCREV_RPI}"
     )
 

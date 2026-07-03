@@ -7,8 +7,6 @@ Documentation=man:systemd.mount(5)
 RequiresMountsFor=/data
 After=data.mount
 
-# Wait for Mender data partition resize to complete (if enabled)
-After=mender-systemd-growfs-data.service
 Before=systemd-journald.service
 DefaultDependencies=no
 

@@ -74,13 +74,9 @@ fail the build at ~77% real occupancy).
   the include (previously content-sized against 8 GiB slots — a real bug);
   rpi5's local floor-only `IMAGE_ROOTFS_SIZE` was removed in favor of the
   include. Minimum media noted as 32 GB in each wks header.
-- **Orin** (blacksail CI builds with `WENDYOS_OTA=wendy`): images are pinned
-  to 12 GiB by the include and fit the upstream slots (14+ GiB). The slots are
-  NOT shrunk to 12 GiB yet — the machine confs are still dual-stack
-  (mender/wendy switchable) and `flash-image-sizes.inc` owns sizing on the
-  mender path; pin `ROOTFSPART_SIZE_DEFAULT` there once the confs are
-  wendy-only. Until then the on-device pre-flight logs the (harmless)
-  slot > payload inequality.
+- **Orin** (all four machines): wendy-only as of the Mender removal (see
+  below) — `ROOTFSPART_SIZE_DEFAULT = "25769803776"` in each machine conf, so
+  every Orin A/B slot is exactly 12 GiB, same as Thor.
 
 ### Enforcement, four layers
 
@@ -98,10 +94,22 @@ fail the build at ~77% real occupancy).
    asserts the deployed ext4 size and the `.wendy` manifest `payload.size`
    equal the per-device constant.
 
+## Mender removal (2026-07-02)
+
+WendyOS is wendyos-update-only. The Mender OTA stack was removed from the
+active flow in the same change: `WENDYOS_OTA` now selects only wendy|none
+(default wendy, none for QEMU); `mender.inc`, `flash-image-sizes.inc`,
+`mender-secrets.inc`, the mender bblayers includes, `recipes-mender/`
+(mender-esp + JP6 state scripts) and `mender-config-before-data.bbclass` are
+deleted; the Orin machine confs lost their dual-stack conditionals and
+MENDER_* vars; bootstrap/prefetch no longer clone meta-mender. The last
+Mender-capable history is the pre-blacksail `main` branch.
+
 ## Verification checklist
 
 - [ ] CI matrix build green: ext4 == payload == 12884901888 (Jetson) /
       8589934592 (RPi) on every device.
+- [ ] Orin (any variant): flash XML APP/APP_b == 12884901888.
 - [ ] `wendy install` a Thor: `lsblk -b` shows APP/APP_b == 12884901888.
 - [ ] OTA a nightly onto that Thor, then a release onto that: all three
       rootfs sizes identical; pre-flight logs equality (no warning).

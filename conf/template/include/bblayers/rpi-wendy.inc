@@ -1,9 +1,9 @@
 # RPi layers for the wendyos-update OTA stack (WENDYOS_OTA = "wendy").
-# Identical to bblayers/rpi.inc but WITHOUT the Mender layers: the wendy stack
+# RPi layer set for the wendy OTA stack (no Mender layers): the wendy stack
 # replaces Mender entirely, and leaving meta-mender-raspberrypi in BBLAYERS
 # would apply its rpi-u-boot-scr.bbappend (Mender's A/B boot.cmd), colliding
 # with meta-rpi-extensions' wendy boot.cmd. Used by the rpi5-sd / rpi5-nvme
-# board templates; RPi3/4 stay on bblayers/rpi.inc + Mender.
+# board templates.
 #
 # Two meta-lts-mixins checkouts, each a different mixin branch (each mixin lives
 # on its own branch, so they can't share a checkout):

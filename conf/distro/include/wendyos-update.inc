@@ -1,5 +1,5 @@
 # wendyos-update OTA stack. Required from wendyos.conf when
-# WENDYOS_OTA == "wendy". Parallels conf/distro/include/mender.inc.
+# WENDYOS_OTA == "wendy".
 #
 # Pulls in the on-device pieces and the build-side artifact:
 #   - wendyos-update:      the OTA client (/usr/bin/wendyos-update + the

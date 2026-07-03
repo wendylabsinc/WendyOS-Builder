@@ -1,7 +1,7 @@
 # Fixed rootfs image size — the single source of truth for the wendy OTA
 # stack (docs/plans/fixed-rootfs-sizes.md). Required from wendyos-update.inc,
 # so it applies exactly where the .wendy artifact is produced
-# (WENDYOS_OTA == "wendy": Thor, RPi3/4/5, Orin when switched in local.conf).
+# (WENDYOS_OTA == "wendy": every non-QEMU machine — Thor, all Orins, RPi3/4/5).
 #
 # The rootfs ext4, the on-disk A/B slot, and the .wendy OTA payload must all
 # be EXACTLY this size on every build — nightly and release artifacts are
@@ -9,7 +9,9 @@
 # slot it is written to. The partition layouts are pinned to the same values:
 # Thor via ROOTFSPART_SIZE_DEFAULT (machine conf), RPi via the rootfsA/B
 # --fixed-size in rpi-wendy-ab*.wks. wendyos-update refuses payloads larger
-# than the target slot as a last line of defense.
+# than the target slot as a last line of defense. The Jetson machine confs
+# pin ROOTFSPART_SIZE_DEFAULT to 2 x this value so each A/B slot matches
+# exactly.
 #
 # Mechanism (oe-core image.bbclass get_rootfs_size, all units KiB):
 #   floor    IMAGE_ROOTFS_SIZE      content below this builds to exactly it

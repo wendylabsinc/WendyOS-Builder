@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Grow /data to fill the storage device on first boot, no reboot.
 #
-# config (FAT) sits BEFORE /data (mender-config-before-data.bbclass), so /data is
-# the LAST partition and grows into the trailing free space. Stock mender-growfs-data
+# config (FAT) sits BEFORE /data (rpi-wendy-ab*.wks), so /data is
+# the LAST partition and grows into the trailing free space. A naive online grower
 # is disabled: it can't resize the MBR *extended* container holding the logical /data.
 #
 # Split in two (mirrors Tegra's mender-grow-data + mender-systemd-growfs-data) so the
@@ -39,7 +39,7 @@ case "$DATA_DEV" in
         resolved="$(findfs "$DATA_DEV" 2>/dev/null || true)"
         [ -n "$resolved" ] || defer "cannot resolve /data spec '$DATA_DEV' yet"
         DATA_DEV="$resolved" ;;
-    "") # No /data entry at all: a single-root board (rpi3 mender-fstab, rpi4
+    "") # No /data entry at all: a single-root board (legacy rpi3/rpi4
         # rpi-fstab) where root growth is handled elsewhere (expand-rootfs-rpi).
         # grow-data-part ships in the shared rpi packagegroup, so it runs here
         # too -- nothing to grow, so succeed quietly instead of failing the unit.

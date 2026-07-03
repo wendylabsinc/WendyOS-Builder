@@ -4,15 +4,12 @@
 # This is the JP7.2 fleet-unification path: r39.2.0 is the first JetPack 7
 # line to support the Orin family alongside Thor, so all three Jetson boards
 # can share one Yocto series (blacksail) and one OTA stack (wendyos-update).
-# The JP6 / Mender Orin path still lives on `main` (local/tegra.inc); revert
-# a board to it with `git checkout main` + re-bootstrap.
 
-# wendyos-update OTA, replacing Mender. wendyos.conf defaults tegra234 to
-# "mender"; override here. Pulls in the client + data-setup + the .wendy
-# artifact (conf/distro/include/wendyos-update.inc) and implies the
-# persistent /data partition — allocated empty at flash time and
-# formatted/grown on first boot by wendyos-data-setup. See
-# tegra_partition_config.bbclass.
+# wendyos-update OTA (also the wendyos.conf default; kept explicit here).
+# Pulls in the client + data-setup + the .wendy artifact
+# (conf/distro/include/wendyos-update.inc) and implies the persistent /data
+# partition — allocated empty at flash time and formatted/grown on first
+# boot by wendyos-data-setup. See tegra_partition_config.bbclass.
 WENDYOS_OTA = "wendy"
 
 # Rootfs-only swaps for now (no UEFI capsule bootloader update). The t234
