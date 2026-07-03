@@ -570,6 +570,12 @@ jobs:
           DEPLOY_DIR: ${{ github.workspace }}/build/tmp/deploy/images/${{ steps.vars.outputs.machine }}
           MACHINE: ${{ steps.vars.outputs.machine }}
           STORAGE: ${{ matrix.storage }}
+          # DEVICE was previously unset here, so the `"$DEVICE" != "jetson-agx-thor"`
+          # guard below silently evaluated true for every device — dead code. It
+          # did not bite while Thor failed earlier (at the tar extraction), but
+          # once that is fixed Thor would wrongly attempt the offline-NVMe-image
+          # generation. Set it so the guard actually distinguishes Thor.
+          DEVICE: ${{ matrix.device }}
         run: |
           # Per-MACHINE, freshly wiped staging dir. A fixed shared path
           # ($GITHUB_WORKSPACE/flash-work) on persistent snapshot runners with no
@@ -628,6 +634,25 @@ jobs:
             echo "No offline NVMe image for $DEVICE (storage=$STORAGE); the tegraflash-tar is the flash artifact."
           fi
 
+          # Diagnose the AGX-Orin-only failure where a deploy-dir artifact that
+          # exists during this step is gone by the upload step: the offline
+          # .img (nvme) and the tegraflash bundle (emmc) both vanished from the
+          # shared /wendy scratch on the 64 GiB AGX Orin builds, while the
+          # smaller orin-nano build survived — the signature of scratch
+          # exhaustion, not a naming bug. build/tmp is a symlink onto the
+          # SHARED /wendy mount, so record disk + dir state here (and verify the
+          # image we just wrote is actually still present) instead of surfacing
+          # a bare "not produced" three steps later with no context.
+          echo "== post-generate scratch state for ${MACHINE} =="
+          df -h "$DEPLOY_DIR" 2>/dev/null || true
+          ls -la "$DEPLOY_DIR" 2>/dev/null || true
+          if [[ "$STORAGE" == "nvme" && "$DEVICE" != "jetson-agx-thor" ]]; then
+            [[ -s "$NVME_IMG" ]] || {
+              echo "::error::offline NVMe image $NVME_IMG missing/empty immediately after generation (see df/ls above — suspect /wendy scratch exhaustion)"
+              exit 1
+            }
+          fi
+
       - name: Build Thor flashpack
         # Pack the extracted tegraflash-tar into the single .tar.zst the wendy CLI
         # flashes (see make-thor-flashpack.sh). The NVIDIA flash tools it runs are
@@ -664,7 +689,14 @@ jobs:
           # it doubles as the eMMC image and the Jetson recovery-flash artifact.
           TEGRAFLASH_BUNDLE=""
           if [[ "$MACHINE" != raspberry* ]]; then
-            TEGRAFLASH_BUNDLE="$DEPLOY_DIR/wendyos-image-${MACHINE}.tegraflash-tar"
+            # Resolve by glob, matching the generate step: r38.4.x/JP7 may deploy
+            # a compressed .tegraflash-tar.zst and the unsuffixed "latest"
+            # symlink is not guaranteed. Empty if genuinely absent — handled
+            # with a diagnostic below.
+            TEGRAFLASH_BUNDLE=$(find "$DEPLOY_DIR" -maxdepth 1 \
+              \( -name "wendyos-image-${MACHINE}.tegraflash-tar" \
+                 -o -name "wendyos-image-${MACHINE}.tegraflash-tar.zst" \) \
+              -print -quit)
           fi
 
           BMAP_FILE=""
@@ -675,13 +707,27 @@ jobs:
             IMAGE_FILE="$DEPLOY_DIR/wendyos-image-${MACHINE}-nvme.img"
             if [[ ! -f "$IMAGE_FILE" ]]; then
               echo "::error::NVMe image not produced this run for ${DEVICE} (${MACHINE}): ${IMAGE_FILE} missing. Refusing to upload a possibly-stale image." >&2
+              # AGX Orin: the image exists after the generate step but is gone by
+              # here — dump scratch state to distinguish /wendy exhaustion from
+              # external removal (see the generate step's matching diagnostic).
+              df -h "$DEPLOY_DIR" 2>/dev/null || true
+              ls -la "$DEPLOY_DIR" 2>/dev/null || true
               exit 1
             fi
             bmaptool create "$IMAGE_FILE" > "${IMAGE_FILE}.bmap"
             BMAP_FILE="${IMAGE_FILE}.bmap"
           elif [[ "$MACHINE" != raspberry* && ( "$STORAGE" == "emmc" || "$DEVICE" == "jetson-agx-thor" ) ]]; then
             # No offline disk image for eMMC or Thor NVMe; the tegraflash bundle
-            # is the flash artifact.
+            # is the flash artifact. It existed during the build (the generate
+            # step extracted it), so an empty/missing bundle here is the same
+            # vanish-from-scratch symptom — fail with disk context, not a bare
+            # "file does not exist" from the publisher.
+            if [[ -z "$TEGRAFLASH_BUNDLE" || ! -f "$TEGRAFLASH_BUNDLE" ]]; then
+              echo "::error::tegraflash bundle for ${MACHINE} missing at upload time (it was present during the build). Suspect /wendy scratch exhaustion." >&2
+              df -h "$DEPLOY_DIR" 2>/dev/null || true
+              ls -la "$DEPLOY_DIR" 2>/dev/null || true
+              exit 1
+            fi
             IMAGE_FILE="$TEGRAFLASH_BUNDLE"
           else
             # RPi: Mender emits .sdimg; pre-Mender RPi builds produced
