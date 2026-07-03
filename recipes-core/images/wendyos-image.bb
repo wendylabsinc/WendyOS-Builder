@@ -120,7 +120,13 @@ IMAGE_INSTALL:append = " \
 # USB gadget IPv4 mode is controlled by WENDYOS_USB_NET_MODE (see wendyos.conf).
 
 IMAGE_ROOTFS_SIZE ?= "8192"
-IMAGE_ROOTFS_EXTRA_SPACE:append = "${@bb.utils.contains("DISTRO_FEATURES", "systemd", " + 4096", "", d)}"
+# Extra free space only on content-sized builds. When the image size is pinned
+# (WENDYOS_ROOTFS_SIZE_KB, wendyos-rootfs-size.inc) the fixed size IS the
+# headroom — and get_rootfs_size() adds EXTRA_SPACE *after* the
+# IMAGE_ROOTFS_SIZE floor, so an unconditional append would push every pinned
+# build past the floor==ceiling limit and fail it. This :append lands after the
+# include's :pn- override, hence the gate must live here.
+IMAGE_ROOTFS_EXTRA_SPACE:append = "${@' + 4096' if bb.utils.contains('DISTRO_FEATURES', 'systemd', True, False, d) and not d.getVar('WENDYOS_ROOTFS_SIZE_KB') else ''}"
 
 # A space-separated list of variable names that BitBake prints in the
 # "Build Configuration" banner at the start of a build.
