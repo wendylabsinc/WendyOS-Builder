@@ -588,7 +588,27 @@ jobs:
           # at the correct sector offset. The resulting wendyos-nvme.img is the
           # primary artifact for `wendy os install` (dd-based provisioning);
           # the tegraflash-tar bundle remains the recovery-flash artifact.
-          TEGRAFLASH_TAR="$DEPLOY_DIR/wendyos-image-${MACHINE}.tegraflash-tar"
+          #
+          # Resolve the bundle by glob rather than a hard-coded name: on
+          # r38.4.x/JP7 (Thor, tegra264) the deployed artifact is not always the
+          # plain "wendyos-image-${MACHINE}.tegraflash-tar" the older Jetsons
+          # emit — tegra-common.inc defaults IMAGE_FSTYPES to "tegraflash-tar.zst"
+          # and the "latest" symlink is not guaranteed. Accept the compressed
+          # variant too (GNU tar auto-detects zstd on extraction). The ls below
+          # is a diagnostic: it records exactly what the image class deposited so
+          # a future naming change is obvious in the log instead of a bare
+          # "Cannot open" from tar.
+          echo "tegraflash artifacts in $DEPLOY_DIR:"
+          ls -la "$DEPLOY_DIR"/*.tegraflash-tar* 2>/dev/null || echo "  (none matched *.tegraflash-tar*)"
+          TEGRAFLASH_TAR=$(find "$DEPLOY_DIR" -maxdepth 1 \
+            \( -name "wendyos-image-${MACHINE}.tegraflash-tar" \
+               -o -name "wendyos-image-${MACHINE}.tegraflash-tar.zst" \) \
+            -print -quit)
+          [[ -n "$TEGRAFLASH_TAR" ]] || {
+            echo "::error::no tegraflash-tar bundle for ${MACHINE} in ${DEPLOY_DIR}"
+            exit 1
+          }
+          echo "Extracting tegraflash bundle: $TEGRAFLASH_TAR"
           tar -xf "$TEGRAFLASH_TAR" -C "$FLASH_WORKDIR"
           # external-flash.xml.in describes the external NVMe boot/root device.
           # eMMC builds are internal-only and ship no such layout; the SD-card
