@@ -23,37 +23,49 @@ IMAGE_VERSION_SUFFIX ?= "${DISTRO_VERSION}"
 # Defining them here unconditionally would leave dangling vars on machines
 # where Mender is disabled (Thor, QEMU, RPi).
 
-# Development-time conveniences applied when WENDYOS_DEBUG = "1": empty
-# root password, PermitEmptyPasswords, PermitRootLogin, postinst logging.
-# Equivalent to scarthgap's legacy `debug-tweaks` alias, expanded into
-# individual features here because wrynose oe-core removed the alias from
-# IMAGE_FEATURES[validitems]. Override WENDYOS_DEBUG_FEATURES in local.conf
-# to add/remove features from the debug bundle.
+# Development-time conveniences applied when WENDYOS_DEBUG = "1": postinst
+# logging. Formerly this bundle also carried empty-root-password,
+# allow-empty-password and allow-root-login (scarthgap's legacy `debug-tweaks`
+# alias, expanded into individual features because wrynose oe-core removed the
+# alias from IMAGE_FEATURES[validitems]). Those root/empty-password features
+# were deliberately dropped: direct root login is now disabled on every image,
+# debug included. With empty-root-password gone, OE-core's
+# zap_empty_root_password rewrites the empty root entry to `root:*:` (a locked
+# account with no valid password) on all builds, and no allow-root-login means
+# sshd is never told PermitRootLogin yes. Override WENDYOS_DEBUG_FEATURES in
+# local.conf if a downstream build genuinely needs them back.
 WENDYOS_DEBUG_FEATURES ?= " \
-    empty-root-password \
-    allow-empty-password \
-    allow-root-login \
     post-install-logging \
     "
 IMAGE_FEATURES += "${@oe.utils.ifelse(d.getVar('WENDYOS_DEBUG') == '1', d.getVar('WENDYOS_DEBUG_FEATURES'), '')}"
 
-# No monitor+keyboard login on release (WENDYOS_DEBUG != "1"). Masking getty@ is
-# fatal here: systemd's 90-systemd.preset enables it and the rootfs preset-all
-# pass rejects "enable a masked unit". So preset-disable the template (a 10- file
-# wins over 90-) and zero logind's auto-VTs, which also stops the autovt@ VT-switch
-# spawns a preset alone can't reach. serial-getty@ (SERIAL_CONSOLES) stays enabled
-# so UART access remains available for field debugging.
-disable_vt_login() {
-    # Drop any getty@tty1 enablement a postinst may have force-created (e.g. Also=).
-    rm -f ${IMAGE_ROOTFS}${sysconfdir}/systemd/system/getty.target.wants/getty@tty1.service
+# No local interactive login on ANY image (debug included). A physically
+# attached monitor+keyboard (VT: getty@tty1 plus logind's autovt@ VT-switch
+# spawns) and the serial console login (serial-getty@, driven by
+# SERIAL_CONSOLES) are both an attack surface on a product device and are
+# removed. Kernel boot messages still reach the serial console — that is the
+# `console=` bootarg, not a getty — so field bring-up can still watch the boot;
+# there is simply no login prompt. Device access is exclusively via the
+# wendy-agent (gRPC); there is no interactive login path (SSH stays off).
+#
+# Masking these units in the rootfs is fatal: systemd's 90-systemd.preset
+# enables getty@/serial-getty@ and the rootfs preset-all pass rejects "enable a
+# masked unit". So preset-disable the templates (a 10- file wins over 90-),
+# drop any enablement symlinks a postinst force-created, and zero logind's
+# auto-VTs (which also stops the autovt@ VT-switch spawns a preset alone can't
+# reach).
+disable_local_login() {
+    rm -f ${IMAGE_ROOTFS}${sysconfdir}/systemd/system/getty.target.wants/getty@*.service
+    rm -f ${IMAGE_ROOTFS}${sysconfdir}/systemd/system/getty.target.wants/serial-getty@*.service
+    rm -f ${IMAGE_ROOTFS}${sysconfdir}/systemd/system/getty.target.wants/console-getty.service
     install -d ${IMAGE_ROOTFS}${systemd_unitdir}/system-preset
-    printf 'disable getty@.service\ndisable autovt@.service\n' \
-        > ${IMAGE_ROOTFS}${systemd_unitdir}/system-preset/10-wendyos-no-vt-login.preset
+    printf 'disable getty@.service\ndisable autovt@.service\ndisable serial-getty@.service\ndisable console-getty.service\n' \
+        > ${IMAGE_ROOTFS}${systemd_unitdir}/system-preset/10-wendyos-no-local-login.preset
     install -d ${IMAGE_ROOTFS}${systemd_unitdir}/logind.conf.d
     printf '[Login]\nNAutoVTs=0\nReserveVT=0\n' \
         > ${IMAGE_ROOTFS}${systemd_unitdir}/logind.conf.d/10-wendyos-no-autovt.conf
 }
-ROOTFS_POSTPROCESS_COMMAND += "${@oe.utils.ifelse(d.getVar('WENDYOS_DEBUG') == '1', '', 'disable_vt_login;')}"
+ROOTFS_POSTPROCESS_COMMAND += "disable_local_login;"
 
 # Optional runtime package management (rpm/dnf in the rootfs).
 # Disabled by default — image is updated atomically via Mender A/B.
