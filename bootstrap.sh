@@ -254,8 +254,11 @@ function clone_repos() {
             return 1
         }
 
-        # check if repo already exists
-        if [[ -d "./${folder}" ]]; then
+        # check if repo already exists — and is a usable git checkout. A bare
+        # directory or a repo missing its .git (e.g. a partially-populated seed
+        # on the shared CI cache) can't be reconciled in place, so drop it and
+        # fall through to a fresh clone.
+        if [[ -d "./${folder}" ]] && git -C "./${folder}" rev-parse --git-dir >/dev/null 2>&1; then
             # repo exists - verify it's at the correct revision
             cd "${folder}"
 
@@ -266,7 +269,13 @@ function clone_repos() {
             current_url=$(git remote get-url origin 2>/dev/null || true)
             if [[ "${current_url}" != "${url}" ]]; then
                 printf "[reurl] '%s' %s -> %s\n" "${folder}" "${current_url:-<none>}" "${url}"
-                git remote set-url origin "${url}" >> "${LOG_FILE}" 2>&1 || {
+                # set-url only rewrites an existing remote; when origin is
+                # absent (current_url empty) it must be added instead.
+                if [[ -z "${current_url}" ]]; then
+                    git remote add origin "${url}" >> "${LOG_FILE}" 2>&1
+                else
+                    git remote set-url origin "${url}" >> "${LOG_FILE}" 2>&1
+                fi || {
                     printf "[error] Failed to set origin URL for '%s'\n" "${folder}"
                     cd ..
                     return 1
@@ -313,8 +322,11 @@ function clone_repos() {
             # need to update to target revision
             printf "[update] '%s' to %s\n" "${folder}" "${srcrev}"
         else
-            # repo doesn't exist - clone it
+            # repo doesn't exist (or a stale non-git directory survived from a
+            # previous run) - clone it. git clone refuses a non-empty target, so
+            # clear any leftover directory first.
             printf "[clone] '%s' at %s\n" "${url}" "${srcrev}"
+            rm -rf "./${folder}"
             git clone "${url}" "${folder}" >> "${LOG_FILE}" 2>&1 || {
                 return 1
             }

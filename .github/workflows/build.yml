@@ -338,28 +338,43 @@ jobs:
       #      those steps (surfaces on non-PR builds, which run them).
       #
       # A bind mount would give a real path for both, but the runner has no
-      # passwordless sudo. So: set TMPDIR explicitly to the real scratch path
-      # (pseudo uses the canonical /wendy/build-tmp, never a symlink) AND also
-      # symlink build/tmp -> /wendy/build-tmp so the shell-level upload steps'
+      # passwordless sudo. So: set TMPDIR explicitly to a real scratch path
+      # (pseudo uses the canonical dir, never a symlink) AND also symlink
+      # build/tmp -> that path so the shell-level upload steps'
       # $GITHUB_WORKSPACE/build/tmp/deploy paths still resolve. Bitbake never
       # uses the symlink (TMPDIR is pinned), so pseudo stays happy.
+      #
+      # The /wendy scratch is bind-mounted from the box and SHARED by every job
+      # container scheduled on it (exactly like the /opt/wendy-cache pool). A
+      # fixed TMPDIR=/wendy/build-tmp therefore lets two concurrent jobs on the
+      # same box drive bitbake against one TMPDIR — an unsupported config that
+      # corrupts both builds (work/, buildstats/ and hosttools/ vanish mid-run
+      # with FileNotFoundError). Give each job its own real subdirectory, keyed
+      # by the same PRIV_TAG the repos snapshot uses, so the scratch is isolated
+      # per job just like repos/.
       - name: Back build/tmp with the platform NVMe scratch
+        env:
+          PRIV_TAG: ${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.device }}-${{ matrix.storage }}
         run: |
           set -euo pipefail
-          # Pin TMPDIR to the real scratch path for bitbake/pseudo.
+          # Per-job real scratch path for bitbake/pseudo. Clear any stale dir a
+          # prior run with the same tag might have left (tag is unique per run
+          # attempt, so this only matters after a re-run of the same attempt).
+          scratch="/wendy/build-tmp/$PRIV_TAG"
+          rm -rf "$scratch"
+          mkdir -p "$scratch"
           {
             echo ''
-            echo '# wendy-ci: back TMPDIR with the platform NVMe scratch'
-            echo 'TMPDIR = "/wendy/build-tmp"'
+            echo '# wendy-ci: back TMPDIR with the platform NVMe scratch (per-job)'
+            echo "TMPDIR = \"$scratch\""
           } >> "$GITHUB_WORKSPACE/build/conf/auto.conf"
           # Alias build/tmp -> the same path so upload steps that read
           # $GITHUB_WORKSPACE/build/tmp/deploy resolve to the real artifacts.
           # bootstrap created build/ but not build/tmp yet (bitbake makes it on
           # first run); clear any stray dir/symlink, then symlink onto scratch.
-          mkdir -p /wendy/build-tmp
           rm -rf "$GITHUB_WORKSPACE/build/tmp"
-          ln -sfn /wendy/build-tmp "$GITHUB_WORKSPACE/build/tmp"
-          echo "TMPDIR pinned to /wendy/build-tmp; build/tmp aliased to it"
+          ln -sfn "$scratch" "$GITHUB_WORKSPACE/build/tmp"
+          echo "TMPDIR pinned to $scratch; build/tmp aliased to it"
 
       - name: Enable debug for nightly builds
         # Release images are production builds — no debug tools by default.
@@ -758,6 +773,16 @@ jobs:
         env:
           PRIV_TAG: ${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.device }}-${{ matrix.storage }}
         run: rm -rf "/opt/wendy-cache/wendyos-builder/repos/runs/$PRIV_TAG"
+
+      # Remove this job's private TMPDIR from the shared /wendy scratch. Unlike
+      # sstate/downloads (persistent caches), TMPDIR is disposable per-build
+      # working state, and the scratch is shared across job containers on the
+      # box, so leaving it behind would accumulate and eventually fill the pool.
+      - name: Release platform scratch
+        if: always()
+        env:
+          PRIV_TAG: ${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.device }}-${{ matrix.storage }}
+        run: rm -rf "/wendy/build-tmp/$PRIV_TAG"
 
   # ---------------------------------------------------------------------------
   # publish: the ONLY writer of GCS manifests. Build jobs upload files and
