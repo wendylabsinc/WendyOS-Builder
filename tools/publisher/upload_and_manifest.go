@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -560,7 +561,13 @@ func compressFile(ctx context.Context, inputPath string, fileType string) (strin
 		} else if fileType == "recovery" {
 			compressionMethod = "xz-fast" // Fast compression for recovery (frequently accessed)
 		} else {
-			compressionMethod = "zip" // Standard zip for OS images (widely compatible)
+			// gzip for OS images: it is only ever the fallback download. The
+			// wendy CLI's primary flash path is the seekable .zst + bmap (which
+			// the publisher always generates for these images), and it streams
+			// this fallback via content-sniffed gzip decompression — the same
+			// path Raspberry Pi .sdimg.gz images already use. gzip is done
+			// in-process below, so the publisher host needs no `zip` binary.
+			compressionMethod = "gzip"
 		}
 	default:
 		// Other file types - don't compress
@@ -589,8 +596,8 @@ func compressFile(ctx context.Context, inputPath string, fileType string) (strin
 	switch compressionMethod {
 	case "xz-max", "xz-fast":
 		outputPath = inputPath + ".xz"
-	case "zip":
-		outputPath = inputPath + ".zip"
+	case "gzip":
+		outputPath = inputPath + ".gz"
 	default:
 		return "", fmt.Errorf("unknown compression method: %s", compressionMethod)
 	}
@@ -683,18 +690,32 @@ func compressFile(ctx context.Context, inputPath string, fileType string) (strin
 			cmd.Stderr = os.Stderr
 		}
 
-	case "zip":
-		// Use zip for OS images
-		// zip -6 creates a .zip file with balanced compression (faster than -9)
-		// We need to change to the directory and zip from there to avoid including full paths
-		dir := filepath.Dir(inputPath)
-		filename := filepath.Base(inputPath)
-		zipFilename := filename + ".zip"
+	case "gzip":
+		// Compress OS images with the standard library in-process — no external
+		// `zip`/`gzip` binary required. This is the fallback download only; the
+		// CLI prefers the seekable .zst + bmap. Handle everything here and
+		// return, since the process-based machinery below is xz-only.
+		if err := gzipFile(ctx, inputPath, outputPath); err != nil {
+			if rmErr := os.Remove(outputPath); rmErr != nil && !os.IsNotExist(rmErr) {
+				log.WithError(rmErr).Warn("Failed to clean up partial compressed file")
+			}
+			return "", err
+		}
 
-		cmd = exec.CommandContext(ctx, "zip", "-6", zipFilename, filename)
-		cmd.Dir = dir
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
+		compressedInfo, err := os.Stat(outputPath)
+		if err != nil {
+			return "", fmt.Errorf("compressed file not found: %w", err)
+		}
+		if fileSize == 0 {
+			return "", fmt.Errorf("original file has zero size")
+		}
+		compressionRatio := float64(fileSize-compressedInfo.Size()) / float64(fileSize) * 100
+		log.WithFields(logrus.Fields{
+			"original_size":   fileSize,
+			"compressed_size": compressedInfo.Size(),
+			"saved":           fmt.Sprintf("%.1f%%", compressionRatio),
+		}).Info("Compression complete")
+		return outputPath, nil
 
 	default:
 		return "", fmt.Errorf("unsupported compression method: %s", compressionMethod)
@@ -780,6 +801,57 @@ func compressFile(ctx context.Context, inputPath string, fileType string) (strin
 	}).Info("Compression complete")
 
 	return outputPath, nil
+}
+
+// ctxReader wraps an io.Reader so a long copy aborts promptly when ctx is
+// cancelled: ctx.Err() is checked before each underlying Read.
+type ctxReader struct {
+	ctx context.Context
+	r   io.Reader
+}
+
+func (c *ctxReader) Read(p []byte) (int, error) {
+	if err := c.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return c.r.Read(p)
+}
+
+// gzipFile compresses src into dst (a .gz file) using the standard library,
+// honoring ctx cancellation. It shells out to no external binary, so the
+// publisher host needs neither `zip` nor `gzip` installed. The compression
+// level matches the previous `zip -6`: balanced size versus speed.
+func gzipFile(ctx context.Context, src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return fmt.Errorf("failed to open input file: %w", err)
+	}
+	defer in.Close()
+
+	out, err := os.Create(dst)
+	if err != nil {
+		return fmt.Errorf("failed to create output file: %w", err)
+	}
+
+	gz, err := gzip.NewWriterLevel(out, gzip.DefaultCompression)
+	if err != nil {
+		out.Close()
+		return fmt.Errorf("failed to create gzip writer: %w", err)
+	}
+
+	if _, err := io.Copy(gz, &ctxReader{ctx: ctx, r: in}); err != nil {
+		gz.Close()
+		out.Close()
+		return fmt.Errorf("gzip compression failed: %w", err)
+	}
+	if err := gz.Close(); err != nil {
+		out.Close()
+		return fmt.Errorf("failed to finalize gzip stream: %w", err)
+	}
+	if err := out.Close(); err != nil {
+		return fmt.Errorf("failed to close output file: %w", err)
+	}
+	return nil
 }
 
 // sendDiscordNotification sends a notification to Discord about the update
@@ -1856,7 +1928,7 @@ func uploadFile(ctx context.Context, bucket *storage.BucketHandle, localPath, de
 	contentType := "application/octet-stream"
 	if strings.HasSuffix(localPath, ".zip") {
 		contentType = "application/zip"
-	} else if strings.HasSuffix(localPath, ".tgz") {
+	} else if strings.HasSuffix(localPath, ".tgz") || strings.HasSuffix(localPath, ".gz") {
 		contentType = "application/gzip"
 	} else if strings.HasSuffix(localPath, ".xz") {
 		contentType = "application/x-xz"
