@@ -23,17 +23,15 @@ GO_IMPORT = "github.com/wendylabsinc/wendyos-update"
 # to go.bbclass where it already sets this.
 GO_SRCURI_DESTSUFFIX ?= "${@os.path.join(os.path.basename(d.getVar('S')), 'src', d.getVar('GO_IMPORT')) + '/'}"
 
-SRC_URI = "git://${GO_IMPORT};protocol=https;branch=fix/tegra-decouple-capsule-slot-switch;destsuffix=${GO_SRCURI_DESTSUFFIX}"
-# c863805f (wendyos-update#7, branch fix/tegra-decouple-capsule-slot-switch):
-# decouple the rootfs slot switch from the bootloader capsule on non-Thor SoCs.
-# UEFI capsule-on-disk is only honored on Thor (t264); on Orin (t234) the
-# firmware advertises FILE_CAPSULE_DELIVERY but silently never processes a
-# staged capsule, so a bootloader-carrying OTA no-op'd (slot never switched,
-# reboot into the same OS, ESRT 0). SwapSlot now allowlists tegra264 for the
-# capsule path and falls back to the nvbootctrl slot switch on Orin/unknown
-# SoCs. TEMPORARY PIN to the PR branch so the fix can be image-tested before
-# #7 merges; re-point branch=main + SRCREV to the merged main SHA after merge.
-# Builds on:
+SRC_URI = "git://${GO_IMPORT};protocol=https;branch=main;destsuffix=${GO_SRCURI_DESTSUFFIX}"
+# f0357892 (main, wendyos-update#7): decouple the rootfs slot switch from the
+# bootloader capsule on non-Thor SoCs. UEFI capsule-on-disk is only honored on
+# Thor (t264); on Orin (t234) the firmware advertises FILE_CAPSULE_DELIVERY but
+# silently never processes a staged capsule, so a bootloader-carrying OTA
+# no-op'd (slot never switched, reboot into the same OS, ESRT 0, no
+# diagnostics). SwapSlot now allowlists tegra264 for the capsule path and falls
+# back to the nvbootctrl slot switch on Orin/unknown SoCs (the new rootfs boots
+# on the existing bootloader). Builds on:
 # b1f3315a (main): install rejects an OTA payload larger than the target A/B
 # slot up front (blockdev.DeviceCapacity seek-to-end pre-flight, exit 3, nothing
 # written) — the connector-side last line of defense behind the meta-edgeos
@@ -62,7 +60,7 @@ SRC_URI = "git://${GO_IMPORT};protocol=https;branch=fix/tegra-decouple-capsule-s
 # slot — kills the Orin Nano stale-inactive-slot false-positive, validated
 # against the real r39.2 efivar format) + structured per-slot `status` and the
 # `switch` verb.
-SRCREV = "c863805feb1905277deda3e705a79bf982287e12"
+SRCREV = "f03578922ea94de7e68116f0b376964676d82056"
 
 inherit go-mod systemd
 
