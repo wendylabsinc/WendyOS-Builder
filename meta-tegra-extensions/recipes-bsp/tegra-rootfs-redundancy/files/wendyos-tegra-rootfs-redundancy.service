@@ -1,0 +1,19 @@
+[Unit]
+Description=Arm Jetson rootfs A/B redundancy if firmware left it disabled
+DefaultDependencies=no
+# Needs the persistent data partition for its one-shot attempt marker, and
+# efivarfs for the UEFI variable. Must settle the slot machinery BEFORE the
+# OTA boot verifier reads/commits a pending update, so it is ordered ahead of
+# wendyos-update-verify.service. It may reboot once on first run; that is
+# guarded so it can never loop.
+After=local-fs.target data.mount
+Before=wendyos-update-verify.service
+ConditionPathExists=/sys/firmware/efi/efivars
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/wendyos-tegra-arm-rootfs-redundancy
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

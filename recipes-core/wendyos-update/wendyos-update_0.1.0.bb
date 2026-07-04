@@ -24,6 +24,12 @@ GO_IMPORT = "github.com/wendylabsinc/wendyos-update"
 GO_SRCURI_DESTSUFFIX ?= "${@os.path.join(os.path.basename(d.getVar('S')), 'src', d.getVar('GO_IMPORT')) + '/'}"
 
 SRC_URI = "git://${GO_IMPORT};protocol=https;branch=main;destsuffix=${GO_SRCURI_DESTSUFFIX}"
+# 33da342c (main, wendyos-update#8): install preflight refuses when tegra rootfs
+# A/B redundancy is not armed (RootfsRedundancyLevel UEFI variable missing/zero).
+# A device flashed by writing the rootfs straight to NVMe never gets it set, so
+# `nvbootctrl -t rootfs set-active-boot-slot` is a silent no-op and every OTA
+# rolls back (running slot != target slot). Paired with the boot service in
+# tegra-rootfs-redundancy, which arms it. Builds on:
 # f0357892 (main, wendyos-update#7): decouple the rootfs slot switch from the
 # bootloader capsule on non-Thor SoCs. UEFI capsule-on-disk is only honored on
 # Thor (t264); on Orin (t234) the firmware advertises FILE_CAPSULE_DELIVERY but
@@ -60,7 +66,7 @@ SRC_URI = "git://${GO_IMPORT};protocol=https;branch=main;destsuffix=${GO_SRCURI_
 # slot — kills the Orin Nano stale-inactive-slot false-positive, validated
 # against the real r39.2 efivar format) + structured per-slot `status` and the
 # `switch` verb.
-SRCREV = "f03578922ea94de7e68116f0b376964676d82056"
+SRCREV = "33da342c3748bf29bc74584ac2ea1bd5880e7ed5"
 
 inherit go-mod systemd
 
