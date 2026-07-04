@@ -110,15 +110,23 @@ jobs:
         run: |
           set -euo pipefail
 
+          # Ordered longest-pole-first. The self-hosted builder pool cannot run
+          # all matrix jobs at once, so queued jobs are picked up in this
+          # (include) order as runners free up. A run's wall-clock is set by
+          # whichever heavy build lands in the final scheduling wave, so the
+          # slowest builds must be dispatched first: jetson-agx-thor is the long
+          # pole (~14 min warm vs ~5 min for a Pi; heavier still on release
+          # builds, which add tegraflash + flashpack + upload), then the other
+          # Jetsons, then the Raspberry Pis. Do NOT sort this alphabetically.
           ALL_MATRIX='[
-            {"device":"raspberry-pi-3","storage":"sd"},
-            {"device":"raspberry-pi-4","storage":"sd"},
-            {"device":"raspberry-pi-5","storage":"sd"},
-            {"device":"raspberry-pi-5","storage":"nvme"},
+            {"device":"jetson-agx-thor","storage":"nvme"},
             {"device":"jetson-agx-orin","storage":"nvme"},
             {"device":"jetson-agx-orin","storage":"emmc"},
             {"device":"jetson-orin-nano","storage":"nvme"},
-            {"device":"jetson-agx-thor","storage":"nvme"}
+            {"device":"raspberry-pi-5","storage":"nvme"},
+            {"device":"raspberry-pi-5","storage":"sd"},
+            {"device":"raspberry-pi-4","storage":"sd"},
+            {"device":"raspberry-pi-3","storage":"sd"}
           ]'
           # Collapse to one line so it can be written to $GITHUB_OUTPUT, which
           # requires single-line key=value pairs (no implicit multiline support).
@@ -126,7 +134,7 @@ jobs:
 
           emit_all() {
             echo "matrix={\"include\":${ALL_MATRIX}}" >> "$GITHUB_OUTPUT"
-            echo "devices=raspberry-pi-3 raspberry-pi-4 raspberry-pi-5 jetson-agx-orin jetson-orin-nano jetson-agx-thor" >> "$GITHUB_OUTPUT"
+            echo "devices=jetson-agx-thor jetson-agx-orin jetson-orin-nano raspberry-pi-5 raspberry-pi-4 raspberry-pi-3" >> "$GITHUB_OUTPUT"
           }
 
           emit_one() {
@@ -182,7 +190,10 @@ jobs:
 
           INCLUDED=()
           DEVICES=()
-          for dev in raspberry-pi-3 raspberry-pi-4 raspberry-pi-5 jetson-agx-orin jetson-orin-nano jetson-agx-thor; do
+          # Same longest-pole-first order as ALL_MATRIX (see above): a partial
+          # matrix built from a subset of devices should still dispatch its
+          # heaviest members first.
+          for dev in jetson-agx-thor jetson-agx-orin jetson-orin-nano raspberry-pi-5 raspberry-pi-4 raspberry-pi-3; do
             if echo "${CHANGED}" | grep -Eq "${DEV_RE[$dev]}"; then
               while IFS= read -r entry; do
                 INCLUDED+=("$entry")
