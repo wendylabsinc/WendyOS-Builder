@@ -389,6 +389,22 @@ jobs:
             echo 'WENDYOS_DEBUG = "1"'
           } >> "$GITHUB_WORKSPACE/build/conf/auto.conf"
 
+      - name: Enable SBOM generation for release builds
+        # SPDX SBOM generation (create-spdx) is expensive — a do_create_spdx
+        # task per recipe plus rootfs-time image/runtime SPDX. It is only ever
+        # consumed on release builds (attached to the GitHub release by the
+        # publish job). promote.yml rebuilds from scratch at the release tag
+        # rather than reusing nightly artifacts, so a nightly's SBOM can never
+        # feed a release — nightly and PR builds skip it entirely. The distro
+        # gates `INHERIT += "create-spdx"` on WENDYOS_SBOM, set here.
+        if: needs.detect-changes.outputs.is-release == 'true'
+        run: |
+          {
+            echo ''
+            echo '# Release build: generate SPDX SBOM (attached to the GitHub release)'
+            echo 'WENDYOS_SBOM = "1"'
+          } >> "$GITHUB_WORKSPACE/build/conf/auto.conf"
+
       - name: Enable SSH when explicitly requested
         # SSH is disabled by default (WENDYOS_SSHD ??= "0" in common.inc).
         # Pass inputs.sshd = true on workflow_dispatch or promote.yml to opt in.
