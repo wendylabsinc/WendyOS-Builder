@@ -1,0 +1,10 @@
+{
+  "jetson-agx-thor/nvme":   { "image_kind": "tegraflash-bundle",          "recovery_bundle_expected": true,  "bmap": false, "flashpack": true,  "pass_storage": false },
+  "jetson-agx-orin/nvme":   { "image_kind": "generated-nvme-img",         "recovery_bundle_expected": true,  "bmap": true,  "flashpack": false, "pass_storage": true },
+  "jetson-agx-orin/emmc":   { "image_kind": "tegraflash-bundle",          "recovery_bundle_expected": true,  "bmap": false, "flashpack": false, "pass_storage": true },
+  "jetson-orin-nano/nvme":  { "image_kind": "generated-nvme-img",         "recovery_bundle_expected": true,  "bmap": true,  "flashpack": false, "pass_storage": true },
+  "raspberry-pi-5/nvme":    { "image_kind": "sdimg-gz-with-wic-fallback", "recovery_bundle_expected": false, "bmap": true,  "flashpack": false, "pass_storage": true },
+  "raspberry-pi-5/sd":      { "image_kind": "sdimg-gz-with-wic-fallback", "recovery_bundle_expected": false, "bmap": true,  "flashpack": false, "pass_storage": true },
+  "raspberry-pi-4/sd":      { "image_kind": "sdimg-gz-with-wic-fallback", "recovery_bundle_expected": false, "bmap": true,  "flashpack": false, "pass_storage": false },
+  "raspberry-pi-3/sd":      { "image_kind": "sdimg-gz-with-wic-fallback", "recovery_bundle_expected": false, "bmap": true,  "flashpack": false, "pass_storage": false }
+}
