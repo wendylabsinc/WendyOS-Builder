@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -583,13 +582,18 @@ func compressFile(ctx context.Context, inputPath string, fileType string) (strin
 		} else if fileType == "recovery" {
 			compressionMethod = "xz-fast" // Fast compression for recovery (frequently accessed)
 		} else {
-			// gzip for OS images: it is only ever the fallback download. The
-			// wendy CLI's primary flash path is the seekable .zst + bmap (which
-			// the publisher always generates for these images), and it streams
-			// this fallback via content-sniffed gzip decompression — the same
-			// path Raspberry Pi .sdimg.gz images already use. gzip is done
-			// in-process below, so the publisher host needs no `zip` binary.
-			compressionMethod = "gzip"
+			// Seekable-zstd for OS images. This single artifact IS the image the
+			// wendy CLI flashes: the fast path streams it as .zst + bmap, and the
+			// full-image fallback (--no-bmap, `wendy os download`) reads the same
+			// object by content-sniffing the zstd magic. It doubles as the
+			// manifest .zst artifact, so it is produced once here rather than a
+			// gzip .img.gz plus a separate seekable pass over the same 60+ GB
+			// image. Done in-process, so the publisher host needs no `zip` binary.
+			//
+			// Only raw images reach this branch: Raspberry Pi .sdimg is gzipped
+			// by the build workflow before upload (isAlreadyCompressed short-
+			// circuits it), and eMMC/Thor ship a recovery bundle, not an .img.
+			compressionMethod = "seekable-zstd"
 		}
 	default:
 		// Other file types - don't compress
@@ -618,8 +622,8 @@ func compressFile(ctx context.Context, inputPath string, fileType string) (strin
 	switch compressionMethod {
 	case "xz-max", "xz-fast":
 		outputPath = inputPath + ".xz"
-	case "gzip":
-		outputPath = inputPath + ".gz"
+	case "seekable-zstd":
+		outputPath = inputPath + ".zst"
 	default:
 		return "", fmt.Errorf("unknown compression method: %s", compressionMethod)
 	}
@@ -712,12 +716,13 @@ func compressFile(ctx context.Context, inputPath string, fileType string) (strin
 			cmd.Stderr = os.Stderr
 		}
 
-	case "gzip":
-		// Compress OS images with the standard library in-process — no external
-		// `zip`/`gzip` binary required. This is the fallback download only; the
-		// CLI prefers the seekable .zst + bmap. Handle everything here and
-		// return, since the process-based machinery below is xz-only.
-		if err := gzipFile(ctx, inputPath, outputPath); err != nil {
+	case "seekable-zstd":
+		// Produce the seekable-zstd image in-process — no external binary
+		// required. Frames are independently decompressible, so the CLI can
+		// random-access via bmap; the whole file also decodes as a normal zstd
+		// stream for the full-image fallback. Handle everything here and return,
+		// since the process-based machinery below is xz-only.
+		if err := compressSeekableZstd(inputPath, outputPath); err != nil {
 			if rmErr := os.Remove(outputPath); rmErr != nil && !os.IsNotExist(rmErr) {
 				log.WithError(rmErr).Warn("Failed to clean up partial compressed file")
 			}
@@ -823,57 +828,6 @@ func compressFile(ctx context.Context, inputPath string, fileType string) (strin
 	}).Info("Compression complete")
 
 	return outputPath, nil
-}
-
-// ctxReader wraps an io.Reader so a long copy aborts promptly when ctx is
-// cancelled: ctx.Err() is checked before each underlying Read.
-type ctxReader struct {
-	ctx context.Context
-	r   io.Reader
-}
-
-func (c *ctxReader) Read(p []byte) (int, error) {
-	if err := c.ctx.Err(); err != nil {
-		return 0, err
-	}
-	return c.r.Read(p)
-}
-
-// gzipFile compresses src into dst (a .gz file) using the standard library,
-// honoring ctx cancellation. It shells out to no external binary, so the
-// publisher host needs neither `zip` nor `gzip` installed. The compression
-// level matches the previous `zip -6`: balanced size versus speed.
-func gzipFile(ctx context.Context, src, dst string) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return fmt.Errorf("failed to open input file: %w", err)
-	}
-	defer in.Close()
-
-	out, err := os.Create(dst)
-	if err != nil {
-		return fmt.Errorf("failed to create output file: %w", err)
-	}
-
-	gz, err := gzip.NewWriterLevel(out, gzip.DefaultCompression)
-	if err != nil {
-		out.Close()
-		return fmt.Errorf("failed to create gzip writer: %w", err)
-	}
-
-	if _, err := io.Copy(gz, &ctxReader{ctx: ctx, r: in}); err != nil {
-		gz.Close()
-		out.Close()
-		return fmt.Errorf("gzip compression failed: %w", err)
-	}
-	if err := gz.Close(); err != nil {
-		out.Close()
-		return fmt.Errorf("failed to finalize gzip stream: %w", err)
-	}
-	if err := out.Close(); err != nil {
-		return fmt.Errorf("failed to close output file: %w", err)
-	}
-	return nil
 }
 
 // sendDiscordNotification sends a notification to Discord about the update
@@ -1598,29 +1552,10 @@ func main() {
 			bmapUploadChan = uploadFileAsync(ctx, bucket, prefix, *bmapFile, *deviceType, *version)
 		}
 
-		// Generate and upload a seekable-zstd image for OS images (the
-		// .img/.wic/.sdimg → zip case). OTA and recovery files use their own
-		// compression formats and are not wrapped in .zst.
-		var zstUploadChan <-chan uploadResult
-		if *localFile != "" && mainResult.compressedPath != "" {
-			rawPath, symErr := filepath.EvalSymlinks(*localFile)
-			if symErr != nil {
-				rawPath = *localFile
-			}
-			rawExt := strings.ToLower(filepath.Ext(rawPath))
-			if rawExt == ".img" || rawExt == ".wic" || rawExt == ".sdimg" {
-				zstPath := rawPath + ".zst"
-				log.WithFields(logrus.Fields{
-					"src": rawPath,
-					"dst": zstPath,
-				}).Info("Generating seekable-zstd image...")
-				if zstErr := compressSeekableZstd(rawPath, zstPath); zstErr != nil {
-					log.WithError(zstErr).Fatal("Failed to generate seekable-zstd image")
-				}
-				log.Info("Seekable-zstd image generated, uploading...")
-				zstUploadChan = uploadFileAsync(ctx, bucket, prefix, zstPath, *deviceType, *version)
-			}
-		}
+		// The seekable-zstd OS image now IS the main file (compressFile produced
+		// it in place of a gzip .img.gz), so there is no separate .zst artifact
+		// to generate or upload here — the manifest .zst fields reuse the main
+		// upload. See the zst-derivation block after the upload waits.
 
 		// Wait for uploads to complete
 		var mainUpload uploadResult
@@ -1677,28 +1612,16 @@ func main() {
 			log.Info("SBOM file uploaded successfully")
 		}
 
-		var zstUpload uploadResult
-		if zstUploadChan != nil {
-			zstUpload = <-zstUploadChan
-			if zstUpload.err != nil {
-				log.WithError(zstUpload.err).Fatal("Failed to upload seekable-zstd file")
-			}
-			log.Info("Seekable-zstd file uploaded successfully")
-		}
-
-		// The checksum of the uploaded .zst (calculated from the local file).
-		var zstChecksum string
-		if zstUpload.path != "" {
-			rawPath, symErr := filepath.EvalSymlinks(*localFile)
-			if symErr != nil {
-				rawPath = *localFile
-			}
-			zstLocalPath := rawPath + ".zst"
-			if cs, csErr := calculateChecksum(zstLocalPath); csErr == nil {
-				zstChecksum = cs
-			} else {
-				log.WithError(csErr).Warn("Failed to calculate zst checksum; zst_checksum will be empty")
-			}
+		// Seekable-zstd manifest fields. When the main OS image is itself a
+		// seekable .zst (Jetson raw .img), it doubles as the .zst artifact, so
+		// reuse the single upload rather than a second identical object.
+		// Non-.zst main images (RPi .sdimg.gz, eMMC/Thor bundles) have none.
+		var zstPath, zstChecksum string
+		var zstSize int64
+		if strings.HasSuffix(strings.ToLower(mainResult.compressedPath), ".zst") {
+			zstPath = mainUpload.path
+			zstChecksum = mainResult.checksum
+			zstSize = mainUpload.size
 		}
 
 		// In upload-only mode the manifests are deliberately untouched: write
@@ -1715,9 +1638,9 @@ func main() {
 				FileSize:          mainUpload.size,
 				FileChecksum:      mainResult.checksum,
 				BmapPath:          bmapUpload.path,
-				ZstPath:           zstUpload.path,
+				ZstPath:           zstPath,
 				ZstChecksum:       zstChecksum,
-				ZstSize:           zstUpload.size,
+				ZstSize:           zstSize,
 				OTAUpdatePath:     otaUpdateUpload.path,
 				OTAUpdateSize:     otaUpdateUpload.size,
 				OTAUpdateChecksum: otaUpdateResult.checksum,
@@ -1743,7 +1666,7 @@ func main() {
 			ctx, bucket, prefix, *deviceType, *version,
 			mainUpload.path, mainUpload.size, mainResult.checksum,
 			bmapUpload.path,
-			zstUpload.path, zstChecksum, zstUpload.size,
+			zstPath, zstChecksum, zstSize,
 			otaUpdateUpload.path, otaUpdateUpload.size, otaUpdateResult.checksum,
 			recoveryUpload.path, recoveryUpload.size, recoveryResult.checksum,
 			flashpackUpload.path, flashpackUpload.size, flashpackResult.checksum,
@@ -2174,6 +2097,11 @@ const seekableFrameSize = 4 << 20 // 4 MiB
 // compressSeekableZstd writes srcPath as a seekable-zstd file to dstPath.
 // Each frame covers seekableFrameSize uncompressed bytes, so the CLI can
 // random-access the image without decompressing from the start.
+//
+// Frames are compressed concurrently (up to GOMAXPROCS at a time) and written
+// in source order via WriteMany. The previous sequential Write loop pinned a
+// single core, which dominated the publish step for the multi-GB Jetson
+// images; parallel framing scales the pass with the runner's cores.
 func compressSeekableZstd(srcPath, dstPath string) error {
 	in, err := os.Open(srcPath)
 	if err != nil {
@@ -2187,6 +2115,8 @@ func compressSeekableZstd(srcPath, dstPath string) error {
 	}
 	defer out.Close()
 
+	// The encoder must support concurrent EncodeAll calls (WriteMany fans out
+	// frame compression across goroutines); klauspost's encoder does.
 	enc, err := zstd.NewWriter(nil)
 	if err != nil {
 		return err
@@ -2198,24 +2128,29 @@ func compressSeekableZstd(srcPath, dstPath string) error {
 		return err
 	}
 
-	buf := make([]byte, seekableFrameSize)
-	for {
+	// frameSource yields one seekableFrameSize frame per call and a nil slice
+	// at EOF. WriteMany may retain each returned slice until it returns, so
+	// every frame is a freshly-allocated buffer rather than a shared scratch
+	// buffer. io.ReadFull returns n>0 with ErrUnexpectedEOF for the final short
+	// frame; that data is emitted and the following call reports EOF.
+	frameSource := func() ([]byte, error) {
+		buf := make([]byte, seekableFrameSize)
 		n, rerr := io.ReadFull(in, buf)
 		if n > 0 {
-			if _, werr := w.Write(buf[:n]); werr != nil {
-				w.Close()
-				return werr
-			}
+			return buf[:n], nil
 		}
-		if rerr == io.EOF || rerr == io.ErrUnexpectedEOF {
-			break
+		if rerr == io.EOF {
+			return nil, nil
 		}
-		if rerr != nil {
-			w.Close()
-			return rerr
-		}
+		return nil, rerr
 	}
 
+	if err := w.WriteMany(context.Background(), frameSource); err != nil {
+		w.Close()
+		return err
+	}
+
+	// WriteMany defers the seek table to Close (see its contract).
 	if err := w.Close(); err != nil {
 		return err
 	}
