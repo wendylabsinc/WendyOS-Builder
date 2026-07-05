@@ -1,0 +1,22 @@
+[Unit]
+Description=Enroll WendyOS systemd-boot into the UEFI BootOrder on first boot
+DefaultDependencies=no
+# Needs the ESP mounted (to stage systemd-bootaa64.efi + loader entries + the
+# per-slot kernels) and efivarfs (to register the Boot#### / reorder BootOrder).
+# Must run before the OTA boot verifier so the boot path is settled first.
+# Idempotent + guarded by a marker on the persistent data partition; the script
+# itself fails safe (leaves the existing L4TLauncher BootOrder untouched) on any
+# error.
+After=local-fs.target data.mount
+RequiresMountsFor=/boot/efi /data
+Before=wendyos-update-verify.service
+ConditionPathExists=/sys/firmware/efi/efivars
+ConditionPathExists=!/data/wendyos-update/systemdboot-enrolled
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/wendyos-systemdboot-firstboot
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

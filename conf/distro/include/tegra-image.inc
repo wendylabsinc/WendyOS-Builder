@@ -33,6 +33,25 @@ IMAGE_INSTALL:append = " \
     v4l-utils \
     "
 
+# systemd-boot A/B boot stack (WENDYOS_TEGRA_SYSTEMDBOOT_AB = 1, set per NVMe Orin
+# machine). Swaps Orin's boot path from NVIDIA UEFI/L4TLauncher + nvbootctrl A/B
+# (whose RootfsRedundancyLevel is unarmable from the OS on Orin) to systemd-boot
+# on the writable ESP, which selects/trials the A/B rootfs slot via its native
+# +tries boot counting (a file-name rename on the FAT ESP — no runtime EFI-var
+# persistence needed):
+#   systemd-boot               the systemd-bootaa64.efi UEFI payload + bootctl
+#   wendyos-systemdboot        stage EFI + loader.conf + slot entries + kernels to
+#                              the ESP on first boot; enroll BootOrder (L4TLauncher
+#                              kept as fallback)
+#   wendyos-update-config-systemdboot  pin the systemdboot connector (not tegrauefi)
+#   efibootmgr                 the BootOrder tool the enroll service shells out to
+# L4TLauncher + the existing extlinux.conf are untouched (kept as the fallback boot
+# path). tegra-rootfs-redundancy is dropped from the packagegroup on this path (the
+# firmware A/B mechanism it arms is unused).
+IMAGE_INSTALL:append = " \
+    ${@'systemd-boot wendyos-systemdboot wendyos-update-config-systemdboot efibootmgr' if (d.getVar('WENDYOS_TEGRA_SYSTEMDBOOT_AB') or '0') == '1' else ''} \
+    "
+
 # Enable DeepStream SDK support (optional - adds ~1GB to image)
 # Tegra/NVIDIA hardware only - DeepStream requires NVIDIA GPUs
 # Also enables l4t-deepstream.csv which provides:

@@ -16,11 +16,16 @@ SUMMARY:${PN} = "Tegra hardware support packages"
 # (blacksail's tegra-flash-init does not RDEPEND on it), so gate on BOTH the
 # SoC and the scarthgap layer tree — a bare tegra234 check would wrongly pull
 # it on blacksail Orin ("Nothing PROVIDES tegra-flash-reboot").
+# tegra-rootfs-redundancy arms NVIDIA's firmware A/B (RootfsRedundancyLevel) and
+# reboots. On the systemd-boot A/B boot path (WENDYOS_TEGRA_SYSTEMDBOOT_AB = 1)
+# that firmware mechanism is unused — slot selection lives in systemd-boot's own
+# +tries boot counting on the ESP — and the var is unarmable from the OS on Orin
+# anyway, so drop the arming service there (it would only burn a boot trying).
 RDEPENDS:${PN} = " \
     ${@'tegra-flash-reboot' if ('tegra234' in d.getVar('MACHINEOVERRIDES').split(':') and (d.getVar('WENDYOS_LAYER_TREE') or '') == 'scarthgap') else ''} \
+    ${@'' if (d.getVar('WENDYOS_TEGRA_SYSTEMDBOOT_AB') or '0') == '1' else 'tegra-rootfs-redundancy'} \
     tegra-tools-tegrastats \
     tegra-bootcontrol-overlay \
-    tegra-rootfs-redundancy \
     setup-nv-boot-control \
     packagegroup-nvidia-container \
     "
