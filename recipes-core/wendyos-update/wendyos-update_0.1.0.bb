@@ -23,7 +23,10 @@ GO_IMPORT = "github.com/wendylabsinc/wendyos-update"
 # to go.bbclass where it already sets this.
 GO_SRCURI_DESTSUFFIX ?= "${@os.path.join(os.path.basename(d.getVar('S')), 'src', d.getVar('GO_IMPORT')) + '/'}"
 
-SRC_URI = "git://${GO_IMPORT};protocol=https;branch=main;destsuffix=${GO_SRCURI_DESTSUFFIX}"
+# TEMPORARY TEST PIN (jo/grub-ab): points at the grubenv connector branch so the
+# image binary contains the connector this image pins via config.json. REVERT
+# branch=main + a merged-main SRCREV before merge.
+SRC_URI = "git://${GO_IMPORT};protocol=https;branch=jo/grubenv-connector;destsuffix=${GO_SRCURI_DESTSUFFIX}"
 # 33da342c (main, wendyos-update#8): install preflight refuses when tegra rootfs
 # A/B redundancy is not armed (RootfsRedundancyLevel UEFI variable missing/zero).
 # A device flashed by writing the rootfs straight to NVMe never gets it set, so
@@ -66,7 +69,8 @@ SRC_URI = "git://${GO_IMPORT};protocol=https;branch=main;destsuffix=${GO_SRCURI_
 # slot — kills the Orin Nano stale-inactive-slot false-positive, validated
 # against the real r39.2 efivar format) + structured per-slot `status` and the
 # `switch` verb.
-SRCREV = "33da342c3748bf29bc74584ac2ea1bd5880e7ed5"
+# TEMPORARY: grubenv A/B connector (jo/grubenv-connector).
+SRCREV = "a2e0e8e251a9340d23c386d2d31a8ad1efc9fdc8"
 
 inherit go-mod systemd
 
