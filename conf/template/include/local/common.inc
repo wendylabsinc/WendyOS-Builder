@@ -52,4 +52,8 @@ CONF_VERSION = "2"
 # auto.conf (parsed before local.conf per bitbake.conf) is not clobbered.
 WENDYOS_DEBUG ??= "0"
 WENDYOS_DEBUG_UART ??= "0"
+
+# Dev-only: re-enable local console/serial login + passwordless root on
+# non-fortress (PR) builds. NEVER set on release or nightly. See wendyos-image.bb.
+WENDYOS_DEV_LOGIN ??= "0"
 WENDYOS_SSHD ??= "0"
