@@ -87,6 +87,22 @@ disable_local_login() {
 # (WENDYOS_DEV_LOGIN="1") keep getty/serial-getty so the PR is debuggable.
 ROOTFS_POSTPROCESS_COMMAND += "${@'' if d.getVar('WENDYOS_DEV_LOGIN') == '1' else 'disable_local_login;'}"
 
+# Stamp build provenance onto the console boot screen (base-files' /etc/issue,
+# shown under the WendyOS logo before the login prompt). The build tag/ID is
+# shown on every build; the builder commit is added only on PR/dev builds, gated
+# on WENDYOS_DEV_LOGIN (CI sets it only for pull_request). WENDYOS_BUILD_* come
+# from auto.conf on CI and fall back to DISTRO_VERSION / "" locally (common.inc).
+# Runs after base-files installs /etc/issue, so the file is present to append to.
+stamp_boot_screen() {
+    issue="${IMAGE_ROOTFS}${sysconfdir}/issue"
+    [ -f "$issue" ] || return 0
+    printf 'Build: %s\n' "${WENDYOS_BUILD_VERSION}" >> "$issue"
+    if [ "${WENDYOS_DEV_LOGIN}" = "1" ] && [ -n "${WENDYOS_BUILD_COMMIT}" ]; then
+        printf 'Commit: %s\n' "${WENDYOS_BUILD_COMMIT}" >> "$issue"
+    fi
+}
+ROOTFS_POSTPROCESS_COMMAND += "stamp_boot_screen;"
+
 # Optional runtime package management (rpm/dnf in the rootfs).
 # Disabled by default — image is updated atomically via Mender A/B.
 # Set WENDYOS_ENABLE_PACKAGE_MANAGEMENT = "1" in local.conf or distro to enable.
@@ -175,6 +191,8 @@ BUILDCFG_VARS += " \
     WENDYOS_PERSIST_JOURNAL_LOGS \
     WENDYOS_UPDATE_BOOTLOADER \
     WENDYOS_DEEPSTREAM \
+    WENDYOS_BUILD_VERSION \
+    WENDYOS_BUILD_COMMIT \
     "
 
 # Include hardware-specific image configuration

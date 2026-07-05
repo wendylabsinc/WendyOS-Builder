@@ -345,6 +345,33 @@ jobs:
           ln -sfn "$scratch" "$GITHUB_WORKSPACE/build/tmp"
           echo "TMPDIR pinned to $scratch; build/tmp aliased to it"
 
+      - name: Stamp build provenance (version + commit)
+        # Bake the build's tag/ID and the exact builder commit into the image so
+        # they surface on the boot screen (/etc/issue) and in /etc/wendyos/commit.
+        # VERSION is the same string the publish step uploads under
+        # (pr-<N> | nightly-<ts> | X.Y.Z); COMMIT is the full builder SHA — the PR
+        # head on pull_request (the reviewed commit, not the ephemeral merge SHA),
+        # otherwise github.sha. Runs on every build. See WENDYOS_BUILD_* in
+        # conf/template/include/local/common.inc.
+        env:
+          BUILD_VERSION: ${{ needs.detect-changes.outputs.version }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_EVENT_NAME:-}" == "pull_request" ]]; then
+            BUILD_COMMIT="$PR_HEAD_SHA"
+          else
+            BUILD_COMMIT="$PUSH_SHA"
+          fi
+          {
+            echo ''
+            echo '# CI: build provenance stamped into the image'
+            echo "WENDYOS_BUILD_VERSION = \"${BUILD_VERSION}\""
+            echo "WENDYOS_BUILD_COMMIT = \"${BUILD_COMMIT}\""
+          } >> "$GITHUB_WORKSPACE/build/conf/auto.conf"
+          echo "Stamped version=${BUILD_VERSION} commit=${BUILD_COMMIT}"
+
       - name: Enable debug for nightly builds
         # Release images are production builds — no debug tools by default.
         # Nightly and workflow_dispatch builds get debug tooling so CI-flashed
