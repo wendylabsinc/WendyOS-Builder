@@ -7,6 +7,11 @@ DefaultDependencies=no
 # wendyos-update-verify.service. It may reboot once on first run; that is
 # guarded so it can never loop.
 After=local-fs.target data.mount
+# The attempt marker lives on /data; RequiresMountsFor pulls the mount into the
+# transaction and fails this unit if /data is unavailable, so the marker can
+# never land on the rootfs underlay and get hidden once /data mounts (which
+# would defeat the reboot-loop guard). After= alone does not guarantee this.
+RequiresMountsFor=/data
 Before=wendyos-update-verify.service
 ConditionPathExists=/sys/firmware/efi/efivars
 
