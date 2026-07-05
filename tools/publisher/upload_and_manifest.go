@@ -1067,6 +1067,8 @@ func main() {
 	removeKeepFiles := flag.Bool("remove-keep-files", false, "When removing a device, keep uploaded files in the bucket (only remove from manifests)")
 	renameTo := flag.String("rename-to", "", "Rename a device (--device old --rename-to new) by moving all files and updating manifests")
 	pr := flag.Int("pr", 0, "Per-PR debug build: route uploads and manifests into pr/<N>/ instead of the shared release manifests")
+	uploadConcurrency := flag.Int("upload-concurrency", 16, "Maximum concurrent upload streams (composite parts + whole small files)")
+	parallelUploadThresholdFlag := flag.Int64("parallel-upload-threshold", 256<<20, "Files larger than this many bytes upload as concurrent composite parts (default 256 MiB)")
 	flag.Parse()
 
 	if *debug {
@@ -1086,6 +1088,16 @@ func main() {
 	// overrides this below from the entry's own PR field, since that job runs
 	// without --pr and must route purely from what --upload-only recorded.
 	prefix := prPrefix(*pr)
+
+	// Initialise the global upload limits before any upload starts. The
+	// semaphore is shared by every upload goroutine (main/ota/recovery/
+	// flashpack/sbom/bmap/zst and the composite parts within each), so the
+	// process never runs more than -upload-concurrency streams at once.
+	if *uploadConcurrency < 1 {
+		*uploadConcurrency = 1
+	}
+	uploadSem = make(chan struct{}, *uploadConcurrency)
+	parallelUploadThreshold = *parallelUploadThresholdFlag
 
 	// Validate args
 	if *listImages {
@@ -1433,6 +1445,30 @@ func main() {
 	if !*updateOnly {
 		log.Info("Starting parallel file processing...")
 
+		// Recovery dedupe: on eMMC/Thor devices --file and --recovery-file point
+		// at the SAME local tegraflash bundle, which today uploads the identical
+		// 7 GB object twice in parallel (both resolve to the same destination
+		// path and neither exists yet, so the skip-if-exists check races). When
+		// the two paths resolve to the same file on disk, upload it once as the
+		// main image and reuse that result (path/size) plus the main file's
+		// checksum for the recovery manifest fields — which is exactly what a
+		// separate upload would have produced. When they differ (Orin NVMe:
+		// main is the .img.zst, recovery is a distinct bundle) both upload as
+		// before.
+		recoveryDedup := false
+		if *localFile != "" && *recoveryFile != "" {
+			same, err := sameLocalFile(*localFile, *recoveryFile)
+			if err != nil {
+				log.WithError(err).Warn("Could not determine whether the recovery file duplicates the main file; uploading both")
+			} else if same {
+				recoveryDedup = true
+				log.WithFields(logrus.Fields{
+					"file":          *localFile,
+					"recovery_file": *recoveryFile,
+				}).Info("Recovery file is the same local file as the main image; skipping duplicate upload and reusing the main upload for recovery")
+			}
+		}
+
 		// Process main file if provided
 		var mainFileChan <-chan fileProcessResult
 		if *localFile != "" {
@@ -1447,9 +1483,10 @@ func main() {
 			otaUpdateFileChan = processFileAsync(ctx, *otaUpdateFile, "ota")
 		}
 
-		// Process recovery file if provided
+		// Process recovery file if provided (skipped when it duplicates the main
+		// file — its manifest fields are reused from the main result below).
 		var recoveryFileChan <-chan fileProcessResult
-		if *recoveryFile != "" {
+		if *recoveryFile != "" && !recoveryDedup {
 			log.Info("Processing recovery file...")
 			recoveryFileChan = processFileAsync(ctx, *recoveryFile, "recovery")
 		}
@@ -1532,7 +1569,7 @@ func main() {
 		}
 
 		var recoveryUploadChan <-chan uploadResult
-		if recoveryResult.compressedPath != "" {
+		if recoveryResult.compressedPath != "" && !recoveryDedup {
 			recoveryUploadChan = uploadFileAsync(ctx, bucket, prefix, recoveryResult.compressedPath, *deviceType, *version)
 		}
 
@@ -1583,6 +1620,15 @@ func main() {
 				log.WithError(recoveryUpload.err).Fatal("Failed to upload recovery file")
 			}
 			log.Info("Recovery file uploaded successfully")
+		}
+
+		// Recovery deduped onto the main image: reuse the main upload's path and
+		// size and the main file's checksum, so the recovery manifest fields are
+		// byte-for-byte identical to what a separate (duplicate) upload produced.
+		if recoveryDedup {
+			recoveryResult = mainResult
+			recoveryUpload = mainUpload
+			log.Info("Reusing main upload result for recovery manifest fields (deduped)")
 		}
 
 		var flashpackUpload uploadResult
@@ -1873,10 +1919,33 @@ func uploadFile(ctx context.Context, bucket *storage.BucketHandle, prefix, local
 		return destinationPath, nil
 	}
 
+	contentType := contentTypeForPath(localPath)
+
+	// Large files upload as concurrent composite parts (see parallel_upload.go);
+	// small files (bmap, SBOM, manifest entries, etc.) keep the single-stream
+	// path below unchanged.
+	plan := planParts(localInfo.Size(), parallelUploadThreshold)
+	if len(plan) > 1 {
+		logComposePlan(destinationPath, localInfo.Size(), plan)
+		if err := uploadFileComposite(ctx, bucketComposer{bucket: bucket}, uploadSem, localPath, destinationPath, contentType, localInfo.Size(), plan, partChunkSize); err != nil {
+			log.WithError(err).Error("Composite upload failed")
+			return "", err
+		}
+		log.WithField("path", destinationPath).Info("File uploaded successfully")
+		return destinationPath, nil
+	}
+
 	log.WithFields(logrus.Fields{
 		"local_path":  localPath,
 		"destination": destinationPath,
 	}).Info("Uploading file")
+
+	// Single-stream small-file upload. It draws from the same global upload
+	// semaphore as composite parts so total in-flight streams stay capped.
+	if err := acquireUploadSlot(ctx, uploadSem); err != nil {
+		return "", err
+	}
+	defer releaseUploadSlot(uploadSem)
 
 	// Open the local file
 	file, err := os.Open(localPath)
@@ -1888,18 +1957,6 @@ func uploadFile(ctx context.Context, bucket *storage.BucketHandle, prefix, local
 
 	// Create the destination object writer
 	w := obj.NewWriter(ctx)
-
-	// Set content type based on extension
-	contentType := "application/octet-stream"
-	if strings.HasSuffix(localPath, ".zip") {
-		contentType = "application/zip"
-	} else if strings.HasSuffix(localPath, ".tgz") || strings.HasSuffix(localPath, ".gz") {
-		contentType = "application/gzip"
-	} else if strings.HasSuffix(localPath, ".xz") {
-		contentType = "application/x-xz"
-	} else if strings.HasSuffix(localPath, ".zst") {
-		contentType = "application/zstd"
-	}
 	w.ContentType = contentType
 
 	// Stream the content (efficient for large files)
