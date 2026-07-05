@@ -1,0 +1,21 @@
+[Unit]
+Description=Enroll WendyOS GRUB2 into the UEFI BootOrder on first boot
+DefaultDependencies=no
+# Needs the ESP mounted (to stage grubaa64.efi/grub.cfg/grubenv) and efivarfs
+# (to register the Boot#### / reorder BootOrder). Must run before the OTA boot
+# verifier so the boot path is settled first. Idempotent + guarded by a marker
+# on the persistent data partition; the script itself fails safe (leaves the
+# existing L4TLauncher BootOrder untouched) on any error.
+After=local-fs.target data.mount
+RequiresMountsFor=/boot/efi /data
+Before=wendyos-update-verify.service
+ConditionPathExists=/sys/firmware/efi/efivars
+ConditionPathExists=!/data/wendyos-update/grub-enrolled
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/wendyos-grub-firstboot
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

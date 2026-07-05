@@ -33,6 +33,23 @@ IMAGE_INSTALL:append = " \
     v4l-utils \
     "
 
+# GRUB2 A/B boot stack (WENDYOS_TEGRA_GRUB_AB = 1, set per NVMe Orin machine;
+# default OFF here). Swaps Orin's boot path from NVIDIA UEFI/L4TLauncher +
+# nvbootctrl A/B (whose RootfsRedundancyLevel is unarmable from the OS on Orin)
+# to a GRUB2 EFI payload on the ESP that selects the A/B rootfs slot from an
+# OS-writable grubenv:
+#   wendyos-grub                  grubaa64.efi + grub.cfg + grubenv (staged to ESP)
+#   wendyos-grub-firstboot        stage to ESP + enroll BootOrder (L4TLauncher kept)
+#   wendyos-update-config-grubenv pin the grubenv connector (not tegrauefi)
+#   efibootmgr                    BootOrder enroll tool the first-boot service uses
+#   grub-editenv                  runtime grubenv editor the grubenv connector uses
+# L4TLauncher stays enrolled as the fallback boot path. tegra-rootfs-redundancy
+# is dropped from the packagegroup on this path (its firmware A/B mechanism is
+# unused and unarmable on Orin).
+IMAGE_INSTALL:append = " \
+    ${@'wendyos-grub wendyos-grub-firstboot wendyos-update-config-grubenv efibootmgr grub-editenv' if (d.getVar('WENDYOS_TEGRA_GRUB_AB') or '0') == '1' else ''} \
+    "
+
 # Enable DeepStream SDK support (optional - adds ~1GB to image)
 # Tegra/NVIDIA hardware only - DeepStream requires NVIDIA GPUs
 # Also enables l4t-deepstream.csv which provides:
