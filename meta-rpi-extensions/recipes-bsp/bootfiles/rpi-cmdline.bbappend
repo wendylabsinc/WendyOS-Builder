@@ -23,7 +23,17 @@ inherit partuuid-rpi
 #
 # A hypothetical future RPi without a dwc2 peripheral controller would
 # need its own :append:<machine> override.
-WENDYOS_RPI_CMDLINE_EXTRAS = " console=serial0,115200${@' modules-load=dwc2' if d.getVar('WENDYOS_USB_GADGET') == '1' else ''}"
+#
+# `console=serial0,115200` (the kernel bootarg that puts boot + printk output
+# on UART) is gated on WENDYOS_DEBUG_UART, mirroring WENDYOS_DEV_LOGIN's gate
+# on the serial *login* prompt (see wendyos-image.bb's disable_local_login).
+# Fortress default (WENDYOS_DEBUG_UART="0"): no serial console registered, so
+# neither boot logs nor a login prompt reach UART. Dev/PR builds
+# (WENDYOS_DEBUG_UART="1", set by CI) restore the console= arg so field
+# bring-up can watch the boot again. "serial0" is the RPi firmware alias that
+# resolves to the correct UART per board (ttyAMA0 on RPi5, ttyS0 on RPi3/4 —
+# see SERIAL_CONSOLES above), so no per-machine override is needed here.
+WENDYOS_RPI_CMDLINE_EXTRAS = "${@' console=serial0,115200' if d.getVar('WENDYOS_DEBUG_UART') == '1' else ''}${@' modules-load=dwc2' if d.getVar('WENDYOS_USB_GADGET') == '1' else ''}"
 CMDLINE_ROOTFS:append:rpi = "${WENDYOS_RPI_CMDLINE_EXTRAS}"
 
 do_deploy[depends] += "${PN}:do_generate_partuuids"

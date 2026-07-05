@@ -17,6 +17,10 @@ type ManifestEntry struct {
 	Storage   string `json:"storage,omitempty"`
 	Nightly   bool   `json:"nightly"`
 	Stability string `json:"stability,omitempty"`
+	// PR, when > 0, marks this entry as a per-PR debug build. It routes all
+	// uploads and manifest writes into the self-contained pr/<N>/ subtree
+	// instead of the shared release manifests. Zero for release/nightly.
+	PR int `json:"pr,omitempty"`
 
 	FilePath     string `json:"file_path,omitempty"`
 	FileSize     int64  `json:"file_size,omitempty"`
@@ -96,4 +100,13 @@ func readManifestEntry(path string) (ManifestEntry, error) {
 		return entry, fmt.Errorf("validating %s: %w", path, err)
 	}
 	return entry, nil
+}
+
+// prPrefix returns the GCS object-path prefix for a per-PR build ("pr/<N>/"),
+// or "" for a normal release/nightly build (pr <= 0).
+func prPrefix(pr int) string {
+	if pr <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("pr/%d/", pr)
 }

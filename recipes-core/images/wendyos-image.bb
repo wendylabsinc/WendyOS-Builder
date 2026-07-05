@@ -39,14 +39,32 @@ WENDYOS_DEBUG_FEATURES ?= " \
     "
 IMAGE_FEATURES += "${@oe.utils.ifelse(d.getVar('WENDYOS_DEBUG') == '1', d.getVar('WENDYOS_DEBUG_FEATURES'), '')}"
 
+# The classic debug-tweaks credential set (empty/passwordless root + autologin)
+# that #172 removed from WENDYOS_DEBUG_FEATURES. Reintroduced ONLY for dev/PR
+# builds, gated strictly on WENDYOS_DEV_LOGIN (never WENDYOS_DEBUG). Without a
+# working credential the restored getty would be unusable (root is otherwise
+# locked to root:*: by zap_empty_root_password).
+WENDYOS_DEV_LOGIN_FEATURES ?= " \
+    empty-root-password \
+    allow-empty-password \
+    allow-root-login \
+    "
+IMAGE_FEATURES += "${@oe.utils.ifelse(d.getVar('WENDYOS_DEV_LOGIN') == '1', d.getVar('WENDYOS_DEV_LOGIN_FEATURES'), '')}"
+
 # No local interactive login on ANY image (debug included). A physically
 # attached monitor+keyboard (VT: getty@tty1 plus logind's autovt@ VT-switch
 # spawns) and the serial console login (serial-getty@, driven by
 # SERIAL_CONSOLES) are both an attack surface on a product device and are
-# removed. Kernel boot messages still reach the serial console — that is the
-# `console=` bootarg, not a getty — so field bring-up can still watch the boot;
-# there is simply no login prompt. Device access is exclusively via the
-# wendy-agent (gRPC); there is no interactive login path (SSH stays off).
+# removed. The kernel `console=` bootarg (boot + printk output on UART, not a
+# getty/login prompt) is a separate knob lit per-machine in the bootarg wiring,
+# not here: on Raspberry Pi it is gated on WENDYOS_DEBUG_UART (see
+# meta-rpi-extensions' rpi-cmdline.bbappend), so RPi fortress builds (the "0"
+# default) get no serial boot output and dev/PR builds (WENDYOS_DEBUG_UART="1")
+# restore it. Tegra console gating on the same knob is still pending (task A2),
+# so Jetson builds currently emit serial boot output regardless of this flag.
+# Either way that is independent of WENDYOS_DEV_LOGIN's login-prompt gate below.
+# Device access is exclusively via the wendy-agent (gRPC); there is no
+# interactive login path (SSH stays off).
 #
 # Masking these units in the rootfs is fatal: systemd's 90-systemd.preset
 # enables getty@/serial-getty@ and the rootfs preset-all pass rejects "enable a
@@ -65,7 +83,9 @@ disable_local_login() {
     printf '[Login]\nNAutoVTs=0\nReserveVT=0\n' \
         > ${IMAGE_ROOTFS}${systemd_unitdir}/logind.conf.d/10-wendyos-no-autovt.conf
 }
-ROOTFS_POSTPROCESS_COMMAND += "disable_local_login;"
+# Fortress (release + nightly): strip every local login path. Dev/PR builds
+# (WENDYOS_DEV_LOGIN="1") keep getty/serial-getty so the PR is debuggable.
+ROOTFS_POSTPROCESS_COMMAND += "${@'' if d.getVar('WENDYOS_DEV_LOGIN') == '1' else 'disable_local_login;'}"
 
 # Optional runtime package management (rpm/dnf in the rootfs).
 # Disabled by default — image is updated atomically via Mender A/B.
@@ -147,6 +167,7 @@ BUILDCFG_VARS += " \
     WENDYOS_DATA_PART \
     WENDYOS_DEBUG \
     WENDYOS_DEBUG_UART \
+    WENDYOS_DEV_LOGIN \
     WENDYOS_SSHD \
     WENDYOS_USB_GADGET \
     WENDYOS_USB_NET_MODE \
