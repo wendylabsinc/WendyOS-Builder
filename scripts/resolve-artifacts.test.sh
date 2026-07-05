@@ -153,9 +153,9 @@ test_missing_bundle_fatal() {
   local d M; d=$(newdir); M=jetson-agx-orin-devkit-emmc-wendyos
   local out; out=$(run_resolver jetson-agx-orin emmc "$M" "$d" 2>&1); local rc=$?
   if [[ "$rc" -ne 0 ]]; then ok "missing bundle: non-zero exit"; else bad "missing bundle: expected non-zero"; fi
-  grep -q "jetson-agx-orin/emmc" <<<"$out" && ok "missing bundle: names device/storage" || bad "missing bundle: error lacks device/storage"
-  grep -q "tegraflash-tar" <<<"$out" && ok "missing bundle: names expected pattern" || bad "missing bundle: error lacks pattern"
-  grep -q "ls -la" <<<"$out" && ok "missing bundle: dumps deploy dir" || bad "missing bundle: no deploy-dir dump"
+  if grep -q "jetson-agx-orin/emmc" <<<"$out"; then ok "missing bundle: names device/storage"; else bad "missing bundle: error lacks device/storage"; fi
+  if grep -q "tegraflash-tar" <<<"$out"; then ok "missing bundle: names expected pattern"; else bad "missing bundle: error lacks pattern"; fi
+  if grep -q "ls -la" <<<"$out"; then ok "missing bundle: dumps deploy dir"; else bad "missing bundle: no deploy-dir dump"; fi
   rm -rf "$d"
 }
 
@@ -164,7 +164,7 @@ test_missing_rpi_fatal() {
   local d M; d=$(newdir); M=raspberrypi3-64-wendyos
   local out; out=$(run_resolver raspberry-pi-3 sd "$M" "$d" 2>&1); local rc=$?
   if [[ "$rc" -ne 0 ]]; then ok "missing rpi image: non-zero exit"; else bad "missing rpi image: expected non-zero"; fi
-  grep -q "sdimg" <<<"$out" && ok "missing rpi image: names sdimg pattern" || bad "missing rpi image: error lacks pattern"
+  if grep -q "sdimg" <<<"$out"; then ok "missing rpi image: names sdimg pattern"; else bad "missing rpi image: error lacks pattern"; fi
   rm -rf "$d"
 }
 
@@ -173,7 +173,7 @@ test_unknown_combo_fatal() {
   local d; d=$(newdir)
   local out; out=$(run_resolver banana-pi sd some-machine "$d" 2>&1); local rc=$?
   if [[ "$rc" -ne 0 ]]; then ok "unknown combo: non-zero exit"; else bad "unknown combo: expected non-zero"; fi
-  grep -q "banana-pi/sd" <<<"$out" && ok "unknown combo: names bad key" || bad "unknown combo: error lacks key"
+  if grep -q "banana-pi/sd" <<<"$out"; then ok "unknown combo: names bad key"; else bad "unknown combo: error lacks key"; fi
   rm -rf "$d"
 }
 
