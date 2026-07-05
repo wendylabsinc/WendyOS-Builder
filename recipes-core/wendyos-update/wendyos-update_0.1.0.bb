@@ -24,6 +24,16 @@ GO_IMPORT = "github.com/wendylabsinc/wendyos-update"
 GO_SRCURI_DESTSUFFIX ?= "${@os.path.join(os.path.basename(d.getVar('S')), 'src', d.getVar('GO_IMPORT')) + '/'}"
 
 SRC_URI = "git://${GO_IMPORT};protocol=https;branch=main;destsuffix=${GO_SRCURI_DESTSUFFIX}"
+# 20ec14e (main, wendyos-update#10): drive rootfs A/B on Orin (t234) by switching
+# the BOOT CHAIN (nvbootctrl WITHOUT `-t rootfs`) instead of the rootfs-redundancy
+# slot, and skip the redundancy preflight on Orin. RootfsRedundancyLevel is
+# unarmable from the OS on Orin (flash-time device-tree setting; efivarfs writes
+# EINVAL), so the rootfs-redundancy slot switch is a silent no-op there — verified
+# on wendyos-test-adrian: the arm boot service exited SUCCESS yet the var stayed
+# level 0. The boot chain is coupled to the rootfs slot and needs no such
+# variable, so Orin drives it directly. Thor (t264) and unknown SoCs keep the
+# rootfs-redundancy + capsule path. Supersedes the f086a3c firmware-capability
+# gating (whose armed-redundancy preflight would refuse every Orin OTA). Builds on:
 # 33da342c (main, wendyos-update#8): install preflight refuses when tegra rootfs
 # A/B redundancy is not armed (RootfsRedundancyLevel UEFI variable missing/zero).
 # A device flashed by writing the rootfs straight to NVMe never gets it set, so
@@ -66,7 +76,7 @@ SRC_URI = "git://${GO_IMPORT};protocol=https;branch=main;destsuffix=${GO_SRCURI_
 # slot — kills the Orin Nano stale-inactive-slot false-positive, validated
 # against the real r39.2 efivar format) + structured per-slot `status` and the
 # `switch` verb.
-SRCREV = "33da342c3748bf29bc74584ac2ea1bd5880e7ed5"
+SRCREV = "20ec14eaef589967ca0279fdff98d431ade315ab"
 
 inherit go-mod systemd
 
