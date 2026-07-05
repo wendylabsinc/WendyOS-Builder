@@ -60,6 +60,14 @@ do_install() {
     # (via the /data bind mount) on every boot to stay OTA-fresh.
     ln -sf ../../usr/lib/wendyos/version.txt ${D}${sysconfdir}/wendyos/version.txt
 
+    # Builder git commit this image was built from (empty on plain local builds).
+    # Same read-only-rootfs + symlink pattern as version.txt so it survives the
+    # /etc/wendyos bind mount on Tegra; setup-etc-binds.sh keeps the bound copy
+    # OTA-fresh. WENDYOS_BUILD_COMMIT is set by CI in auto.conf (see common.inc).
+    echo "${WENDYOS_BUILD_COMMIT}" > ${WORKDIR}/commit
+    install -m 0644 ${WORKDIR}/commit ${D}${nonarch_libdir}/wendyos/commit
+    ln -sf ../../usr/lib/wendyos/commit ${D}${sysconfdir}/wendyos/commit
+
     # Create build ID file (actual date will be set at first boot if needed)
     echo "WendyOS-${DISTRO_VERSION}" > ${WORKDIR}/wendyos-build-id
     install -m 0644 ${WORKDIR}/wendyos-build-id ${D}${sysconfdir}/wendyos-build-id
@@ -95,6 +103,8 @@ FILES:${PN} += "${sysconfdir}/wendyos"
 FILES:${PN} += "${sysconfdir}/wendyos/device-type"
 FILES:${PN} += "${sysconfdir}/wendyos/version.txt"
 FILES:${PN} += "${nonarch_libdir}/wendyos/version.txt"
+FILES:${PN} += "${sysconfdir}/wendyos/commit"
+FILES:${PN} += "${nonarch_libdir}/wendyos/commit"
 FILES:${PN} += "${sysconfdir}/wendyos-build-id"
 
 CONFFILES:${PN} += "${sysconfdir}/wendyos/device-type"

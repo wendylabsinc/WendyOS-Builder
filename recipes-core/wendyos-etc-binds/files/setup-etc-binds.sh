@@ -78,6 +78,13 @@ then
     cp -p /usr/lib/wendyos/version.txt /etc/wendyos/version.txt
 fi
 
+# Same OTA-freshness refresh for the builder commit stamp (see version.txt above).
+if mountpoint -q /etc/wendyos && [ -f /usr/lib/wendyos/commit ]
+then
+    log_info "Refreshing /etc/wendyos/commit from /usr/lib/wendyos/"
+    cp -p /usr/lib/wendyos/commit /etc/wendyos/commit
+fi
+
 # [Note]
 # /etc/hostname is NOT bind-mounted because file-level bind mounts prevent atomic
 # writes. hostnamectl uses rename() for atomic updates, which fails with EBUSY on
