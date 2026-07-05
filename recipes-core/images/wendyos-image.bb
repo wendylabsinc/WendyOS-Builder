@@ -55,10 +55,14 @@ IMAGE_FEATURES += "${@oe.utils.ifelse(d.getVar('WENDYOS_DEV_LOGIN') == '1', d.ge
 # attached monitor+keyboard (VT: getty@tty1 plus logind's autovt@ VT-switch
 # spawns) and the serial console login (serial-getty@, driven by
 # SERIAL_CONSOLES) are both an attack surface on a product device and are
-# removed. Kernel boot messages still reach the serial console — that is the
-# `console=` bootarg, not a getty — so field bring-up can still watch the boot;
-# there is simply no login prompt. Device access is exclusively via the
-# wendy-agent (gRPC); there is no interactive login path (SSH stays off).
+# removed. The kernel `console=` bootarg (boot + printk output on UART, not a
+# getty/login prompt) is a separate knob, gated on WENDYOS_DEBUG_UART in the
+# per-machine bootarg wiring (e.g. meta-rpi-extensions' rpi-cmdline.bbappend):
+# fortress builds (the "0" default) get neither boot-log visibility nor a
+# login prompt on UART; dev/PR builds (WENDYOS_DEBUG_UART="1") restore boot
+# logs for field bring-up, independent of WENDYOS_DEV_LOGIN's login-prompt
+# gate below. Device access is exclusively via the wendy-agent (gRPC); there
+# is no interactive login path (SSH stays off).
 #
 # Masking these units in the rootfs is fatal: systemd's 90-systemd.preset
 # enables getty@/serial-getty@ and the rootfs preset-all pass rejects "enable a
