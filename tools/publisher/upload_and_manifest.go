@@ -2132,6 +2132,11 @@ const seekableFrameSize = 4 << 20 // 4 MiB
 // compressSeekableZstd writes srcPath as a seekable-zstd file to dstPath.
 // Each frame covers seekableFrameSize uncompressed bytes, so the CLI can
 // random-access the image without decompressing from the start.
+//
+// Frames are compressed concurrently (up to GOMAXPROCS at a time) and written
+// in source order via WriteMany. The previous sequential Write loop pinned a
+// single core, which dominated the publish step for the multi-GB Jetson
+// images; parallel framing scales the pass with the runner's cores.
 func compressSeekableZstd(srcPath, dstPath string) error {
 	in, err := os.Open(srcPath)
 	if err != nil {
@@ -2145,6 +2150,8 @@ func compressSeekableZstd(srcPath, dstPath string) error {
 	}
 	defer out.Close()
 
+	// The encoder must support concurrent EncodeAll calls (WriteMany fans out
+	// frame compression across goroutines); klauspost's encoder does.
 	enc, err := zstd.NewWriter(nil)
 	if err != nil {
 		return err
@@ -2156,24 +2163,29 @@ func compressSeekableZstd(srcPath, dstPath string) error {
 		return err
 	}
 
-	buf := make([]byte, seekableFrameSize)
-	for {
+	// frameSource yields one seekableFrameSize frame per call and a nil slice
+	// at EOF. WriteMany may retain each returned slice until it returns, so
+	// every frame is a freshly-allocated buffer rather than a shared scratch
+	// buffer. io.ReadFull returns n>0 with ErrUnexpectedEOF for the final short
+	// frame; that data is emitted and the following call reports EOF.
+	frameSource := func() ([]byte, error) {
+		buf := make([]byte, seekableFrameSize)
 		n, rerr := io.ReadFull(in, buf)
 		if n > 0 {
-			if _, werr := w.Write(buf[:n]); werr != nil {
-				w.Close()
-				return werr
-			}
+			return buf[:n], nil
 		}
-		if rerr == io.EOF || rerr == io.ErrUnexpectedEOF {
-			break
+		if rerr == io.EOF {
+			return nil, nil
 		}
-		if rerr != nil {
-			w.Close()
-			return rerr
-		}
+		return nil, rerr
 	}
 
+	if err := w.WriteMany(context.Background(), frameSource); err != nil {
+		w.Close()
+		return err
+	}
+
+	// WriteMany defers the seek table to Close (see its contract).
 	if err := w.Close(); err != nil {
 		return err
 	}
