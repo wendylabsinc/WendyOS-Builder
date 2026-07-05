@@ -14,6 +14,34 @@ import (
 	"github.com/klauspost/compress/zstd"
 )
 
+// Test PR path-prefix builders
+func TestImageObjectPath(t *testing.T) {
+	if got := imageObjectPath("", "raspberry-pi-5", "1.2.3", "os.img.gz"); got != "images/raspberry-pi-5/1.2.3/os.img.gz" {
+		t.Fatalf("release path = %q", got)
+	}
+	if got := imageObjectPath("pr/123/", "raspberry-pi-5", "pr-123", "os.img.gz"); got != "pr/123/images/raspberry-pi-5/pr-123/os.img.gz" {
+		t.Fatalf("pr path = %q", got)
+	}
+}
+
+func TestDeviceManifestPath(t *testing.T) {
+	if got := deviceManifestPath("", "raspberry-pi-5"); got != "manifests/raspberry-pi-5.json" {
+		t.Fatalf("release manifest = %q", got)
+	}
+	if got := deviceManifestPath("pr/123/", "raspberry-pi-5"); got != "pr/123/manifests/raspberry-pi-5.json" {
+		t.Fatalf("pr manifest = %q", got)
+	}
+}
+
+func TestMasterManifestPath(t *testing.T) {
+	if got := masterManifestPath(""); got != "manifests/master.json" {
+		t.Fatalf("release master = %q", got)
+	}
+	if got := masterManifestPath("pr/123/"); got != "pr/123/manifests/master.json" {
+		t.Fatalf("pr master = %q", got)
+	}
+}
+
 // Test validation functions
 func TestValidateDeviceType(t *testing.T) {
 	tests := []struct {
