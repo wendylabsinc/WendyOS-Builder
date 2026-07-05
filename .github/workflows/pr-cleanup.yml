@@ -1,0 +1,103 @@
+name: Cleanup PR Images
+on:
+  pull_request:
+    types: [closed]
+  schedule:
+    - cron: "17 4 * * 1"   # Mondays 04:17 UTC — weekly orphan sweep
+  workflow_dispatch:
+permissions:
+  contents: read
+  pull-requests: read
+jobs:
+  # ---------------------------------------------------------------------------
+  # cleanup-closed: fires on every PR close (merged or not) and deletes that
+  # PR's self-contained pr/<N>/ subtree from the public images bucket.
+  # ---------------------------------------------------------------------------
+  cleanup-closed:
+    name: Delete images for closed PR
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Remove pr/<N>/ subtree
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          # -m parallel, and tolerate an already-empty prefix (PR that never built).
+          gsutil -m rm -r "gs://wendyos-images-public/pr/${PR_NUMBER}/**" || \
+            echo "Nothing to delete for PR ${PR_NUMBER}."
+
+  # ---------------------------------------------------------------------------
+  # sweep-orphans: weekly safety net for missed close events (e.g. workflow
+  # outage, force-deleted PR). Deletes any pr/<N>/ subtree whose PR number is
+  # no longer open. Fails safe: if the open-PR list can't be fetched, the job
+  # aborts before touching the bucket rather than risk treating every PR as
+  # orphaned and mass-deleting.
+  # ---------------------------------------------------------------------------
+  sweep-orphans:
+    name: Weekly orphan sweep
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      id-token: write
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Delete pr/<N>/ trees with no open PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          # Fetch the open-PR set first. If this fails for any reason (API
+          # outage, auth hiccup, gh CLI error), abort immediately rather than
+          # falling through to a sweep that would see zero "open" PRs and
+          # delete every pr/<N>/ tree in the bucket.
+          if ! open_prs=$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --limit 1000 --json number --jq '.[].number' | sort -u); then
+            echo "::error::Failed to list open PRs via gh; aborting sweep without deleting anything." >&2
+            exit 1
+          fi
+
+          # List existing pr/<N>/ prefixes in the bucket. A non-zero exit here
+          # just means the pr/ prefix doesn't exist yet (nothing to sweep) -
+          # treat that as an empty listing rather than an error.
+          pr_dirs=$(gsutil ls "gs://wendyos-images-public/pr/" 2>/dev/null | \
+            sed -nE 's#.*/pr/([0-9]+)/#\1#p' | sort -u || true)
+
+          if [[ -z "$pr_dirs" ]]; then
+            echo "No pr/<N>/ directories found in the bucket; nothing to sweep."
+            exit 0
+          fi
+
+          while IFS= read -r n; do
+            [[ -z "$n" ]] && continue
+            if grep -qx -- "$n" <<<"$open_prs"; then
+              echo "PR $n is open -> keeping."
+            else
+              echo "PR $n not open -> deleting."
+              gsutil -m rm -r "gs://wendyos-images-public/pr/${n}/**" || \
+                echo "::warning::Failed to delete gs://wendyos-images-public/pr/${n}/ (may already be empty)."
+            fi
+          done <<<"$pr_dirs"
