@@ -568,13 +568,21 @@ jobs:
           DEPLOY_DIR: ${{ github.workspace }}/build/tmp/deploy/images/${{ steps.vars.outputs.machine }}
           MACHINE: ${{ steps.vars.outputs.machine }}
           STORAGE: ${{ matrix.storage }}
-          # DEVICE was previously unset here, so the `"$DEVICE" != "jetson-agx-thor"`
-          # guard below silently evaluated true for every device — dead code. It
-          # did not bite while Thor failed earlier (at the tar extraction), but
-          # once that is fixed Thor would wrongly attempt the offline-NVMe-image
-          # generation. Set it so the guard actually distinguishes Thor.
           DEVICE: ${{ matrix.device }}
         run: |
+          set -euo pipefail
+          # Resolve all artifact paths + expectations from the checked-in device
+          # map (.github/device-artifacts.json) via the single resolver. This
+          # replaces the inline glob + per-device if/elif that drifted ~11 times.
+          # The resolver fails loudly (with df/ls diagnostics) if the tegraflash
+          # bundle is missing for a tegraflash-bundle device; for generated-nvme
+          # devices it resolves the bundle path and the MACHINE-scoped target
+          # .img path without requiring the .img to exist yet (we make it below).
+          RESOLVED=$(DEVICE="$DEVICE" STORAGE="$STORAGE" MACHINE="$MACHINE" \
+                     DEPLOY_DIR="$DEPLOY_DIR" \
+                     "$GITHUB_WORKSPACE/wendyos/scripts/resolve-artifacts.sh")
+          eval "$RESOLVED"
+
           # Per-MACHINE, freshly wiped staging dir. A fixed shared path
           # ($GITHUB_WORKSPACE/flash-work) on persistent snapshot runners with no
           # cleanup let one Jetson's extracted tegraflash-tar leak into the next
@@ -593,41 +601,36 @@ jobs:
           # primary artifact for `wendy os install` (dd-based provisioning);
           # the tegraflash-tar bundle remains the recovery-flash artifact.
           #
-          # Resolve the bundle by glob rather than a hard-coded name: on
-          # r38.4.x/JP7 (Thor, tegra264) the deployed artifact is not always the
-          # plain "wendyos-image-${MACHINE}.tegraflash-tar" the older Jetsons
-          # emit — tegra-common.inc defaults IMAGE_FSTYPES to "tegraflash-tar.zst"
-          # and the "latest" symlink is not guaranteed. Accept the compressed
-          # variant too (GNU tar auto-detects zstd on extraction). The ls below
-          # is a diagnostic: it records exactly what the image class deposited so
-          # a future naming change is obvious in the log instead of a bare
-          # "Cannot open" from tar.
-          echo "tegraflash artifacts in $DEPLOY_DIR:"
-          ls -la "$DEPLOY_DIR"/*.tegraflash-tar* 2>/dev/null || echo "  (none matched *.tegraflash-tar*)"
-          TEGRAFLASH_TAR=$(find "$DEPLOY_DIR" -maxdepth 1 \
-            \( -name "wendyos-image-${MACHINE}.tegraflash-tar" \
-               -o -name "wendyos-image-${MACHINE}.tegraflash-tar.zst" \) \
-            -print -quit)
-          [[ -n "$TEGRAFLASH_TAR" ]] || {
+          # The bundle must exist to extract it. The resolver already hard-fails
+          # for tegraflash-bundle devices; this guards the generated-nvme case
+          # (bundle is recovery-only there, so the resolver leaves it empty
+          # rather than failing) to preserve the historical extract-time error.
+          [[ -n "$TEGRAFLASH_BUNDLE" ]] || {
             echo "::error::no tegraflash-tar bundle for ${MACHINE} in ${DEPLOY_DIR}"
             exit 1
           }
-          echo "Extracting tegraflash bundle: $TEGRAFLASH_TAR"
-          tar -xf "$TEGRAFLASH_TAR" -C "$FLASH_WORKDIR"
+          echo "Extracting tegraflash bundle: $TEGRAFLASH_BUNDLE"
+          tar -xf "$TEGRAFLASH_BUNDLE" -C "$FLASH_WORKDIR"
+
           # external-flash.xml.in describes the external NVMe boot/root device.
           # eMMC builds are internal-only and ship no such layout; the SD-card
           # Orin Nano is not a CI target (its layout lives in a <device
           # type="sdcard"> block, not external-flash.xml.in, and the blacksail
           # bundle no longer ships dosdcard.sh to build it). For those the
-          # tegraflash-tar bundle itself is the flash artifact — nothing to do.
-          # Write the offline NVMe image into the MACHINE-scoped deploy dir, not a
-          # fixed workspace path, so the upload step can never pick up another
+          # tegraflash-tar bundle itself is the flash artifact (image_kind=
+          # tegraflash-bundle) — nothing to generate. IMAGE_FILE for the
+          # generated-nvme case is the MACHINE-scoped deploy path (never a fixed
+          # workspace path), so the upload step can never pick up another
           # Jetson's image. Remove any prior copy first.
-          NVME_IMG="$DEPLOY_DIR/wendyos-image-${MACHINE}-nvme.img"
-          rm -f "$NVME_IMG"
-          if [[ -f "$FLASH_WORKDIR/external-flash.xml.in" && "$DEVICE" != "jetson-agx-thor" ]]; then
-            python3 "$GITHUB_WORKSPACE/wendyos/scripts/make-thor-nvme-img.py" \
-              "$FLASH_WORKDIR" "$NVME_IMG"
+          if [[ "$IMAGE_KIND" == "generated-nvme-img" ]]; then
+            NVME_IMG="$IMAGE_FILE"
+            rm -f "$NVME_IMG"
+            if [[ -f "$FLASH_WORKDIR/external-flash.xml.in" ]]; then
+              python3 "$GITHUB_WORKSPACE/wendyos/scripts/make-thor-nvme-img.py" \
+                "$FLASH_WORKDIR" "$NVME_IMG"
+            else
+              echo "No external-flash.xml.in in bundle for $DEVICE (storage=$STORAGE); cannot build offline NVMe image."
+            fi
           else
             echo "No offline NVMe image for $DEVICE (storage=$STORAGE); the tegraflash-tar is the flash artifact."
           fi
@@ -644,9 +647,9 @@ jobs:
           echo "== post-generate scratch state for ${MACHINE} =="
           df -h "$DEPLOY_DIR" 2>/dev/null || true
           ls -la "$DEPLOY_DIR" 2>/dev/null || true
-          if [[ "$STORAGE" == "nvme" && "$DEVICE" != "jetson-agx-thor" ]]; then
-            [[ -s "$NVME_IMG" ]] || {
-              echo "::error::offline NVMe image $NVME_IMG missing/empty immediately after generation (see df/ls above — suspect /wendy scratch exhaustion)"
+          if [[ "$IMAGE_KIND" == "generated-nvme-img" ]]; then
+            [[ -s "$IMAGE_FILE" ]] || {
+              echo "::error::offline NVMe image $IMAGE_FILE missing/empty immediately after generation (see df/ls above — suspect /wendy scratch exhaustion)"
               exit 1
             }
           fi
@@ -684,69 +687,56 @@ jobs:
         run: |
           TOKEN=$(gcloud auth print-access-token)
 
-          # The wendy/blacksail OTA stack emits a single tegraflash-tar bundle;
-          # it doubles as the eMMC image and the Jetson recovery-flash artifact.
-          TEGRAFLASH_BUNDLE=""
-          if [[ "$MACHINE" != raspberry* ]]; then
-            # Resolve by glob, matching the generate step: r38.4.x/JP7 may deploy
-            # a compressed .tegraflash-tar.zst and the unsuffixed "latest"
-            # symlink is not guaranteed. Empty if genuinely absent — handled
-            # with a diagnostic below.
-            TEGRAFLASH_BUNDLE=$(find "$DEPLOY_DIR" -maxdepth 1 \
-              \( -name "wendyos-image-${MACHINE}.tegraflash-tar" \
-                 -o -name "wendyos-image-${MACHINE}.tegraflash-tar.zst" \) \
-              -print -quit)
-          fi
+          # Resolve every artifact path + expectation from the checked-in device
+          # map (.github/device-artifacts.json) via the single resolver — the
+          # same source of truth the generate step used. This replaces the inline
+          # glob + per-device if/elif chain that drifted ~11 times. The resolver
+          # fails loudly (with df/ls diagnostics) when the tegraflash bundle is
+          # missing for a tegraflash-bundle device (eMMC / Thor NVMe). It emits:
+          #   IMAGE_KIND IMAGE_FILE TEGRAFLASH_BUNDLE RECOVERY_EXPECTED
+          #   BMAP_REQUIRED FLASHPACK_REQUIRED PASS_STORAGE RPI_NEEDS_GZIP
+          RESOLVED=$(DEVICE="$DEVICE" STORAGE="$STORAGE" MACHINE="$MACHINE" \
+                     DEPLOY_DIR="$DEPLOY_DIR" \
+                     "$GITHUB_WORKSPACE/wendyos/scripts/resolve-artifacts.sh") || exit 1
+          eval "$RESOLVED"
 
+          # Do the non-resolution work (bmaptool / gzip) the map says applies.
           BMAP_FILE=""
-          if [[ "$MACHINE" != raspberry* && "$STORAGE" == "nvme" && "$DEVICE" != "jetson-agx-thor" ]]; then
-            # MACHINE-scoped image written by the generate step (never a fixed
-            # shared path). Fail hard if this run did not produce it, rather than
-            # uploading a stale image left behind by another Jetson build.
-            IMAGE_FILE="$DEPLOY_DIR/wendyos-image-${MACHINE}-nvme.img"
-            if [[ ! -f "$IMAGE_FILE" ]]; then
-              echo "::error::NVMe image not produced this run for ${DEVICE} (${MACHINE}): ${IMAGE_FILE} missing. Refusing to upload a possibly-stale image." >&2
-              # AGX Orin: the image exists after the generate step but is gone by
-              # here — dump scratch state to distinguish /wendy exhaustion from
-              # external removal (see the generate step's matching diagnostic).
-              df -h "$DEPLOY_DIR" 2>/dev/null || true
-              ls -la "$DEPLOY_DIR" 2>/dev/null || true
-              exit 1
-            fi
-            bmaptool create "$IMAGE_FILE" > "${IMAGE_FILE}.bmap"
-            BMAP_FILE="${IMAGE_FILE}.bmap"
-          elif [[ "$MACHINE" != raspberry* && ( "$STORAGE" == "emmc" || "$DEVICE" == "jetson-agx-thor" ) ]]; then
-            # No offline disk image for eMMC or Thor NVMe; the tegraflash bundle
-            # is the flash artifact. It existed during the build (the generate
-            # step extracted it), so an empty/missing bundle here is the same
-            # vanish-from-scratch symptom — fail with disk context, not a bare
-            # "file does not exist" from the publisher.
-            if [[ -z "$TEGRAFLASH_BUNDLE" || ! -f "$TEGRAFLASH_BUNDLE" ]]; then
-              echo "::error::tegraflash bundle for ${MACHINE} missing at upload time (it was present during the build). Suspect /wendy scratch exhaustion." >&2
-              df -h "$DEPLOY_DIR" 2>/dev/null || true
-              ls -la "$DEPLOY_DIR" 2>/dev/null || true
-              exit 1
-            fi
-            IMAGE_FILE="$TEGRAFLASH_BUNDLE"
-          else
-            # RPi: Mender emits .sdimg; pre-Mender RPi builds produced
-            # .rootfs.wic. Prefer sdimg, fall back to wic.
-            if [[ -f "$DEPLOY_DIR/wendyos-image-${MACHINE}.sdimg" ]]; then
-              # Resolve the Yocto symlink to the real file before gzipping;
-              # gzip fails with ELOOP when the symlink chain is too deep.
-              # Use -f to suppress the "has N other links" error from Yocto hard links.
-              SDIMG_REAL=$(readlink -f "$DEPLOY_DIR/wendyos-image-${MACHINE}.sdimg")
-              # Generate bmap before gzip — bmaptool operates on the raw image.
-              bmaptool create "$SDIMG_REAL" > "${SDIMG_REAL}.bmap"
-              BMAP_FILE="${SDIMG_REAL}.bmap"
-              gzip -f "$SDIMG_REAL"
-              IMAGE_FILE="${SDIMG_REAL}.gz"
-            else
-              IMAGE_FILE="$DEPLOY_DIR/wendyos-image-${MACHINE}.rootfs.wic"
+          case "$IMAGE_KIND" in
+            generated-nvme-img)
+              # MACHINE-scoped image written by the generate step (never a fixed
+              # shared path). The resolver cannot check it — it is produced after
+              # Yocto deploy — so keep the stale-image guard and its df/ls
+              # diagnostics here (a separate gated spec removes them later): fail
+              # hard rather than upload a possibly-stale image from another build.
+              if [[ ! -f "$IMAGE_FILE" ]]; then
+                echo "::error::NVMe image not produced this run for ${DEVICE} (${MACHINE}): ${IMAGE_FILE} missing. Refusing to upload a possibly-stale image." >&2
+                df -h "$DEPLOY_DIR" 2>/dev/null || true
+                ls -la "$DEPLOY_DIR" 2>/dev/null || true
+                exit 1
+              fi
               bmaptool create "$IMAGE_FILE" > "${IMAGE_FILE}.bmap"
               BMAP_FILE="${IMAGE_FILE}.bmap"
-            fi
-          fi
+              ;;
+            tegraflash-bundle)
+              # No offline disk image for eMMC / Thor NVMe; IMAGE_FILE is the
+              # tegraflash bundle itself, already resolved and existence-checked
+              # (with df/ls diagnostics) by the resolver. No bmap for this kind.
+              : ;;
+            sdimg-gz-with-wic-fallback)
+              # RPi: IMAGE_FILE is the readlink-resolved raw image (.sdimg real
+              # target, or .rootfs.wic). Generate bmap before gzip — bmaptool
+              # operates on the raw image. For sdimg, gzip -f the raw file
+              # (suppresses the Yocto hard-link "has N other links" error) and
+              # point IMAGE_FILE at the .gz; wic uploads uncompressed.
+              bmaptool create "$IMAGE_FILE" > "${IMAGE_FILE}.bmap"
+              BMAP_FILE="${IMAGE_FILE}.bmap"
+              if [[ "$RPI_NEEDS_GZIP" == "true" ]]; then
+                gzip -f "$IMAGE_FILE"
+                IMAGE_FILE="${IMAGE_FILE}.gz"
+              fi
+              ;;
+          esac
 
           # Upload-only: files are pushed to GCS here, but ALL manifest writes
           # are deferred to the single serialised publish job. Parallel matrix
@@ -782,13 +772,15 @@ jobs:
 
           # Thor: attach the flashpack built in the previous step so the publisher
           # uploads it and records flashpack_path/checksum/size in the manifest.
-          if [[ "$DEVICE" == "jetson-agx-thor" && -n "${FLASHPACK_FILE:-}" && -f "$FLASHPACK_FILE" ]]; then
+          # FLASHPACK_REQUIRED (from the map) is true only for the flashpack
+          # device(s); the file itself must also be present.
+          if [[ "$FLASHPACK_REQUIRED" == "true" && -n "${FLASHPACK_FILE:-}" && -f "$FLASHPACK_FILE" ]]; then
             ARGS+=(--flashpack-file "$FLASHPACK_FILE")
           fi
 
           # Devices with multiple storage variants pass --storage so the manifest
-          # records the correct per-storage-type paths.
-          if [[ "$DEVICE" == "jetson-orin-nano" || "$DEVICE" == "jetson-agx-orin" || "$DEVICE" == "raspberry-pi-5" ]]; then
+          # records the correct per-storage-type paths (PASS_STORAGE from the map).
+          if [[ "$PASS_STORAGE" == "true" ]]; then
             ARGS+=(--storage "$STORAGE")
           fi
 

@@ -1,0 +1,32 @@
+name: Scripts CI
+
+# Gate the device-artifact map + resolver so build.yml never picks up a broken
+# resolver or a map that drifted out of sync with the build matrix.
+on:
+  pull_request:
+    paths:
+      - 'scripts/resolve-artifacts*'
+      - '.github/device-artifacts.json'
+      - '.github/workflows/scripts-ci.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/resolve-artifacts*'
+      - '.github/device-artifacts.json'
+      - '.github/workflows/scripts-ci.yml'
+
+jobs:
+  test:
+    name: Resolver map + unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate device-artifacts.json
+        run: jq empty .github/device-artifacts.json
+
+      - name: shellcheck
+        run: shellcheck scripts/resolve-artifacts.sh scripts/resolve-artifacts.test.sh
+
+      - name: Run resolver tests
+        run: bash scripts/resolve-artifacts.test.sh
