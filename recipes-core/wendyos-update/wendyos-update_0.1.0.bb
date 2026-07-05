@@ -23,7 +23,10 @@ GO_IMPORT = "github.com/wendylabsinc/wendyos-update"
 # to go.bbclass where it already sets this.
 GO_SRCURI_DESTSUFFIX ?= "${@os.path.join(os.path.basename(d.getVar('S')), 'src', d.getVar('GO_IMPORT')) + '/'}"
 
-SRC_URI = "git://${GO_IMPORT};protocol=https;branch=main;destsuffix=${GO_SRCURI_DESTSUFFIX}"
+# TEMPORARY TEST PIN (jo/systemdboot-ab): points at the systemdboot connector
+# branch so the image binary actually contains the connector this image pins via
+# config.json. REVERT branch=main + a merged-main SRCREV before merge.
+SRC_URI = "git://${GO_IMPORT};protocol=https;branch=jo/systemdboot-connector;destsuffix=${GO_SRCURI_DESTSUFFIX}"
 # 33da342c (main, wendyos-update#8): install preflight refuses when tegra rootfs
 # A/B redundancy is not armed (RootfsRedundancyLevel UEFI variable missing/zero).
 # A device flashed by writing the rootfs straight to NVMe never gets it set, so
@@ -66,7 +69,8 @@ SRC_URI = "git://${GO_IMPORT};protocol=https;branch=main;destsuffix=${GO_SRCURI_
 # slot — kills the Orin Nano stale-inactive-slot false-positive, validated
 # against the real r39.2 efivar format) + structured per-slot `status` and the
 # `switch` verb.
-SRCREV = "33da342c3748bf29bc74584ac2ea1bd5880e7ed5"
+# TEMPORARY: systemdboot A/B connector (jo/systemdboot-connector).
+SRCREV = "625c28e96d98b7dfad6ea3ce7c7e4551f42f4020"
 
 inherit go-mod systemd
 
