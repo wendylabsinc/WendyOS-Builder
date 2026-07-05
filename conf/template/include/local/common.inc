@@ -51,5 +51,15 @@ CONF_VERSION = "2"
 # --debug), local.conf, or board config. Uses ??= so bootstrap-generated
 # auto.conf (parsed before local.conf per bitbake.conf) is not clobbered.
 WENDYOS_DEBUG ??= "0"
-WENDYOS_DEBUG_UART ??= "0"
+WENDYOS_DEBUG_UART ??= "${WENDYOS_DEBUG}"
 WENDYOS_SSHD ??= "0"
+
+# Local interactive login, split by console type so each is opt-in separately.
+# UART/serial login (serial-getty@ + console-getty on /dev/console) defaults to
+# the WENDYOS_DEBUG value — kept on for debug images so the serial-login dev
+# workflow survives, off for release. The monitor+keyboard VT login (getty@ +
+# autovt@) defaults OFF on every image, debug included: it is not part of the
+# dev workflow and is pure attack surface. Override either explicitly.
+WENDYOS_ENABLE_UART_LOGIN ??= "${WENDYOS_DEBUG}"
+WENDYOS_ENABLE_VT_LOGIN   ??= "0"
+

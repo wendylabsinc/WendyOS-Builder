@@ -39,33 +39,47 @@ WENDYOS_DEBUG_FEATURES ?= " \
     "
 IMAGE_FEATURES += "${@oe.utils.ifelse(d.getVar('WENDYOS_DEBUG') == '1', d.getVar('WENDYOS_DEBUG_FEATURES'), '')}"
 
-# No local interactive login on ANY image (debug included). A physically
-# attached monitor+keyboard (VT: getty@tty1 plus logind's autovt@ VT-switch
-# spawns) and the serial console login (serial-getty@, driven by
-# SERIAL_CONSOLES) are both an attack surface on a product device and are
-# removed. Kernel boot messages still reach the serial console — that is the
-# `console=` bootarg, not a getty — so field bring-up can still watch the boot;
-# there is simply no login prompt. Device access is exclusively via the
-# wendy-agent (gRPC); there is no interactive login path (SSH stays off).
+# Local interactive login is an attack surface on a product device, so both
+# console types are disabled by default and each is separately opt-in:
+#   - UART/serial login (serial-getty@ + console-getty on /dev/console):
+#     WENDYOS_ENABLE_UART_LOGIN, default = WENDYOS_DEBUG (on for debug so the
+#     serial-login dev workflow survives, off for release).
+#   - monitor+keyboard VT login (getty@ + logind autovt@ spawns):
+#     WENDYOS_ENABLE_VT_LOGIN, default off on every image (debug included).
+# Kernel boot messages always reach the serial console regardless — that is the
+# `console=` bootarg, not a getty. With a login disabled, device access is via
+# the wendy-agent (gRPC). See common.inc for the knobs.
+#
+# console-getty (login on /dev/console) is grouped with UART: on these boards
+# `console=` points at the serial console, so /dev/console is the UART.
 #
 # Masking these units in the rootfs is fatal: systemd's 90-systemd.preset
 # enables getty@/serial-getty@ and the rootfs preset-all pass rejects "enable a
 # masked unit". So preset-disable the templates (a 10- file wins over 90-),
-# drop any enablement symlinks a postinst force-created, and zero logind's
-# auto-VTs (which also stops the autovt@ VT-switch spawns a preset alone can't
-# reach).
-disable_local_login() {
+# drop any enablement symlinks a postinst force-created, and (VT only) zero
+# logind's auto-VTs (stops the autovt@ VT-switch spawns a preset can't reach).
+disable_vt_login() {
     rm -f ${IMAGE_ROOTFS}${sysconfdir}/systemd/system/getty.target.wants/getty@*.service
-    rm -f ${IMAGE_ROOTFS}${sysconfdir}/systemd/system/getty.target.wants/serial-getty@*.service
-    rm -f ${IMAGE_ROOTFS}${sysconfdir}/systemd/system/getty.target.wants/console-getty.service
     install -d ${IMAGE_ROOTFS}${systemd_unitdir}/system-preset
-    printf 'disable getty@.service\ndisable autovt@.service\ndisable serial-getty@.service\ndisable console-getty.service\n' \
-        > ${IMAGE_ROOTFS}${systemd_unitdir}/system-preset/10-wendyos-no-local-login.preset
+    printf 'disable getty@.service\ndisable autovt@.service\n' \
+        > ${IMAGE_ROOTFS}${systemd_unitdir}/system-preset/10-wendyos-no-vt-login.preset
     install -d ${IMAGE_ROOTFS}${systemd_unitdir}/logind.conf.d
     printf '[Login]\nNAutoVTs=0\nReserveVT=0\n' \
         > ${IMAGE_ROOTFS}${systemd_unitdir}/logind.conf.d/10-wendyos-no-autovt.conf
 }
-ROOTFS_POSTPROCESS_COMMAND += "disable_local_login;"
+
+disable_uart_login() {
+    rm -f ${IMAGE_ROOTFS}${sysconfdir}/systemd/system/getty.target.wants/serial-getty@*.service
+    rm -f ${IMAGE_ROOTFS}${sysconfdir}/systemd/system/getty.target.wants/console-getty.service
+    install -d ${IMAGE_ROOTFS}${systemd_unitdir}/system-preset
+    printf 'disable serial-getty@.service\ndisable console-getty.service\n' \
+        > ${IMAGE_ROOTFS}${systemd_unitdir}/system-preset/10-wendyos-no-uart-login.preset
+}
+
+# Each gate bakes its command in or out, so the do_rootfs signature changes with
+# the knob and the image rebuilds.
+ROOTFS_POSTPROCESS_COMMAND += "${@oe.utils.ifelse(d.getVar('WENDYOS_ENABLE_UART_LOGIN') == '1', '', 'disable_uart_login;')}"
+ROOTFS_POSTPROCESS_COMMAND += "${@oe.utils.ifelse(d.getVar('WENDYOS_ENABLE_VT_LOGIN') == '1', '', 'disable_vt_login;')}"
 
 # Optional runtime package management (rpm/dnf in the rootfs).
 # Disabled by default — image is updated atomically via Mender A/B.
@@ -148,6 +162,8 @@ BUILDCFG_VARS += " \
     WENDYOS_DEBUG \
     WENDYOS_DEBUG_UART \
     WENDYOS_SSHD \
+    WENDYOS_ENABLE_UART_LOGIN \
+    WENDYOS_ENABLE_VT_LOGIN \
     WENDYOS_USB_GADGET \
     WENDYOS_USB_NET_MODE \
     WENDYOS_MDNS_INTERFACES \
