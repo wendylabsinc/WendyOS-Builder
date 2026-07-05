@@ -24,6 +24,12 @@ GO_IMPORT = "github.com/wendylabsinc/wendyos-update"
 GO_SRCURI_DESTSUFFIX ?= "${@os.path.join(os.path.basename(d.getVar('S')), 'src', d.getVar('GO_IMPORT')) + '/'}"
 
 SRC_URI = "git://${GO_IMPORT};protocol=https;branch=main;destsuffix=${GO_SRCURI_DESTSUFFIX}"
+# TEMPORARY TEST PIN (jo/orin-capsule-firmware-image): bumps SRCREV to f086a3c
+# (main tip) so CI builds an installable Orin image on the firmware-capability
+# A/B approach — the counterpart to the boot-chain image in wendyos-builder#181
+# (wendyos-update#10). Flash both on the same jetson-orin-nano to see which Orin
+# diagnosis actually round-trips an OTA. REVERT to a plain merged-main SRCREV
+# (no test comment) before this builder branch merges.
 # 33da342c (main, wendyos-update#8): install preflight refuses when tegra rootfs
 # A/B redundancy is not armed (RootfsRedundancyLevel UEFI variable missing/zero).
 # A device flashed by writing the rootfs straight to NVMe never gets it set, so
@@ -66,7 +72,11 @@ SRC_URI = "git://${GO_IMPORT};protocol=https;branch=main;destsuffix=${GO_SRCURI_
 # slot — kills the Orin Nano stale-inactive-slot false-positive, validated
 # against the real r39.2 efivar format) + structured per-slot `status` and the
 # `switch` verb.
-SRCREV = "33da342c3748bf29bc74584ac2ea1bd5880e7ed5"
+# TEMPORARY: f086a3c (main tip, wendyos-update) — gate capsule updates on
+# firmware capability (OsIndicationsSupported FILE_CAPSULE_DELIVERY probe), not a
+# SoC allowlist; PreflightInstall requires RootfsRedundancyLevel armed. The
+# competing Orin A/B approach vs wendyos-update#10's boot-chain nvbootctrl path.
+SRCREV = "f086a3cc1a6794cf3bbd737141e4ec1fd0a1a256"
 
 inherit go-mod systemd
 
