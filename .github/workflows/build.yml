@@ -52,9 +52,9 @@ jobs:
   # ---------------------------------------------------------------------------
   # detect-changes: compute the build matrix.
   # On main / workflow_dispatch we always build every device (nightly).
-  # On pull_request we prune to only the devices whose paths actually changed.
-  # Any change touching a "global" path (distro conf, shared recipes, the
-  # workflow itself, etc.) falls back to building every device.
+  # On pull_request we also always build every device: PR images back
+  # `wendy os install --pr`, which needs an image for the user's target
+  # regardless of which paths changed in the PR.
   # ---------------------------------------------------------------------------
   detect-changes:
     name: Detect affected devices
@@ -78,6 +78,8 @@ jobs:
         env:
           REF_TYPE: ${{ github.ref_type }}
           REF_NAME: ${{ github.ref_name }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
           if [[ "$REF_TYPE" == "tag" ]]; then
@@ -94,6 +96,9 @@ jobs:
               exit 1
             fi
             echo "is-release=true" >> "$GITHUB_OUTPUT"
+          elif [[ "${GITHUB_EVENT_NAME:-}" == "pull_request" ]]; then
+            VERSION="pr-${PR_NUMBER}"
+            echo "is-release=false" >> "$GITHUB_OUTPUT"
           else
             VERSION="nightly-$(date -u +%Y%m%dT%H%M%S)"
             echo "is-release=false" >> "$GITHUB_OUTPUT"
@@ -104,8 +109,6 @@ jobs:
       - id: set
         env:
           EVENT_NAME: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           INPUT_DEVICE: ${{ inputs.device }}
         run: |
           set -euo pipefail
@@ -163,56 +166,11 @@ jobs:
             exit 0
           fi
 
-          CHANGED=$(git diff --name-only "${BASE_SHA}" "${HEAD_SHA}")
-          echo "Changed files:"
-          printf '  %s\n' ${CHANGED:-<none>}
-
-          # Paths whose change can affect any device. Conservative: anything
-          # that isn't clearly board/machine-scoped is treated as global.
-          GLOBAL_RE='^(conf/distro/|conf/template/include/|conf/layer\.conf$|classes/|recipes-|wic/|scripts/|Makefile$|bootstrap\.sh$|\.github/workflows/build\.yml$)'
-
-          if echo "${CHANGED}" | grep -Eq "${GLOBAL_RE}"; then
-            echo "Global path changed -> building all devices."
-            emit_all
-            exit 0
-          fi
-
-          # Per-device path patterns. meta-rpi-extensions affects every Pi;
-          # meta-tegra-extensions affects Jetson only.
-          declare -A DEV_RE=(
-            [raspberry-pi-3]='(^conf/template/boards/rpi3-sd/|^conf/machine/raspberrypi3-64-wendyos\.conf$|^meta-rpi-extensions/)'
-            [raspberry-pi-4]='(^conf/template/boards/rpi4-sd/|^conf/machine/raspberrypi4-64-wendyos\.conf$|^meta-rpi-extensions/)'
-            [raspberry-pi-5]='(^conf/template/boards/rpi5-(sd|nvme)/|^conf/machine/raspberrypi5(-nvme)?-wendyos\.conf$|^meta-rpi-extensions/)'
-            [jetson-agx-orin]='(^conf/template/boards/jetson-agx-orin(-emmc)?/|^conf/machine/jetson-agx-orin-devkit-(nvme|emmc)-wendyos\.conf$|^meta-tegra-extensions/)'
-            [jetson-orin-nano]='(^conf/template/boards/jetson-orin-nano-(nvme|sd)/|^conf/machine/jetson-orin-nano-devkit(-nvme)?-wendyos\.conf$|^meta-tegra-extensions/)'
-            [jetson-agx-thor]='(^conf/template/boards/jetson-agx-thor/|^conf/machine/jetson-agx-thor-devkit-nvme-wendyos\.conf$|^meta-tegra-extensions-jp7/)'
-          )
-
-          INCLUDED=()
-          DEVICES=()
-          # Same longest-pole-first order as ALL_MATRIX (see above): a partial
-          # matrix built from a subset of devices should still dispatch its
-          # heaviest members first.
-          for dev in jetson-agx-thor jetson-agx-orin jetson-orin-nano raspberry-pi-5 raspberry-pi-4 raspberry-pi-3; do
-            if echo "${CHANGED}" | grep -Eq "${DEV_RE[$dev]}"; then
-              while IFS= read -r entry; do
-                INCLUDED+=("$entry")
-              done < <(echo "${ALL_MATRIX}" | jq -c ".[] | select(.device == \"${dev}\")")
-              DEVICES+=("${dev}")
-            fi
-          done
-
-          if [[ ${#INCLUDED[@]} -eq 0 ]]; then
-            echo "No device-affecting paths changed -> empty matrix (build job will be skipped)."
-            echo 'matrix={"include":[]}' >> "$GITHUB_OUTPUT"
-            echo 'devices='              >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          echo "Building devices: ${DEVICES[*]}"
-          MATRIX="{\"include\":[$(IFS=,; echo "${INCLUDED[*]}")]}"
-          echo "matrix=${MATRIX}"      >> "$GITHUB_OUTPUT"
-          echo "devices=${DEVICES[*]}" >> "$GITHUB_OUTPUT"
+          # PR builds force-build every device so `wendy os install --pr` always
+          # has an image for the user's target, regardless of which paths changed.
+          echo "Trigger=pull_request: force-building all devices for --pr installs."
+          emit_all
+          exit 0
 
   # ---------------------------------------------------------------------------
   # build: per-device Yocto image build.
@@ -400,6 +358,22 @@ jobs:
             echo 'WENDYOS_DEBUG = "1"'
           } >> "$GITHUB_WORKSPACE/build/conf/auto.conf"
 
+      - name: Enable developer profile (PR builds)
+        # PR images are open-book debug builds: full debug tooling, SSH, UART
+        # console, and a local passwordless login so the PR is debuggable on
+        # real hardware. Never applied to nightly (in-between) or release
+        # (fortress) builds. See WENDYOS_DEV_LOGIN in wendyos-image.bb.
+        if: github.event_name == 'pull_request'
+        run: |
+          {
+            echo ''
+            echo '# PR CI: open-book developer profile'
+            echo 'WENDYOS_DEBUG = "1"'
+            echo 'WENDYOS_SSHD = "1"'
+            echo 'WENDYOS_DEBUG_UART = "1"'
+            echo 'WENDYOS_DEV_LOGIN = "1"'
+          } >> "$GITHUB_WORKSPACE/build/conf/auto.conf"
+
       - name: Enable SBOM generation for release builds
         # SPDX SBOM generation (create-spdx) is expensive — a do_create_spdx
         # task per recipe plus rootfs-time image/runtime SPDX. It is only ever
@@ -569,18 +543,15 @@ jobs:
           overwrite: true
 
       - name: Authenticate to Google Cloud
-        if: github.event_name != 'pull_request'
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
       - name: Set up Cloud SDK
-        if: github.event_name != 'pull_request'
         uses: google-github-actions/setup-gcloud@v2
 
       - name: Set up Go
-        if: github.event_name != 'pull_request'
         uses: actions/setup-go@v5
         with:
           go-version-file: wendyos/tools/publisher/go.mod
@@ -592,7 +563,7 @@ jobs:
       # passwordless sudo, so there is no apt-get step here.
 
       - name: Generate flashable image (Jetson)
-        if: github.event_name != 'pull_request' && startsWith(matrix.device, 'jetson-')
+        if: startsWith(matrix.device, 'jetson-')
         env:
           DEPLOY_DIR: ${{ github.workspace }}/build/tmp/deploy/images/${{ steps.vars.outputs.machine }}
           MACHINE: ${{ steps.vars.outputs.machine }}
@@ -684,7 +655,7 @@ jobs:
         # Pack the extracted tegraflash-tar into the single .tar.zst the wendy CLI
         # flashes (see make-thor-flashpack.sh). The NVIDIA flash tools it runs are
         # i386, so this x86_64 runner needs i386 runtime libs.
-        if: github.event_name != 'pull_request' && matrix.device == 'jetson-agx-thor'
+        if: matrix.device == 'jetson-agx-thor'
         env:
           UPLOAD_VERSION: ${{ needs.detect-changes.outputs.version }}
           MACHINE: ${{ steps.vars.outputs.machine }}
@@ -700,7 +671,6 @@ jobs:
           echo "FLASHPACK_FILE=$GITHUB_WORKSPACE/thor-flashpack/wendyos-${UPLOAD_VERSION}-jetson-agx-thor.flashpack.tar.zst" >> "$GITHUB_ENV"
 
       - name: Upload image and emit manifest entry
-        if: github.event_name != 'pull_request'
         env:
           DEPLOY_DIR: ${{ github.workspace }}/build/tmp/deploy/images/${{ steps.vars.outputs.machine }}
           MACHINE: ${{ steps.vars.outputs.machine }}
@@ -709,6 +679,8 @@ jobs:
           IS_RELEASE: ${{ needs.detect-changes.outputs.is-release }}
           UPLOAD_VERSION: ${{ needs.detect-changes.outputs.version }}
           SBOM_FILE: ${{ steps.sbom.outputs.bundle }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           TOKEN=$(gcloud auth print-access-token)
 
@@ -794,6 +766,12 @@ jobs:
             ARGS+=(--nightly)
           fi
 
+          # PR builds upload to the pr/<N>/ subtree instead of the shared
+          # nightly/release tree (see wendy os install --pr).
+          if [[ "${GITHUB_EVENT_NAME:-}" == "pull_request" ]]; then
+            ARGS+=(--pr "${PR_NUMBER}")
+          fi
+
           # For all Jetson targets, include the tegraflash bundle as the recovery file
           # (used for USB recovery-mode flashing via tegraflash.py / initrd-flash).
           # wendy/blacksail builds use .tegraflash-tar (JP7/r38.4.x renamed the
@@ -846,7 +824,8 @@ jobs:
           go run . "${ARGS[@]}"
 
       - name: Upload manifest entry artifact
-        if: github.event_name != 'pull_request'
+        # Runs on PRs too: publish-pr (a separate job) consumes these
+        # PR-stamped manifest-entry artifacts to write pr/<N>/ manifests.
         uses: actions/upload-artifact@v4
         with:
           name: manifest-entry-${{ matrix.device }}-${{ matrix.storage }}
