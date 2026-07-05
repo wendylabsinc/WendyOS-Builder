@@ -80,11 +80,30 @@ jobs:
             exit 1
           fi
 
-          # List existing pr/<N>/ prefixes in the bucket. A non-zero exit here
-          # just means the pr/ prefix doesn't exist yet (nothing to sweep) -
-          # treat that as an empty listing rather than an error.
-          pr_dirs=$(gsutil ls "gs://wendyos-images-public/pr/" 2>/dev/null | \
-            sed -nE 's#.*/pr/([0-9]+)/#\1#p' | sort -u || true)
+          # Fail closed on an empty-but-successful result. gh can exit 0 with no
+          # output (e.g. a --jq/--json schema mismatch after a gh version bump,
+          # or a transient empty-but-successful API response). An empty open-PR
+          # set would make every pr/<N>/ below look orphaned and get deleted -
+          # including live PRs. This repo always has open PRs at sweep time, so
+          # zero-open is treated as a signal error, not a real state.
+          if [[ -z "$open_prs" ]]; then
+            echo "::error::gh pr list returned zero open PRs; refusing to sweep — cannot distinguish a PR-less repo from an API glitch." >&2
+            exit 1
+          fi
+
+          # List existing pr/<N>/ prefixes in the bucket. gsutil ls exits 1 both
+          # when the prefix legitimately doesn't exist yet (nothing to sweep)
+          # and on a genuine failure (network/auth/permissions), so distinguish
+          # them: the "no matches" case is benign, anything else gets a warning
+          # and we still fail toward under-deletion (empty pr_dirs -> no-op).
+          if ls_out=$(gsutil ls "gs://wendyos-images-public/pr/" 2>&1); then
+            pr_dirs=$(sed -nE 's#.*/pr/([0-9]+)/#\1#p' <<<"$ls_out" | sort -u)
+          elif grep -qiE 'matched no objects|bucketnotfound|no urls matched' <<<"$ls_out"; then
+            pr_dirs=""
+          else
+            echo "::warning::gsutil ls of the pr/ prefix failed (not an empty-listing case); treating as nothing to sweep. Output: ${ls_out}" >&2
+            pr_dirs=""
+          fi
 
           if [[ -z "$pr_dirs" ]]; then
             echo "No pr/<N>/ directories found in the bucket; nothing to sweep."
