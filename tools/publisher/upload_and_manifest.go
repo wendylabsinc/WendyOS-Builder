@@ -1119,6 +1119,14 @@ func main() {
 		log.SetLevel(logrus.DebugLevel)
 	}
 
+	// --pr isolates OS-image uploads/manifests into pr/<N>/. The firmware
+	// pipeline is deliberately un-prefixed, so combining the two would silently
+	// write firmware into the SHARED manifests/master.json + firmware/<chip>/
+	// tree — the exact corruption --pr exists to prevent. Reject it loudly.
+	if *pr > 0 && *firmware {
+		log.Fatal("--pr is not supported with --firmware (PR builds publish OS images only)")
+	}
+
 	// The active path prefix for this invocation: "" for release/nightly
 	// builds, "pr/<N>/" for a per-PR debug build. The --apply-metadata branch
 	// overrides this below from the entry's own PR field, since that job runs
