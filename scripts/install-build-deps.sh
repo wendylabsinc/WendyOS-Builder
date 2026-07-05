@@ -1,14 +1,12 @@
 #!/usr/bin/env bash
 #
 # Install the host packages needed to run a Yocto / WendyOS build.
-# Sourced by both scripts/docker/dockerfile (local-dev container) and
-# ci/packer/wendyos-builder.pkr.hcl (CI runner AMI), so the package list
-# stays in one place.
+# Sourced by scripts/docker/dockerfile to build the local-dev container.
 #
-# NOTE: the CI *build runner image* is migrating to wendylabsinc/ci. New
-# build-environment package changes for CI should be made there
-# (repositories/WendyOS-Builder/install-build-deps.sh); mirror them here only
-# for the legacy AWS AMI until the build.yml cutover. See ci/README.md.
+# NOTE: the CI *build runner image* lives in wendylabsinc/ci. Build-
+# environment package changes for CI go there
+# (repositories/WendyOS-Builder/install-build-deps.sh); this file is now
+# independent and only serves the local-dev Docker image. See ci/README.md.
 #
 # Idempotent: safe to re-run. Must be invoked as root (or via sudo).
 
@@ -69,10 +67,11 @@ unzip -q "${tmp_aws}/awscliv2.zip" -d "${tmp_aws}"
 rm -rf "${tmp_aws}"
 /usr/local/bin/aws --version
 
-# s5cmd: highly parallel S3 client. Used by .github/workflows/build.yml's
-# sstate / downloads cache restore + save steps. For the millions-of-tiny-files
-# shape of sstate-cache it is roughly an order of magnitude faster than
-# `aws s3 sync`. Pinned to a specific release so the AMI bake is reproducible.
+# s5cmd: highly parallel S3 client, kept for ad-hoc S3 work from the dev
+# container. (build.yml's S3 sstate cache steps are gone — CI caches live on
+# the self-hosted platform's local NVMe now.) For millions-of-tiny-files
+# workloads it is roughly an order of magnitude faster than `aws s3 sync`.
+# Pinned to a specific release so the build is reproducible.
 S5CMD_VERSION="2.2.2"
 case "${arch}" in
     amd64) s5cmd_arch="64bit" ;;
@@ -95,7 +94,7 @@ rm -rf "${tmp_s5}"
 # reachable from login and non-login (docker exec) shells alike.
 #
 # Defaults to the latest stable release (resolved from go.dev). Pin a
-# specific version for a reproducible CI AMI bake by exporting
+# specific version for a reproducible build by exporting
 # GO_VERSION=1.26.0 before running this script.
 case "${arch}" in
     amd64) go_arch="amd64" ;;
@@ -126,9 +125,9 @@ ln -sf /usr/local/go/bin/gofmt /usr/local/bin/gofmt
 # Ubuntu 24.04 (Noble) restricts unprivileged user namespaces via AppArmor by
 # default. BitBake's pseudo / fakeroot machinery needs them, and refuses to run
 # with: "User namespaces are not usable by BitBake, possibly due to AppArmor."
-# Persist the override so every fresh AMI boot re-applies it without operator
-# intervention. (The Docker dev path didn't trip on this because the container
-# runs --privileged, bypassing AppArmor.)
+# Persist the override so every fresh container boot re-applies it without
+# operator intervention. (The Docker dev path didn't trip on this because the
+# container runs --privileged, bypassing AppArmor.)
 mkdir -p /etc/sysctl.d
 cat > /etc/sysctl.d/60-bitbake-userns.conf <<'EOF'
 # Allow unprivileged user namespaces for Yocto / BitBake builds.
