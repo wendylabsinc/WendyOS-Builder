@@ -1052,3 +1052,89 @@ jobs:
               -H "Content-Type: application/json" \
               -d @- \
               "$DISCORD_WEBHOOK_URL"
+
+  # ---------------------------------------------------------------------------
+  # publish-pr: PR-only counterpart to `publish`. Writes into the pr/<N>/
+  # manifest namespace instead of the top-level one, so `wendy os install --pr`
+  # can resolve a PR's images without touching the real device manifests.
+  # No release tagging / Discord announcement here - that stays exclusive to
+  # the `publish` job's nightly/release path.
+  # ---------------------------------------------------------------------------
+  publish-pr:
+    name: Publish PR manifests
+    needs: [detect-changes, build]
+    if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+    concurrency:
+      group: pr-publish-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    runs-on: [runs-on, family=c7i-flex.xlarge, spot=false, "run-id=${{ github.run_id }}-publish-pr"]
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          path: wendyos
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: wendyos/tools/publisher/go.mod
+          cache-dependency-path: wendyos/tools/publisher/go.sum
+
+      - name: Download manifest entries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: manifest-entry-*
+          path: manifest-entries
+          merge-multiple: true
+
+      - name: Write PR device manifests
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          entries=("$GITHUB_WORKSPACE"/manifest-entries/*.json)
+          if [[ ${#entries[@]} -eq 0 ]]; then
+            echo "::warning::No manifest entries found (did every build fail?); nothing to publish."
+            exit 0
+          fi
+          TOKEN=$(gcloud auth print-access-token)
+          cd "$GITHUB_WORKSPACE/wendyos/tools/publisher"
+          go build -o "$RUNNER_TEMP/publisher" .
+          for entry in "${entries[@]}"; do
+            echo "::group::apply $(basename "$entry")"
+            cat "$entry"
+            "$RUNNER_TEMP/publisher" --apply-metadata "$entry" --access-token "$TOKEN"
+            echo "::endgroup::"
+          done
+
+      - name: Update PR master manifest
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          entries=("$GITHUB_WORKSPACE"/manifest-entries/*.json)
+          if [[ ${#entries[@]} -eq 0 ]]; then
+            echo "No manifest entries; skipping PR master manifest update."
+            exit 0
+          fi
+          TOKEN=$(gcloud auth print-access-token)
+          cd "$GITHUB_WORKSPACE/wendyos/tools/publisher"
+          [[ -x "$RUNNER_TEMP/publisher" ]] || go build -o "$RUNNER_TEMP/publisher" .
+          readarray -t rows < <(jq -sc '[.[] | {device, version}] | unique_by(.device) | .[]' "${entries[@]}")
+          for row in "${rows[@]}"; do
+            DEVICE=$(jq -r .device <<<"$row")
+            VERSION=$(jq -r .version <<<"$row")
+            "$RUNNER_TEMP/publisher" --device "$DEVICE" --version "$VERSION" --pr "$PR_NUMBER" --master-manifest-only --nightly --access-token "$TOKEN" </dev/null
+          done
