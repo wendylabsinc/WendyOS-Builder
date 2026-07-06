@@ -23,8 +23,13 @@ GO_IMPORT = "github.com/wendylabsinc/wendyos-update"
 # to go.bbclass where it already sets this.
 GO_SRCURI_DESTSUFFIX ?= "${@os.path.join(os.path.basename(d.getVar('S')), 'src', d.getVar('GO_IMPORT')) + '/'}"
 
-SRC_URI = "git://${GO_IMPORT};protocol=https;branch=main;destsuffix=${GO_SRCURI_DESTSUFFIX}"
+# NOTE: temporarily tracking feature/fix-tegra-wendy-update while the tegra
+# capsule/boot-chain fixes are validated on-device. Flip back to branch=main
+# (and SRCREV to the merge commit) once merged.
+SRC_URI = "git://${GO_IMPORT};protocol=https;branch=feature/fix-tegra-wendy-update;destsuffix=${GO_SRCURI_DESTSUFFIX}"
 
+# a96913f5 (feature/fix-tegra-wendy-update): settle the boot chain before staging
+# a capsule.
 # f086a3cc (main): gate capsule updates on firmware capability, not a SoC
 # allowlist. capsuleUpdateEffective() now probes OsIndicationsSupported
 # (FILE_CAPSULE_DELIVERY, bit 2) instead of the tegra264 device-tree allowlist.
@@ -70,7 +75,7 @@ SRC_URI = "git://${GO_IMPORT};protocol=https;branch=main;destsuffix=${GO_SRCURI_
 # slot — kills the Orin Nano stale-inactive-slot false-positive, validated
 # against the real r39.2 efivar format) + structured per-slot `status` and the
 # `switch` verb.
-SRCREV = "f086a3cc1a6794cf3bbd737141e4ec1fd0a1a256"
+SRCREV = "a96913f5a0ac02852f8211cf484a028f79683f9a"
 
 inherit go-mod systemd
 

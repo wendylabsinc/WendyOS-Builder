@@ -33,6 +33,7 @@ RDEPENDS:${PN} += " \
         ' \
             tegra-uefi-capsules \
             bootloader-update \
+            tegra-uefi-bootentry \
         ', \
         '' \
         )} \

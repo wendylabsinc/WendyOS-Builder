@@ -1,0 +1,18 @@
+[Unit]
+Description=Register a UEFI boot entry for the ESP (raw-installed Jetson capsule support)
+# efivarfs must be present to read/write UEFI boot variables. Order after
+# local-fs so the ESP by-partlabel symlink (udev) is settled, and before the
+# OTA verifier so a later capsule OTA finds a registered boot device. The unit
+# never reboots and is idempotent, so this ordering is soft.
+After=local-fs.target
+Before=wendyos-update-verify.service
+ConditionPathExists=/sys/firmware/efi/efivars
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/tegra-uefi-bootentry
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+
