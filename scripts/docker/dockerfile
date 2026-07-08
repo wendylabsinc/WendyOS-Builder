@@ -20,8 +20,7 @@ ENV PROJECT=wendyos
 ENV TZ=America/Los_Angeles
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
-# Install the required packages. The package list lives in scripts/install-build-deps.sh
-# so the Packer-built CI runner AMI can install the exact same set with no drift.
+# Install the required packages. The package list lives in scripts/install-build-deps.sh.
 COPY ./files/install-build-deps.sh /tmp/install-build-deps.sh
 RUN /tmp/install-build-deps.sh && rm -f /tmp/install-build-deps.sh
 

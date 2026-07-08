@@ -15,10 +15,12 @@ tmpfs                   /var/volatile  tmpfs  defaults              0 0
 # /boot is the shared FAT boot partition (firmware + u-boot + boot.scr +
 # uboot.env). It must stay mounted: the ubootenv connector edits
 # /boot/uboot.env via fw_setenv (see wendyos-fw-env / fw_env.config).
+# Referenced by LABEL, not a per-build PARTUUID: OTA writes only the rootfs
+# slot (never re-partitions), so a baked PARTUUID drifts and emergency-boots.
 #
 # /data is grown to fill the card on first boot by grow-data-part, which reads
 # this entry; it resolves LABEL=data to the device. /config is the FAT
 # provisioning partition.
-PARTUUID=RPI_BOOT_UUID  /boot    vfat  defaults              0 2
+LABEL=boot              /boot    vfat  defaults,nofail       0 2
 LABEL=config            /config  vfat  defaults,nofail       0 0
 LABEL=data              /data    ext4  defaults,noatime,nofail  0 2

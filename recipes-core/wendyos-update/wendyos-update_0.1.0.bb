@@ -24,11 +24,59 @@ GO_IMPORT = "github.com/wendylabsinc/wendyos-update"
 GO_SRCURI_DESTSUFFIX ?= "${@os.path.join(os.path.basename(d.getVar('S')), 'src', d.getVar('GO_IMPORT')) + '/'}"
 
 SRC_URI = "git://${GO_IMPORT};protocol=https;branch=main;destsuffix=${GO_SRCURI_DESTSUFFIX}"
+# 20ec14e (main, wendyos-update#10): drive rootfs A/B on Orin (t234) by switching
+# the BOOT CHAIN (nvbootctrl WITHOUT `-t rootfs`) instead of the rootfs-redundancy
+# slot, and skip the redundancy preflight on Orin. RootfsRedundancyLevel is
+# unarmable from the OS on Orin (flash-time device-tree setting; efivarfs writes
+# EINVAL), so the rootfs-redundancy slot switch is a silent no-op there — verified
+# on wendyos-test-adrian: the arm boot service exited SUCCESS yet the var stayed
+# level 0. The boot chain is coupled to the rootfs slot and needs no such
+# variable, so Orin drives it directly. Thor (t264) and unknown SoCs keep the
+# rootfs-redundancy + capsule path. Supersedes the f086a3c firmware-capability
+# gating (whose armed-redundancy preflight would refuse every Orin OTA). Builds on:
+# 33da342c (main, wendyos-update#8): install preflight refuses when tegra rootfs
+# A/B redundancy is not armed (RootfsRedundancyLevel UEFI variable missing/zero).
+# A device flashed by writing the rootfs straight to NVMe never gets it set, so
+# `nvbootctrl -t rootfs set-active-boot-slot` is a silent no-op and every OTA
+# rolls back (running slot != target slot). Paired with the boot service in
+# tegra-rootfs-redundancy, which arms it. Builds on:
+# f0357892 (main, wendyos-update#7): decouple the rootfs slot switch from the
+# bootloader capsule on non-Thor SoCs. UEFI capsule-on-disk is only honored on
+# Thor (t264); on Orin (t234) the firmware advertises FILE_CAPSULE_DELIVERY but
+# silently never processes a staged capsule, so a bootloader-carrying OTA
+# no-op'd (slot never switched, reboot into the same OS, ESRT 0, no
+# diagnostics). SwapSlot now allowlists tegra264 for the capsule path and falls
+# back to the nvbootctrl slot switch on Orin/unknown SoCs (the new rootfs boots
+# on the existing bootloader). Builds on:
+# b1f3315a (main): install rejects an OTA payload larger than the target A/B
+# slot up front (blockdev.DeviceCapacity seek-to-end pre-flight, exit 3, nothing
+# written) — the connector-side last line of defense behind the meta-edgeos
+# fixed-rootfs-size pin (wendyos-rootfs-size.inc). Builds on:
+# 8fb341c0 (PR #2): merges WDY-1775 — ubootenv resolves MBR (rpi3) A/B slots by
+# partition number (an OTA rootfs write wipes the ext4 fs label; the partition
+# number is the only durable slot identity on MBR). GPT (rpi4/5) unchanged.
+# Builds on:
+# 61c46bc (PR #5): the boot verifier confirms EVERY healthy boot to the
+# firmware (`nvbootctrl -t rootfs mark-boot-successful`, connector.BootConfirmer).
+# With rootfs A/B redundancy enabled, Jetson UEFI arms a boot-validation
+# watchdog on every boot and resets the SoC ~2 min into userspace unless the
+# boot is confirmed; stock L4T confirms from nv_update_verifier.service, which
+# this image does not ship. PR #4 confirmed only at commit, so ordinary boots
+# still watchdog-rebooted (observed right after "Starting Wendy Agent"),
+# burning firmware retries and flip-flopping slots. A boot the firmware
+# flagged unhealthy is deliberately NOT confirmed, so pre-userspace failures
+# still auto-fall-back. Builds on:
+# 627463ef (PR #4): tegrauefi MarkGood confirms the booted slot with
+# `nvbootctrl -t rootfs mark-boot-successful` at commit time — the trial-cycle
+# confirm half (RPi already disarms its U-Boot trial in MarkGood).
+# 8bba71c6: ubootenv refuses a slot swap when /boot is not a mountpoint, so the
+# trial arm can no longer silently no-op against a shadow uboot.env on the rootfs
+# (pairs with the /boot-by-LABEL + nofail fstab change, WDY-1768).
 # 16614b4b: WDY-1742 verify-boot fix (BootIsCompromised checks only the booted
 # slot — kills the Orin Nano stale-inactive-slot false-positive, validated
-# against the real r39.2 efivar format) + structured per-slot `status` and a new
-# `switch` verb. The fix is why the tegra verify-mask bbappend is now gone.
-SRCREV = "16614b4be4875163c965a5ee4174b1ed068ad813"
+# against the real r39.2 efivar format) + structured per-slot `status` and the
+# `switch` verb.
+SRCREV = "20ec14eaef589967ca0279fdff98d431ade315ab"
 
 inherit go-mod systemd
 

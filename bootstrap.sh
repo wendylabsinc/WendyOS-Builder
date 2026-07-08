@@ -68,9 +68,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Default repo URLs and commit hashes live in scripts/upstream-repos.env so the
-# CI runner AMI (built by ci/packer/*.pkr.hcl) can prime the same revisions
-# without re-declaring them. A per-board conf/template/boards/<board-id>/
+# Default repo URLs and commit hashes live in scripts/upstream-repos.env so
+# they're declared in one place. A per-board conf/template/boards/<board-id>/
 # repos.overrides file may override any URL_*/SRCREV_* (and append entries via
 # REPOS_EXTRA) before repos[] is built below.
 # shellcheck source=scripts/upstream-repos.env
@@ -99,13 +98,13 @@ Environment variables:
             rename scheduled to avoid confusion.
   WENDYOS_HOST_BUILD
             When set to 1, skip the Docker build environment and prepare the
-            tree for a host-native bitbake invocation. Used by CI runners that
-            boot from a custom AMI with the build prerequisites preinstalled.
+            tree for a host-native bitbake invocation. Used by CI runners
+            whose image already has the build prerequisites preinstalled.
   WENDYOS_REPO_CACHE_DIR
             Optional path to a directory with pre-cloned upstream layer repos
             (poky/, meta-tegra/, ...). When set, missing entries in repos/ are
             seeded from this cache before clone_repos runs, turning each clone
-            into a cheap fetch + checkout. Used by the CI AMI.
+            into a cheap fetch + checkout.
 
 Options:
   --help, -h   Show this help message.
@@ -120,7 +119,7 @@ EOF
 
 ###
 # Parse command-line arguments
-OPT_DEBUG=1
+OPT_DEBUG=0
 OPT_HISTORY=0
 for arg in "$@"; do
     case "${arg}" in
@@ -254,8 +253,11 @@ function clone_repos() {
             return 1
         }
 
-        # check if repo already exists
-        if [[ -d "./${folder}" ]]; then
+        # check if repo already exists — and is a usable git checkout. A bare
+        # directory or a repo missing its .git (e.g. a partially-populated seed
+        # on the shared CI cache) can't be reconciled in place, so drop it and
+        # fall through to a fresh clone.
+        if [[ -d "./${folder}" ]] && git -C "./${folder}" rev-parse --git-dir >/dev/null 2>&1; then
             # repo exists - verify it's at the correct revision
             cd "${folder}"
 
@@ -266,11 +268,29 @@ function clone_repos() {
             current_url=$(git remote get-url origin 2>/dev/null || true)
             if [[ "${current_url}" != "${url}" ]]; then
                 printf "[reurl] '%s' %s -> %s\n" "${folder}" "${current_url:-<none>}" "${url}"
-                git remote set-url origin "${url}" >> "${LOG_FILE}" 2>&1 || {
+                # set-url only rewrites an existing remote; when origin is
+                # absent (current_url empty) it must be added instead.
+                if [[ -z "${current_url}" ]]; then
+                    git remote add origin "${url}" >> "${LOG_FILE}" 2>&1
+                else
+                    git remote set-url origin "${url}" >> "${LOG_FILE}" 2>&1
+                fi || {
                     printf "[error] Failed to set origin URL for '%s'\n" "${folder}"
                     cd ..
                     return 1
                 }
+            fi
+
+            # Fast path: SRCREVs are immutable pinned SHAs, so if the checkout
+            # is already at the target commit there is nothing to fetch — skip
+            # the network round-trip. This matters on the shared CI cache, where
+            # a warm build would otherwise re-fetch every layer repo for nothing.
+            if [[ "${srcrev}" =~ ^[0-9a-f]{40}$ ]] \
+               && git rev-parse -q --verify "${srcrev}^{commit}" >/dev/null 2>&1 \
+               && [[ "$(git rev-parse HEAD 2>/dev/null)" == "${srcrev}" ]]; then
+                printf "[ok] '%s' at %s (no fetch)\n" "${folder}" "${srcrev}"
+                cd ..
+                continue
             fi
 
             # fetch latest refs from remote
@@ -301,8 +321,11 @@ function clone_repos() {
             # need to update to target revision
             printf "[update] '%s' to %s\n" "${folder}" "${srcrev}"
         else
-            # repo doesn't exist - clone it
+            # repo doesn't exist (or a stale non-git directory survived from a
+            # previous run) - clone it. git clone refuses a non-empty target, so
+            # clear any leftover directory first.
             printf "[clone] '%s' at %s\n" "${url}" "${srcrev}"
+            rm -rf "./${folder}"
             git clone "${url}" "${folder}" >> "${LOG_FILE}" 2>&1 || {
                 return 1
             }
@@ -311,11 +334,21 @@ function clone_repos() {
         fi
 
         # we need to checkout (either new clone or update)
-        git checkout "${srcrev}" >> "${LOG_FILE}" 2>&1 || {
-            printf "[error] Failed to checkout %s in '%s'\n" "${srcrev}" "${folder}"
-            cd ..
-            return 1
-        }
+        if ! git checkout "${srcrev}" >> "${LOG_FILE}" 2>&1; then
+            # The SRCREV may not be reachable from any current branch tip — e.g.
+            # the upstream branch it lived on was deleted or force-pushed (as
+            # happened with meta-tegra's wip-l4t-r39.2.0 branch). A plain clone /
+            # `git fetch origin` only retrieves current refs, so the pinned
+            # commit is absent locally even though the object still exists on the
+            # server. Fetch it directly by SHA, then retry the checkout.
+            printf "[refetch] '%s': %s not reachable via refs; fetching by SHA\n" "${folder}" "${srcrev}"
+            if ! { git fetch origin "${srcrev}" >> "${LOG_FILE}" 2>&1 && \
+                   git checkout "${srcrev}" >> "${LOG_FILE}" 2>&1; }; then
+                printf "[error] Failed to checkout %s in '%s'\n" "${srcrev}" "${folder}"
+                cd ..
+                return 1
+            fi
+        fi
 
         cd ..
     done
@@ -447,11 +480,10 @@ mkdir -p "repos/${WENDYOS_LAYER_TREE}"
 cd "repos/${WENDYOS_LAYER_TREE}"
 
 # Seed the per-tree repos dir from a pre-cloned cache when one is provided.
-# The CI runner AMI (built by ci/packer/wendyos-builder.pkr.hcl) bakes the
-# upstream layer repos at the pinned SRCREVs into
-# /opt/wendyos-cache/repos/<tree>/ so clone_repos below sees them as
-# already-checked-out and only runs `git fetch` + `git checkout`. Local dev
-# leaves this unset and clones fresh as before.
+# When WENDYOS_REPO_CACHE_DIR points at a directory with the upstream layer
+# repos already checked out at (or near) the pinned SRCREVs, clone_repos
+# below sees them as already-checked-out and only runs `git fetch` +
+# `git checkout`. Local dev leaves this unset and clones fresh as before.
 if [[ -n "${WENDYOS_REPO_CACHE_DIR:-}" && -d "${WENDYOS_REPO_CACHE_DIR}/${WENDYOS_LAYER_TREE}" ]]
 then
     printf "Seeding repos/%s/ from cache: %s/%s\n" \
@@ -587,10 +619,11 @@ auto_conf="./${YOCTO_BUILD_DIR}/conf/auto.conf"
 printf "\nDirectory structure:\n"
 tree -d -L 2 -I 'build|downloads|sstate-cache' || true #--charset=ascii
 
-# Host-build mode: skip the Docker image entirely. CI runs on an AMI that
-# already has the build prerequisites installed (see ci/packer/), and a
-# disposable VM doesn't benefit from the container's isolation. Local dev
-# leaves WENDYOS_HOST_BUILD unset and gets the Docker flow as before.
+# Host-build mode: skip the Docker image entirely. CI runs on a self-hosted
+# runner image (see ci/README.md) that already has the build prerequisites
+# installed, and a disposable runner doesn't benefit from the container's
+# isolation. Local dev leaves WENDYOS_HOST_BUILD unset and gets the Docker
+# flow as before.
 if [[ "${WENDYOS_HOST_BUILD:-0}" == "1" ]]
 then
     cd "${WORK_DIR}"
@@ -615,9 +648,8 @@ docker_path="${PROJECT_DIR}/docker"
 mkdir -p "${docker_path}"
 copy_dir "${META_LAYER_DIR}/scripts/docker" "${docker_path}"
 
-# Stage the shared package install script into the Docker build context.
-# Same script is consumed by ci/packer/wendyos-builder.pkr.hcl so the dev
-# container and the CI AMI install an identical set of build prerequisites.
+# Stage the package install script into the Docker build context for the
+# dev container. See ci/README.md for the (separate) CI runner image.
 mkdir -p "${docker_path}/files"
 cp "${META_LAYER_DIR}/scripts/install-build-deps.sh" "${docker_path}/files/install-build-deps.sh"
 chmod +x "${docker_path}/files/install-build-deps.sh"

@@ -5,6 +5,12 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda
 
 inherit systemd
 
+# Storage medium ("nvme"/"emmc"/"sd") for /etc/wendyos/device-type; set per
+# board in the template local.conf. Weak default keeps ${STORAGE} well-defined
+# (empty) for boards that declare no medium (e.g. qemu), so the do_install
+# guard below reliably skips the STORAGE line instead of risking a literal.
+STORAGE ??= ""
+
 SRC_URI = " \
     file://generate-uuid.sh \
     file://generate-device-name.sh \
@@ -54,6 +60,14 @@ do_install() {
     # (via the /data bind mount) on every boot to stay OTA-fresh.
     ln -sf ../../usr/lib/wendyos/version.txt ${D}${sysconfdir}/wendyos/version.txt
 
+    # Builder git commit this image was built from (empty on plain local builds).
+    # Same read-only-rootfs + symlink pattern as version.txt so it survives the
+    # /etc/wendyos bind mount on Tegra; setup-etc-binds.sh keeps the bound copy
+    # OTA-fresh. WENDYOS_BUILD_COMMIT is set by CI in auto.conf (see common.inc).
+    echo "${WENDYOS_BUILD_COMMIT}" > ${WORKDIR}/commit
+    install -m 0644 ${WORKDIR}/commit ${D}${nonarch_libdir}/wendyos/commit
+    ln -sf ../../usr/lib/wendyos/commit ${D}${sysconfdir}/wendyos/commit
+
     # Create build ID file (actual date will be set at first boot if needed)
     echo "WendyOS-${DISTRO_VERSION}" > ${WORKDIR}/wendyos-build-id
     install -m 0644 ${WORKDIR}/wendyos-build-id ${D}${sysconfdir}/wendyos-build-id
@@ -61,10 +75,19 @@ do_install() {
 
 do_install:append() {
     # Stable board identity for the wendy agent. Sourced as shell.
-    # BOARD is set in conf/machine/<machine>.conf; MACHINE is the yocto machine name.
+    # BOARD is set in conf/machine/<machine>.conf; MACHINE is the yocto machine
+    # name; STORAGE ("nvme"/"emmc"/"sd") is set in the board template local.conf.
     install -d ${D}${sysconfdir}/wendyos
     printf 'BOARD=%s\n'   "${WENDYOS_BOARD_ID}" >  ${D}${sysconfdir}/wendyos/device-type
     printf 'MACHINE=%s\n' "${MACHINE}"          >> ${D}${sysconfdir}/wendyos/device-type
+    # STORAGE lets the OTA client pick the storage-specific artifact directly
+    # (e.g. jetson-agx-orin publishes both an NVMe and an eMMC image under one
+    # manifest key). Without it the agent must infer the medium from the MACHINE
+    # name, which fails for legacy/plain-string identities and can serve the
+    # wrong image. Only emitted when the board declares a medium.
+    if [ -n "${STORAGE}" ]; then
+        printf 'STORAGE=%s\n' "${STORAGE}"      >> ${D}${sysconfdir}/wendyos/device-type
+    fi
     chmod 0644 ${D}${sysconfdir}/wendyos/device-type
 }
 
@@ -80,6 +103,8 @@ FILES:${PN} += "${sysconfdir}/wendyos"
 FILES:${PN} += "${sysconfdir}/wendyos/device-type"
 FILES:${PN} += "${sysconfdir}/wendyos/version.txt"
 FILES:${PN} += "${nonarch_libdir}/wendyos/version.txt"
+FILES:${PN} += "${sysconfdir}/wendyos/commit"
+FILES:${PN} += "${nonarch_libdir}/wendyos/commit"
 FILES:${PN} += "${sysconfdir}/wendyos-build-id"
 
 CONFFILES:${PN} += "${sysconfdir}/wendyos/device-type"

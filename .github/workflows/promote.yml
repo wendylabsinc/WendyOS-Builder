@@ -29,11 +29,7 @@ jobs:
     permissions:
       contents: write
       actions: write
-    runs-on:
-      - runs-on
-      - family=c7i-flex.8xlarge
-      - spot=false
-      - run-id=${{ github.run_id }}-promote
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4

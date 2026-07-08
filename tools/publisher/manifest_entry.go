@@ -17,6 +17,10 @@ type ManifestEntry struct {
 	Storage   string `json:"storage,omitempty"`
 	Nightly   bool   `json:"nightly"`
 	Stability string `json:"stability,omitempty"`
+	// PR, when > 0, marks this entry as a per-PR debug build. It routes all
+	// uploads and manifest writes into the self-contained pr/<N>/ subtree
+	// instead of the shared release manifests. Zero for release/nightly.
+	PR int `json:"pr,omitempty"`
 
 	FilePath     string `json:"file_path,omitempty"`
 	FileSize     int64  `json:"file_size,omitempty"`
@@ -39,6 +43,14 @@ type ManifestEntry struct {
 	FlashpackPath     string `json:"flashpack_path,omitempty"`
 	FlashpackSize     int64  `json:"flashpack_size,omitempty"`
 	FlashpackChecksum string `json:"flashpack_checksum,omitempty"`
+
+	// SBOM is the image-level SPDX Software Bill of Materials bundle
+	// (a .spdx.tar.zst produced by the create-spdx class). It is an audit
+	// artifact, not something the OTA client flashes; recording it in the
+	// manifest just makes it discoverable alongside the image it describes.
+	SBOMPath     string `json:"sbom_path,omitempty"`
+	SBOMSize     int64  `json:"sbom_size,omitempty"`
+	SBOMChecksum string `json:"sbom_checksum,omitempty"`
 }
 
 func (e *ManifestEntry) validate() error {
@@ -88,4 +100,13 @@ func readManifestEntry(path string) (ManifestEntry, error) {
 		return entry, fmt.Errorf("validating %s: %w", path, err)
 	}
 	return entry, nil
+}
+
+// prPrefix returns the GCS object-path prefix for a per-PR build ("pr/<N>/"),
+// or "" for a normal release/nightly build (pr <= 0).
+func prPrefix(pr int) string {
+	if pr <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("pr/%d/", pr)
 }

@@ -20,6 +20,9 @@ func validEntry() ManifestEntry {
 		OTAUpdatePath:     "images/jetson-agx-orin/0.15.1-nightly/wendyos-image.mender",
 		OTAUpdateSize:     2889977344,
 		OTAUpdateChecksum: "d04d8a8991e621bf62f4bcde5882973bd2cb2948dc841e3469874de2cdddcc66",
+		SBOMPath:          "images/jetson-agx-orin/0.15.1-nightly/wendyos-image.spdx.tar.zst",
+		SBOMSize:          14829056,
+		SBOMChecksum:      "9f2c1e6c0b7a4d3e8f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e",
 	}
 }
 
@@ -56,6 +59,12 @@ func TestManifestEntryValidate(t *testing.T) {
 		{"no files", func(e *ManifestEntry) {
 			e.FilePath, e.OTAUpdatePath, e.RecoveryPath = "", "", ""
 		}, "no files"},
+		{"sbom alone is not a flashable file", func(e *ManifestEntry) {
+			// An SBOM is an audit artifact, never the sole payload of an entry;
+			// at least one flashable file (image/OTA/recovery) is still required.
+			e.FilePath, e.OTAUpdatePath, e.RecoveryPath = "", "", ""
+			e.SBOMPath = "images/d/v/wendyos-image.spdx.tar.zst"
+		}, "no files"},
 		{"recovery only ok", func(e *ManifestEntry) {
 			e.FilePath, e.OTAUpdatePath = "", ""
 			e.RecoveryPath = "images/d/v/recovery.tar.gz"
@@ -90,5 +99,33 @@ func TestReadManifestEntryRejectsGarbage(t *testing.T) {
 	}
 	if _, err := readManifestEntry(filepath.Join(t.TempDir(), "missing.json")); err == nil {
 		t.Error("readManifestEntry accepted a missing file")
+	}
+}
+
+func TestPRPrefix(t *testing.T) {
+	if got := prPrefix(0); got != "" {
+		t.Fatalf("prPrefix(0) = %q, want empty", got)
+	}
+	if got := prPrefix(-1); got != "" {
+		t.Fatalf("prPrefix(-1) = %q, want empty", got)
+	}
+	if got := prPrefix(123); got != "pr/123/" {
+		t.Fatalf("prPrefix(123) = %q, want pr/123/", got)
+	}
+}
+
+func TestManifestEntryPRRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "entry.json")
+	in := ManifestEntry{Device: "raspberry-pi-5", Version: "pr-123", PR: 123, FilePath: "pr/123/images/raspberry-pi-5/pr-123/x.img.gz"}
+	if err := writeManifestEntry(p, in); err != nil {
+		t.Fatal(err)
+	}
+	out, err := readManifestEntry(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.PR != 123 {
+		t.Fatalf("PR = %d, want 123", out.PR)
 	}
 }
