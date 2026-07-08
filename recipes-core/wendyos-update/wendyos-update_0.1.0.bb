@@ -37,8 +37,10 @@ SRC_URI = "git://${GO_IMPORT};protocol=https;branch=feature/fix-tegra-wendy-upda
 # A/B redundancy is not armed (RootfsRedundancyLevel UEFI variable missing/zero).
 # A device flashed by writing the rootfs straight to NVMe never gets it set, so
 # `nvbootctrl -t rootfs set-active-boot-slot` is a silent no-op and every OTA
-# rolls back (running slot != target slot). Paired with the boot service in
-# tegra-rootfs-redundancy, which arms it. Builds on:
+# rolls back (running slot != target slot). RootfsRedundancyLevel is a flash-time,
+# firmware-LOCKED UEFI setting (verified r39.2: OS SetVariable EINVALs, and
+# L4TConfiguration.dts marks it `locked`), so the preflight correctly directs an
+# unarmed device to reflash — it cannot be armed from the OS. Builds on:
 # f0357892 (main, wendyos-update#7): decouple the rootfs slot switch from the
 # bootloader capsule on non-Thor SoCs. UEFI capsule-on-disk is only honored on
 # Thor (t264); on Orin (t234) the firmware advertises FILE_CAPSULE_DELIVERY but
