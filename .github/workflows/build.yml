@@ -584,10 +584,14 @@ jobs:
           go-version-file: wendyos/tools/publisher/go.mod
           cache-dependency-path: wendyos/tools/publisher/go.sum
 
-      # Jetson flash-packaging deps (device-tree-compiler, android-sdk-libsparse-utils
-      # for simg2img, i386 runtime libs for the Thor NVIDIA flash tools) are baked
-      # into the self-hosted runner image — see wendylabsinc/ci. The runner has no
-      # passwordless sudo, so there is no apt-get step here.
+      # Jetson flash-packaging deps are baked into the self-hosted runner image
+      # — see wendylabsinc/ci. The runner has no passwordless sudo, so there is
+      # no apt-get step here. Thor needs device-tree-compiler,
+      # android-sdk-libsparse-utils (simg2img) and i386 runtime libs for the
+      # NVIDIA flash tools; the T234 Orin flashpacks additionally need
+      # build-essential (cpp preprocesses BCT dts), e2fsprogs (prebuilds
+      # flashpkg.ext4), python3-yaml, openssl and zstd. All must be present in
+      # the runner image.
 
       - name: Generate flashable image (Jetson)
         if: startsWith(matrix.device, 'jetson-')
@@ -681,24 +685,43 @@ jobs:
             }
           fi
 
-      - name: Build Thor flashpack
+      - name: Build flashpack (Jetson)
         # Pack the extracted tegraflash-tar into the single .tar.zst the wendy CLI
-        # flashes (see make-thor-flashpack.sh). The NVIDIA flash tools it runs are
-        # i386, so this x86_64 runner needs i386 runtime libs.
-        if: matrix.device == 'jetson-agx-thor'
+        # flashes (see make-thor-flashpack.sh for T264, make-t234-flashpack.sh for
+        # the Orin family). The flash tools' dependencies (i386 libs for Thor's
+        # NVIDIA tools, build-essential/e2fsprogs for T234) are baked into the
+        # self-hosted runner image (wendylabsinc/ci); no apt-get here.
+        if: github.event_name != 'pull_request' && contains(fromJSON('["jetson-agx-thor", "jetson-agx-orin", "jetson-orin-nano"]'), matrix.device)
         env:
           UPLOAD_VERSION: ${{ needs.detect-changes.outputs.version }}
           MACHINE: ${{ steps.vars.outputs.machine }}
+          DEVICE: ${{ matrix.device }}
+          STORAGE: ${{ matrix.storage }}
         run: |
           set -euo pipefail
           FLASH_WORKDIR="$GITHUB_WORKSPACE/flash-work/${MACHINE}"   # MACHINE-scoped, matches the generate step
-          # i386 runtime libs for the NVIDIA flash tools are baked into the
-          # runner image (wendylabsinc/ci); no apt-get here (no passwordless sudo).
-          "$GITHUB_WORKSPACE/wendyos/scripts/make-thor-flashpack.sh" \
-            --bundle-dir "$FLASH_WORKDIR" \
-            --out "$GITHUB_WORKSPACE/thor-flashpack" \
-            --version "$UPLOAD_VERSION"
-          echo "FLASHPACK_FILE=$GITHUB_WORKSPACE/thor-flashpack/wendyos-${UPLOAD_VERSION}-jetson-agx-thor.flashpack.tar.zst" >> "$GITHUB_ENV"
+          FLASHPACK_OUT="$GITHUB_WORKSPACE/flashpack-out"
+          if [[ "$DEVICE" == "jetson-agx-thor" ]]; then
+            "$GITHUB_WORKSPACE/wendyos/scripts/make-thor-flashpack.sh" \
+              --bundle-dir "$FLASH_WORKDIR" \
+              --out "$FLASHPACK_OUT" \
+              --version "$UPLOAD_VERSION"
+          else
+            "$GITHUB_WORKSPACE/wendyos/scripts/make-t234-flashpack.sh" \
+              --bundle-dir "$FLASH_WORKDIR" \
+              --out "$FLASHPACK_OUT" \
+              --version "$UPLOAD_VERSION" \
+              --device "$DEVICE" \
+              --storage "$STORAGE"
+          fi
+          # Discover rather than reconstruct the artifact name; exactly one
+          # flashpack must exist or this build is wrong.
+          mapfile -t FLASHPACKS < <(find "$FLASHPACK_OUT" -maxdepth 1 -name '*.flashpack.tar.zst')
+          if [[ ${#FLASHPACKS[@]} -ne 1 ]]; then
+            echo "::error::expected exactly 1 flashpack in $FLASHPACK_OUT, found ${#FLASHPACKS[@]}" >&2
+            exit 1
+          fi
+          echo "FLASHPACK_FILE=${FLASHPACKS[0]}" >> "$GITHUB_ENV"
 
       - name: Upload image and emit manifest entry
         env:
@@ -797,11 +820,20 @@ jobs:
             ARGS+=(--recovery-file "$TEGRAFLASH_BUNDLE")
           fi
 
-          # Thor: attach the flashpack built in the previous step so the publisher
-          # uploads it and records flashpack_path/checksum/size in the manifest.
-          # FLASHPACK_REQUIRED (from the map) is true only for the flashpack
-          # device(s); the file itself must also be present.
-          if [[ "$FLASHPACK_REQUIRED" == "true" && -n "${FLASHPACK_FILE:-}" && -f "$FLASHPACK_FILE" ]]; then
+          # Attach the flashpack built in the previous step so the publisher
+          # uploads it and records the flashpack fields in the manifest —
+          # storage-scoped (nvme_flashpack_* / emmc_flashpack_*) when --storage
+          # is passed, top-level otherwise (Thor). FLASHPACK_REQUIRED (from the
+          # device map) is the single source of truth for which builds carry a
+          # flashpack; it is true only on non-PR builds where the previous step
+          # set FLASHPACK_FILE, so gating on FLASHPACK_FILE being set keeps PR
+          # builds (which skip the build-flashpack step) clean. Set-but-missing
+          # is a build bug; fail rather than silently publish without a flashpack.
+          if [[ "$FLASHPACK_REQUIRED" == "true" && -n "${FLASHPACK_FILE:-}" ]]; then
+            if [[ ! -f "$FLASHPACK_FILE" ]]; then
+              echo "::error::FLASHPACK_FILE set but missing: $FLASHPACK_FILE" >&2
+              exit 1
+            fi
             ARGS+=(--flashpack-file "$FLASHPACK_FILE")
           fi
 

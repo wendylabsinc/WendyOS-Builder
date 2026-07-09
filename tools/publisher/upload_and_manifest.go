@@ -188,6 +188,17 @@ type VersionMetadata struct {
 	SDCardZstPath      string `json:"sd_zst_path,omitempty"`
 	SDCardZstChecksum  string `json:"sd_zst_checksum,omitempty"`
 	SDCardZstSizeBytes int64  `json:"sd_zst_size_bytes,omitempty"`
+	// Storage-specific flashpacks. A flashpack is built per MACHINE, and the
+	// AGX Orin nvme and emmc machines share one device manifest, so each
+	// storage variant gets its own fields. The top-level FlashpackPath above
+	// mirrors the NVMe flashpack (and is the only field on single-storage
+	// devices like Thor, which passes no --storage).
+	NVMEFlashpackPath      string `json:"nvme_flashpack_path,omitempty"`
+	NVMEFlashpackChecksum  string `json:"nvme_flashpack_checksum,omitempty"`
+	NVMEFlashpackSizeBytes int64  `json:"nvme_flashpack_size_bytes,omitempty"`
+	EMMCFlashpackPath      string `json:"emmc_flashpack_path,omitempty"`
+	EMMCFlashpackChecksum  string `json:"emmc_flashpack_checksum,omitempty"`
+	EMMCFlashpackSizeBytes int64  `json:"emmc_flashpack_size_bytes,omitempty"`
 }
 
 // MasterManifest represents the top-level manifest
@@ -1041,7 +1052,7 @@ func main() {
 	localFile := flag.String("file", "", "Local file path to upload")
 	otaUpdateFile := flag.String("ota-update", "", "Local OTA update file path to upload")
 	recoveryFile := flag.String("recovery-file", "", "Optional recovery/tegraflash file path to upload")
-	flashpackFile := flag.String("flashpack-file", "", "Optional Thor flashpack (.tar.zst) file path to upload")
+	flashpackFile := flag.String("flashpack-file", "", "Optional Jetson flashpack (.tar.zst) file path to upload")
 	bmapFile := flag.String("bmap-file", "", "Optional .bmap block-map file to upload alongside the OS image")
 	sbomFile := flag.String("sbom", "", "Optional SPDX SBOM bundle (.spdx.tar.zst) to upload alongside the OS image and record in the manifest")
 	storage := flag.String("storage", "", "Storage type for multi-artifact devices: nvme or sd (omit for single-storage devices)")
@@ -1245,6 +1256,11 @@ func main() {
 			if *flashpackFile != "" {
 				if err := validateFileExists(*flashpackFile); err != nil {
 					log.WithError(err).Fatal("Invalid flashpack file")
+				}
+				// No sd_flashpack_* manifest fields exist; fail before the
+				// upload so the blob can't land in the bucket unrecorded.
+				if *storage == "sd" {
+					log.Fatal("--flashpack-file is not supported with --storage sd (no manifest field to record it)")
 				}
 			}
 
@@ -2146,6 +2162,40 @@ func setZstPath(meta *VersionMetadata, storageType, zstPath, zstChecksum string,
 	}
 }
 
+// applyFlashpack records a flashpack on the version metadata. Flashpacks are
+// per-MACHINE artifacts, so multi-storage devices route to storage-specific
+// fields; the top-level FlashpackPath mirrors the NVMe one so a CLI that only
+// knows the single field flashes the NVMe variant. Single-storage devices
+// (Thor, no --storage) land directly on the top-level fields. An empty
+// flashpackPath is a no-op.
+func applyFlashpack(meta *VersionMetadata, storageType, flashpackPath, flashpackChecksum string, flashpackSize int64) {
+	if flashpackPath == "" {
+		return
+	}
+	switch storageType {
+	case "nvme":
+		meta.NVMEFlashpackPath = flashpackPath
+		meta.NVMEFlashpackChecksum = flashpackChecksum
+		meta.NVMEFlashpackSizeBytes = flashpackSize
+		meta.FlashpackPath = flashpackPath
+		meta.FlashpackChecksum = flashpackChecksum
+		meta.FlashpackSizeBytes = flashpackSize
+	case "emmc":
+		meta.EMMCFlashpackPath = flashpackPath
+		meta.EMMCFlashpackChecksum = flashpackChecksum
+		meta.EMMCFlashpackSizeBytes = flashpackSize
+	case "sd":
+		// No SD flashpack is produced today and there is no sd_flashpack_*
+		// field; warn loudly so an uploaded blob is never silently orphaned.
+		log.WithField("flashpack_path", flashpackPath).
+			Warn("No manifest field for sd flashpacks; flashpack uploaded but not recorded — add sd_flashpack_* fields")
+	default:
+		meta.FlashpackPath = flashpackPath
+		meta.FlashpackChecksum = flashpackChecksum
+		meta.FlashpackSizeBytes = flashpackSize
+	}
+}
+
 // seekableFrameSize is the uncompressed size of each independent zstd frame
 // written by compressSeekableZstd. 4 MiB balances random-access granularity
 // against seek-table overhead.
@@ -2416,12 +2466,13 @@ func updateDeviceManifest(ctx context.Context, logger *logrus.Entry, bucket *sto
 			}).Info("Updating recovery file metadata")
 		}
 
-		// Update flashpack fields only if provided
+		// Update flashpack fields only if provided. Storage variants route to
+		// their own fields so AGX Orin's nvme and emmc flashpacks don't
+		// clobber each other (see applyFlashpack).
 		if flashpackPath != "" {
-			versionMetadata.FlashpackPath = flashpackPath
-			versionMetadata.FlashpackChecksum = flashpackChecksum
-			versionMetadata.FlashpackSizeBytes = flashpackSize
+			applyFlashpack(&versionMetadata, storageType, flashpackPath, flashpackChecksum, flashpackSize)
 			logger.WithFields(logrus.Fields{
+				"storage":            storageType,
 				"flashpack_path":     flashpackPath,
 				"flashpack_size":     flashpackSize,
 				"flashpack_checksum": flashpackChecksum,
@@ -2950,6 +3001,19 @@ func promoteNightlyToStable(ctx context.Context, bucket *storage.BucketHandle, p
 		topZstDest = copyManifestArtifact(ctx, logger, bucket, prefix, sourceVersionMeta.ZstPath, deviceType, stableVersion, "seekable-zstd")
 	}
 
+	// Copy flashpacks, mirroring bmap/zst promotion. Flashpacks are
+	// per-storage artifacts; the top-level fields mirror the NVMe one and are
+	// the only fields on single-storage devices (Thor).
+	nvmeFlashpackDest := copyManifestArtifact(ctx, logger, bucket, prefix, sourceVersionMeta.NVMEFlashpackPath, deviceType, stableVersion, "NVMe flashpack")
+	emmcFlashpackDest := copyManifestArtifact(ctx, logger, bucket, prefix, sourceVersionMeta.EMMCFlashpackPath, deviceType, stableVersion, "eMMC flashpack")
+	var topFlashpackDest string
+	switch {
+	case nvmeFlashpackDest != "":
+		topFlashpackDest = nvmeFlashpackDest
+	case sourceVersionMeta.FlashpackPath != "":
+		topFlashpackDest = copyManifestArtifact(ctx, logger, bucket, prefix, sourceVersionMeta.FlashpackPath, deviceType, stableVersion, "flashpack")
+	}
+
 	// Create new stable version entry with promotion metadata
 	promotedAt := time.Now()
 	sourceVersion := nightlyVersion
@@ -3021,6 +3085,51 @@ func promoteNightlyToStable(ctx context.Context, bucket *storage.BucketHandle, p
 		RecoveryPath:       recoveryDestPath,
 		RecoveryChecksum:   sourceVersionMeta.RecoveryChecksum,
 		RecoverySizeBytes:  sourceVersionMeta.RecoverySizeBytes,
+		FlashpackPath:      topFlashpackDest,
+		FlashpackChecksum: func() string {
+			if nvmeFlashpackDest != "" {
+				return sourceVersionMeta.NVMEFlashpackChecksum
+			}
+			if topFlashpackDest != "" {
+				return sourceVersionMeta.FlashpackChecksum
+			}
+			return ""
+		}(),
+		FlashpackSizeBytes: func() int64 {
+			if nvmeFlashpackDest != "" {
+				return sourceVersionMeta.NVMEFlashpackSizeBytes
+			}
+			if topFlashpackDest != "" {
+				return sourceVersionMeta.FlashpackSizeBytes
+			}
+			return 0
+		}(),
+		NVMEFlashpackPath: nvmeFlashpackDest,
+		NVMEFlashpackChecksum: func() string {
+			if nvmeFlashpackDest != "" {
+				return sourceVersionMeta.NVMEFlashpackChecksum
+			}
+			return ""
+		}(),
+		NVMEFlashpackSizeBytes: func() int64 {
+			if nvmeFlashpackDest != "" {
+				return sourceVersionMeta.NVMEFlashpackSizeBytes
+			}
+			return 0
+		}(),
+		EMMCFlashpackPath: emmcFlashpackDest,
+		EMMCFlashpackChecksum: func() string {
+			if emmcFlashpackDest != "" {
+				return sourceVersionMeta.EMMCFlashpackChecksum
+			}
+			return ""
+		}(),
+		EMMCFlashpackSizeBytes: func() int64 {
+			if emmcFlashpackDest != "" {
+				return sourceVersionMeta.EMMCFlashpackSizeBytes
+			}
+			return 0
+		}(),
 	}
 
 	// Clear OTA/recovery fields if copy failed
@@ -3279,6 +3388,19 @@ func swapImageFile(ctx context.Context, bucket *storage.BucketHandle, prefix, de
 		OTAUpdatePath:      existingVersion.OTAUpdatePath,
 		OTAUpdateChecksum:  existingVersion.OTAUpdateChecksum,
 		OTAUpdateSizeBytes: existingVersion.OTAUpdateSizeBytes,
+
+		// Flashpacks preserved from existing: like the recovery bundle they
+		// are self-contained artifacts, not derived from the swapped image.
+		// (Bmap/zst stay dropped — they describe the replaced image.)
+		FlashpackPath:          existingVersion.FlashpackPath,
+		FlashpackChecksum:      existingVersion.FlashpackChecksum,
+		FlashpackSizeBytes:     existingVersion.FlashpackSizeBytes,
+		NVMEFlashpackPath:      existingVersion.NVMEFlashpackPath,
+		NVMEFlashpackChecksum:  existingVersion.NVMEFlashpackChecksum,
+		NVMEFlashpackSizeBytes: existingVersion.NVMEFlashpackSizeBytes,
+		EMMCFlashpackPath:      existingVersion.EMMCFlashpackPath,
+		EMMCFlashpackChecksum:  existingVersion.EMMCFlashpackChecksum,
+		EMMCFlashpackSizeBytes: existingVersion.EMMCFlashpackSizeBytes,
 	}
 
 	// Recovery: use new if provided, otherwise preserve existing
