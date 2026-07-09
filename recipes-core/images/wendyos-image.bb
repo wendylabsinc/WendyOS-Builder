@@ -39,67 +39,83 @@ WENDYOS_DEBUG_FEATURES ?= " \
     "
 IMAGE_FEATURES += "${@oe.utils.ifelse(d.getVar('WENDYOS_DEBUG') == '1', d.getVar('WENDYOS_DEBUG_FEATURES'), '')}"
 
-# The classic debug-tweaks credential set (empty/passwordless root + autologin)
-# that #172 removed from WENDYOS_DEBUG_FEATURES. Reintroduced ONLY for dev/PR
-# builds, gated strictly on WENDYOS_DEV_LOGIN (never WENDYOS_DEBUG). Without a
-# working credential the restored getty would be unusable (root is otherwise
-# locked to root:*: by zap_empty_root_password).
-WENDYOS_DEV_LOGIN_FEATURES ?= " \
-    empty-root-password \
-    allow-empty-password \
-    allow-root-login \
-    "
-IMAGE_FEATURES += "${@oe.utils.ifelse(d.getVar('WENDYOS_DEV_LOGIN') == '1', d.getVar('WENDYOS_DEV_LOGIN_FEATURES'), '')}"
-
-# No local interactive login on ANY image (debug included). A physically
-# attached monitor+keyboard (VT: getty@tty1 plus logind's autovt@ VT-switch
-# spawns) and the serial console login (serial-getty@, driven by
-# SERIAL_CONSOLES) are both an attack surface on a product device and are
-# removed. The kernel `console=` bootarg (boot + printk output on UART, not a
-# getty/login prompt) is a separate knob lit per-machine in the bootarg wiring,
-# not here: on Raspberry Pi it is gated on WENDYOS_DEBUG_UART (see
-# meta-rpi-extensions' rpi-cmdline.bbappend), so RPi fortress builds (the "0"
-# default) get no serial boot output and dev/PR builds (WENDYOS_DEBUG_UART="1")
-# restore it. Tegra console gating on the same knob is still pending (task A2),
-# so Jetson builds currently emit serial boot output regardless of this flag.
-# Either way that is independent of WENDYOS_DEV_LOGIN's login-prompt gate below.
-# Device access is exclusively via the wendy-agent (gRPC); there is no
-# interactive login path (SSH stays off).
+# Local interactive login is an attack surface on a product device, so every
+# getty is disabled by default and each console type is separately opt-in. No
+# login implies opening root: credentials are a separate concern — root stays
+# locked (root:*: on every image via zap_empty_root_password); log in as the
+# wendy user, which has passwordless sudo.
 #
-# Masking these units in the rootfs is fatal: systemd's 90-systemd.preset
-# enables getty@/serial-getty@ and the rootfs preset-all pass rejects "enable a
-# masked unit". So preset-disable the templates (a 10- file wins over 90-),
-# drop any enablement symlinks a postinst force-created, and zero logind's
-# auto-VTs (which also stops the autovt@ VT-switch spawns a preset alone can't
-# reach).
-disable_local_login() {
+#   getty@ + autovt@ (+ logind auto-VTs)       -> monitor/keyboard VT login
+#                                                 WENDYOS_ENABLE_VT_LOGIN (default 0)
+#   serial-getty@<port> (from SERIAL_CONSOLES) -> named serial login
+#                                                 WENDYOS_ENABLE_UART_LOGIN (default 0; CI opts in on PR)
+#   console-getty (login on /dev/console)      -> the LAST console= on the
+#       cmdline: the serial port on Tegra/RPi/qemu, but tty0 (the VT) on x86.
+#       Grouped per board via WENDYOS_CONSOLE_LOGIN_TYPE so the operator's
+#       UART/VT choice governs the login they actually get. (Tegra sets no
+#       SERIAL_CONSOLES, so console-getty *is* its serial login — keep it UART.)
+#
+# The kernel `console=` bootarg (boot + printk output, not a getty) is separate:
+# on RPi it is gated on WENDYOS_DEBUG_UART (rpi-cmdline.bbappend); Tegra emits it
+# regardless (task A2). Independent of the login knobs here.
+#
+# Masking is fatal: systemd's 90-systemd.preset enables getty@/serial-getty@ and
+# the rootfs preset-all pass rejects "enable a masked unit". So preset-disable
+# (a 10- file beats 90-) + drop any enablement symlinks; VT additionally zeroes
+# logind's auto-VTs (stops the autovt@ VT-switch spawns a preset can't reach).
+
+# console-getty logs in on /dev/console, whose identity is board-specific:
+# serial-console boards -> group with UART; x86 (console=tty0) -> group with VT.
+WENDYOS_CONSOLE_LOGIN_TYPE ?= "uart"
+WENDYOS_CONSOLE_LOGIN_TYPE:x86-wendyos = "vt"
+
+disable_vt_login() {
     rm -f ${IMAGE_ROOTFS}${sysconfdir}/systemd/system/getty.target.wants/getty@*.service
-    rm -f ${IMAGE_ROOTFS}${sysconfdir}/systemd/system/getty.target.wants/serial-getty@*.service
-    rm -f ${IMAGE_ROOTFS}${sysconfdir}/systemd/system/getty.target.wants/console-getty.service
     install -d ${IMAGE_ROOTFS}${systemd_unitdir}/system-preset
-    printf 'disable getty@.service\ndisable autovt@.service\ndisable serial-getty@.service\ndisable console-getty.service\n' \
-        > ${IMAGE_ROOTFS}${systemd_unitdir}/system-preset/10-wendyos-no-local-login.preset
+    printf 'disable getty@.service\ndisable autovt@.service\n' \
+        > ${IMAGE_ROOTFS}${systemd_unitdir}/system-preset/10-wendyos-no-vt-login.preset
     install -d ${IMAGE_ROOTFS}${systemd_unitdir}/logind.conf.d
     printf '[Login]\nNAutoVTs=0\nReserveVT=0\n' \
         > ${IMAGE_ROOTFS}${systemd_unitdir}/logind.conf.d/10-wendyos-no-autovt.conf
 }
-# Fortress (release + nightly): strip every local login path. Dev/PR builds
-# (WENDYOS_DEV_LOGIN="1") keep getty/serial-getty so the PR is debuggable.
-ROOTFS_POSTPROCESS_COMMAND += "${@'' if d.getVar('WENDYOS_DEV_LOGIN') == '1' else 'disable_local_login;'}"
+
+disable_uart_login() {
+    rm -f ${IMAGE_ROOTFS}${sysconfdir}/systemd/system/getty.target.wants/serial-getty@*.service
+    install -d ${IMAGE_ROOTFS}${systemd_unitdir}/system-preset
+    printf 'disable serial-getty@.service\n' \
+        > ${IMAGE_ROOTFS}${systemd_unitdir}/system-preset/10-wendyos-no-uart-login.preset
+}
+
+disable_console_getty() {
+    rm -f ${IMAGE_ROOTFS}${sysconfdir}/systemd/system/getty.target.wants/console-getty.service
+    install -d ${IMAGE_ROOTFS}${systemd_unitdir}/system-preset
+    printf 'disable console-getty.service\n' \
+        > ${IMAGE_ROOTFS}${systemd_unitdir}/system-preset/10-wendyos-no-console-getty.preset
+}
+
+# console-getty is governed by the knob matching its board grouping.
+WENDYOS_CONSOLE_GETTY_KNOB = "${@d.getVar('WENDYOS_ENABLE_VT_LOGIN') if d.getVar('WENDYOS_CONSOLE_LOGIN_TYPE') == 'vt' else d.getVar('WENDYOS_ENABLE_UART_LOGIN')}"
+
+# Each gate bakes its command in/out, so the do_rootfs signature tracks the knob
+# and the image rebuilds when a knob changes.
+ROOTFS_POSTPROCESS_COMMAND += "${@oe.utils.ifelse(d.getVar('WENDYOS_ENABLE_VT_LOGIN') == '1', '', 'disable_vt_login;')}"
+ROOTFS_POSTPROCESS_COMMAND += "${@oe.utils.ifelse(d.getVar('WENDYOS_ENABLE_UART_LOGIN') == '1', '', 'disable_uart_login;')}"
+ROOTFS_POSTPROCESS_COMMAND += "${@oe.utils.ifelse(d.getVar('WENDYOS_CONSOLE_GETTY_KNOB') == '1', '', 'disable_console_getty;')}"
 
 # Stamp build provenance onto the console boot screen (base-files' /etc/issue,
 # shown under the WendyOS logo before the login prompt). The build tag/ID is
-# shown on every build; the builder commit is added only on PR/dev builds, gated
-# on WENDYOS_DEV_LOGIN (CI sets it only for pull_request). WENDYOS_BUILD_* come
-# from auto.conf on CI and fall back to DISTRO_VERSION / "" locally (common.inc).
-# Runs after base-files installs /etc/issue, so the file is present to append to.
+# shown on every build; the builder commit is added only on PR builds, keyed on
+# the CI version tag (WENDYOS_BUILD_VERSION = "pr-<N>" on pull_request, else
+# nightly-<ts> / X.Y.Z). WENDYOS_BUILD_* come from auto.conf on CI and fall back
+# to DISTRO_VERSION / "" locally (common.inc). Runs after base-files installs
+# /etc/issue, so the file is present to append to.
 stamp_boot_screen() {
     issue="${IMAGE_ROOTFS}${sysconfdir}/issue"
     [ -f "$issue" ] || return 0
     printf 'Build: %s\n' "${WENDYOS_BUILD_VERSION}" >> "$issue"
-    if [ "${WENDYOS_DEV_LOGIN}" = "1" ] && [ -n "${WENDYOS_BUILD_COMMIT}" ]; then
-        printf 'Commit: %s\n' "${WENDYOS_BUILD_COMMIT}" >> "$issue"
-    fi
+    case "${WENDYOS_BUILD_VERSION}" in
+        pr-*) [ -n "${WENDYOS_BUILD_COMMIT}" ] && printf 'Commit: %s\n' "${WENDYOS_BUILD_COMMIT}" >> "$issue" ;;
+    esac
 }
 ROOTFS_POSTPROCESS_COMMAND += "stamp_boot_screen;"
 
@@ -183,7 +199,8 @@ BUILDCFG_VARS += " \
     WENDYOS_DATA_PART \
     WENDYOS_DEBUG \
     WENDYOS_DEBUG_UART \
-    WENDYOS_DEV_LOGIN \
+    WENDYOS_ENABLE_UART_LOGIN \
+    WENDYOS_ENABLE_VT_LOGIN \
     WENDYOS_SSHD \
     WENDYOS_USB_GADGET \
     WENDYOS_USB_NET_MODE \

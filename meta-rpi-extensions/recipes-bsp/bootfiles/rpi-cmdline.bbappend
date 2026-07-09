@@ -25,8 +25,8 @@ inherit partuuid-rpi
 # need its own :append:<machine> override.
 #
 # `console=serial0,115200` (the kernel bootarg that puts boot + printk output
-# on UART) is gated on WENDYOS_DEBUG_UART, mirroring WENDYOS_DEV_LOGIN's gate
-# on the serial *login* prompt (see wendyos-image.bb's disable_local_login).
+# on UART) is gated on WENDYOS_DEBUG_UART, mirroring WENDYOS_ENABLE_UART_LOGIN's
+# gate on the serial *login* prompt (see wendyos-image.bb's disable_uart_login).
 # Fortress default (WENDYOS_DEBUG_UART="0"): no serial console registered, so
 # neither boot logs nor a login prompt reach UART. Dev/PR builds
 # (WENDYOS_DEBUG_UART="1", set by CI) restore the console= arg so field
