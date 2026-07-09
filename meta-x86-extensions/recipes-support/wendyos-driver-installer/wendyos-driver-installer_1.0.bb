@@ -8,7 +8,7 @@ inherit systemd
 SRC_URI = " \
     file://wendyos-driver-update.sh \
     file://wendyos-driver-update.service \
-"
+    "
 
 S = "${UNPACKDIR}"
 
@@ -26,6 +26,6 @@ do_install() {
 FILES:${PN} = " \
     ${sbindir}/wendyos-driver-update.sh \
     ${systemd_system_unitdir}/wendyos-driver-update.service \
-"
+    "
 
 RDEPENDS:${PN} = "bash dnf rpm systemd"

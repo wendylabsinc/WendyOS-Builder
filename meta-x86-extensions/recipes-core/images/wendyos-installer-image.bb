@@ -1,7 +1,10 @@
 DESCRIPTION = "WendyOS live installer image for generic x86_64 PCs"
 LICENSE = "MIT"
 
-require wendyos-image.bb
+# wendyos-image.bb lives in the base wendyos layer; reference it by its
+# layer-relative path so BBPATH resolves it now that this recipe sits in
+# meta-x86-extensions (a bare "wendyos-image.bb" only worked when co-located).
+require recipes-core/images/wendyos-image.bb
 
 # The production WendyOS x86 image remains a directly flashable .wic. This
 # recipe builds a live ISO that exposes OE-Core's "install" boot entry, which

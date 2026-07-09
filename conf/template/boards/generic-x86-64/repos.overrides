@@ -9,6 +9,17 @@
 #   REPOS_EXTRA=(...)    append extra clones that coexist with defaults,
 #                        each entry "enabled|url|folder|commit"
 
+# Tree pin. The rest of the fleet has moved to blacksail, but x86 stays on
+# scarthgap for now: the MediaTek Wi-Fi backport
+# (meta-x86-extensions/recipes-kernel/linux/files/
+# 0001-wifi-mt76-mt7921e-add-MT7920-PCI-support.patch) is a v6.10 backport that
+# applies to scarthgap's 6.6 kernel but is redundant on blacksail's 6.18
+# (which likely already carries MT7920 support). Revisit and move to blacksail
+# once that patch is confirmed redundant/portable. See
+# docs/plans/x86-support-plan.md. Explicit here so scarthgap is a documented
+# choice, not the bootstrap default falling through.
+WENDYOS_LAYER_TREE="scarthgap"
+
 #SRCREV_BITBAKE="<commit-hash>"
 #SRCREV_OECORE="<commit-hash>"
 #SRCREV_METAYOCTO="<commit-hash>"

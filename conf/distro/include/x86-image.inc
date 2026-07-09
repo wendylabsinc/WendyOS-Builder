@@ -16,11 +16,14 @@ WENDYOS_NVIDIA_DRIVER_PACKAGE ??= "packagegroup-wendyos-nvidia-graphics"
 WENDYOS_ROCM_DRIVER_PACKAGE ??= "packagegroup-wendyos-rocm"
 
 # Useful on commodity PCs and harmless on machines without a given bus/device.
+# packagegroup-wendyos-x86 (meta-x86-extensions) carries the NUC network/BT/GPU
+# kernel-module coverage as RRECOMMENDS.
 IMAGE_INSTALL:append = " \
     pciutils \
     linux-firmware \
     ca-certificates \
     wendyos-driver-installer \
+    packagegroup-wendyos-x86 \
     "
 
 # Experimental NVIDIA dGPU container plumbing. This does not ship proprietary

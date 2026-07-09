@@ -1,8 +1,9 @@
 SUMMARY = "WendyOS Default User Configuration"
 DESCRIPTION = "Creates the default 'wendy' user for WendyOS. \
-The base package creates the user. The -data-setup package \
-provides the first-boot service that initializes the home directory on the \
-persistent /data partition (Tegra only)."
+The base package creates the user (passwordless sudo is shipped by the sudo \
+recipe, which owns /etc/sudoers.d). The -data-setup package provides the \
+first-boot service that initializes the home directory on the persistent /data \
+partition (Tegra only)."
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
 
@@ -11,18 +12,26 @@ inherit useradd systemd
 SRC_URI = " \
     file://wendyos-user-setup.sh \
     file://wendyos-user-setup.service \
-"
+    "
 S = "${UNPACKDIR}"
 
 PACKAGES = "${PN}-data-setup ${PN}"
 
-# Create wendy user - simplified group list (non-existent groups cause failures)
+# Create wendy user - simplified group list (non-existent groups cause failures).
+# The render group (GPU render-node access for amdgpu/ROCm) is added on x86
+# only; the ARM fleet reaches the GPU via the nvidia nodes + video group and
+# does not need it. The group list is a variable so the password hash stays in
+# one place across the override.
 USERADD_PACKAGES = "${PN}"
-GROUPADD_PARAM:${PN} = "-r render"
+
+WENDY_GROUPS = "dialout,video,audio,users"
+WENDY_GROUPS:x86-wendyos = "dialout,video,audio,users,render"
+GROUPADD_PARAM:${PN}:x86-wendyos = "-r render"
+
 # Password 'wendy' hash generated with: openssl passwd -6 -salt 5ixFr0sKRtsKKKhY wendy
 # useradd -m creates /home/wendy on the rootfs; on Tegra, the first-boot service
 # in wendyos-user-data-setup re-initializes it from persistent storage (/data/home)
-USERADD_PARAM:${PN} = "-m -d /home/wendy -s /bin/bash -G dialout,video,audio,users,render -p '\$6\$5ixFr0sKRtsKKKhY\$5SyCVB9y95JEITWZ8AMcMCrMF4Rvq97ymUjEoUCBKfTl7vWHjTLEboowxWF6hIJgBUMOnJQfeIRPPwYCUaIwm.' wendy"
+USERADD_PARAM:${PN} = "-m -d /home/wendy -s /bin/bash -G ${WENDY_GROUPS} -p '\$6\$5ixFr0sKRtsKKKhY\$5SyCVB9y95JEITWZ8AMcMCrMF4Rvq97ymUjEoUCBKfTl7vWHjTLEboowxWF6hIJgBUMOnJQfeIRPPwYCUaIwm.' wendy"
 
 SYSTEMD_SERVICE:${PN}-data-setup = "wendyos-user-setup.service"
 SYSTEMD_AUTO_ENABLE:${PN}-data-setup = "enable"
@@ -35,10 +44,12 @@ do_install() {
     # Install systemd service (packaged in -data-setup)
     install -d ${D}${systemd_system_unitdir}
     install -m 0644 ${UNPACKDIR}/wendyos-user-setup.service ${D}${systemd_system_unitdir}/wendyos-user-setup.service
-
 }
 
-# Base package: user creation only (useradd class handles /etc/passwd)
+# Base package: user creation only (useradd class handles /etc/passwd). The
+# sudoers grant is shipped by the sudo recipe (sudo-lib owns /etc/sudoers.d;
+# co-owning that dir here caused an rpm dir-ownership conflict).
+FILES:${PN} = ""
 ALLOW_EMPTY:${PN} = "1"
 RDEPENDS:${PN} = "sudo bash systemd"
 
@@ -47,5 +58,6 @@ SUMMARY:${PN}-data-setup = "WendyOS User Home Directory Setup for /data Partitio
 FILES:${PN}-data-setup = " \
     ${sbindir}/wendyos-user-setup.sh \
     ${systemd_system_unitdir}/wendyos-user-setup.service \
-"
+    "
 RDEPENDS:${PN}-data-setup = "${PN} bash systemd-mount-home"
+
