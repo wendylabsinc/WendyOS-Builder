@@ -101,3 +101,31 @@ func TestReadManifestEntryRejectsGarbage(t *testing.T) {
 		t.Error("readManifestEntry accepted a missing file")
 	}
 }
+
+func TestPRPrefix(t *testing.T) {
+	if got := prPrefix(0); got != "" {
+		t.Fatalf("prPrefix(0) = %q, want empty", got)
+	}
+	if got := prPrefix(-1); got != "" {
+		t.Fatalf("prPrefix(-1) = %q, want empty", got)
+	}
+	if got := prPrefix(123); got != "pr/123/" {
+		t.Fatalf("prPrefix(123) = %q, want pr/123/", got)
+	}
+}
+
+func TestManifestEntryPRRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "entry.json")
+	in := ManifestEntry{Device: "raspberry-pi-5", Version: "pr-123", PR: 123, FilePath: "pr/123/images/raspberry-pi-5/pr-123/x.img.gz"}
+	if err := writeManifestEntry(p, in); err != nil {
+		t.Fatal(err)
+	}
+	out, err := readManifestEntry(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.PR != 123 {
+		t.Fatalf("PR = %d, want 123", out.PR)
+	}
+}

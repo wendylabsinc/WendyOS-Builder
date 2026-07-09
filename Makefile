@@ -28,8 +28,9 @@ BUILD_DIR := build
 IMAGE_TARGET ?= wendyos-image
 
 # When set to 1, run bitbake directly on the host instead of inside the
-# build Docker container. CI uses this on the custom RunsOn AMI that already
-# has the Yocto host prerequisites installed; local dev leaves it unset.
+# build Docker container. CI uses this on the self-hosted runner image that
+# already has the Yocto host prerequisites installed; local dev leaves it
+# unset.
 WENDYOS_HOST_BUILD ?= 0
 
 # Flash configuration

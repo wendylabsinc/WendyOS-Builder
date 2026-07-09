@@ -19,8 +19,8 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda
 # they pin a known-good version so local builds stay reproducible. Bump them
 # when you want local builds to track a newer agent; CI always overrides them
 # with the latest stable release.
-WENDYOS_AGENT_VERSION ??= "2026.06.17-194156"
-WENDYOS_AGENT_SHA256  ??= "72b08b61bb26ab4ce9693e19fe5f44d7108f7ddbea587470249821302c3f24b9"
+WENDYOS_AGENT_VERSION ??= "2026.07.03-194041"
+WENDYOS_AGENT_SHA256  ??= "c84d35aee93a25866b9da41a112463f887f6cbb4cebcf2093c9795e8f3fafaa9"
 
 # Surface the resolved agent version as the package version for traceability
 # (e.g. in the image manifest). Hyphens are not valid in PV, so map them to

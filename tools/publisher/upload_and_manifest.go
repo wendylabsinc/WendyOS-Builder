@@ -32,6 +32,28 @@ import (
 
 var log = logrus.New()
 
+// imageObjectPath, deviceManifestPath, and masterManifestPath build the GCS
+// object paths for OS images and manifests. Every path is routed through one
+// of these so that a single active "prefix" (prPrefix(pr), "" for
+// release/nightly builds) consistently isolates a per-PR debug build into its
+// own pr/<N>/ subtree without touching the shared release paths.
+func imageObjectPath(prefix, deviceType, version, filename string) string {
+	return fmt.Sprintf("%simages/%s/%s/%s", prefix, deviceType, version, filename)
+}
+func deviceManifestPath(prefix, deviceType string) string {
+	return fmt.Sprintf("%smanifests/%s.json", prefix, deviceType)
+}
+func masterManifestPath(prefix string) string {
+	return prefix + "manifests/master.json"
+}
+
+// imageDirPrefix builds the GCS prefix used to list/delete all objects under
+// a device's image directory (images/<device>/), respecting the active
+// pr/<N>/ prefix the same way imageObjectPath does.
+func imageDirPrefix(prefix, deviceType string) string {
+	return fmt.Sprintf("%simages/%s/", prefix, deviceType)
+}
+
 // gcloudTokenSource implements oauth2.TokenSource. It seeds with the caller's
 // initial access token and refreshes by running "gcloud auth print-access-token"
 // once the token is within 10 seconds of expiry (the oauth2 package's Valid()
@@ -440,7 +462,7 @@ type uploadResult struct {
 }
 
 // uploadFileAsync uploads a file asynchronously
-func uploadFileAsync(ctx context.Context, bucket *storage.BucketHandle, localPath, deviceType, version string) <-chan uploadResult {
+func uploadFileAsync(ctx context.Context, bucket *storage.BucketHandle, prefix, localPath, deviceType, version string) <-chan uploadResult {
 	resultChan := make(chan uploadResult, 1)
 
 	go func() {
@@ -454,7 +476,7 @@ func uploadFileAsync(ctx context.Context, bucket *storage.BucketHandle, localPat
 		}
 		expectedSize := localInfo.Size()
 
-		path, err := uploadFile(ctx, bucket, localPath, deviceType, version)
+		path, err := uploadFile(ctx, bucket, prefix, localPath, deviceType, version)
 		if err != nil {
 			resultChan <- uploadResult{err: err}
 			return
@@ -571,7 +593,18 @@ func compressFile(ctx context.Context, inputPath string, fileType string) (strin
 		} else if fileType == "recovery" {
 			compressionMethod = "xz-fast" // Fast compression for recovery (frequently accessed)
 		} else {
-			compressionMethod = "zip" // Standard zip for OS images (widely compatible)
+			// Seekable-zstd for OS images. This single artifact IS the image the
+			// wendy CLI flashes: the fast path streams it as .zst + bmap, and the
+			// full-image fallback (--no-bmap, `wendy os download`) reads the same
+			// object by content-sniffing the zstd magic. It doubles as the
+			// manifest .zst artifact, so it is produced once here rather than a
+			// gzip .img.gz plus a separate seekable pass over the same 60+ GB
+			// image. Done in-process, so the publisher host needs no `zip` binary.
+			//
+			// Only raw images reach this branch: Raspberry Pi .sdimg is gzipped
+			// by the build workflow before upload (isAlreadyCompressed short-
+			// circuits it), and eMMC/Thor ship a recovery bundle, not an .img.
+			compressionMethod = "seekable-zstd"
 		}
 	default:
 		// Other file types - don't compress
@@ -600,8 +633,8 @@ func compressFile(ctx context.Context, inputPath string, fileType string) (strin
 	switch compressionMethod {
 	case "xz-max", "xz-fast":
 		outputPath = inputPath + ".xz"
-	case "zip":
-		outputPath = inputPath + ".zip"
+	case "seekable-zstd":
+		outputPath = inputPath + ".zst"
 	default:
 		return "", fmt.Errorf("unknown compression method: %s", compressionMethod)
 	}
@@ -694,18 +727,33 @@ func compressFile(ctx context.Context, inputPath string, fileType string) (strin
 			cmd.Stderr = os.Stderr
 		}
 
-	case "zip":
-		// Use zip for OS images
-		// zip -6 creates a .zip file with balanced compression (faster than -9)
-		// We need to change to the directory and zip from there to avoid including full paths
-		dir := filepath.Dir(inputPath)
-		filename := filepath.Base(inputPath)
-		zipFilename := filename + ".zip"
+	case "seekable-zstd":
+		// Produce the seekable-zstd image in-process — no external binary
+		// required. Frames are independently decompressible, so the CLI can
+		// random-access via bmap; the whole file also decodes as a normal zstd
+		// stream for the full-image fallback. Handle everything here and return,
+		// since the process-based machinery below is xz-only.
+		if err := compressSeekableZstd(inputPath, outputPath); err != nil {
+			if rmErr := os.Remove(outputPath); rmErr != nil && !os.IsNotExist(rmErr) {
+				log.WithError(rmErr).Warn("Failed to clean up partial compressed file")
+			}
+			return "", err
+		}
 
-		cmd = exec.CommandContext(ctx, "zip", "-6", zipFilename, filename)
-		cmd.Dir = dir
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
+		compressedInfo, err := os.Stat(outputPath)
+		if err != nil {
+			return "", fmt.Errorf("compressed file not found: %w", err)
+		}
+		if fileSize == 0 {
+			return "", fmt.Errorf("original file has zero size")
+		}
+		compressionRatio := float64(fileSize-compressedInfo.Size()) / float64(fileSize) * 100
+		log.WithFields(logrus.Fields{
+			"original_size":   fileSize,
+			"compressed_size": compressedInfo.Size(),
+			"saved":           fmt.Sprintf("%.1f%%", compressionRatio),
+		}).Info("Compression complete")
+		return outputPath, nil
 
 	default:
 		return "", fmt.Errorf("unsupported compression method: %s", compressionMethod)
@@ -1029,11 +1077,38 @@ func main() {
 	removeDevice := flag.Bool("remove-device", false, "Remove a device (or firmware chip with --firmware) and all its images/versions")
 	removeKeepFiles := flag.Bool("remove-keep-files", false, "When removing a device, keep uploaded files in the bucket (only remove from manifests)")
 	renameTo := flag.String("rename-to", "", "Rename a device (--device old --rename-to new) by moving all files and updating manifests")
+	pr := flag.Int("pr", 0, "Per-PR debug build: route uploads and manifests into pr/<N>/ instead of the shared release manifests")
+	uploadConcurrency := flag.Int("upload-concurrency", 16, "Maximum concurrent upload streams (composite parts + whole small files)")
+	parallelUploadThresholdFlag := flag.Int64("parallel-upload-threshold", 256<<20, "Files larger than this many bytes upload as concurrent composite parts (default 256 MiB)")
 	flag.Parse()
 
 	if *debug {
 		log.SetLevel(logrus.DebugLevel)
 	}
+
+	// --pr isolates OS-image uploads/manifests into pr/<N>/. The firmware
+	// pipeline is deliberately un-prefixed, so combining the two would silently
+	// write firmware into the SHARED manifests/master.json + firmware/<chip>/
+	// tree — the exact corruption --pr exists to prevent. Reject it loudly.
+	if *pr > 0 && *firmware {
+		log.Fatal("--pr is not supported with --firmware (PR builds publish OS images only)")
+	}
+
+	// The active path prefix for this invocation: "" for release/nightly
+	// builds, "pr/<N>/" for a per-PR debug build. The --apply-metadata branch
+	// overrides this below from the entry's own PR field, since that job runs
+	// without --pr and must route purely from what --upload-only recorded.
+	prefix := prPrefix(*pr)
+
+	// Initialise the global upload limits before any upload starts. The
+	// semaphore is shared by every upload goroutine (main/ota/recovery/
+	// flashpack/sbom/bmap/zst and the composite parts within each), so the
+	// process never runs more than -upload-concurrency streams at once.
+	if *uploadConcurrency < 1 {
+		*uploadConcurrency = 1
+	}
+	uploadSem = make(chan struct{}, *uploadConcurrency)
+	parallelUploadThreshold = *parallelUploadThresholdFlag
 
 	// Validate args
 	if *listImages {
@@ -1226,7 +1301,7 @@ func main() {
 
 	// Send notification for an already-published release
 	if *notifyOnly {
-		manifestPath := fmt.Sprintf("manifests/%s.json", *deviceType)
+		manifestPath := deviceManifestPath(prefix, *deviceType)
 		r, err := bucket.Object(manifestPath).NewReader(ctx)
 		if err != nil {
 			log.WithError(err).Fatal("Failed to read device manifest")
@@ -1259,7 +1334,7 @@ func main() {
 			"is_nightly":  *nightly,
 			"stability":   *stability,
 		})
-		if err := updateMasterManifest(ctx, logger, bucket, *deviceType, *version, *nightly, *stability, true); err != nil {
+		if err := updateMasterManifest(ctx, logger, bucket, prefix, *deviceType, *version, *nightly, *stability, true); err != nil {
 			log.WithError(err).Fatal("Failed to update master manifest")
 		}
 		return
@@ -1274,14 +1349,18 @@ func main() {
 		if err != nil {
 			log.WithError(err).Fatal("Failed to read manifest entry")
 		}
+		// This job runs without --pr; route purely from what --upload-only
+		// stamped onto the entry so the publish-pr job needs only the entry.
+		prefix = prPrefix(entry.PR)
 		log.WithFields(logrus.Fields{
 			"entry":   *applyMetadata,
 			"device":  entry.Device,
 			"version": entry.Version,
 			"storage": entry.Storage,
+			"pr":      entry.PR,
 		}).Info("Applying manifest entry")
 		updateManifests(
-			ctx, bucket, entry.Device, entry.Version,
+			ctx, bucket, prefix, entry.Device, entry.Version,
 			entry.FilePath, entry.FileSize, entry.FileChecksum,
 			entry.BmapPath,
 			entry.ZstPath, entry.ZstChecksum, entry.ZstSize,
@@ -1296,7 +1375,7 @@ func main() {
 
 	// Rename device if requested
 	if *renameTo != "" {
-		if err := renameDeviceType(ctx, bucket, *deviceType, *renameTo); err != nil {
+		if err := renameDeviceType(ctx, bucket, prefix, *deviceType, *renameTo); err != nil {
 			log.WithError(err).Fatal("Failed to rename device")
 		}
 		return
@@ -1312,7 +1391,7 @@ func main() {
 
 	// Remove device if requested
 	if *removeDevice {
-		if err := removeDeviceType(ctx, bucket, *deviceType, !*removeKeepFiles); err != nil {
+		if err := removeDeviceType(ctx, bucket, prefix, *deviceType, !*removeKeepFiles); err != nil {
 			log.WithError(err).Fatal("Failed to remove device")
 		}
 		return
@@ -1328,7 +1407,7 @@ func main() {
 
 	// Create device if requested
 	if *createDevice {
-		if err := createNewDevice(ctx, bucket, *deviceType, *stability); err != nil {
+		if err := createNewDevice(ctx, bucket, prefix, *deviceType, *stability); err != nil {
 			log.WithError(err).Fatal("Failed to create device")
 		}
 		return
@@ -1336,13 +1415,13 @@ func main() {
 
 	// Promote nightly to stable if requested
 	if *promote {
-		promoteNightlyToStable(ctx, bucket, *deviceType, *version, *notifyDiscord)
+		promoteNightlyToStable(ctx, bucket, prefix, *deviceType, *version, *notifyDiscord)
 		return
 	}
 
 	// Swap image file if requested
 	if *swap {
-		swapImageFile(ctx, bucket, *deviceType, *version, *localFile, *recoveryFile, *nightly)
+		swapImageFile(ctx, bucket, prefix, *deviceType, *version, *localFile, *recoveryFile, *nightly)
 		return
 	}
 
@@ -1382,6 +1461,30 @@ func main() {
 	if !*updateOnly {
 		log.Info("Starting parallel file processing...")
 
+		// Recovery dedupe: on eMMC/Thor devices --file and --recovery-file point
+		// at the SAME local tegraflash bundle, which today uploads the identical
+		// 7 GB object twice in parallel (both resolve to the same destination
+		// path and neither exists yet, so the skip-if-exists check races). When
+		// the two paths resolve to the same file on disk, upload it once as the
+		// main image and reuse that result (path/size) plus the main file's
+		// checksum for the recovery manifest fields — which is exactly what a
+		// separate upload would have produced. When they differ (Orin NVMe:
+		// main is the .img.zst, recovery is a distinct bundle) both upload as
+		// before.
+		recoveryDedup := false
+		if *localFile != "" && *recoveryFile != "" {
+			same, err := sameLocalFile(*localFile, *recoveryFile)
+			if err != nil {
+				log.WithError(err).Warn("Could not determine whether the recovery file duplicates the main file; uploading both")
+			} else if same {
+				recoveryDedup = true
+				log.WithFields(logrus.Fields{
+					"file":          *localFile,
+					"recovery_file": *recoveryFile,
+				}).Info("Recovery file is the same local file as the main image; skipping duplicate upload and reusing the main upload for recovery")
+			}
+		}
+
 		// Process main file if provided
 		var mainFileChan <-chan fileProcessResult
 		if *localFile != "" {
@@ -1396,9 +1499,10 @@ func main() {
 			otaUpdateFileChan = processFileAsync(ctx, *otaUpdateFile, "ota")
 		}
 
-		// Process recovery file if provided
+		// Process recovery file if provided (skipped when it duplicates the main
+		// file — its manifest fields are reused from the main result below).
 		var recoveryFileChan <-chan fileProcessResult
-		if *recoveryFile != "" {
+		if *recoveryFile != "" && !recoveryDedup {
 			log.Info("Processing recovery file...")
 			recoveryFileChan = processFileAsync(ctx, *recoveryFile, "recovery")
 		}
@@ -1472,58 +1576,39 @@ func main() {
 
 		var mainUploadChan <-chan uploadResult
 		if mainResult.compressedPath != "" {
-			mainUploadChan = uploadFileAsync(ctx, bucket, mainResult.compressedPath, *deviceType, *version)
+			mainUploadChan = uploadFileAsync(ctx, bucket, prefix, mainResult.compressedPath, *deviceType, *version)
 		}
 
 		var otaUpdateUploadChan <-chan uploadResult
 		if otaUpdateResult.compressedPath != "" {
-			otaUpdateUploadChan = uploadFileAsync(ctx, bucket, otaUpdateResult.compressedPath, *deviceType, *version)
+			otaUpdateUploadChan = uploadFileAsync(ctx, bucket, prefix, otaUpdateResult.compressedPath, *deviceType, *version)
 		}
 
 		var recoveryUploadChan <-chan uploadResult
-		if recoveryResult.compressedPath != "" {
-			recoveryUploadChan = uploadFileAsync(ctx, bucket, recoveryResult.compressedPath, *deviceType, *version)
+		if recoveryResult.compressedPath != "" && !recoveryDedup {
+			recoveryUploadChan = uploadFileAsync(ctx, bucket, prefix, recoveryResult.compressedPath, *deviceType, *version)
 		}
 
 		var flashpackUploadChan <-chan uploadResult
 		if flashpackResult.compressedPath != "" {
-			flashpackUploadChan = uploadFileAsync(ctx, bucket, flashpackResult.compressedPath, *deviceType, *version)
+			flashpackUploadChan = uploadFileAsync(ctx, bucket, prefix, flashpackResult.compressedPath, *deviceType, *version)
 		}
 
 		var sbomUploadChan <-chan uploadResult
 		if sbomResult.compressedPath != "" {
-			sbomUploadChan = uploadFileAsync(ctx, bucket, sbomResult.compressedPath, *deviceType, *version)
+			sbomUploadChan = uploadFileAsync(ctx, bucket, prefix, sbomResult.compressedPath, *deviceType, *version)
 		}
 
 		// bmap is a small XML file; upload it in parallel with the others.
 		var bmapUploadChan <-chan uploadResult
 		if *bmapFile != "" {
-			bmapUploadChan = uploadFileAsync(ctx, bucket, *bmapFile, *deviceType, *version)
+			bmapUploadChan = uploadFileAsync(ctx, bucket, prefix, *bmapFile, *deviceType, *version)
 		}
 
-		// Generate and upload a seekable-zstd image for OS images (the
-		// .img/.wic/.sdimg → zip case). OTA and recovery files use their own
-		// compression formats and are not wrapped in .zst.
-		var zstUploadChan <-chan uploadResult
-		if *localFile != "" && mainResult.compressedPath != "" {
-			rawPath, symErr := filepath.EvalSymlinks(*localFile)
-			if symErr != nil {
-				rawPath = *localFile
-			}
-			rawExt := strings.ToLower(filepath.Ext(rawPath))
-			if rawExt == ".img" || rawExt == ".wic" || rawExt == ".sdimg" {
-				zstPath := rawPath + ".zst"
-				log.WithFields(logrus.Fields{
-					"src": rawPath,
-					"dst": zstPath,
-				}).Info("Generating seekable-zstd image...")
-				if zstErr := compressSeekableZstd(rawPath, zstPath); zstErr != nil {
-					log.WithError(zstErr).Fatal("Failed to generate seekable-zstd image")
-				}
-				log.Info("Seekable-zstd image generated, uploading...")
-				zstUploadChan = uploadFileAsync(ctx, bucket, zstPath, *deviceType, *version)
-			}
-		}
+		// The seekable-zstd OS image now IS the main file (compressFile produced
+		// it in place of a gzip .img.gz), so there is no separate .zst artifact
+		// to generate or upload here — the manifest .zst fields reuse the main
+		// upload. See the zst-derivation block after the upload waits.
 
 		// Wait for uploads to complete
 		var mainUpload uploadResult
@@ -1553,6 +1638,15 @@ func main() {
 			log.Info("Recovery file uploaded successfully")
 		}
 
+		// Recovery deduped onto the main image: reuse the main upload's path and
+		// size and the main file's checksum, so the recovery manifest fields are
+		// byte-for-byte identical to what a separate (duplicate) upload produced.
+		if recoveryDedup {
+			recoveryResult = mainResult
+			recoveryUpload = mainUpload
+			log.Info("Reusing main upload result for recovery manifest fields (deduped)")
+		}
+
 		var flashpackUpload uploadResult
 		if flashpackUploadChan != nil {
 			flashpackUpload = <-flashpackUploadChan
@@ -1580,28 +1674,16 @@ func main() {
 			log.Info("SBOM file uploaded successfully")
 		}
 
-		var zstUpload uploadResult
-		if zstUploadChan != nil {
-			zstUpload = <-zstUploadChan
-			if zstUpload.err != nil {
-				log.WithError(zstUpload.err).Fatal("Failed to upload seekable-zstd file")
-			}
-			log.Info("Seekable-zstd file uploaded successfully")
-		}
-
-		// The checksum of the uploaded .zst (calculated from the local file).
-		var zstChecksum string
-		if zstUpload.path != "" {
-			rawPath, symErr := filepath.EvalSymlinks(*localFile)
-			if symErr != nil {
-				rawPath = *localFile
-			}
-			zstLocalPath := rawPath + ".zst"
-			if cs, csErr := calculateChecksum(zstLocalPath); csErr == nil {
-				zstChecksum = cs
-			} else {
-				log.WithError(csErr).Warn("Failed to calculate zst checksum; zst_checksum will be empty")
-			}
+		// Seekable-zstd manifest fields. When the main OS image is itself a
+		// seekable .zst (Jetson raw .img), it doubles as the .zst artifact, so
+		// reuse the single upload rather than a second identical object.
+		// Non-.zst main images (RPi .sdimg.gz, eMMC/Thor bundles) have none.
+		var zstPath, zstChecksum string
+		var zstSize int64
+		if strings.HasSuffix(strings.ToLower(mainResult.compressedPath), ".zst") {
+			zstPath = mainUpload.path
+			zstChecksum = mainResult.checksum
+			zstSize = mainUpload.size
 		}
 
 		// In upload-only mode the manifests are deliberately untouched: write
@@ -1613,13 +1695,14 @@ func main() {
 				Storage:           *storage,
 				Nightly:           *nightly,
 				Stability:         *stability,
+				PR:                *pr,
 				FilePath:          mainUpload.path,
 				FileSize:          mainUpload.size,
 				FileChecksum:      mainResult.checksum,
 				BmapPath:          bmapUpload.path,
-				ZstPath:           zstUpload.path,
+				ZstPath:           zstPath,
 				ZstChecksum:       zstChecksum,
-				ZstSize:           zstUpload.size,
+				ZstSize:           zstSize,
 				OTAUpdatePath:     otaUpdateUpload.path,
 				OTAUpdateSize:     otaUpdateUpload.size,
 				OTAUpdateChecksum: otaUpdateResult.checksum,
@@ -1642,10 +1725,10 @@ func main() {
 
 		// Update manifests with results
 		updateManifests(
-			ctx, bucket, *deviceType, *version,
+			ctx, bucket, prefix, *deviceType, *version,
 			mainUpload.path, mainUpload.size, mainResult.checksum,
 			bmapUpload.path,
-			zstUpload.path, zstChecksum, zstUpload.size,
+			zstPath, zstChecksum, zstSize,
 			otaUpdateUpload.path, otaUpdateUpload.size, otaUpdateResult.checksum,
 			recoveryUpload.path, recoveryUpload.size, recoveryResult.checksum,
 			flashpackUpload.path, flashpackUpload.size, flashpackResult.checksum,
@@ -1654,7 +1737,7 @@ func main() {
 		)
 	} else {
 		// Just update manifests for existing file
-		imagePath := fmt.Sprintf("images/%s/%s/%s", *deviceType, *version, filepath.Base(*localFile))
+		imagePath := imageObjectPath(prefix, *deviceType, *version, filepath.Base(*localFile))
 
 		obj := bucket.Object(imagePath)
 		attrs, err := obj.Attrs(ctx)
@@ -1669,7 +1752,7 @@ func main() {
 		var otaUpdateChecksum string
 		var recoveryChecksum string
 
-		manifestPath := fmt.Sprintf("manifests/%s.json", *deviceType)
+		manifestPath := deviceManifestPath(prefix, *deviceType)
 		manifestObj := bucket.Object(manifestPath)
 		r, err := manifestObj.NewReader(ctx)
 		if err == nil {
@@ -1700,7 +1783,7 @@ func main() {
 		var otaUpdatePath string
 		var otaUpdateSize int64
 		if *otaUpdateFile != "" {
-			otaUpdatePath = fmt.Sprintf("images/%s/%s/%s", *deviceType, *version, filepath.Base(*otaUpdateFile))
+			otaUpdatePath = imageObjectPath(prefix, *deviceType, *version, filepath.Base(*otaUpdateFile))
 			menderObj := bucket.Object(otaUpdatePath)
 			menderAttrs, err := menderObj.Attrs(ctx)
 			if err != nil {
@@ -1714,7 +1797,7 @@ func main() {
 		var recoveryPath string
 		var recoverySize int64
 		if *recoveryFile != "" {
-			recoveryPath = fmt.Sprintf("images/%s/%s/%s", *deviceType, *version, filepath.Base(*recoveryFile))
+			recoveryPath = imageObjectPath(prefix, *deviceType, *version, filepath.Base(*recoveryFile))
 			recoveryObj := bucket.Object(recoveryPath)
 			recoveryAttrs, err := recoveryObj.Attrs(ctx)
 			if err != nil {
@@ -1724,7 +1807,7 @@ func main() {
 			recoverySize = recoveryAttrs.Size
 		}
 
-		updateManifests(ctx, bucket, *deviceType, *version, imagePath, attrs.Size, mainChecksum, "", "", "", 0, otaUpdatePath, otaUpdateSize, otaUpdateChecksum, recoveryPath, recoverySize, recoveryChecksum, "", 0, "", "", 0, "", *storage, *nightly, *stability, *notifyDiscord, *skipMasterManifest)
+		updateManifests(ctx, bucket, prefix, *deviceType, *version, imagePath, attrs.Size, mainChecksum, "", "", "", 0, otaUpdatePath, otaUpdateSize, otaUpdateChecksum, recoveryPath, recoverySize, recoveryChecksum, "", 0, "", "", 0, "", *storage, *nightly, *stability, *notifyDiscord, *skipMasterManifest)
 	}
 }
 
@@ -1833,9 +1916,9 @@ func listImagesInBucket(ctx context.Context, bucket *storage.BucketHandle) {
 	}
 }
 
-func uploadFile(ctx context.Context, bucket *storage.BucketHandle, localPath, deviceType, version string) (string, error) {
+func uploadFile(ctx context.Context, bucket *storage.BucketHandle, prefix, localPath, deviceType, version string) (string, error) {
 	filename := filepath.Base(localPath)
-	destinationPath := fmt.Sprintf("images/%s/%s/%s", deviceType, version, filename)
+	destinationPath := imageObjectPath(prefix, deviceType, version, filename)
 
 	// Skip re-upload if the object already exists in GCS with the same size.
 	// This makes outer-retry loops (used to survive 412 manifest races when
@@ -1852,10 +1935,33 @@ func uploadFile(ctx context.Context, bucket *storage.BucketHandle, localPath, de
 		return destinationPath, nil
 	}
 
+	contentType := contentTypeForPath(localPath)
+
+	// Large files upload as concurrent composite parts (see parallel_upload.go);
+	// small files (bmap, SBOM, manifest entries, etc.) keep the single-stream
+	// path below unchanged.
+	plan := planParts(localInfo.Size(), parallelUploadThreshold)
+	if len(plan) > 1 {
+		logComposePlan(destinationPath, localInfo.Size(), plan)
+		if err := uploadFileComposite(ctx, bucketComposer{bucket: bucket}, uploadSem, localPath, destinationPath, contentType, localInfo.Size(), plan, partChunkSize); err != nil {
+			log.WithError(err).Error("Composite upload failed")
+			return "", err
+		}
+		log.WithField("path", destinationPath).Info("File uploaded successfully")
+		return destinationPath, nil
+	}
+
 	log.WithFields(logrus.Fields{
 		"local_path":  localPath,
 		"destination": destinationPath,
 	}).Info("Uploading file")
+
+	// Single-stream small-file upload. It draws from the same global upload
+	// semaphore as composite parts so total in-flight streams stay capped.
+	if err := acquireUploadSlot(ctx, uploadSem); err != nil {
+		return "", err
+	}
+	defer releaseUploadSlot(uploadSem)
 
 	// Open the local file
 	file, err := os.Open(localPath)
@@ -1867,18 +1973,6 @@ func uploadFile(ctx context.Context, bucket *storage.BucketHandle, localPath, de
 
 	// Create the destination object writer
 	w := obj.NewWriter(ctx)
-
-	// Set content type based on extension
-	contentType := "application/octet-stream"
-	if strings.HasSuffix(localPath, ".zip") {
-		contentType = "application/zip"
-	} else if strings.HasSuffix(localPath, ".tgz") {
-		contentType = "application/gzip"
-	} else if strings.HasSuffix(localPath, ".xz") {
-		contentType = "application/x-xz"
-	} else if strings.HasSuffix(localPath, ".zst") {
-		contentType = "application/zstd"
-	}
 	w.ContentType = contentType
 
 	// Stream the content (efficient for large files)
@@ -1899,7 +1993,7 @@ func uploadFile(ctx context.Context, bucket *storage.BucketHandle, localPath, de
 	return destinationPath, nil
 }
 
-func updateManifests(ctx context.Context, bucket *storage.BucketHandle, deviceType, version, filePath string, fileSize int64, fileChecksum string, bmapPath string, zstPath, zstChecksum string, zstSize int64, otaUpdatePath string, otaUpdateSize int64, otaUpdateChecksum string, recoveryPath string, recoverySize int64, recoveryChecksum string, flashpackPath string, flashpackSize int64, flashpackChecksum string, sbomPath string, sbomSize int64, sbomChecksum string, storage string, isNightly bool, stability string, notifyDiscord bool, skipMasterManifest bool) {
+func updateManifests(ctx context.Context, bucket *storage.BucketHandle, prefix, deviceType, version, filePath string, fileSize int64, fileChecksum string, bmapPath string, zstPath, zstChecksum string, zstSize int64, otaUpdatePath string, otaUpdateSize int64, otaUpdateChecksum string, recoveryPath string, recoverySize int64, recoveryChecksum string, flashpackPath string, flashpackSize int64, flashpackChecksum string, sbomPath string, sbomSize int64, sbomChecksum string, storage string, isNightly bool, stability string, notifyDiscord bool, skipMasterManifest bool) {
 	logger := log.WithFields(logrus.Fields{
 		"device_type":     deviceType,
 		"version":         version,
@@ -1925,7 +2019,7 @@ func updateManifests(ctx context.Context, bucket *storage.BucketHandle, deviceTy
 
 	if skipMasterManifest {
 		logger.Info("Updating device manifest (master manifest will be updated by a separate publish job)")
-		if err := updateDeviceManifest(ctx, deviceLogger, bucket, deviceType, version, filePath, fileSize, fileChecksum, bmapPath, zstPath, zstChecksum, zstSize, otaUpdatePath, otaUpdateSize, otaUpdateChecksum, recoveryPath, recoverySize, recoveryChecksum, flashpackPath, flashpackSize, flashpackChecksum, sbomPath, sbomSize, sbomChecksum, storage, isNightly); err != nil {
+		if err := updateDeviceManifest(ctx, deviceLogger, bucket, prefix, deviceType, version, filePath, fileSize, fileChecksum, bmapPath, zstPath, zstChecksum, zstSize, otaUpdatePath, otaUpdateSize, otaUpdateChecksum, recoveryPath, recoverySize, recoveryChecksum, flashpackPath, flashpackSize, flashpackChecksum, sbomPath, sbomSize, sbomChecksum, storage, isNightly); err != nil {
 			logger.WithError(err).Fatal("Failed to update device manifest")
 		}
 	} else {
@@ -1947,12 +2041,12 @@ func updateManifests(ctx context.Context, bucket *storage.BucketHandle, deviceTy
 
 		go func() {
 			defer wg.Done()
-			deviceErrChan <- updateDeviceManifest(ctx, deviceLogger, bucket, deviceType, version, filePath, fileSize, fileChecksum, bmapPath, zstPath, zstChecksum, zstSize, otaUpdatePath, otaUpdateSize, otaUpdateChecksum, recoveryPath, recoverySize, recoveryChecksum, flashpackPath, flashpackSize, flashpackChecksum, sbomPath, sbomSize, sbomChecksum, storage, isNightly)
+			deviceErrChan <- updateDeviceManifest(ctx, deviceLogger, bucket, prefix, deviceType, version, filePath, fileSize, fileChecksum, bmapPath, zstPath, zstChecksum, zstSize, otaUpdatePath, otaUpdateSize, otaUpdateChecksum, recoveryPath, recoverySize, recoveryChecksum, flashpackPath, flashpackSize, flashpackChecksum, sbomPath, sbomSize, sbomChecksum, storage, isNightly)
 		}()
 
 		go func() {
 			defer wg.Done()
-			masterErrChan <- updateMasterManifest(ctx, masterLogger, bucket, deviceType, version, isNightly, stability, false)
+			masterErrChan <- updateMasterManifest(ctx, masterLogger, bucket, prefix, deviceType, version, isNightly, stability, false)
 		}()
 
 		wg.Wait()
@@ -2110,6 +2204,11 @@ const seekableFrameSize = 4 << 20 // 4 MiB
 // compressSeekableZstd writes srcPath as a seekable-zstd file to dstPath.
 // Each frame covers seekableFrameSize uncompressed bytes, so the CLI can
 // random-access the image without decompressing from the start.
+//
+// Frames are compressed concurrently (up to GOMAXPROCS at a time) and written
+// in source order via WriteMany. The previous sequential Write loop pinned a
+// single core, which dominated the publish step for the multi-GB Jetson
+// images; parallel framing scales the pass with the runner's cores.
 func compressSeekableZstd(srcPath, dstPath string) error {
 	in, err := os.Open(srcPath)
 	if err != nil {
@@ -2123,6 +2222,8 @@ func compressSeekableZstd(srcPath, dstPath string) error {
 	}
 	defer out.Close()
 
+	// The encoder must support concurrent EncodeAll calls (WriteMany fans out
+	// frame compression across goroutines); klauspost's encoder does.
 	enc, err := zstd.NewWriter(nil)
 	if err != nil {
 		return err
@@ -2134,24 +2235,29 @@ func compressSeekableZstd(srcPath, dstPath string) error {
 		return err
 	}
 
-	buf := make([]byte, seekableFrameSize)
-	for {
+	// frameSource yields one seekableFrameSize frame per call and a nil slice
+	// at EOF. WriteMany may retain each returned slice until it returns, so
+	// every frame is a freshly-allocated buffer rather than a shared scratch
+	// buffer. io.ReadFull returns n>0 with ErrUnexpectedEOF for the final short
+	// frame; that data is emitted and the following call reports EOF.
+	frameSource := func() ([]byte, error) {
+		buf := make([]byte, seekableFrameSize)
 		n, rerr := io.ReadFull(in, buf)
 		if n > 0 {
-			if _, werr := w.Write(buf[:n]); werr != nil {
-				w.Close()
-				return werr
-			}
+			return buf[:n], nil
 		}
-		if rerr == io.EOF || rerr == io.ErrUnexpectedEOF {
-			break
+		if rerr == io.EOF {
+			return nil, nil
 		}
-		if rerr != nil {
-			w.Close()
-			return rerr
-		}
+		return nil, rerr
 	}
 
+	if err := w.WriteMany(context.Background(), frameSource); err != nil {
+		w.Close()
+		return err
+	}
+
+	// WriteMany defers the seek table to Close (see its contract).
 	if err := w.Close(); err != nil {
 		return err
 	}
@@ -2162,7 +2268,7 @@ func compressSeekableZstd(srcPath, dstPath string) error {
 // into the stable version's image directory and returns the new path. It
 // returns "" when srcPath is empty, malformed, or the copy fails — the caller
 // treats a missing artifact as non-fatal, matching the image-copy behavior.
-func copyManifestArtifact(ctx context.Context, logger *logrus.Entry, bucket *storage.BucketHandle, srcPath, deviceType, stableVersion, label string) string {
+func copyManifestArtifact(ctx context.Context, logger *logrus.Entry, bucket *storage.BucketHandle, prefix, srcPath, deviceType, stableVersion, label string) string {
 	if srcPath == "" {
 		return ""
 	}
@@ -2170,7 +2276,7 @@ func copyManifestArtifact(ctx context.Context, logger *logrus.Entry, bucket *sto
 	if len(parts) < 4 {
 		return ""
 	}
-	destPath := fmt.Sprintf("images/%s/%s/%s", deviceType, stableVersion, parts[len(parts)-1])
+	destPath := imageObjectPath(prefix, deviceType, stableVersion, parts[len(parts)-1])
 	if _, err := bucket.Object(destPath).CopierFrom(bucket.Object(srcPath)).Run(ctx); err != nil {
 		logger.WithError(err).Warnf("Failed to copy %s, continuing without it", label)
 		return ""
@@ -2179,8 +2285,8 @@ func copyManifestArtifact(ctx context.Context, logger *logrus.Entry, bucket *sto
 	return destPath
 }
 
-func updateDeviceManifest(ctx context.Context, logger *logrus.Entry, bucket *storage.BucketHandle, deviceType, version, filePath string, fileSize int64, fileChecksum string, bmapPath string, zstPath, zstChecksum string, zstSize int64, otaUpdatePath string, otaUpdateSize int64, otaUpdateChecksum string, recoveryPath string, recoverySize int64, recoveryChecksum string, flashpackPath string, flashpackSize int64, flashpackChecksum string, sbomPath string, sbomSize int64, sbomChecksum string, storageType string, isNightly bool) error {
-	manifestPath := fmt.Sprintf("manifests/%s.json", deviceType)
+func updateDeviceManifest(ctx context.Context, logger *logrus.Entry, bucket *storage.BucketHandle, prefix, deviceType, version, filePath string, fileSize int64, fileChecksum string, bmapPath string, zstPath, zstChecksum string, zstSize int64, otaUpdatePath string, otaUpdateSize int64, otaUpdateChecksum string, recoveryPath string, recoverySize int64, recoveryChecksum string, flashpackPath string, flashpackSize int64, flashpackChecksum string, sbomPath string, sbomSize int64, sbomChecksum string, storageType string, isNightly bool) error {
+	manifestPath := deviceManifestPath(prefix, deviceType)
 	logger = logger.WithField("manifest_path", manifestPath)
 	logger.Info("Processing device manifest")
 
@@ -2444,8 +2550,8 @@ func updateDeviceManifest(ctx context.Context, logger *logrus.Entry, bucket *sto
 	return fmt.Errorf("failed to write device manifest after %d attempts: concurrent writers", maxRetries)
 }
 
-func updateMasterManifest(ctx context.Context, logger *logrus.Entry, bucket *storage.BucketHandle, deviceType, version string, isNightly bool, stability string, forceWrite bool) error {
-	masterManifestPath := "manifests/master.json"
+func updateMasterManifest(ctx context.Context, logger *logrus.Entry, bucket *storage.BucketHandle, prefix, deviceType, version string, isNightly bool, stability string, forceWrite bool) error {
+	masterManifestPath := masterManifestPath(prefix)
 	logger = logger.WithField("manifest_path", masterManifestPath)
 	logger.Info("Processing master manifest")
 
@@ -2490,7 +2596,7 @@ func updateMasterManifest(ctx context.Context, logger *logrus.Entry, bucket *sto
 					}
 					correctVersion := (isNightly && existingInfo.LatestNightly == version) ||
 						(!isNightly && existingInfo.Latest == version)
-					expectedPath := fmt.Sprintf("manifests/%s.json", deviceType)
+					expectedPath := deviceManifestPath(prefix, deviceType)
 					if correctVersion && existingInfo.ManifestPath == expectedPath && existingInfo.Stability == expectedStability {
 						logger.Info("Master manifest already up-to-date, skipping write")
 						return nil
@@ -2522,7 +2628,7 @@ func updateMasterManifest(ctx context.Context, logger *logrus.Entry, bucket *sto
 		}
 
 		// Always set ManifestPath to ensure consistency
-		deviceInfo.ManifestPath = fmt.Sprintf("manifests/%s.json", deviceType)
+		deviceInfo.ManifestPath = deviceManifestPath(prefix, deviceType)
 
 		// Set stability (defaults to "stable" if empty)
 		if stability == "" {
@@ -2596,7 +2702,7 @@ func updateMasterManifest(ctx context.Context, logger *logrus.Entry, bucket *sto
 }
 
 // createNewDevice creates a new device type in both manifests
-func createNewDevice(ctx context.Context, bucket *storage.BucketHandle, deviceType string, stability string) error {
+func createNewDevice(ctx context.Context, bucket *storage.BucketHandle, prefix, deviceType string, stability string) error {
 	logger := log.WithFields(logrus.Fields{
 		"device_type": deviceType,
 		"stability":   stability,
@@ -2604,7 +2710,7 @@ func createNewDevice(ctx context.Context, bucket *storage.BucketHandle, deviceTy
 	logger.Info("Creating new device type")
 
 	// Create empty device manifest
-	manifestPath := fmt.Sprintf("manifests/%s.json", deviceType)
+	manifestPath := deviceManifestPath(prefix, deviceType)
 	manifest := DeviceManifest{
 		DeviceID: deviceType,
 		Versions: make(map[string]VersionMetadata),
@@ -2636,7 +2742,7 @@ func createNewDevice(ctx context.Context, bucket *storage.BucketHandle, deviceTy
 	logger.Info("Successfully created device manifest")
 
 	// Update master manifest to include the new device
-	masterManifestPath := "manifests/master.json"
+	masterManifestPath := masterManifestPath(prefix)
 	masterObj := bucket.Object(masterManifestPath)
 
 	var masterManifest MasterManifest
@@ -2700,7 +2806,7 @@ func createNewDevice(ctx context.Context, bucket *storage.BucketHandle, deviceTy
 }
 
 // promoteNightlyToStable promotes a nightly build to stable release by removing "nightly" from version name
-func promoteNightlyToStable(ctx context.Context, bucket *storage.BucketHandle, deviceType, nightlyVersion string, notifyDiscord bool) {
+func promoteNightlyToStable(ctx context.Context, bucket *storage.BucketHandle, prefix, deviceType, nightlyVersion string, notifyDiscord bool) {
 	logger := log.WithFields(logrus.Fields{
 		"device_type":     deviceType,
 		"nightly_version": nightlyVersion,
@@ -2731,7 +2837,7 @@ func promoteNightlyToStable(ctx context.Context, bucket *storage.BucketHandle, d
 	logger.WithField("stable_version", stableVersion).Info("Derived stable version name")
 
 	// Read device manifest
-	manifestPath := fmt.Sprintf("manifests/%s.json", deviceType)
+	manifestPath := deviceManifestPath(prefix, deviceType)
 	obj := bucket.Object(manifestPath)
 
 	var manifest DeviceManifest
@@ -2772,7 +2878,7 @@ func promoteNightlyToStable(ctx context.Context, bucket *storage.BucketHandle, d
 		logger.WithField("path", sourcePath).Fatal("Invalid source file path format")
 	}
 	filename := parts[len(parts)-1]
-	destinationPath := fmt.Sprintf("images/%s/%s/%s", deviceType, stableVersion, filename)
+	destinationPath := imageObjectPath(prefix, deviceType, stableVersion, filename)
 
 	logger.WithFields(logrus.Fields{
 		"source_path":      sourcePath,
@@ -2797,7 +2903,7 @@ func promoteNightlyToStable(ctx context.Context, bucket *storage.BucketHandle, d
 		otaParts := strings.Split(sourceVersionMeta.OTAUpdatePath, "/")
 		if len(otaParts) >= 4 {
 			otaFilename := otaParts[len(otaParts)-1]
-			otaDestPath = fmt.Sprintf("images/%s/%s/%s", deviceType, stableVersion, otaFilename)
+			otaDestPath = imageObjectPath(prefix, deviceType, stableVersion, otaFilename)
 
 			otaSrcObj := bucket.Object(sourceVersionMeta.OTAUpdatePath)
 			otaDstObj := bucket.Object(otaDestPath)
@@ -2818,7 +2924,7 @@ func promoteNightlyToStable(ctx context.Context, bucket *storage.BucketHandle, d
 		recoveryParts := strings.Split(sourceVersionMeta.RecoveryPath, "/")
 		if len(recoveryParts) >= 4 {
 			recoveryFilename := recoveryParts[len(recoveryParts)-1]
-			recoveryDestPath = fmt.Sprintf("images/%s/%s/%s", deviceType, stableVersion, recoveryFilename)
+			recoveryDestPath = imageObjectPath(prefix, deviceType, stableVersion, recoveryFilename)
 
 			recoverySrcObj := bucket.Object(sourceVersionMeta.RecoveryPath)
 			recoveryDstObj := bucket.Object(recoveryDestPath)
@@ -2838,7 +2944,7 @@ func promoteNightlyToStable(ctx context.Context, bucket *storage.BucketHandle, d
 	if sourceVersionMeta.NVMEPath != "" {
 		nvmeParts := strings.Split(sourceVersionMeta.NVMEPath, "/")
 		if len(nvmeParts) >= 4 {
-			nvmeDestPath = fmt.Sprintf("images/%s/%s/%s", deviceType, stableVersion, nvmeParts[len(nvmeParts)-1])
+			nvmeDestPath = imageObjectPath(prefix, deviceType, stableVersion, nvmeParts[len(nvmeParts)-1])
 			if _, err := bucket.Object(nvmeDestPath).CopierFrom(bucket.Object(sourceVersionMeta.NVMEPath)).Run(ctx); err != nil {
 				logger.WithError(err).Warn("Failed to copy NVME image, continuing without it")
 				nvmeDestPath = ""
@@ -2854,7 +2960,7 @@ func promoteNightlyToStable(ctx context.Context, bucket *storage.BucketHandle, d
 	if sourceVersionMeta.SDCardPath != "" {
 		sdParts := strings.Split(sourceVersionMeta.SDCardPath, "/")
 		if len(sdParts) >= 4 {
-			sdDestPath = fmt.Sprintf("images/%s/%s/%s", deviceType, stableVersion, sdParts[len(sdParts)-1])
+			sdDestPath = imageObjectPath(prefix, deviceType, stableVersion, sdParts[len(sdParts)-1])
 			if _, err := bucket.Object(sdDestPath).CopierFrom(bucket.Object(sourceVersionMeta.SDCardPath)).Run(ctx); err != nil {
 				logger.WithError(err).Warn("Failed to copy SD card image, continuing without it")
 				sdDestPath = ""
@@ -2869,8 +2975,8 @@ func promoteNightlyToStable(ctx context.Context, bucket *storage.BucketHandle, d
 	// bmap describes one image, so each follows its image to the stable path.
 	// Top-level BmapPath mirrors top-level Path (NVMe) for older CLIs. A pre-fix
 	// nightly that only carries the legacy top-level BmapPath is still promoted.
-	nvmeBmapDest := copyManifestArtifact(ctx, logger, bucket, sourceVersionMeta.NVMEBmapPath, deviceType, stableVersion, "NVMe block map")
-	sdBmapDest := copyManifestArtifact(ctx, logger, bucket, sourceVersionMeta.SDCardBmapPath, deviceType, stableVersion, "SD card block map")
+	nvmeBmapDest := copyManifestArtifact(ctx, logger, bucket, prefix, sourceVersionMeta.NVMEBmapPath, deviceType, stableVersion, "NVMe block map")
+	sdBmapDest := copyManifestArtifact(ctx, logger, bucket, prefix, sourceVersionMeta.SDCardBmapPath, deviceType, stableVersion, "SD card block map")
 	var topBmapDest string
 	switch {
 	case nvmeBmapDest != "":
@@ -2878,13 +2984,13 @@ func promoteNightlyToStable(ctx context.Context, bucket *storage.BucketHandle, d
 	case sdBmapDest != "":
 		topBmapDest = sdBmapDest
 	case sourceVersionMeta.BmapPath != "":
-		topBmapDest = copyManifestArtifact(ctx, logger, bucket, sourceVersionMeta.BmapPath, deviceType, stableVersion, "block map")
+		topBmapDest = copyManifestArtifact(ctx, logger, bucket, prefix, sourceVersionMeta.BmapPath, deviceType, stableVersion, "block map")
 	}
 
 	// Copy seekable-zstd images, mirroring bmap promotion. Each zst follows
 	// its image to the stable path and retains its checksum/size metadata.
-	nvmeZstDest := copyManifestArtifact(ctx, logger, bucket, sourceVersionMeta.NVMEZstPath, deviceType, stableVersion, "NVMe seekable-zstd")
-	sdZstDest := copyManifestArtifact(ctx, logger, bucket, sourceVersionMeta.SDCardZstPath, deviceType, stableVersion, "SD card seekable-zstd")
+	nvmeZstDest := copyManifestArtifact(ctx, logger, bucket, prefix, sourceVersionMeta.NVMEZstPath, deviceType, stableVersion, "NVMe seekable-zstd")
+	sdZstDest := copyManifestArtifact(ctx, logger, bucket, prefix, sourceVersionMeta.SDCardZstPath, deviceType, stableVersion, "SD card seekable-zstd")
 	var topZstDest string
 	switch {
 	case nvmeZstDest != "":
@@ -2892,20 +2998,20 @@ func promoteNightlyToStable(ctx context.Context, bucket *storage.BucketHandle, d
 	case sdZstDest != "":
 		topZstDest = sdZstDest
 	case sourceVersionMeta.ZstPath != "":
-		topZstDest = copyManifestArtifact(ctx, logger, bucket, sourceVersionMeta.ZstPath, deviceType, stableVersion, "seekable-zstd")
+		topZstDest = copyManifestArtifact(ctx, logger, bucket, prefix, sourceVersionMeta.ZstPath, deviceType, stableVersion, "seekable-zstd")
 	}
 
 	// Copy flashpacks, mirroring bmap/zst promotion. Flashpacks are
 	// per-storage artifacts; the top-level fields mirror the NVMe one and are
 	// the only fields on single-storage devices (Thor).
-	nvmeFlashpackDest := copyManifestArtifact(ctx, logger, bucket, sourceVersionMeta.NVMEFlashpackPath, deviceType, stableVersion, "NVMe flashpack")
-	emmcFlashpackDest := copyManifestArtifact(ctx, logger, bucket, sourceVersionMeta.EMMCFlashpackPath, deviceType, stableVersion, "eMMC flashpack")
+	nvmeFlashpackDest := copyManifestArtifact(ctx, logger, bucket, prefix, sourceVersionMeta.NVMEFlashpackPath, deviceType, stableVersion, "NVMe flashpack")
+	emmcFlashpackDest := copyManifestArtifact(ctx, logger, bucket, prefix, sourceVersionMeta.EMMCFlashpackPath, deviceType, stableVersion, "eMMC flashpack")
 	var topFlashpackDest string
 	switch {
 	case nvmeFlashpackDest != "":
 		topFlashpackDest = nvmeFlashpackDest
 	case sourceVersionMeta.FlashpackPath != "":
-		topFlashpackDest = copyManifestArtifact(ctx, logger, bucket, sourceVersionMeta.FlashpackPath, deviceType, stableVersion, "flashpack")
+		topFlashpackDest = copyManifestArtifact(ctx, logger, bucket, prefix, sourceVersionMeta.FlashpackPath, deviceType, stableVersion, "flashpack")
 	}
 
 	// Create new stable version entry with promotion metadata
@@ -3069,7 +3175,7 @@ func promoteNightlyToStable(ctx context.Context, bucket *storage.BucketHandle, d
 	logger.Info("Successfully updated device manifest")
 
 	// Update master manifest
-	if err := updateMasterManifestForPromotion(ctx, logger, bucket, deviceType, stableVersion); err != nil {
+	if err := updateMasterManifestForPromotion(ctx, logger, bucket, prefix, deviceType, stableVersion); err != nil {
 		logger.WithError(err).Fatal("Failed to update master manifest after promotion")
 	}
 
@@ -3083,8 +3189,8 @@ func promoteNightlyToStable(ctx context.Context, bucket *storage.BucketHandle, d
 }
 
 // updateMasterManifestForPromotion updates master manifest after promotion
-func updateMasterManifestForPromotion(ctx context.Context, logger *logrus.Entry, bucket *storage.BucketHandle, deviceType, stableVersion string) error {
-	masterManifestPath := "manifests/master.json"
+func updateMasterManifestForPromotion(ctx context.Context, logger *logrus.Entry, bucket *storage.BucketHandle, prefix, deviceType, stableVersion string) error {
+	masterManifestPath := masterManifestPath(prefix)
 	obj := bucket.Object(masterManifestPath)
 
 	const maxRetries = 10
@@ -3153,7 +3259,7 @@ func updateMasterManifestForPromotion(ctx context.Context, logger *logrus.Entry,
 }
 
 // swapImageFile replaces an existing version's image file while preserving metadata
-func swapImageFile(ctx context.Context, bucket *storage.BucketHandle, deviceType, version, localFile, recoveryFile string, isNightly bool) {
+func swapImageFile(ctx context.Context, bucket *storage.BucketHandle, prefix, deviceType, version, localFile, recoveryFile string, isNightly bool) {
 	logger := log.WithFields(logrus.Fields{
 		"device_type":   deviceType,
 		"version":       version,
@@ -3165,7 +3271,7 @@ func swapImageFile(ctx context.Context, bucket *storage.BucketHandle, deviceType
 	logger.Info("Starting image file swap")
 
 	// Read device manifest to validate version exists
-	manifestPath := fmt.Sprintf("manifests/%s.json", deviceType)
+	manifestPath := deviceManifestPath(prefix, deviceType)
 	obj := bucket.Object(manifestPath)
 
 	var manifest DeviceManifest
@@ -3202,7 +3308,7 @@ func swapImageFile(ctx context.Context, bucket *storage.BucketHandle, deviceType
 	}
 
 	// Upload new file
-	newPath, err := uploadFile(ctx, bucket, localFile, deviceType, version)
+	newPath, err := uploadFile(ctx, bucket, prefix, localFile, deviceType, version)
 	if err != nil {
 		logger.WithError(err).Fatal("Failed to upload new file")
 	}
@@ -3235,7 +3341,7 @@ func swapImageFile(ctx context.Context, bucket *storage.BucketHandle, deviceType
 	var newRecoveryPath, newRecoveryChecksum string
 	var newRecoverySize int64
 	if recoveryFile != "" {
-		recoveryPath, err := uploadFile(ctx, bucket, recoveryFile, deviceType, version)
+		recoveryPath, err := uploadFile(ctx, bucket, prefix, recoveryFile, deviceType, version)
 		if err != nil {
 			logger.WithError(err).Fatal("Failed to upload recovery file")
 		}
@@ -3329,7 +3435,7 @@ func swapImageFile(ctx context.Context, bucket *storage.BucketHandle, deviceType
 	}
 
 	// Update master manifest timestamp only
-	updateMasterManifestTimestamp(ctx, logger, bucket)
+	updateMasterManifestTimestamp(ctx, logger, bucket, prefix)
 
 	logger.WithFields(logrus.Fields{
 		"version":      version,
@@ -3357,8 +3463,8 @@ func calculateGCSChecksum(ctx context.Context, bucket *storage.BucketHandle, fil
 }
 
 // updateMasterManifestTimestamp updates only the timestamp in master manifest
-func updateMasterManifestTimestamp(ctx context.Context, logger *logrus.Entry, bucket *storage.BucketHandle) {
-	masterManifestPath := "manifests/master.json"
+func updateMasterManifestTimestamp(ctx context.Context, logger *logrus.Entry, bucket *storage.BucketHandle, prefix string) {
+	masterManifestPath := masterManifestPath(prefix)
 	obj := bucket.Object(masterManifestPath)
 
 	var masterManifest MasterManifest
@@ -3976,7 +4082,7 @@ func deleteObjectsByPrefix(ctx context.Context, bucket *storage.BucketHandle, pr
 }
 
 // removeDeviceType removes a device type from the manifests and optionally deletes its files
-func removeDeviceType(ctx context.Context, bucket *storage.BucketHandle, deviceType string, deleteFiles bool) error {
+func removeDeviceType(ctx context.Context, bucket *storage.BucketHandle, prefix, deviceType string, deleteFiles bool) error {
 	logger := log.WithFields(logrus.Fields{
 		"device_type":  deviceType,
 		"delete_files": deleteFiles,
@@ -3984,7 +4090,7 @@ func removeDeviceType(ctx context.Context, bucket *storage.BucketHandle, deviceT
 	logger.Info("Removing device type")
 
 	// Read the master manifest
-	masterManifestPath := "manifests/master.json"
+	masterManifestPath := masterManifestPath(prefix)
 	masterObj := bucket.Object(masterManifestPath)
 
 	var masterManifest MasterManifest
@@ -4014,9 +4120,9 @@ func removeDeviceType(ctx context.Context, bucket *storage.BucketHandle, deviceT
 
 	// Delete uploaded files if requested
 	if deleteFiles {
-		prefix := fmt.Sprintf("images/%s/", deviceType)
-		logger.WithField("prefix", prefix).Info("Deleting uploaded images")
-		deleted, err := deleteObjectsByPrefix(ctx, bucket, prefix)
+		imgPrefix := imageDirPrefix(prefix, deviceType)
+		logger.WithField("prefix", imgPrefix).Info("Deleting uploaded images")
+		deleted, err := deleteObjectsByPrefix(ctx, bucket, imgPrefix)
 		if err != nil {
 			logger.WithError(err).Error("Failed to delete images")
 			return fmt.Errorf("failed to delete images: %w", err)
@@ -4025,7 +4131,7 @@ func removeDeviceType(ctx context.Context, bucket *storage.BucketHandle, deviceT
 	}
 
 	// Delete the device manifest
-	manifestPath := fmt.Sprintf("manifests/%s.json", deviceType)
+	manifestPath := deviceManifestPath(prefix, deviceType)
 	logger.WithField("manifest_path", manifestPath).Info("Deleting device manifest")
 	if err := bucket.Object(manifestPath).Delete(ctx); err != nil {
 		logger.WithError(err).Warn("Failed to delete device manifest (may not exist)")
@@ -4071,7 +4177,7 @@ func copyObject(ctx context.Context, bucket *storage.BucketHandle, src, dst stri
 }
 
 // renameDeviceType moves all files and manifest data from one device type to another
-func renameDeviceType(ctx context.Context, bucket *storage.BucketHandle, oldDevice, newDevice string) error {
+func renameDeviceType(ctx context.Context, bucket *storage.BucketHandle, prefix, oldDevice, newDevice string) error {
 	logger := log.WithFields(logrus.Fields{
 		"old_device": oldDevice,
 		"new_device": newDevice,
@@ -4079,7 +4185,7 @@ func renameDeviceType(ctx context.Context, bucket *storage.BucketHandle, oldDevi
 	logger.Info("Renaming device type")
 
 	// Read the master manifest
-	masterManifestPath := "manifests/master.json"
+	masterManifestPath := masterManifestPath(prefix)
 	masterObj := bucket.Object(masterManifestPath)
 
 	var masterManifest MasterManifest
@@ -4105,7 +4211,7 @@ func renameDeviceType(ctx context.Context, bucket *storage.BucketHandle, oldDevi
 	}
 
 	// Read the source device manifest
-	oldManifestPath := fmt.Sprintf("manifests/%s.json", oldDevice)
+	oldManifestPath := deviceManifestPath(prefix, oldDevice)
 	oldManifestObj := bucket.Object(oldManifestPath)
 
 	var deviceManifest DeviceManifest
@@ -4124,7 +4230,7 @@ func renameDeviceType(ctx context.Context, bucket *storage.BucketHandle, oldDevi
 
 	// If target device already exists, read its manifest to merge into
 	var targetManifest DeviceManifest
-	newManifestPath := fmt.Sprintf("manifests/%s.json", newDevice)
+	newManifestPath := deviceManifestPath(prefix, newDevice)
 	newManifestObj := bucket.Object(newManifestPath)
 
 	tmr, err := newManifestObj.NewReader(ctx)
@@ -4146,8 +4252,8 @@ func renameDeviceType(ctx context.Context, bucket *storage.BucketHandle, oldDevi
 	}
 
 	// Copy all image files from old device to new device
-	oldPrefix := fmt.Sprintf("images/%s/", oldDevice)
-	newPrefix := fmt.Sprintf("images/%s/", newDevice)
+	oldPrefix := imageDirPrefix(prefix, oldDevice)
+	newPrefix := imageDirPrefix(prefix, newDevice)
 	logger.WithFields(logrus.Fields{
 		"old_prefix": oldPrefix,
 		"new_prefix": newPrefix,

@@ -44,6 +44,18 @@ IMAGE_CMD:wendy () {
     if [ -z "${WENDYOS_BOARD_ID}" ]; then
         bbfatal "image_types_wendy: WENDYOS_BOARD_ID is unset; cannot set the artifact's compatible device"
     fi
+    # The payload must be exactly the pinned rootfs size (wendyos-rootfs-size.inc):
+    # the on-device A/B slots are sized to it, and nightly/release artifacts must
+    # be byte-identical in size (see wendyos-rootfs-size.inc). This catches
+    # any sizing path that bypasses the IMAGE_ROOTFS_SIZE/MAXSIZE floor==ceiling
+    # pin before a mis-sized artifact can ship.
+    if [ -n "${WENDYOS_ROOTFS_SIZE_KB}" ]; then
+        payload_size=$(stat -Lc %s "${IMGDEPLOYDIR}/${IMAGE_LINK_NAME}.${WENDY_ARTIFACTIMG_FSTYPE}")
+        expected_size=$(expr ${WENDYOS_ROOTFS_SIZE_KB} \* 1024)
+        if [ "$payload_size" != "$expected_size" ]; then
+            bbfatal "image_types_wendy: rootfs image is $payload_size bytes but WENDYOS_ROOTFS_SIZE_KB pins it to $expected_size; refusing to pack a mis-sized OTA payload"
+        fi
+    fi
     wendyos-update pack \
         --image ${IMGDEPLOYDIR}/${IMAGE_LINK_NAME}.${WENDY_ARTIFACTIMG_FSTYPE} \
         --name ${WENDY_ARTIFACT_NAME} \

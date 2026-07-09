@@ -52,4 +52,15 @@ CONF_VERSION = "2"
 # auto.conf (parsed before local.conf per bitbake.conf) is not clobbered.
 WENDYOS_DEBUG ??= "0"
 WENDYOS_DEBUG_UART ??= "0"
+
+# Dev-only: re-enable local console/serial login + passwordless root on
+# non-fortress (PR) builds. NEVER set on release or nightly. See wendyos-image.bb.
+WENDYOS_DEV_LOGIN ??= "0"
 WENDYOS_SSHD ??= "0"
+
+# Build provenance stamped into the image (boot screen /etc/issue + /etc/wendyos/commit).
+# CI overrides these in auto.conf per build: VERSION is the release/nightly/PR tag
+# (pr-<N> | nightly-<ts> | X.Y.Z), COMMIT is the full builder git SHA. Local builds
+# fall back to DISTRO_VERSION and an empty commit.
+WENDYOS_BUILD_VERSION ??= "${DISTRO_VERSION}"
+WENDYOS_BUILD_COMMIT ??= ""

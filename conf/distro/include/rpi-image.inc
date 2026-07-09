@@ -89,3 +89,11 @@ IMAGE_INSTALL:remove = "${@'wendyos-data-setup' if d.getVar('WENDYOS_OTA') == 'w
 #                            raspberrypi only deploys the kernel to the FAT.
 IMAGE_INSTALL:append = "${@' wendyos-fw-env wendyos-update-config kernel-image' if d.getVar('WENDYOS_OTA') == 'wendy' else ''}"
 
+# 3) Fixed A/B rootfs sizing — the image, the A/B slot, and the .wendy OTA
+#    payload are all pinned to one per-platform constant so they are identical
+#    on every build and an OTA image can never outgrow its on-device slot. The
+#    mechanism (floor==ceiling IMAGE_ROOTFS_SIZE/MAXSIZE + pack-time guard) lives
+#    in conf/distro/include/wendyos-rootfs-size.inc (required via
+#    wendyos-update.inc; WENDYOS_ROOTFS_SIZE_KB:rpi = 8 GiB), with the matching
+#    `--fixed-size ${WENDYOS_ROOTFS_SIZE_KB}K` rootfsA/rootfsB slots in rpi-wendy-ab*.wks.
+

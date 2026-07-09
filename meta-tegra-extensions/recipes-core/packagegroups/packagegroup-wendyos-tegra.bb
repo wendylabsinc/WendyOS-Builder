@@ -20,6 +20,7 @@ RDEPENDS:${PN} = " \
     ${@'tegra-flash-reboot' if ('tegra234' in d.getVar('MACHINEOVERRIDES').split(':') and (d.getVar('WENDYOS_LAYER_TREE') or '') == 'scarthgap') else ''} \
     tegra-tools-tegrastats \
     tegra-bootcontrol-overlay \
+    tegra-rootfs-redundancy \
     setup-nv-boot-control \
     packagegroup-nvidia-container \
     "

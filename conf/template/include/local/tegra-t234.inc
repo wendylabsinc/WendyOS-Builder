@@ -15,6 +15,28 @@
 # tegra_partition_config.bbclass.
 WENDYOS_OTA = "wendy"
 
+# Fixed A/B rootfs slot size: 12 GiB per slot on every build, so an OTA rootfs
+# image always fits the on-device APP/APP_b partition (set at flash time, never
+# re-created). ROOTFSPART_SIZE_DEFAULT is the single-slot value; the redundant
+# A/B layout (USE_REDUNDANT_FLASH_LAYOUT=1, set in the machine conf) halves it,
+# so 24 GiB -> 12 GiB per slot. image_types_tegra.bbclass uses the resulting
+# ROOTFSPART_SIZE as APPSIZE in the generated flash layout. Strong '=' here
+# (parsed via local.conf, before the upstream orin-nano.inc/agx-orin.inc '?=')
+# wins. 24 GiB = 24 * 1024^3 bytes.
+ROOTFSPART_SIZE_DEFAULT = "25769803776"
+
+# The wendy rootfs is pinned to a fixed 12 GiB (wendyos-rootfs-size.inc), which
+# equals this slot, so image == slot == OTA payload. Keep the ext4 a 128 MiB
+# (32768 4K-block) multiple so blocks_per_group stays 32768: EDK2 Ext4Pkg
+# (L4TLauncher's ext4 reader) rejects blocks_per_group != 8*blocksize with
+# EFI_UNSUPPORTED and the board boot-loops. 12 GiB is already a 128 MiB
+# multiple, so this is a no-op guard today. Scoped :pn-wendyos-image —
+# machine-wide would round the ESP (tegra-espimage) past its 64 MiB max and
+# fail the build; IMAGE_ROOTFS_ALIGNMENT also feeds TEGRA_BLBLOCKSIZE, pinned
+# to its current 4 KiB so mksparse / the flash helper are unchanged.
+IMAGE_ROOTFS_ALIGNMENT:pn-wendyos-image = "131072"
+TEGRA_BLBLOCKSIZE:pn-wendyos-image = "4096"
+
 # Rootfs-only swaps for now (no UEFI capsule bootloader update). The t234
 # capsule path needs its own on-device verification on r39.2 — the ESRT
 # entry0 + fw_class GUID must be confirmed (Thor's GUID 3c834404 is
