@@ -52,3 +52,15 @@ EOF
     fi
 }
 ROOTFS_POSTPROCESS_COMMAND:append:x86-wendyos = " configure_wendyos_driver_feed;"
+
+# /config and /data as plain rootfs directories, not partitions. x86 has a
+# single persistent read-write rootfs (no A/B), so these persist as-is and no
+# /data machinery is wired (wendyos-etc-binds/data-setup are OTA-only and stay
+# off — that is deliberate). They mirror the fleet paths and, being directories,
+# become drop-in mount points if x86 ever gains wendy-update A/B: add the
+# partitions + fstab and migrate the folder contents before enabling the mount.
+create_wendyos_dirs() {
+    install -d -m 0755 ${IMAGE_ROOTFS}/config
+    install -d -m 0755 ${IMAGE_ROOTFS}/data
+}
+ROOTFS_POSTPROCESS_COMMAND:append:x86-wendyos = " create_wendyos_dirs;"
