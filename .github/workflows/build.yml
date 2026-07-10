@@ -23,6 +23,7 @@ on:
           - jetson-agx-orin
           - jetson-orin-nano
           - jetson-agx-thor
+          - generic-x86-64
       version:
         description: "Git ref (commit SHA, tag, or branch) to build. Empty = latest main."
         type: string
@@ -120,12 +121,16 @@ jobs:
           # slowest builds must be dispatched first: jetson-agx-thor is the long
           # pole (~14 min warm vs ~5 min for a Pi; heavier still on release
           # builds, which add tegraflash + flashpack + upload), then the other
-          # Jetsons, then the Raspberry Pis. Do NOT sort this alphabetically.
+          # Jetsons, then generic-x86-64, then the Raspberry Pis. generic-x86-64
+          # is placed ahead of the Pis because its sstate is coldest (newest
+          # board) and its first builds run long until the cache warms. Do NOT
+          # sort this alphabetically.
           ALL_MATRIX='[
             {"device":"jetson-agx-thor","storage":"nvme"},
             {"device":"jetson-agx-orin","storage":"nvme"},
             {"device":"jetson-agx-orin","storage":"emmc"},
             {"device":"jetson-orin-nano","storage":"nvme"},
+            {"device":"generic-x86-64","storage":"disk"},
             {"device":"raspberry-pi-5","storage":"nvme"},
             {"device":"raspberry-pi-5","storage":"sd"},
             {"device":"raspberry-pi-4","storage":"sd"},
@@ -137,7 +142,7 @@ jobs:
 
           emit_all() {
             echo "matrix={\"include\":${ALL_MATRIX}}" >> "$GITHUB_OUTPUT"
-            echo "devices=jetson-agx-thor jetson-agx-orin jetson-orin-nano raspberry-pi-5 raspberry-pi-4 raspberry-pi-3" >> "$GITHUB_OUTPUT"
+            echo "devices=jetson-agx-thor jetson-agx-orin jetson-orin-nano generic-x86-64 raspberry-pi-5 raspberry-pi-4 raspberry-pi-3" >> "$GITHUB_OUTPUT"
           }
 
           emit_one() {
@@ -234,6 +239,7 @@ jobs:
             jetson-agx-orin:emmc) BOARD=jetson-agx-orin-emmc;  MACHINE=jetson-agx-orin-devkit-emmc-wendyos ;;
             jetson-orin-nano:nvme) BOARD=jetson-orin-nano-nvme; MACHINE=jetson-orin-nano-devkit-nvme-wendyos ;;
             jetson-agx-thor:nvme) BOARD=jetson-agx-thor;       MACHINE=jetson-agx-thor-devkit-nvme-wendyos ;;
+            generic-x86-64:disk)  BOARD=generic-x86-64;       MACHINE=genericx86-64-wendyos ;;
             *) echo "Unknown device/storage: $DEVICE/$STORAGE"; exit 1 ;;
           esac
           echo "board=$BOARD" >> "$GITHUB_OUTPUT"
@@ -439,27 +445,40 @@ jobs:
       # the recipe embeds the version + checksum in SRC_URI, so a new release
       # changes the do_fetch signature and sstate re-fetches instead of reusing
       # a stale cached binary. Authenticated to avoid the 60/hr anon API limit.
+      #
+      # Arch-aware: the release publishes one tarball per arch and the recipe
+      # fetches wendy-agent-linux-<arch>-<version>.tar.gz for the arch matching
+      # the MACHINE (arm64 for Tegra/RPi, amd64 for generic-x86-64 via
+      # WENDYOS_AGENT_RELEASE_ARCH:x86-wendyos). WENDYOS_AGENT_SHA256 must be the
+      # checksum for THAT tarball, so resolve the digest for this job's arch —
+      # passing the arm64 sha to an amd64 build fails do_fetch on checksum.
       - name: Resolve latest wendyos-agent version
         env:
           GH_TOKEN: ${{ github.token }}
+          DEVICE: ${{ matrix.device }}
         run: |
           set -euo pipefail
+          case "$DEVICE" in
+            generic-x86-64) ARCH=amd64 ;;
+            *)              ARCH=arm64 ;;
+          esac
+
           release_json="$(curl -sSfL \
             -H "Authorization: Bearer $GH_TOKEN" \
             -H "Accept: application/vnd.github+json" \
             "https://api.github.com/repos/wendylabsinc/WendyOS/releases/latest")"
 
           version="$(jq -r '.tag_name' <<<"$release_json")"
-          sha="$(jq -r '.assets[]
-            | select(.name | test("^wendy-agent-linux-arm64-.*\\.tar\\.gz$"))
+          sha="$(jq -r --arg arch "$ARCH" '.assets[]
+            | select(.name | test("^wendy-agent-linux-\($arch)-.*\\.tar\\.gz$"))
             | .digest' <<<"$release_json" | sed 's/^sha256://')"
 
           if [[ -z "$version" || "$version" == "null" || -z "$sha" || "$sha" == "null" ]]; then
-            echo "Failed to resolve wendyos-agent version/sha (version='$version' sha='$sha')" >&2
+            echo "Failed to resolve wendyos-agent version/sha for arch '$ARCH' (version='$version' sha='$sha')" >&2
             exit 1
           fi
 
-          echo "Resolved wendyos-agent $version (sha256=$sha)"
+          echo "Resolved wendyos-agent $version for $ARCH (sha256=$sha)"
           {
             echo "WENDYOS_AGENT_VERSION=$version"
             echo "WENDYOS_AGENT_SHA256=$sha"
@@ -494,7 +513,13 @@ jobs:
       # bitbake floor==ceiling pin and the image_types_wendy pack-time assert;
       # runs on PRs too so drift fails fast. No sudo: in host-build mode the
       # deploy tree is runner-owned (see the SBOM staging step below).
+      #
+      # Skipped for generic-x86-64: it has no A/B OTA (WENDYOS_OTA="none"), so it
+      # ships no .wendy payload and its ext4 is sized by IMAGE_ROOTFS_SIZE (a
+      # minimum, not a floor==ceiling pin) — there is no fixed-size slot contract
+      # to enforce. Revisit if x86 ever gains a wendy-update A/B layout.
       - name: Verify pinned rootfs size
+        if: matrix.device != 'generic-x86-64'
         env:
           DEPLOY_DIR: ${{ github.workspace }}/build/tmp/deploy/images/${{ steps.vars.outputs.machine }}
           DEVICE: ${{ matrix.device }}
@@ -763,6 +788,14 @@ jobs:
                 gzip -f "$IMAGE_FILE"
                 IMAGE_FILE="${IMAGE_FILE}.gz"
               fi
+              ;;
+            wic-disk)
+              # generic-x86-64: IMAGE_FILE is the .wic disk image. Regenerate the
+              # bmap here (deterministic, not dependent on Yocto's wic.bmap
+              # naming) and upload the .wic uncompressed — the publisher
+              # recompresses it. No gzip, no recovery bundle, no OTA.
+              bmaptool create "$IMAGE_FILE" > "${IMAGE_FILE}.bmap"
+              BMAP_FILE="${IMAGE_FILE}.bmap"
               ;;
           esac
 
