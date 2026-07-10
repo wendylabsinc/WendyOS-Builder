@@ -188,6 +188,12 @@ jobs:
       # Federation still works on the self-hosted platform.
       id-token: write
     runs-on: [self-hosted, linux, x64, wendyos-builder]
+    # Backstop against a wedged build holding a shared runner for hours. Healthy
+    # CI builds run in ~8-18 min off the warm NVMe caches; a cold-ish build is
+    # well under an hour. The stall watchdog on the build step aborts a hung
+    # bitbake far sooner (see run 29087311971: 82 min wedged on a hung do_fetch
+    # before a manual cancel); this is the last-resort ceiling if that misses.
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.detect-changes.outputs.matrix) }}
@@ -475,9 +481,18 @@ jobs:
           # population glitches — and pass on retry (validated: both Orin and
           # Thor needed one). The retry is cheap: sstate and downloads persist,
           # so the second pass reuses everything the first produced.
-          make build MACHINE="$MACHINE" || {
+          #
+          # Wrap each attempt in the stall watchdog: if bitbake reports no task
+          # events for STALL_ABORT_SECONDS (a hung do_fetch on an unreachable
+          # mirror wedges the scheduler with no effective timeout), it kills the
+          # build tree so the attempt fails fast instead of idling for hours. A
+          # transient network stall then gets the same second chance as any
+          # other cold-attempt glitch above.
+          watchdog=./scripts/run-with-stall-watchdog.sh
+          export STALL_ABORT_SECONDS="${STALL_ABORT_SECONDS:-1800}"
+          "$watchdog" make build MACHINE="$MACHINE" || {
             echo "::warning::make build failed on first attempt; retrying once"
-            make build MACHINE="$MACHINE"
+            "$watchdog" make build MACHINE="$MACHINE"
           }
 
       # The persistent NVMe cache is written in place by the build (sstate,
