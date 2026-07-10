@@ -9,19 +9,16 @@
 #   REPOS_EXTRA=(...)    append extra clones that coexist with defaults,
 #                        each entry "enabled|url|folder|commit"
 
-# Tree pin. The rest of the fleet has moved to blacksail, but x86 stays on
-# scarthgap for now: the MediaTek Wi-Fi backport
-# (meta-x86-extensions/recipes-kernel/linux/files/
-# 0001-wifi-mt76-mt7921e-add-MT7920-PCI-support.patch) is a v6.10 backport that
-# applies to scarthgap's 6.6 kernel but is redundant on blacksail's 6.18
-# (which likely already carries MT7920 support). Revisit and move to blacksail
-# once that patch is confirmed redundant/portable. See
-# docs/plans/x86-support-plan.md. Explicit here so scarthgap is a documented
-# choice, not the bootstrap default falling through.
-WENDYOS_LAYER_TREE="scarthgap"
-
-#SRCREV_BITBAKE="<commit-hash>"
-#SRCREV_OECORE="<commit-hash>"
-#SRCREV_METAYOCTO="<commit-hash>"
-#SRCREV_OE="<commit-hash>"
-#SRCREV_VIRT="<commit-hash>"
+# Tree pin: blacksail (kernel 6.18). x86 moved off scarthgap because the target
+# hardware's GPU + WiFi (Intel 8086:e340) + BT (8086:e376) are all newer than
+# scarthgap's 6.6 kernel + 20240909 firmware; blacksail's 6.18 + 20260519
+# firmware support them natively, and it lets the mt76 MT7920 backport be
+# dropped (upstream since v6.10). SRCREVs pin the same blacksail tree state as
+# the other boards (see rpi5-sd; no SRCREV_RPI — x86 has no meta-raspberrypi).
+# See docs/plans/x86-support-plan.md.
+WENDYOS_LAYER_TREE="blacksail"
+SRCREV_BITBAKE="30ccfbb849ec80cddb4383d198a1441af0ea760a"
+SRCREV_OECORE="294409c4bfe392471509d4cb6c1e6fb1063d2b3b"
+SRCREV_METAYOCTO="f49de2f33e37ca971d64215cc1a3669312e1e7c3"
+SRCREV_OE="5d90e6543de4d1c39424956c67ff1925a39bf3c8"
+SRCREV_VIRT="022f4356d4a9b389f51472d40a9330aa59f6bb9a"
