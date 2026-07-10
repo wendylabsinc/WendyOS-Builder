@@ -6,6 +6,51 @@ chip-wide Tegra234 mechanisms (UEFI variables under the L4T RootfsStatus
 GUID, Mender data under `/data`) and apply to both boards unless explicitly
 noted.
 
+## CSI camera reports a firmware mismatch
+
+### Symptom
+
+`wendy device camera view` fails with `TEGRA_FIRMWARE_MISMATCH` and reports two
+different L4T families, or `/dev/capture-isp-channel*` is absent after a raw
+rootfs image was written.
+
+### Cause
+
+The rootfs release in `/etc/nv_tegra_release` and the boot firmware reported by
+`nvbootctrl dump-slots-info` came from different JetPack/L4T families. CSI/ISP
+drivers depend on matching boot firmware; raw `--rootfs-only` imaging never
+updates QSPI.
+
+### Fix
+
+Put the supported devkit in Force Recovery mode and run full recovery (do not
+pass `--rootfs-only`):
+
+```bash
+# Orin Nano P3767-0005 on P3768-0000 (NVMe)
+wendy os install --device-type jetson-orin-nano
+
+# AGX Orin P3701-0005 on P3737-0000
+wendy os install --device-type jetson-agx-orin --storage nvme
+# or: --storage emmc
+```
+
+Full recovery erases QSPI and all partitions on the chosen storage, including
+`/data`. The CLI does not fall back automatically to raw imaging. After it
+reports final `SUCCESS`, verify both commands report the same L4T family and
+then retry CSI streaming:
+
+```bash
+cat /etc/nv_tegra_release
+nvbootctrl dump-slots-info
+ls /dev/capture-isp-channel*
+wendy device camera view
+```
+
+An unknown or unparseable firmware state produces an agent warning but does not
+block cameras. Capsule-based T234 boot-firmware OTA remains disabled; enabling
+and qualifying it is separate follow-up work.
+
 ---
 
 ## Restore Rootfs Slot Integrity

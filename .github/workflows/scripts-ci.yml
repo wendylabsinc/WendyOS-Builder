@@ -6,12 +6,20 @@ on:
   pull_request:
     paths:
       - 'scripts/resolve-artifacts*'
+      - 'scripts/make-t234-flashpack.sh'
+      - 'scripts/t234_flashpack_manifest*'
+      - 'scripts/make-jetson-disk-img.py'
+      - 'scripts/make_jetson_disk_img_test.py'
       - '.github/device-artifacts.json'
       - '.github/workflows/scripts-ci.yml'
   push:
     branches: [main]
     paths:
       - 'scripts/resolve-artifacts*'
+      - 'scripts/make-t234-flashpack.sh'
+      - 'scripts/t234_flashpack_manifest*'
+      - 'scripts/make-jetson-disk-img.py'
+      - 'scripts/make_jetson_disk_img_test.py'
       - '.github/device-artifacts.json'
       - '.github/workflows/scripts-ci.yml'
 
@@ -26,7 +34,13 @@ jobs:
         run: jq empty .github/device-artifacts.json
 
       - name: shellcheck
-        run: shellcheck scripts/resolve-artifacts.sh scripts/resolve-artifacts.test.sh
+        run: shellcheck scripts/resolve-artifacts.sh scripts/resolve-artifacts.test.sh scripts/make-t234-flashpack.sh
 
       - name: Run resolver tests
         run: bash scripts/resolve-artifacts.test.sh
+
+      - name: Run T234 flashpack manifest tests
+        run: python3 -m unittest scripts/t234_flashpack_manifest_test.py
+
+      - name: Run Jetson raw disk image tests
+        run: python3 -m unittest scripts/make_jetson_disk_img_test.py

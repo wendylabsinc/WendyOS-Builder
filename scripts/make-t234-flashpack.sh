@@ -55,6 +55,10 @@ done
 [ -n "$VERSION" ]    || err "--version is required"
 [ -n "$DEVICE" ]     || err "--device is required"
 [ -n "$STORAGE" ]    || err "--storage is required"
+case "$DEVICE/$STORAGE" in
+    jetson-orin-nano/nvme|jetson-agx-orin/nvme|jetson-agx-orin/emmc) ;;
+    *) err "unsupported T234 recovery target: $DEVICE/$STORAGE";;
+esac
 
 here="$(cd "$BUNDLE_DIR" && pwd)"
 OUT="$(mkdir -p "$OUT" && cd "$OUT" && pwd)"
@@ -139,7 +143,6 @@ fi
 log "Step 4: build the final flash layout XML (what write_to_device_t234 builds)"
 # ---------------------------------------------------------------------------
 : "${EXTERNAL_ROOTFS_DRIVE:=0}"
-: "${NO_INTERNAL_STORAGE:=0}"
 if [ "$EXTERNAL_ROOTFS_DRIVE" = 1 ]; then
     layout=external-flash.xml.in
 else
@@ -212,15 +215,15 @@ cp internal-secureflash.xml "$FP/stage2/"
 
 # stage2/flashpkg — the tree the flashing initrd expects on its "flashpkg" LUN:
 # conf/command_sequence drives the device-side steps, bootloader/ is the boot
-# firmware it programs, logs/ + status are written by the device. Mirrors
-# generate_flash_package_t234 with default options (no erase-nvme).
+# firmware it programs, logs/ + status are written by the device. The selected
+# rootfs export is overwritten by the host. Do not add erase-mmc for an NVMe
+# target: AGX recovery must not destroy the unselected onboard eMMC.
 PKG="$FP/stage2/flashpkg"
 mkdir -p "$PKG/conf" "$PKG/bootloader" "$PKG/logs"
 cp bootloader_staging/* "$PKG/bootloader/"
 {
     echo "bootloader"
     echo "extra-pre-wipe"
-    [ "$EXTERNAL_ROOTFS_DRIVE" = 0 ] || [ "$NO_INTERNAL_STORAGE" = 1 ] || echo "erase-mmc"
     echo "export-devices $ROOTFS_DEVICE"
     echo "extra"
     echo "reboot"
@@ -263,73 +266,15 @@ echo "  flash images: $(find "$FP/stage2/flash" -type f | wc -l | tr -d ' ') fil
 # ---------------------------------------------------------------------------
 log "Step 7: write manifest.json"
 # ---------------------------------------------------------------------------
-# The manifest schema is defined authoritatively by the Go consumer
-# (go/internal/cli/tegraflash/flashpack/flashpack.go: type Manifest). Keep these
-# fields in sync with it. The rcm send phases are parsed from rcmbootcmd.txt so
-# the manifest can never drift from what tegraflash generated. Only stage-1
-# files and flashpkg.ext4 get integrity hashes: stage-2 flash images are
-# covered by the tarball checksum verified on download.
-VERSION="$VERSION" DEVICE="$DEVICE" STORAGE="$STORAGE" MACHINE="$MACHINE" \
-    BOARDID="$BOARDID" FAB="$FAB" BOARDSKU="$BOARDSKU" BOARDREV="$BOARDREV" \
-    CHIP_SKU="${CHIP_SKU:-}" ROOTFS_DEVICE="$ROOTFS_DEVICE" \
-    BOOT_DEVICE_TYPE="$BOOT_DEVICE_TYPE" ROOTFS_IMAGE="$ROOTFS_IMAGE" \
-    EXTERNAL_ROOTFS_DRIVE="$EXTERNAL_ROOTFS_DRIVE" FP="$FP" \
-    python3 - <<'PY'
-import os, json, hashlib, pathlib, re, sys
-fp = pathlib.Path(os.environ["FP"])
-def sha(p):
-    h = hashlib.sha256()
-    with open(p, "rb") as f:
-        for b in iter(lambda: f.read(1 << 20), b""):
-            h.update(b)
-    return h.hexdigest()
-files = {}
-for p in sorted((fp / "stage1").rglob("*")) + [fp / "stage2" / "flashpkg.ext4"]:
-    if p.is_file():
-        rel = str(p.relative_to(fp))
-        files[rel] = {"sha256": sha(p), "size": p.stat().st_size}
-# rcmbootcmd.txt is authoritative for the send order: one tegrarcm_v2
-# invocation per line, each a sequence of "--download <type> <file>".
-phases = []
-for line in (fp / "stage1" / "rcmbootcmd.txt").read_text().splitlines():
-    dls = re.findall(r"--download\s+(\S+)\s+(\S+)", line)
-    if dls:
-        phases.append([{"type": t, "file": f"stage1/{f}"} for t, f in dls])
-if len(phases) != 2:
-    sys.exit(f"ERR: expected 2 rcm phases in rcmbootcmd.txt, got {len(phases)} — "
-             "the BSP changed the RCM boot contract; the wendy CLI needs updating too")
-m = {
-    "schema": 1,
-    "family": "t234",
-    "wendyos_version": os.environ["VERSION"],
-    "rcm_phases": phases,
-    "layout": {
-        "stage1": "stage1",
-        "flashpkg_image": "stage2/flashpkg.ext4",
-        "flashpkg_dir": "stage2/flashpkg",
-        "flash_dir": "stage2/flash",
-        "flash_layout": "stage2/flash/initrd-flash.xml",
-        "tools": "stage2/tools",
-    },
-    "rootfs_device": os.environ["ROOTFS_DEVICE"],
-    "rootfs_image": os.environ["ROOTFS_IMAGE"],
-    "boot_device_type": os.environ["BOOT_DEVICE_TYPE"],
-    "external_rootfs": os.environ["EXTERNAL_ROOTFS_DRIVE"] == "1",
-    "files": files,
-    # provenance only (not read by wendy)
-    "board": os.environ["DEVICE"],
-    "storage": os.environ["STORAGE"],
-    "machine": os.environ["MACHINE"],
-    "chip": "0x23",
-    "board_id": os.environ["BOARDID"],
-    "board_fab": os.environ["FAB"],
-    "board_sku": os.environ["BOARDSKU"],
-    "board_rev": os.environ["BOARDREV"],
-    "chip_sku": os.environ.get("CHIP_SKU") or None,
-}
-(fp / "manifest.json").write_text(json.dumps(m, indent=2) + "\n")
-print(f"  manifest: {len(files)} files hashed, {sum(len(p) for p in phases)} rcm downloads")
-PY
+# Schema v2 is generated by a standalone, unit-tested validator. It hashes
+# every staged file (including all partition images), validates every consumed
+# path, and pins the exact supported module/carrier SKU before packaging.
+python3 "$(dirname "$0")/t234_flashpack_manifest.py" \
+    --root "$FP" --version "$VERSION" --device "$DEVICE" --storage "$STORAGE" \
+    --machine "$MACHINE" --board-id "$BOARDID" --board-sku "$BOARDSKU" \
+    --board-fab "$FAB" --board-rev "$BOARDREV" --chip-sku "${CHIP_SKU:-}" \
+    --rootfs-device "$ROOTFS_DEVICE" --boot-device-type "$BOOT_DEVICE_TYPE" \
+    --rootfs-image "$ROOTFS_IMAGE" || err "schema-v2 manifest validation failed"
 
 # ---------------------------------------------------------------------------
 log "Step 8: pack (.tar.zst — what the wendy CLI downloads and extracts)"

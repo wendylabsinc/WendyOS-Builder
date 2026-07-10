@@ -37,11 +37,11 @@ ROOTFSPART_SIZE_DEFAULT = "25769803776"
 IMAGE_ROOTFS_ALIGNMENT:pn-wendyos-image = "131072"
 TEGRA_BLBLOCKSIZE:pn-wendyos-image = "4096"
 
-# Rootfs-only swaps for now (no UEFI capsule bootloader update). The t234
+# OTA remains rootfs-only for now (no UEFI capsule bootloader update). The t234
 # capsule path needs its own on-device verification on r39.2 — the ESRT
 # entry0 + fw_class GUID must be confirmed (Thor's GUID 3c834404 is
 # t264-only) — so it's a later phase mirroring Thor's Step B. Keep off.
-WENDYOS_UPDATE_BOOTLOADER = "1"
+WENDYOS_UPDATE_BOOTLOADER = "0"
 
 # Persistent journal logs left at the smart default (tracks WENDYOS_OTA):
 # WENDYOS_OTA="wendy" -> persistent on /data.

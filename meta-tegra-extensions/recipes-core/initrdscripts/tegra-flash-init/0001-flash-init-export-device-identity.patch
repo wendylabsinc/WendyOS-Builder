@@ -1,0 +1,69 @@
+From 9ebf1c57704f0f29baebbf94c1c08078969b43ba Mon Sep 17 00:00:00 2001
+From: Wendy Labs <engineering@wendy.dev>
+Date: Fri, 10 Jul 2026 12:00:00 -0400
+Subject: [PATCH] flash-init: export recovery device identity
+
+Expose the exact T234 module/carrier tuple and USB session in the first
+flashpkg LUN. The Wendy host validates this before replacing the LUN, which is
+the destructive QSPI/rootfs handoff boundary.
+---
+ init-flash.sh | 30 +++++++++++++++++++++++++++++-
+ 1 file changed, 29 insertions(+), 1 deletion(-)
+
+diff --git a/init-flash.sh b/init-flash.sh
+index 708765b..00b25c4 100644
+--- a/init-flash.sh
++++ b/init-flash.sh
+@@ -30,7 +30,7 @@ if [ -n "$sernum" ]; then
+     # Restricted to 8 characters for the ID_MODEL tag
+     sernum=$(printf "%x" "$sernum" | tail -c8)
+ fi
+-[ -n "$sernum" ] || sernum="UNKNOWN"
++[ -n "$sernum" ] || sernum="00000000"
+ echo "Serial number: $sernum"
+ UDC=$(ls -1 /sys/class/udc | head -n 1)
+ if [ -z "$UDC" ]; then
+@@ -119,6 +119,33 @@ wait_for_disconnect() {
+     return 0
+ }
+ 
++write_device_identity() {
++    local compatible carrier module carrier_id carrier_sku module_id module_sku
++    compatible=$(tr '\000' '\n' < /proc/device-tree/compatible | \
++        grep -m1 -E '^nvidia,p[0-9]{4}-[0-9]{4}\+p[0-9]{4}-[0-9]{4}$' || true)
++    compatible=${compatible#nvidia,p}
++    carrier=${compatible%%+p*}
++    module=${compatible#*+p}
++
++    carrier_id=${carrier%%-*}
++    carrier_sku=${carrier#*-}
++    module_id=${module%%-*}
++    module_sku=${module#*-}
++    [ "$carrier_id" != "$carrier" ] || carrier_id=UNKNOWN
++    [ "$module_id" != "$module" ] || module_id=UNKNOWN
++
++    cat > /tmp/flashpkg_tree/flashpkg/device.json <<EOF
++{
++  "protocol": "wendy-t234-recovery-v2",
++  "session_id": "$sernum",
++  "module_id": "$module_id",
++  "module_sku": "$module_sku",
++  "carrier_id": "$carrier_id",
++  "carrier_sku": "$carrier_sku"
++}
++EOF
++}
++
+ get_flash_package() {
+     rm -rf /tmp/flashpkg_tree
+     mkdir -p /tmp/flashpkg_tree/flashpkg/logs
+@@ -131,6 +158,7 @@ get_flash_package() {
+     # create a world-writable subdirectory so a user can send us
+     # the commands and content.
+     chmod 777 /tmp/flashpkg_tree/flashpkg
++    write_device_identity
+     echo "PENDING: expecting command sequence from host" > /tmp/flashpkg_tree/flashpkg/status
+     dd if=/dev/zero of=/tmp/flashpkg.ext4 bs=1M count=128 > /dev/null || return 1
+     mke2fs -t ext4 -d /tmp/flashpkg_tree /tmp/flashpkg.ext4 > /dev/null || return 1
+-- 
+2.50.1

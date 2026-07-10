@@ -126,6 +126,7 @@ jobs:
             {"device":"jetson-agx-orin","storage":"nvme"},
             {"device":"jetson-agx-orin","storage":"emmc"},
             {"device":"jetson-orin-nano","storage":"nvme"},
+            {"device":"jetson-orin-nano","storage":"sd"},
             {"device":"raspberry-pi-5","storage":"nvme"},
             {"device":"raspberry-pi-5","storage":"sd"},
             {"device":"raspberry-pi-4","storage":"sd"},
@@ -233,6 +234,7 @@ jobs:
             jetson-agx-orin:nvme) BOARD=jetson-agx-orin;       MACHINE=jetson-agx-orin-devkit-nvme-wendyos ;;
             jetson-agx-orin:emmc) BOARD=jetson-agx-orin-emmc;  MACHINE=jetson-agx-orin-devkit-emmc-wendyos ;;
             jetson-orin-nano:nvme) BOARD=jetson-orin-nano-nvme; MACHINE=jetson-orin-nano-devkit-nvme-wendyos ;;
+            jetson-orin-nano:sd)   BOARD=jetson-orin-nano-sd;   MACHINE=jetson-orin-nano-devkit-wendyos ;;
             jetson-agx-thor:nvme) BOARD=jetson-agx-thor;       MACHINE=jetson-agx-thor-devkit-nvme-wendyos ;;
             *) echo "Unknown device/storage: $DEVICE/$STORAGE"; exit 1 ;;
           esac
@@ -626,14 +628,13 @@ jobs:
           # All Jetsons run the wendy/blacksail OTA stack (WENDYOS_OTA=wendy):
           # IMAGE_FSTYPES emits a single 'tegraflash-tar' bundle that does NOT
           # ship the doexternal.sh / dosdcard.sh helper scripts.
-          # make-thor-nvme-img.py reimplements their offline GPT image creation
-          # by parsing external-flash.xml.in and writing each partition's binary
-          # at the correct sector offset. The resulting wendyos-nvme.img is the
-          # primary artifact for `wendy os install` (dd-based provisioning);
-          # the tegraflash-tar bundle remains the recovery-flash artifact.
+          # make-jetson-disk-img.py reimplements their offline GPT image creation
+          # by parsing the NVMe or SD device layout and writing each partition's
+          # binary at the correct sector offset. These raw images are retained
+          # only for explicit `wendy os install --rootfs-only`.
           #
           # The bundle must exist to extract it. The resolver already hard-fails
-          # for tegraflash-bundle devices; this guards the generated-nvme case
+          # for tegraflash-bundle devices; this guards generated-image cases
           # (bundle is recovery-only there, so the resolver leaves it empty
           # rather than failing) to preserve the historical extract-time error.
           [[ -n "$TEGRAFLASH_BUNDLE" ]] || {
@@ -643,28 +644,26 @@ jobs:
           echo "Extracting tegraflash bundle: $TEGRAFLASH_BUNDLE"
           tar -xf "$TEGRAFLASH_BUNDLE" -C "$FLASH_WORKDIR"
 
-          # external-flash.xml.in describes the external NVMe boot/root device.
-          # eMMC builds are internal-only and ship no such layout; the SD-card
-          # Orin Nano is not a CI target (its layout lives in a <device
-          # type="sdcard"> block, not external-flash.xml.in, and the blacksail
-          # bundle no longer ships dosdcard.sh to build it). For those the
-          # tegraflash-tar bundle itself is the flash artifact (image_kind=
-          # tegraflash-bundle) — nothing to generate. IMAGE_FILE for the
-          # generated-nvme case is the MACHINE-scoped deploy path (never a fixed
-          # workspace path), so the upload step can never pick up another
-          # Jetson's image. Remove any prior copy first.
-          if [[ "$IMAGE_KIND" == "generated-nvme-img" ]]; then
-            NVME_IMG="$IMAGE_FILE"
-            rm -f "$NVME_IMG"
-            if [[ -f "$FLASH_WORKDIR/external-flash.xml.in" ]]; then
-              python3 "$GITHUB_WORKSPACE/wendyos/scripts/make-thor-nvme-img.py" \
-                "$FLASH_WORKDIR" "$NVME_IMG"
-            else
-              echo "No external-flash.xml.in in bundle for $DEVICE (storage=$STORAGE); cannot build offline NVMe image."
-            fi
-          else
-            echo "No offline NVMe image for $DEVICE (storage=$STORAGE); the tegraflash-tar is the flash artifact."
-          fi
+          # Build the explicit rootfs-only raw artifact. NVMe lives in the
+          # external layout; Nano SD lives in flash.xml.in's sdcard device.
+          # eMMC and Thor remain recovery-only and use the tegraflash bundle.
+          case "$IMAGE_KIND" in
+            generated-nvme-img)
+              rm -f "$IMAGE_FILE"
+              python3 "$GITHUB_WORKSPACE/wendyos/scripts/make-jetson-disk-img.py" \
+                "$FLASH_WORKDIR" "$IMAGE_FILE" \
+                --layout external-flash.xml.in --device-type external
+              ;;
+            generated-sd-img)
+              rm -f "$IMAGE_FILE"
+              python3 "$GITHUB_WORKSPACE/wendyos/scripts/make-jetson-disk-img.py" \
+                "$FLASH_WORKDIR" "$IMAGE_FILE" \
+                --layout flash.xml.in --device-type sdcard
+              ;;
+            *)
+              echo "No offline raw image for $DEVICE (storage=$STORAGE); the tegraflash-tar is the flash artifact."
+              ;;
+          esac
 
           # Diagnose the AGX-Orin-only failure where a deploy-dir artifact that
           # exists during this step is gone by the upload step: the offline
@@ -678,9 +677,9 @@ jobs:
           echo "== post-generate scratch state for ${MACHINE} =="
           df -h "$DEPLOY_DIR" 2>/dev/null || true
           ls -la "$DEPLOY_DIR" 2>/dev/null || true
-          if [[ "$IMAGE_KIND" == "generated-nvme-img" ]]; then
+          if [[ "$IMAGE_KIND" == "generated-nvme-img" || "$IMAGE_KIND" == "generated-sd-img" ]]; then
             [[ -s "$IMAGE_FILE" ]] || {
-              echo "::error::offline NVMe image $IMAGE_FILE missing/empty immediately after generation (see df/ls above — suspect /wendy scratch exhaustion)"
+              echo "::error::offline raw image $IMAGE_FILE missing/empty immediately after generation (see df/ls above — suspect /wendy scratch exhaustion)"
               exit 1
             }
           fi
@@ -691,7 +690,7 @@ jobs:
         # the Orin family). The flash tools' dependencies (i386 libs for Thor's
         # NVIDIA tools, build-essential/e2fsprogs for T234) are baked into the
         # self-hosted runner image (wendylabsinc/ci); no apt-get here.
-        if: github.event_name != 'pull_request' && contains(fromJSON('["jetson-agx-thor", "jetson-agx-orin", "jetson-orin-nano"]'), matrix.device)
+        if: github.event_name != 'pull_request' && matrix.storage != 'sd' && contains(fromJSON('["jetson-agx-thor", "jetson-agx-orin", "jetson-orin-nano"]'), matrix.device)
         env:
           UPLOAD_VERSION: ${{ needs.detect-changes.outputs.version }}
           MACHINE: ${{ steps.vars.outputs.machine }}
@@ -753,14 +752,14 @@ jobs:
           # Do the non-resolution work (bmaptool / gzip) the map says applies.
           BMAP_FILE=""
           case "$IMAGE_KIND" in
-            generated-nvme-img)
+            generated-nvme-img|generated-sd-img)
               # MACHINE-scoped image written by the generate step (never a fixed
               # shared path). The resolver cannot check it — it is produced after
               # Yocto deploy — so keep the stale-image guard and its df/ls
               # diagnostics here (a separate gated spec removes them later): fail
               # hard rather than upload a possibly-stale image from another build.
               if [[ ! -f "$IMAGE_FILE" ]]; then
-                echo "::error::NVMe image not produced this run for ${DEVICE} (${MACHINE}): ${IMAGE_FILE} missing. Refusing to upload a possibly-stale image." >&2
+                echo "::error::raw image not produced this run for ${DEVICE} (${MACHINE}): ${IMAGE_FILE} missing. Refusing to upload a possibly-stale image." >&2
                 df -h "$DEPLOY_DIR" 2>/dev/null || true
                 ls -la "$DEPLOY_DIR" 2>/dev/null || true
                 exit 1
