@@ -26,12 +26,21 @@ COMPATIBLE_MACHINE = "genericx86-64-wendyos"
 # "x86_64" (userspace naming), whereas module.bbclass exports the kernel's
 # "x86" — pass x86_64 so the NVIDIA arch check passes (the kernel kbuild maps
 # x86_64 back to SRCARCH=x86 internally).
+#
+# EXTRA_CFLAGS forces -fcf-protection=branch onto the RM core (nv-kernel.o and
+# nv-modeset-kernel.o, built by NVIDIA's own make under src/, not by Kbuild).
+# That build only auto-enables the flag behind a compiler probe that fails under
+# the OE cross-gcc (which defaults to cf-protection=none), so the RM core shipped
+# without ENDBR landing pads and faulted the kernel's IBT on CET CPUs. Forcing it
+# lets the module load with CONFIG_X86_KERNEL_IBT enabled. utils.mk does
+# CFLAGS += EXTRA_CFLAGS and propagates it to both src sub-makes.
 MODULES_MODULE_SYMVERS_LOCATION = "kernel-open"
 EXTRA_OEMAKE += " \
     ARCH='${HOST_ARCH}' \
     TARGET_ARCH='${HOST_ARCH}' \
     SYSSRC='${STAGING_KERNEL_DIR}' \
     SYSOUT='${STAGING_KERNEL_BUILDDIR}' \
+    EXTRA_CFLAGS='-fcf-protection=branch' \
     "
 SECURITY_STACK_PROTECTOR = ""
 
@@ -45,9 +54,9 @@ do_install:append() {
 # conf rides in the recipe's own package.
 FILES:${PN} += "${sysconfdir}/modprobe.d/nvidia.conf"
 
-# Autoload the compute modules at boot. IBT is disabled in the kernel config
-# (nvidia-ibt.cfg) so the driver initializes the GPU cleanly. drm and modeset
-# are display-only and not needed for compute.
+# Autoload the compute modules at boot. The RM core is built with ENDBR
+# (EXTRA_CFLAGS above), so it loads cleanly with kernel IBT enabled. drm and
+# modeset are display-only and not needed for compute.
 KERNEL_MODULE_AUTOLOAD += "nvidia nvidia-uvm"
 
 RPROVIDES:${PN} += " \
