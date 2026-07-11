@@ -23,5 +23,5 @@ RDEPENDS:${PN} = " \
     kernel-module-nvidia-uvm \
     nvidia-userspace \
     nvidia-container-toolkit \
-    nvidia-dgpu-cdi \
+    wendyos-gpu-cdi \
     "

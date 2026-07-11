@@ -1,0 +1,14 @@
+[Unit]
+Description=WendyOS GPU container-compute setup (detect, load, CDI)
+After=local-fs.target
+Before=containerd.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/wendyos-gpu-cdi.sh
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

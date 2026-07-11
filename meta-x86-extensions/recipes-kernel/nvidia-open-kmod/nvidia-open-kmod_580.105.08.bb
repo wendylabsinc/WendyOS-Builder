@@ -54,10 +54,10 @@ do_install:append() {
 # conf rides in the recipe's own package.
 FILES:${PN} += "${sysconfdir}/modprobe.d/nvidia.conf"
 
-# Autoload the compute modules at boot. The RM core is built with ENDBR
-# (EXTRA_CFLAGS above), so it loads cleanly with kernel IBT enabled. drm and
-# modeset are display-only and not needed for compute.
-KERNEL_MODULE_AUTOLOAD += "nvidia nvidia-uvm"
+# The compute modules (nvidia, nvidia-uvm) are NOT force-loaded at boot. The
+# wendyos-gpu-cdi service loads them on demand only when an NVIDIA GPU is
+# detected, so this same image stays dormant on AMD-only boxes. The RM core is
+# built with ENDBR (EXTRA_CFLAGS above), so it loads cleanly with kernel IBT on.
 
 RPROVIDES:${PN} += " \
     kernel-module-nvidia \
