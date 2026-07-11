@@ -26,11 +26,15 @@ IMAGE_INSTALL:append = " \
     packagegroup-wendyos-x86 \
     "
 
-# Experimental NVIDIA dGPU container plumbing. This does not ship proprietary
-# desktop GPU drivers; it generates CDI metadata only when a driver and
-# nvidia-ctk are present.
+# NVIDIA dGPU compute stack. When WENDYOS_NVIDIA_DGPU=1 this bakes the full
+# driver stack into the image for validation: the open kernel modules, the
+# matching proprietary userspace, the container toolkit and the CDI helper.
+# Baking the proprietary userspace into a shipped image is a licensing question,
+# so this is the validation path. The shipping path installs the same
+# packagegroup from the driver feed at first boot (wendyos-driver-installer),
+# tracked as a separate follow-up.
 IMAGE_INSTALL:append = " \
-    ${@oe.utils.ifelse(d.getVar('WENDYOS_NVIDIA_DGPU') == '1', ' nvidia-dgpu-cdi', '')} \
+    ${@oe.utils.ifelse(d.getVar('WENDYOS_NVIDIA_DGPU') == '1', 'packagegroup-wendyos-nvidia-graphics', '')} \
     "
 
 configure_wendyos_driver_feed() {
@@ -51,6 +55,7 @@ gpgcheck=${WENDYOS_DRIVER_FEED_GPGCHECK}
 EOF
     fi
 }
+
 ROOTFS_POSTPROCESS_COMMAND:append:x86-wendyos = " configure_wendyos_driver_feed;"
 
 # /config and /data as plain rootfs directories, not partitions. x86 has a
@@ -63,4 +68,15 @@ create_wendyos_dirs() {
     install -d -m 0755 ${IMAGE_ROOTFS}/config
     install -d -m 0755 ${IMAGE_ROOTFS}/data
 }
+
 ROOTFS_POSTPROCESS_COMMAND:append:x86-wendyos = " create_wendyos_dirs;"
+
+# NVIDIA's prebuilt userspace binaries (nvidia-smi, nvidia-modprobe) use the
+# x86-64 ABI loader path /lib64/ld-linux-x86-64.so.2, but OE only provides /lib.
+# Add a /lib64 -> lib compat symlink so they execute. Gated on the NVIDIA stack
+# so non-NVIDIA x86 images are untouched.
+create_lib64_compat() {
+    [ -e ${IMAGE_ROOTFS}/lib64 ] || ln -sf lib ${IMAGE_ROOTFS}/lib64
+}
+
+ROOTFS_POSTPROCESS_COMMAND:append:x86-wendyos = " ${@oe.utils.ifelse(d.getVar('WENDYOS_NVIDIA_DGPU') == '1', 'create_lib64_compat;', '')}"
