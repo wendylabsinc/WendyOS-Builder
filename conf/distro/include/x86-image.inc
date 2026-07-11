@@ -4,16 +4,12 @@
 WENDYOS_X86_ROOTFS_SIZE ??= "8388608"
 IMAGE_ROOTFS_SIZE:x86-wendyos = "${WENDYOS_X86_ROOTFS_SIZE}"
 
-# x86 installer images can optionally install driver updates from a WendyOS
-# package feed after first boot. Keep runtime package management only on this
-# target; embedded/OTA-oriented targets keep the default immutable behavior.
+# x86 is a PC-class target, so keep runtime package management and sshd enabled.
+# Embedded/OTA-oriented targets keep the default immutable behavior. Package
+# management also underpins the future GPU userspace feed (Phase B, see the plan
+# doc).
 WENDYOS_ENABLE_PACKAGE_MANAGEMENT:x86-wendyos ?= "1"
 WENDYOS_SSHD:x86-wendyos ?= "1"
-
-WENDYOS_DRIVER_FEED_URI ??= ""
-WENDYOS_DRIVER_FEED_GPGCHECK ??= "0"
-WENDYOS_NVIDIA_DRIVER_PACKAGE ??= "packagegroup-wendyos-nvidia-graphics"
-WENDYOS_ROCM_DRIVER_PACKAGE ??= "packagegroup-wendyos-rocm"
 
 # Useful on commodity PCs and harmless on machines without a given bus/device.
 # packagegroup-wendyos-x86 (meta-x86-extensions) carries the NUC network/BT/GPU
@@ -22,41 +18,19 @@ IMAGE_INSTALL:append = " \
     pciutils \
     linux-firmware \
     ca-certificates \
-    wendyos-driver-installer \
     packagegroup-wendyos-x86 \
     "
 
 # NVIDIA dGPU compute stack. When WENDYOS_NVIDIA_DGPU=1 this bakes the full
-# driver stack into the image for validation: the open kernel modules, the
-# matching proprietary userspace, the container toolkit and the CDI helper.
+# driver stack into the image: the open kernel modules, the matching proprietary
+# userspace, the container toolkit and the wendyos-gpu-cdi detect/CDI helper.
 # Baking the proprietary userspace into a shipped image is a licensing question,
-# so this is the validation path. The shipping path installs the same
-# packagegroup from the driver feed at first boot (wendyos-driver-installer),
-# tracked as a separate follow-up.
+# so this is the current path (Phase A). The shipping path (Phase B) keeps the
+# kernel modules baked and moves the userspace to a feed installed at first boot
+# by the detect service. See docs/plans/x86-support-plan.md.
 IMAGE_INSTALL:append = " \
     ${@oe.utils.ifelse(d.getVar('WENDYOS_NVIDIA_DGPU') == '1', 'packagegroup-wendyos-nvidia-graphics', '')} \
     "
-
-configure_wendyos_driver_feed() {
-    install -d ${IMAGE_ROOTFS}${libdir}/wendyos
-    cat > ${IMAGE_ROOTFS}${libdir}/wendyos/driver-installer.conf <<EOF
-WENDYOS_NVIDIA_DRIVER_PACKAGE="${WENDYOS_NVIDIA_DRIVER_PACKAGE}"
-WENDYOS_ROCM_DRIVER_PACKAGE="${WENDYOS_ROCM_DRIVER_PACKAGE}"
-EOF
-
-    if [ -n "${WENDYOS_DRIVER_FEED_URI}" ]; then
-        install -d ${IMAGE_ROOTFS}${sysconfdir}/yum.repos.d
-        cat > ${IMAGE_ROOTFS}${sysconfdir}/yum.repos.d/wendyos-drivers.repo <<EOF
-[wendyos-drivers]
-name=WendyOS x86 driver updates
-baseurl=${WENDYOS_DRIVER_FEED_URI}
-enabled=1
-gpgcheck=${WENDYOS_DRIVER_FEED_GPGCHECK}
-EOF
-    fi
-}
-
-ROOTFS_POSTPROCESS_COMMAND:append:x86-wendyos = " configure_wendyos_driver_feed;"
 
 # /config and /data as plain rootfs directories, not partitions. x86 has a
 # single persistent read-write rootfs (no A/B), so these persist as-is and no
