@@ -1,0 +1,25 @@
+[Unit]
+Description=WendyOS Agent Updater
+Documentation=https://github.com/wendylabsinc/wendy-agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/wendyos/bin/wendyos-agent-updater.sh
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=wendy-agent-updater
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/usr/local/bin /opt/wendyos/bin /opt/wendy /var/lib/wendy-agent /tmp
+
+# Environment
+EnvironmentFile=-/etc/default/wendy-agent
+
+[Install]
+WantedBy=multi-user.target

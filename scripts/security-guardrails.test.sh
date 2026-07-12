@@ -120,11 +120,18 @@ assert_grep_absent "C2: key generation does not default to dev/test keys" \
   'DEV_KEYS:-1' meta-tegra-extensions/uefi-keys/generate-keys.sh
 
 # ---------------------------------------------------------------------------
-# C3 — Agent auto-updater verifies the binary before installing it
+# C3 — The agent auto-updater must cryptographically verify the binary before
+# install. Chosen remediation: keep the updater but make it FAIL-CLOSED — verify
+# a detached signature against a baked public key (openssl) before chmod/install.
+# Secure state = a verify key ships, the download script verifies a signature,
+# and the recipe installs the key.
 # ---------------------------------------------------------------------------
-assert_grep_present "C3: agent updater verifies download (sha256/signature)" \
-  'sha256sum|sha256 |gpg --verify|minisign|cosign|checksum' \
-  recipes-core/wendyos-agent/files/download-wendyos-agent.sh
+assert_path_present "C3: agent updater verify key is baked" \
+  recipes-core/wendyos-agent/files/agent-verify-key.pem
+assert_grep_present "C3: agent updater verifies a signature (openssl, fail-closed)" \
+  'openssl dgst .*-verify' recipes-core/wendyos-agent/files/download-wendyos-agent.sh
+assert_grep_present "C3: recipe installs the verify key" \
+  'agent-verify-key' recipes-core/wendyos-agent/wendyos-agent_1.0.bb
 
 # ---------------------------------------------------------------------------
 # H1 — Fork-PR code must not run unguarded on the self-hosted builder

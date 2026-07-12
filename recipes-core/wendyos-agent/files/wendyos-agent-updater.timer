@@ -1,0 +1,17 @@
+[Unit]
+Description=WendyOS Agent Update Timer
+Documentation=https://github.com/wendylabsinc/wendy-agent
+
+[Timer]
+# Run on boot after network is available
+OnBootSec=5min
+
+# Run daily at 3 AM
+OnCalendar=daily
+Persistent=true
+
+# Randomize start time by up to 30 minutes to avoid thundering herd
+RandomizedDelaySec=30min
+
+[Install]
+WantedBy=timers.target
