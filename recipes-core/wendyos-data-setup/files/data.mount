@@ -8,7 +8,9 @@ After=wendyos-data-init.service
 What=/dev/disk/by-partlabel/data
 Where=/data
 Type=ext4
-Options=defaults,noatime
+# Hardened (H6): nosuid,nodev. NOT noexec — /data backs container images and app
+# volumes (bind-mounted to /var/lib/containerd, /var/lib/wendy, /home) that execute.
+Options=defaults,noatime,nosuid,nodev
 
 [Install]
 WantedBy=local-fs.target
