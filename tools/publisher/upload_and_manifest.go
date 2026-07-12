@@ -1067,7 +1067,7 @@ func main() {
 	stability := flag.String("stability", "stable", "Device stability level: stable, experimental, deprecated")
 	notifyDiscord := flag.Bool("notify-discord", true, "Send Discord notification after successful publish")
 	notifyOnly := flag.Bool("notify-only", false, "Send Discord notification for an already-published release (reads sizes from manifest)")
-	accessToken := flag.String("access-token", "", "GCS access token (from gcloud auth print-access-token)")
+	accessToken := flag.String("access-token", "", "GCS access token (from gcloud auth print-access-token); prefer the WENDYOS_GCS_ACCESS_TOKEN env var so the token is not exposed on the process command line (visible in ps)")
 	debug := flag.Bool("debug", false, "Enable debug logging")
 	promote := flag.Bool("promote", false, "Promote nightly to stable by removing 'nightly' from version name")
 	swap := flag.Bool("swap", false, "Replace existing version's image file while preserving metadata")
@@ -1284,7 +1284,14 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
 
-	client, err := createStorageClientWithAuth(ctx, *accessToken)
+	// Resolve the access token: the explicit flag wins, otherwise fall back to
+	// the WENDYOS_GCS_ACCESS_TOKEN env var. CI passes it via the env so the token
+	// never appears on the command line (where `ps` would leak it).
+	token := *accessToken
+	if token == "" {
+		token = os.Getenv("WENDYOS_GCS_ACCESS_TOKEN")
+	}
+	client, err := createStorageClientWithAuth(ctx, token)
 	if err != nil {
 		log.WithError(err).Fatal("Failed to create storage client")
 	}

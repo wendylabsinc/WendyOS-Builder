@@ -31,7 +31,7 @@ Status: 🔴 vulnerable (test red) · 🟢 fixed (test green) · 🔵 verify ext
 | C1a | **Remove Mender entirely** — dead OTA stack still ships recipes, config, and a public demo `server.crt`. | `conf/distro/include/mender*.inc`, `conf/distro/wendyos.conf` (`MENDER_*`), `meta-tegra-extensions*/recipes-mender/**`, `.../mender/files/server.crt` | test | 🔴 |
 | C1b | **`wendyos-update` has no artifact signature verification and no pinned CA** — an attacker who can serve/redirect updates can push an arbitrary rootfs → remote root. | `recipes-core/wendyos-update/wendyos-update_0.1.0.bb` (+ its client config) | test | 🔴 |
 | C2 | **Secure Boot disabled on every Jetson**; the "enable" path enrolls **public EDK2 TestRoot/TestSub** certs. | `conf/machine/jetson-*-wendyos.conf` (`TEGRA_UEFI_USE_SIGNED_FILES="false"`); `meta-tegra-extensions/uefi-keys/generate-keys.sh` (`DEV_KEYS=1`); `meta-tegra-extensions/recipes-bsp/uefi/files/UefiDefaultSecurityKeys.dts` | test (config) + manual (fuse burn) | 🔴 |
-| C3 | **Agent auto-updater installs the root control-plane binary with no signature/checksum check**, enabled by default (timer OnBoot+daily). Contrast the build-time recipe, which pins `SRC_URI[agent.sha256sum]`. | `recipes-core/wendyos-agent/files/download-wendyos-agent.sh`, `.../wendyos-agent-updater.{sh,timer}`, `.../wendyos-agent_1.0.bb` | test | 🔴 |
+| C3 | **Agent auto-updater installed the root control-plane binary with no signature/checksum check**, enabled by default. **FIXED**: the pull-from-GitHub updater (download script + timer/service) was removed; the agent now updates only via the sha256-pinned build-time fetch shipped in the A/B OTA rootfs. | `recipes-core/wendyos-agent/wendyos-agent_1.0.bb` | test | 🟢 |
 
 > **C1b BLOCKER (verified 2026-07-12):** the pinned `wendyos-update` binary
 > (`github.com/wendylabsinc/wendyos-update`@`20ec14e`, per its `docs/cli-contract.md`)
@@ -69,7 +69,7 @@ Status: 🔴 vulnerable (test red) · 🟢 fixed (test green) · 🔵 verify ext
 | M2 | **`WENDYOS_DEV_LOGIN=1` restores empty-root-password + root login + getty** on publicly-installable PR images. Ensure it can never ride into release/nightly; default off. | `recipes-core/images/wendyos-image.bb` | lock-in test | 🟢 (guard) |
 | M3 | **No kernel hardening fragments / no module signing**; Jetson serial console always on. | `recipes-kernel/**`, `wendyos-image.bb:63` | test | 🔴 |
 | M4 | **`eval echo` on a cwd-derived path** (config parse). | `scripts/docker/docker-util.sh:55-62` | test | 🟢 |
-| M5 | **GCS access token passed on argv** (`--access-token`) — visible in `ps`/logs. | `.github/workflows/build.yml`, `tools/publisher/upload_and_manifest.go` | test | 🔴 |
+| M5 | **GCS access token passed on argv** (`--access-token`) — visible in `ps`/logs. | `.github/workflows/build.yml`, `tools/publisher/upload_and_manifest.go` | test | 🟢 |
 
 ## Low / hygiene
 
