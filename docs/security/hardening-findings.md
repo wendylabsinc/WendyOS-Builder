@@ -54,8 +54,8 @@ Status: 🔴 vulnerable (test red) · 🟢 fixed (test green) · 🔵 verify ext
 | H2 | **Default `wendy`/`wendy` user with `NOPASSWD: ALL`** — fleet-wide static credential; becomes remote root the moment `WENDYOS_SSHD=1`. | `recipes-extended/wendyos-user/wendyos-user_1.0.bb` | test | 🔴 |
 | H3 | **No host firewall**; wendy-agent gRPC (`:50051`) exposure rests entirely on the out-of-tree binary's bind/mTLS. | absence of nftables ruleset; `wendyos-agent.service` | test (firewall present) + manual (agent mTLS) | 🔴 / 🔵 |
 | H4 | **mDNS advertises control-plane port + device UUID on ALL interfaces** despite a comment claiming `usb0`-only. | `conf/distro/wendyos.conf` (`WENDYOS_MDNS_INTERFACES ?= ""`); `recipes-connectivity/avahi/avahi_%.bbappend` | test | 🔴 |
-| H5 | **Boot order allows USB/HTTP/PXE** — physical/LAN boot of attacker code (compounds C2). | `meta-tegra-extensions/recipes-bsp/tegra-bootcontrol-overlay/files/boot-priority*.dtso` | test | 🔴 |
-| H6 | **No rootfs integrity (no dm-verity), rootfs mounted `rw`; `/data`,`/config`,`/boot` mounted without `nosuid,nodev,noexec`.** | `recipes-core/base-files/files/*fstab` | test (mount flags) | 🔴 |
+| H5 | **Boot order allowed USB/HTTP/PXE.** **FIXED**: `DefaultBootPriority` restricted to internal storage (`sd, nvme`); usb/http/pxe removed. (Recovery flashing uses Tegra recovery mode, not UEFI boot order.) | `meta-tegra-extensions/recipes-bsp/tegra-bootcontrol-overlay/files/boot-priority*.dtso` | test | 🟢 |
+| H6 | **Writable/removable partitions mounted without `nosuid`/`nodev`.** **FIXED (mount flags)**: `/data`,`/config`,`/boot` now `nosuid,nodev` (+`noexec` on the FAT partitions; `/data` keeps exec for apps). Rootfs integrity (dm-verity) is a separate larger effort — still open, tracked here. | `recipes-core/base-files/files/*fstab` | test (mount flags) | 🟢 |
 | H7 | **Data at rest is plaintext** (WiFi PSKs, identity); OP-TEE storage is REE-FS with no RPMB anti-rollback. | no LUKS/dm-crypt/fscrypt in tree; `recipes-core/systemd-mount-tee/**` | manual (design change) | 🔵 |
 | H8 | **Dev container runs `--privileged --network host`** with passwordless sudo + baked `dev:wendyos` password. | `scripts/docker/dockerfile`, `scripts/docker/docker-util.sh`, `Makefile` | test | 🔴 |
 | H9 | **Build-time toolchain downloads unverified/unpinned** (Go "latest", AWS CLI, s5cmd, fzf HEAD). | `scripts/install-build-deps.sh`, `scripts/docker/dockerfile` | test | 🔴 |
@@ -77,7 +77,7 @@ Status: 🔴 vulnerable (test red) · 🟢 fixed (test green) · 🔵 verify ext
 |----|---------|-------|-------|--------|
 | L1 | **22 MB stale Mach-O `publisher` binary committed** (CI rebuilds from source; never executed by CI). | `tools/publisher/publisher` | test (no committed binary) | 🟢 |
 | L2 | `eval`-built `sudo` strings; predictable-name tmpfile in `oe4t-tegraflash-deploy`. | `scripts/run-qemu.sh`, `scripts/manage-*`, `scripts/oe4t-tegraflash-deploy` | — | 🔵 |
-| L3 | Base image pinned to mutable `ubuntu:24.04` tag (not digest). | `scripts/docker/dockerfile` | test | 🔴 |
+| L3 | Base image pinned to mutable `ubuntu:24.04` tag (not digest). **Deferred**: needs the current manifest-list digest (`docker buildx imagetools inspect ubuntu:24.04` → set `ARG BASE_IMAGE=ubuntu:24.04@sha256:<digest>`); registry was unreachable from the fix environment. | `scripts/docker/dockerfile` | test | 🔴 |
 | L4 | `mender-secrets.inc` tracked in git (footgun if a real tenant token is filled in) — removed with C1a. | `conf/distro/include/mender-secrets.inc` | folded into C1a | 🔴 |
 
 ## Confirmed-good (lock-in only — do not regress)
