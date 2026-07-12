@@ -55,7 +55,7 @@ Status: 🔴 vulnerable (test red) · 🟢 fixed (test green) · 🔵 verify ext
 | M1 | **No OTA rollback/downgrade protection** (monotonic version gate). | `wendyos-update` client | test (once C1b lands) | 🔴 |
 | M2 | **`WENDYOS_DEV_LOGIN=1` restores empty-root-password + root login + getty** on publicly-installable PR images. Ensure it can never ride into release/nightly; default off. | `recipes-core/images/wendyos-image.bb` | lock-in test | 🟢 (guard) |
 | M3 | **No kernel hardening fragments / no module signing**; Jetson serial console always on. | `recipes-kernel/**`, `wendyos-image.bb:63` | test | 🔴 |
-| M4 | **`eval echo` on a cwd-derived path** (config parse). | `scripts/docker/docker-util.sh:55-62` | test | 🔴 |
+| M4 | **`eval echo` on a cwd-derived path** (config parse). | `scripts/docker/docker-util.sh:55-62` | test | 🟢 |
 | M5 | **GCS access token passed on argv** (`--access-token`) — visible in `ps`/logs. | `.github/workflows/build.yml`, `tools/publisher/upload_and_manifest.go` | test | 🔴 |
 
 ## Low / hygiene

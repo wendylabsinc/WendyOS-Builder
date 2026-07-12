@@ -34,6 +34,34 @@ CON_LRED="${CON_SWITCH}1;31m"
 
 DOCKER_ARGS=""
 
+# Safely expand a leading ~ and $VAR / ${VAR} references in a config path.
+# Deliberately does NOT invoke the shell (no eval): a config value such as
+# $(rm -rf ~) or a backtick command is kept as literal text, never executed
+# (hardening finding M4).
+expand_path() {
+    local p="$1" out="" name rest
+    local tilde='~'   # compare against a variable so shellcheck doesn't read this as a failed ~ expansion
+    [[ "$p" == "$tilde" || "$p" == "$tilde/"* ]] && p="${HOME}${p:1}"
+    while [[ "$p" == *'$'* ]]; do
+        out+="${p%%\$*}"          # text before the first $
+        rest="${p#*\$}"           # text after the first $
+        if [[ "$rest" == '{'* ]]; then
+            name="${rest#\{}"; name="${name%%\}*}"
+            rest="${rest#*\}}"
+        else
+            name="${rest%%[^A-Za-z0-9_]*}"
+            rest="${rest#"$name"}"
+        fi
+        if [[ -z "$name" ]]; then
+            out+='$'              # a lone $ with no name -> keep literal
+        else
+            out+="${!name-}"      # environment value only, no command execution
+        fi
+        p="$rest"
+    done
+    printf '%s' "${out}${p}"
+}
+
 ###
 function parse_config() {
     local config_file="$1"
@@ -53,13 +81,13 @@ function parse_config() {
         }
 
         src=$(echo "${line}" | cut -d':' -f 1)
-        src=$(eval echo "${src}")
+        src=$(expand_path "${src}")
 
         dest=$(echo "${line}" | cut -s -d':' -f 2)
-        dest=$(eval echo "${dest}")
+        dest=$(expand_path "${dest}")
 
         rights=$(echo "${line}" | cut -s -d':' -f 3)
-        rights=$(eval echo "${rights}")
+        rights=$(expand_path "${rights}")
 
         # printf "Host: '%s'\n" "${src}"
         # printf "Docker: '%s'\n" "${dest}"
