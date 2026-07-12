@@ -153,10 +153,15 @@ assert_grep_absent "H2: no baked shared password in useradd" \
 assert_tracked_present "H3: a host firewall ruleset ships (nftables)" '*nftables*' '*.nft'
 
 # ---------------------------------------------------------------------------
-# H4 — mDNS scoped to usb0 by default (not all interfaces)
+# H4 — Decision: LAN mDNS discovery is accepted by default (access is gated by
+# the agent's mTLS, H3). The usb0-only FORTRESS lockdown must stay available:
+# setting WENDYOS_MDNS_INTERFACES restricts advertisement via avahi's
+# allow-interfaces. Guard that the lockdown mechanism remains wired.
 # ---------------------------------------------------------------------------
-assert_grep_absent "H4: WENDYOS_MDNS_INTERFACES not defaulted to all-interfaces" \
-  'WENDYOS_MDNS_INTERFACES[[:space:]]*\?=[[:space:]]*""' conf/distro/wendyos.conf
+assert_grep_present "H4: mDNS lockdown flag honored (avahi reads WENDYOS_MDNS_INTERFACES)" \
+  'WENDYOS_MDNS_INTERFACES' recipes-connectivity/avahi/avahi_%.bbappend
+assert_grep_present "H4: mDNS lockdown restricts interfaces (avahi allow-interfaces)" \
+  'allow-interfaces' recipes-connectivity/avahi/avahi_%.bbappend
 
 # ---------------------------------------------------------------------------
 # H5 — Boot order excludes USB/HTTP/PXE
