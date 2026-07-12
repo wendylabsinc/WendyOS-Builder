@@ -33,11 +33,24 @@ Status: 🔴 vulnerable (test red) · 🟢 fixed (test green) · 🔵 verify ext
 | C2 | **Secure Boot disabled on every Jetson**; the "enable" path enrolls **public EDK2 TestRoot/TestSub** certs. | `conf/machine/jetson-*-wendyos.conf` (`TEGRA_UEFI_USE_SIGNED_FILES="false"`); `meta-tegra-extensions/uefi-keys/generate-keys.sh` (`DEV_KEYS=1`); `meta-tegra-extensions/recipes-bsp/uefi/files/UefiDefaultSecurityKeys.dts` | test (config) + manual (fuse burn) | 🔴 |
 | C3 | **Agent auto-updater installs the root control-plane binary with no signature/checksum check**, enabled by default (timer OnBoot+daily). Contrast the build-time recipe, which pins `SRC_URI[agent.sha256sum]`. | `recipes-core/wendyos-agent/files/download-wendyos-agent.sh`, `.../wendyos-agent-updater.{sh,timer}`, `.../wendyos-agent_1.0.bb` | test | 🔴 |
 
+> **C1b BLOCKER (verified 2026-07-12):** the pinned `wendyos-update` binary
+> (`github.com/wendylabsinc/wendyos-update`@`20ec14e`, per its `docs/cli-contract.md`)
+> supports only *structural* validation + a checksum on install/pack — **no
+> cryptographic artifact signing** (no verify key, signature, or public-key
+> config). C1b is therefore a **cross-repo** change, in this order: **(1)**
+> implement detached-signature verification in the `wendyos-update` Go repo
+> (verify against a baked public key; refuse unsigned/mismatched artifacts);
+> **(2)** builder bakes the public key at `/etc/wendyos-update/artifact-verify-key.pem`
+> + a `config.json` requiring verification (this repo — turns the C1b guardrail
+> green); **(3)** release CI signs artifacts with the private key (CI secrets /
+> offline). Doing (2) alone is security theater — the binary would ignore the
+> key. Guardrail stays RED until (1)+(2) land.
+
 ## High
 
 | ID | Finding | Where | Guard | Status |
 |----|---------|-------|-------|--------|
-| H1 | **Fork-PR code runs on the persistent self-hosted builder** with a shared **writable** sstate/downloads cache → release-image cache poisoning. No same-repo guard on the `build` job. | `.github/workflows/build.yml` (`on: pull_request`, job `build` `if:`, `runs-on: self-hosted`, cache symlink) | test (workflow lint) | 🔴 |
+| H1 | **Fork-PR code runs on the persistent self-hosted builder** with a shared **writable** sstate/downloads cache → release-image cache poisoning. No same-repo guard on the `build` job. | `.github/workflows/build.yml` (`on: pull_request`, job `build` `if:`, `runs-on: self-hosted`, cache symlink) | test (workflow lint) | 🟢 |
 | H2 | **Default `wendy`/`wendy` user with `NOPASSWD: ALL`** — fleet-wide static credential; becomes remote root the moment `WENDYOS_SSHD=1`. | `recipes-extended/wendyos-user/wendyos-user_1.0.bb` | test | 🔴 |
 | H3 | **No host firewall**; wendy-agent gRPC (`:50051`) exposure rests entirely on the out-of-tree binary's bind/mTLS. | absence of nftables ruleset; `wendyos-agent.service` | test (firewall present) + manual (agent mTLS) | 🔴 / 🔵 |
 | H4 | **mDNS advertises control-plane port + device UUID on ALL interfaces** despite a comment claiming `usb0`-only. | `conf/distro/wendyos.conf` (`WENDYOS_MDNS_INTERFACES ?= ""`); `recipes-connectivity/avahi/avahi_%.bbappend` | test | 🔴 |

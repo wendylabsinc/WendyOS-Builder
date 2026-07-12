@@ -181,7 +181,14 @@ jobs:
   build:
     name: Build ${{ matrix.device }} (${{ matrix.storage }})
     needs: detect-changes
-    if: needs.detect-changes.outputs.devices != ''
+    # Never run untrusted fork-PR code on the self-hosted builder: it shares a
+    # persistent, writable sstate/downloads cache across jobs, so a poisoned PR
+    # build could corrupt release-image artifacts. Same-repo PRs, push, and
+    # workflow_dispatch are unaffected (H1).
+    if: >-
+      needs.detect-changes.outputs.devices != '' &&
+      (github.event_name != 'pull_request' ||
+       github.event.pull_request.head.repo.full_name == github.repository)
     permissions:
       contents: read
       # GitHub mints the OIDC token (not the runner), so GCP Workload Identity
