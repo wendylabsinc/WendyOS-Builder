@@ -51,7 +51,7 @@ Status: 🔴 vulnerable (test red) · 🟢 fixed (test green) · 🔵 verify ext
 | ID | Finding | Where | Guard | Status |
 |----|---------|-------|-------|--------|
 | H1 | **Fork-PR code runs on the persistent self-hosted builder** with a shared **writable** sstate/downloads cache → release-image cache poisoning. No same-repo guard on the `build` job. | `.github/workflows/build.yml` (`on: pull_request`, job `build` `if:`, `runs-on: self-hosted`, cache symlink) | test (workflow lint) | 🟢 |
-| H2 | **Default `wendy`/`wendy` user with `NOPASSWD: ALL`** — fleet-wide static credential; becomes remote root the moment `WENDYOS_SSHD=1`. | `recipes-extended/wendyos-user/wendyos-user_1.0.bb` | test | 🔴 |
+| H2 | **Default `wendy` user with `NOPASSWD: ALL`** — fleet-wide sudo escalation; remote root the moment `WENDYOS_SSHD=1`. **Partial:** the baked shared password hash was removed (account now password-locked, and there is no interactive login path); **`NOPASSWD:ALL` still open** pending confirmation of what relies on it. | `recipes-extended/wendyos-user/wendyos-user_1.0.bb` | test | 🔴 (1/2 guards green) |
 | H3 | **No host firewall**; wendy-agent gRPC (`:50051`) exposure rests entirely on the out-of-tree binary's bind/mTLS. | absence of nftables ruleset; `wendyos-agent.service` | test (firewall present) + manual (agent mTLS) | 🔴 / 🔵 |
 | H4 | **mDNS advertises control-plane port + device UUID on ALL interfaces** despite a comment claiming `usb0`-only. | `conf/distro/wendyos.conf` (`WENDYOS_MDNS_INTERFACES ?= ""`); `recipes-connectivity/avahi/avahi_%.bbappend` | test | 🔴 |
 | H5 | **Boot order allows USB/HTTP/PXE** — physical/LAN boot of attacker code (compounds C2). | `meta-tegra-extensions/recipes-bsp/tegra-bootcontrol-overlay/files/boot-priority*.dtso` | test | 🔴 |

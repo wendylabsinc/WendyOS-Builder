@@ -18,10 +18,12 @@ PACKAGES = "${PN}-data-setup ${PN}"
 
 # Create wendy user - simplified group list (non-existent groups cause failures)
 USERADD_PACKAGES = "${PN}"
-# Password 'wendy' hash generated with: openssl passwd -6 -salt 5ixFr0sKRtsKKKhY wendy
+# No password is baked in (finding H2): useradd without -p leaves the account
+# password locked, so there is no fleet-wide shared credential. Device access is
+# gRPC-only with no interactive login, so the wendy account never needs one.
 # useradd -m creates /home/wendy on the rootfs; on Tegra, the first-boot service
 # in wendyos-user-data-setup re-initializes it from persistent storage (/data/home)
-USERADD_PARAM:${PN} = "-m -d /home/wendy -s /bin/bash -G dialout,video,audio,users -p '\$6\$5ixFr0sKRtsKKKhY\$5SyCVB9y95JEITWZ8AMcMCrMF4Rvq97ymUjEoUCBKfTl7vWHjTLEboowxWF6hIJgBUMOnJQfeIRPPwYCUaIwm.' wendy"
+USERADD_PARAM:${PN} = "-m -d /home/wendy -s /bin/bash -G dialout,video,audio,users wendy"
 
 SYSTEMD_SERVICE:${PN}-data-setup = "wendyos-user-setup.service"
 SYSTEMD_AUTO_ENABLE:${PN}-data-setup = "enable"
