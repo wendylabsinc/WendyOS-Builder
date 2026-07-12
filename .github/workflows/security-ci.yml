@@ -1,0 +1,31 @@
+name: Security CI
+
+# Runs the security regression guardrails (scripts/security-guardrails.test.sh).
+# Each assertion encodes a DESIRED SECURE STATE from docs/security/hardening-findings.md,
+# so this job is INTENTIONALLY RED until the open findings are closed — it lists
+# exactly what is left on every run, so nothing is forgotten. Fixing a finding
+# turns its assertion green with no test edit.
+#
+# Because a genuinely-red required check would block all merges, do NOT add this
+# to branch protection as a required status check yet. Promote it to required
+# once the suite is all-green (see the design spec).
+#
+# Not path-filtered on purpose: a guardrail can be regressed by a change almost
+# anywhere in the tree, so this runs on every PR and every push to main.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  guardrails:
+    name: Security regression guardrails
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: shellcheck
+        run: shellcheck scripts/security-guardrails.test.sh
+
+      - name: Run security guardrails
+        run: bash scripts/security-guardrails.test.sh
