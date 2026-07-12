@@ -39,17 +39,20 @@ do_install() {
 }
 
 pkg_postinst_ontarget:${PN}() {
-    # Add sudoers entry for wendy user on target only
-    if [ -d /etc/sudoers.d ]; then
-        echo "wendy ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/wendy
-        chmod 0440 /etc/sudoers.d/wendy
-    fi
+    # The wendy user is an unprivileged interactive identity — no sudo (finding
+    # H2). Device management is gRPC-only via wendy-agent, which runs as root;
+    # no on-device unit or script escalates through this user. Actively scrub any
+    # stale passwordless-sudo grant written by an image built before this change
+    # so an A/B OTA upgrade drops it too (harmless if the file is absent).
+    rm -f /etc/sudoers.d/wendy
 }
 
-# Base package: user creation + sudoers (no files, useradd class handles /etc/passwd)
+# Base package: user creation only (no files, useradd class handles /etc/passwd).
+# sudo is intentionally NOT pulled in — the wendy user has no sudo (H2); a dev
+# break-glass path, if ever needed, belongs in a dev-image opt-in, not the fleet.
 FILES:${PN} = ""
 ALLOW_EMPTY:${PN} = "1"
-RDEPENDS:${PN} = "sudo bash systemd"
+RDEPENDS:${PN} = "bash systemd"
 
 # Data setup package: first-boot /data/home initialization (Tegra only)
 SUMMARY:${PN}-data-setup = "WendyOS User Home Directory Setup for /data Partition"
