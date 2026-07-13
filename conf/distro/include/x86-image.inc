@@ -1,8 +1,12 @@
 # Generic x86_64 PC image configuration.
 
-# Size is in KB. Override from local.conf for larger PC disk images.
-WENDYOS_X86_ROOTFS_SIZE ??= "8388608"
-IMAGE_ROOTFS_SIZE:x86-wendyos = "${WENDYOS_X86_ROOTFS_SIZE}"
+# A/B rootfs sizing: image == slot == .wendy payload, pinned to one constant
+# (WENDYOS_ROOTFS_SIZE_KB:x86-wendyos) via floor==ceiling, so an OTA image can
+# never outgrow its fixed on-device slot. The matching --fixed-size rootfsA/
+# rootfsB slots are in meta-x86-extensions/files/wic/genericx86-ab.wks. On the
+# OTA path (Phase 2) wendyos-update.inc requires this same file, so requiring it
+# here too is idempotent (the only overlap, a WICVARS list entry, dedups harmlessly).
+require conf/distro/include/wendyos-rootfs-size.inc
 
 # x86 is a PC-class target, so keep runtime package management and sshd enabled.
 # Embedded/OTA-oriented targets keep the default immutable behavior. Package
@@ -14,11 +18,32 @@ WENDYOS_SSHD:x86-wendyos ?= "1"
 # Useful on commodity PCs and harmless on machines without a given bus/device.
 # packagegroup-wendyos-x86 (meta-x86-extensions) carries the NUC network/BT/GPU
 # kernel-module coverage as RRECOMMENDS.
+#
+# kernel-image puts /boot/${KERNEL_IMAGETYPE} (bzImage) INSIDE the rootfs so GRUB
+# can load the kernel from the selected A/B slot's own /boot (grubAB.cfg), keeping
+# each slot self-contained. The ESP carries only GRUB + grubenv
+# (install-kernel-into-boot-dir=false in the wks), never the kernel.
+# grub-editenv edits the A/B grubenv (EFI/BOOT/grubenv) from Linux — the analog of
+# fw_setenv on RPi. Needed to flip the slot manually in Phase 1, and by the
+# wendyos-update grubenv connector in Phase 2.
 IMAGE_INSTALL:append = " \
     pciutils \
     linux-firmware \
     ca-certificates \
     packagegroup-wendyos-x86 \
+    kernel-image \
+    grub-editenv \
+    "
+
+# A/B wic build: GPT + ext4 label tooling, and DO NOT let wic write an fstab. The
+# stock wic fstab update would bake a single "/" entry, wrong on the other slot;
+# the A/B fstab (x86-wendy-fstab, no "/" entry, LABEL mounts) is installed by
+# base-files instead. Mirrors rpi-image.inc.
+WIC_CREATE_EXTRA_ARGS ?= "--no-fstab-update"
+do_image_wic[depends] += " \
+    wic-tools:do_populate_sysroot \
+    e2fsprogs-native:do_populate_sysroot \
+    gptfdisk-native:do_populate_sysroot \
     "
 
 # NVIDIA dGPU compute stack. When WENDYOS_NVIDIA_DGPU=1 this bakes the full
@@ -32,12 +57,10 @@ IMAGE_INSTALL:append = " \
     ${@oe.utils.ifelse(d.getVar('WENDYOS_NVIDIA_DGPU') == '1', 'packagegroup-wendyos-nvidia-graphics', '')} \
     "
 
-# /config and /data as plain rootfs directories, not partitions. x86 has a
-# single persistent read-write rootfs (no A/B), so these persist as-is and no
-# /data machinery is wired (wendyos-etc-binds/data-setup are OTA-only and stay
-# off — that is deliberate). They mirror the fleet paths and, being directories,
-# become drop-in mount points if x86 ever gains wendy-update A/B: add the
-# partitions + fstab and migrate the folder contents before enabling the mount.
+# /config and /data mount points. With the A/B layout they are now real
+# partitions (FAT config + ext4 data in genericx86-ab.wks) mounted by LABEL from
+# the A/B fstab (x86-wendy-fstab), so the rootfs must carry empty mount-point
+# directories for the mounts to land on. install -d is idempotent.
 create_wendyos_dirs() {
     install -d -m 0755 ${IMAGE_ROOTFS}/config
     install -d -m 0755 ${IMAGE_ROOTFS}/data
