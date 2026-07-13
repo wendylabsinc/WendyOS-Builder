@@ -12,8 +12,11 @@
                         gNVIDIAPublicVariableGuid {
                             /* Valid tokens include: sd, nvme, usb, emmc, sata, http, pxe, shell */
                             DefaultBootPriority {
-                                /* NVMe first so wendy os install works out of the box */
-                                data = "nvme, sd, usb, http, pxe";
+                                /* NVMe first so wendy os install works out of the box.
+                                   Local storage only; USB/HTTP/PXE removed so the device
+                                   cannot boot attacker media or a network image (H5,
+                                   compounds C2). Recovery via NVIDIA recovery mode. */
+                                data = "nvme, sd";
                                 locked;
                             };
                         };

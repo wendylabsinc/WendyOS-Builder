@@ -12,8 +12,11 @@
                         gNVIDIAPublicVariableGuid {
                             /* Valid tokens include: sd, nvme, usb, emmc, sata, http, pxe, shell */
                             DefaultBootPriority {
-                                /* Put SD first, then NVMe, then USB, then HTTP/PXE */
-                                data = "sd, nvme, usb, http, pxe";
+                                /* Local storage only: SD then NVMe. USB/HTTP/PXE are
+                                   removed so the device cannot boot attacker-supplied
+                                   removable media or a network image (H5, compounds C2).
+                                   Recovery is via NVIDIA recovery mode, not this order. */
+                                data = "sd, nvme";
                                 locked;
                             };
                         };
