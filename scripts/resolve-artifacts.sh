@@ -123,13 +123,13 @@ case "$IMAGE_KIND" in
     sdimg="$DEPLOY_DIR/wendyos-image-${MACHINE}.sdimg"
     wic="$DEPLOY_DIR/wendyos-image-${MACHINE}.rootfs.wic"
     if [[ -f "$sdimg" ]]; then
-      # Mender build: prefer .sdimg. Resolve the Yocto symlink chain now — gzip
+      # .sdimg present: prefer it. Resolve the Yocto symlink chain now — gzip
       # fails with ELOOP on deep chains, so the workflow must gzip the real
       # file, not the symlink.
       IMAGE_FILE=$(readlink -f "$sdimg")
       RPI_NEEDS_GZIP=true
     elif [[ -f "$wic" ]]; then
-      # Pre-Mender fallback.
+      # Fallback to the .wic image.
       IMAGE_FILE="$wic"
     else
       fail "no Raspberry Pi image for $KEY ($MACHINE): expected wendyos-image-${MACHINE}.sdimg (preferred) or wendyos-image-${MACHINE}.rootfs.wic in $DEPLOY_DIR (map entry image_kind=sdimg-gz-with-wic-fallback)"

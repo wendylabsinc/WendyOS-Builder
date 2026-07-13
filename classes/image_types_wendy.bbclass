@@ -2,8 +2,8 @@
 #
 # Defines the "wendy" IMAGE_FSTYPE: a .wendy OTA artifact for the
 # wendyos-update client, produced by running `wendyos-update pack` on the
-# image's ext4 rootfs. Replaces mender-artifactimg.bbclass for boards
-# using the wendyos-update OTA stack (WENDYOS_OTA = "wendy").
+# image's ext4 rootfs, for boards using the wendyos-update OTA stack
+# (WENDYOS_OTA = "wendy").
 #
 # Enable per build by adding to the image's fstypes + classes (done in
 # the OTA wiring, gated on WENDYOS_OTA == "wendy"):

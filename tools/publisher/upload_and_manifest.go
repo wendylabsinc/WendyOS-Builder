@@ -166,8 +166,8 @@ type VersionMetadata struct {
 	// offline image, hence no bmap.
 	NVMEBmapPath   string `json:"nvme_bmap_path,omitempty"`
 	SDCardBmapPath string `json:"sd_bmap_path,omitempty"`
-	// Storage-specific OTA (Mender) artifacts. The NVMe and SD/eMMC builds
-	// produce distinct .mender artifacts whose embedded device_type differs,
+	// Storage-specific OTA artifacts. The NVMe and SD/eMMC builds
+	// produce distinct OTA artifacts whose embedded device_type differs,
 	// so they cannot share a single ota_update_path. The CLI selects
 	// nvme_ota_update_path when the device reports storage_medium=nvme;
 	// otherwise it uses ota_update_path.
@@ -297,7 +297,7 @@ func printProgress(read int64, total int64, percent int) {
 // isOSImage checks if a file is an OS image based on its extension
 func isOSImage(filename string) bool {
 	ext := strings.ToLower(filepath.Ext(filename))
-	result := ext == ".img" || ext == ".wic" || ext == ".sdimg" || ext == ".zip" || ext == ".tgz" || ext == ".xz" || ext == ".zst" || ext == ".mender"
+	result := ext == ".img" || ext == ".wic" || ext == ".sdimg" || ext == ".zip" || ext == ".tgz" || ext == ".xz" || ext == ".zst"
 	log.WithFields(logrus.Fields{
 		"filename":  filename,
 		"extension": ext,
@@ -537,7 +537,6 @@ func isAlreadyCompressed(filename string) bool {
 		".xz", ".gz", ".bz2", ".zst", ".lz4", ".lzma",
 		".tar.gz", ".tgz", ".tar.xz", ".tar.zst", ".tar.bz2",
 		".zip", ".7z", ".rar",
-		".mender", // Mender Artifacts are tar containers with internally xz-compressed payloads
 	}
 
 	for _, ext := range compressedExts {
@@ -1784,13 +1783,13 @@ func main() {
 		var otaUpdateSize int64
 		if *otaUpdateFile != "" {
 			otaUpdatePath = imageObjectPath(prefix, *deviceType, *version, filepath.Base(*otaUpdateFile))
-			menderObj := bucket.Object(otaUpdatePath)
-			menderAttrs, err := menderObj.Attrs(ctx)
+			otaObj := bucket.Object(otaUpdatePath)
+			otaAttrs, err := otaObj.Attrs(ctx)
 			if err != nil {
 				log.WithError(err).Error("Failed to get OTA update file attributes, does it exist?")
 				return
 			}
-			otaUpdateSize = menderAttrs.Size
+			otaUpdateSize = otaAttrs.Size
 		}
 
 		// Handle existing recovery file if specified
@@ -2098,9 +2097,9 @@ func setBmapPath(meta *VersionMetadata, storageType, bmapPath string) {
 	}
 }
 
-// applyOTAUpdate records an OTA (Mender) artifact in the version metadata,
+// applyOTAUpdate records an OTA artifact in the version metadata,
 // routing NVMe artifacts to the NVMe-specific fields. The NVMe and SD/eMMC
-// builds emit distinct .mender artifacts whose embedded device_type differs,
+// builds emit distinct OTA artifacts whose embedded device_type differs,
 // so they must not share ota_update_path — otherwise whichever variant
 // publishes last wins and the other variant's devices reject the artifact
 // ("Artifact device type doesn't match"). For "nvme" the artifact also

@@ -4,8 +4,8 @@ DESCRIPTION = "Generic A/B over-the-air update client for WendyOS. Installs the 
 wendyos-update binary plus the boot-verify and auto-commit systemd units. The \
 board-specific behaviour lives behind a connector (tegrauefi for Jetson, \
 ubootenv for Raspberry Pi / U-Boot boards); the engine, artifact format and \
-CLI are board-agnostic. Replaces the Mender client on platforms without \
-meta-mender support (e.g. JetPack 7 / wrynose)."
+CLI are board-agnostic. It is the OTA update client used across WendyOS \
+platforms (e.g. JetPack 7 / wrynose)."
 HOMEPAGE = "https://github.com/wendylabsinc/wendyos-update"
 
 LICENSE = "MIT"

@@ -4,7 +4,7 @@
 # This board joins the JP7.2 fleet-unification experiment alongside Thor.
 # r39.2.0 is the first JP7 line to support the Orin family AND Thor, so all
 # three Jetson boards share one Yocto series (blacksail) under
-# repos/blacksail/. The JP6/Mender Orin fallback lives on `main` (default
+# repos/blacksail/. The JP6 Orin fallback lives on `main` (default
 # scarthgap pins); revert = git checkout main + re-bootstrap a clean build dir.
 #
 # The pins below are the SHARED blacksail tree set — IDENTICAL across Thor and
@@ -43,5 +43,5 @@ SRCREV_TEGRA="d0b2f4d81dc3cd286a6cfd244044a20cc61ebfe5"
 # openembedded-layer + meta-python (hence the compat bridge).
 SRCREV_TEGRA_COMM="931db8c0f56eefbfb028d340ade0953b91006d54"
 
-# Mender SRCREVs intentionally NOT overridden — JetPack 7 has no Mender
-# support; these boards use the wendyos-update OTA stack (WENDYOS_OTA = "wendy").
+# OTA-related SRCREVs are left at their upstream defaults — these boards use
+# the wendyos-update OTA stack (WENDYOS_OTA = "wendy").

@@ -3,7 +3,7 @@
 Description=Bind mount persistent /etc files from /data
 DefaultDependencies=no
 Conflicts=shutdown.target
-After=local-fs.target data.mount mender-systemd-growfs-data.service
+After=local-fs.target data.mount
 Before=sysinit.target wendyos-uuid-generate.service wendyos-device-name-generate.service
 Requires=data.mount
 

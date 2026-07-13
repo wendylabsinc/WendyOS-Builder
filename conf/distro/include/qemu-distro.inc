@@ -11,5 +11,5 @@ WENDYOS_DEEPSTREAM ?= "0"
 # This prevents var-log.mount from being created
 WENDYOS_PERSIST_JOURNAL_LOGS ?= "0"
 
-# Note: Mender is not inherited for QEMU (see wendyos.conf)
-# QEMU uses simple single-partition ext4 layout without Mender A/B partitions
+# Note: A/B OTA is not inherited for QEMU (see wendyos.conf)
+# QEMU uses a simple single-partition ext4 layout without A/B partitions

@@ -30,7 +30,7 @@ PARENT_SYS="$(readlink -f "/sys/class/block/${PART_BASENAME}/..")"
 DISK="/dev/$(basename "$PARENT_SYS")"    # e.g. /dev/mmcblk0
 echo "[expand-rootfs] RootDEV=$ROOTDEV Disk=$DISK Part=$PARTNUM FS=$FSTYPE"
 
-# Skip if an A/B rootfs layout is detected (e.g. mender)
+# Skip if an A/B rootfs layout is detected
 if lsblk -rno PARTLABEL "$DISK" 2>/dev/null | grep -qiE 'root[a-b]'; then
   echo "[expand-rootfs] Detected A/B rootfs layout -> skip."
   mkdir -p "$(dirname "$STAMP")"; touch "$STAMP"; exit 0

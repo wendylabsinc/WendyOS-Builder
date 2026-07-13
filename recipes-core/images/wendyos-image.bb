@@ -4,24 +4,16 @@ LICENSE = "MIT"
 
 inherit core-image
 
-# Note: mender-full is inherited via conf/distro/include/mender.inc
-# which is conditionally included in wendyos.conf (not for QEMU)
-
 DISTRO_FEATURES:append = " systemd"
 VIRTUAL-RUNTIME_init_manager = "systemd"
 
-# Make this image also produce an ext4 alongside tegraflash/mender/dataimg
+# Make this image also produce an ext4 alongside tegraflash
 IMAGE_FSTYPES += " ext4"
 
 # Release-style naming for this image:
 # - IMAGE_VERSION_SUFFIX is a common pattern to carry a release tag.
 # - If unset, it falls back to DISTRO_VERSION.
 IMAGE_VERSION_SUFFIX ?= "${DISTRO_VERSION}"
-
-# Mender artifact name and configuration live in conf/distro/include/mender.inc,
-# which is conditionally required when WENDYOS_OTA = "mender" (see wendyos.conf).
-# Defining them here unconditionally would leave dangling vars on machines
-# where Mender is disabled (Thor, QEMU, RPi).
 
 # Development-time conveniences applied when WENDYOS_DEBUG = "1": postinst
 # logging. Formerly this bundle also carried empty-root-password,
@@ -104,7 +96,7 @@ stamp_boot_screen() {
 ROOTFS_POSTPROCESS_COMMAND += "stamp_boot_screen;"
 
 # Optional runtime package management (rpm/dnf in the rootfs).
-# Disabled by default — image is updated atomically via Mender A/B.
+# Disabled by default — image is updated atomically via the A/B OTA.
 # Set WENDYOS_ENABLE_PACKAGE_MANAGEMENT = "1" in local.conf or distro to enable.
 IMAGE_FEATURES += "${@bb.utils.contains('WENDYOS_ENABLE_PACKAGE_MANAGEMENT', '1', 'package-management', '', d)}"
 
@@ -134,11 +126,8 @@ IMAGE_INSTALL:append = " \
     gstreamer1.0-libav \
     "
 
-# Mender userspace packages — gated on WENDYOS_OTA == "mender" (set in
-# wendyos.conf and overridable per-machine). python3-pip-jetson-config
-# lives in meta-tegra-extensions, so it's split out as Tegra-only.
+# python3-pip-jetson-config lives in meta-tegra-extensions, so it's Tegra-only.
 IMAGE_INSTALL:append = " \
-    ${@'mender-configure mender-connect' if d.getVar('WENDYOS_OTA') == 'mender' else ''} \
     ${@'python3-pip-jetson-config' if 'tegra' in d.getVar('MACHINEOVERRIDES').split(':') else ''} \
     "
 

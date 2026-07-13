@@ -1,6 +1,5 @@
 # WendyOS A/B layout for the wendyos-update OTA stack (WENDYOS_OTA = "wendy").
-# Replaces Mender's auto-generated mender-image-sd layout — with no Mender in
-# the build, nothing generates the A/B partitions, so we author them here.
+# Hand-authored: nothing else generates the A/B partitions.
 #
 # GPT. Partition ORDER is load-bearing and is duplicated in two places that
 # MUST stay in sync with it:

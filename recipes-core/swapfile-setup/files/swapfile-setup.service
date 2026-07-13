@@ -6,7 +6,7 @@ Documentation=man:swapon(8)
 # is on the sysinit critical path -- waiting would re-block boot. swapfile-setup.sh
 # df-guards and retries next boot if /data isn't grown yet.
 RequiresMountsFor=/data
-After=data.mount mender-systemd-growfs-data.service
+After=data.mount
 Before=swap.target
 DefaultDependencies=no
 Conflicts=shutdown.target

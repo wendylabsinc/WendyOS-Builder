@@ -15,7 +15,7 @@
 # is pinned to the same SRCREV_RPI as scarthgap (kernel 6.6 + BCM2712 support);
 # its layer.conf only declares scarthgap, so it is bridged for blacksail below.
 #
-# No Mender (wendy OTA stack).
+# Uses the wendy OTA stack.
 
 BBLAYERS += " \
     ${TOPDIR}/../repos/${WENDYOS_LAYER_TREE}/meta-raspberrypi \

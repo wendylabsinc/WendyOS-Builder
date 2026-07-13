@@ -4,7 +4,7 @@ Documentation=man:systemd.mount(5)
 
 # OP-TEE secure storage (PKCS#11 tokens, device keys, certificates) is written
 # by tee-supplicant to /var/lib/tee. By default that path is on the rootfs, which
-# a Mender A/B OTA replaces on every update -> the device's keys would be wiped.
+# an A/B OTA replaces on every update -> the device's keys would be wiped.
 # Back it with /data/tee (persists across A/B switches), same pattern as
 # /var/lib/containerd -> /data/containerd.
 
@@ -12,9 +12,6 @@ Documentation=man:systemd.mount(5)
 RequiresMountsFor=/data
 After=data.mount
 
-# Wait for Mender data partition resize to complete (if enabled).
-# Safe even if mender-systemd-growfs-data.service doesn't exist.
-After=mender-systemd-growfs-data.service
 
 # Must be mounted before tee-supplicant uses /var/lib/tee for secure storage.
 # Assumes source-built OP-TEE (USE_PREBUILT_OPTEE=0, the meta-tegra default and

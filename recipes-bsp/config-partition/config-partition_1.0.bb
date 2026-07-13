@@ -1,8 +1,8 @@
 SUMMARY = "FAT32 config partition image for Tegra flash"
 DESCRIPTION = "Creates a FAT32 partition image deployed to DEPLOY_DIR_IMAGE \
 for inclusion in the Tegra tegraflash package. RPi does not use this recipe — \
-its config partition is created by Mender as an extra part (MENDER_EXTRA_PARTS \
-in raspberrypi-common-wendyos.inc), placed before /data, and persists."
+its config partition is created by the rpi-wendy-ab*.wks wic layout, placed \
+before /data, and persists."
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
 
