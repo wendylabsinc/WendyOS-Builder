@@ -28,6 +28,7 @@ RDEPENDS:${PN} = " \
     wendyos-identity \
     wendyos-agent \
     wendyos-user \
+    wendyos-firewall \
     wendyos-motd \
     containerd-config \
     xdg-dbus-proxy \
