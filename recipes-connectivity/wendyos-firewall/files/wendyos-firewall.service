@@ -1,0 +1,24 @@
+[Unit]
+Description=WendyOS host firewall (nftables default-deny inbound)
+DefaultDependencies=no
+Wants=network-pre.target
+Before=network-pre.target
+After=nss-lookup.target
+Conflicts=shutdown.target
+Before=shutdown.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Validate before applying; a syntactically bad ruleset must NOT half-load.
+# If validation fails the unit fails and loads nothing -> box stays open
+# (fail-open), never half-closed.
+ExecStartPre=/usr/sbin/nft -c -f /etc/nftables/wendyos-firewall.nft
+ExecStart=/usr/sbin/nft -f /etc/nftables/wendyos-firewall.nft
+# Reload replaces only our table (the .nft deletes+recreates it).
+ExecReload=/usr/sbin/nft -f /etc/nftables/wendyos-firewall.nft
+# On stop, remove ONLY our table (never touch CNI's).
+ExecStop=/usr/sbin/nft delete table inet wendy_filter
+
+[Install]
+WantedBy=multi-user.target

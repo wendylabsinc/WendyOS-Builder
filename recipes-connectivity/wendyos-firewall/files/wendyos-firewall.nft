@@ -1,0 +1,77 @@
+#!/usr/sbin/nft -f
+# WendyOS host firewall — default-deny INBOUND (finding H3).
+#
+# Managed as an ISOLATED, named table so it never touches containerd/CNI's
+# iptables(-nft) chains: we delete/create ONLY `table inet wendy_filter` and
+# never run `nft flush ruleset`, and we add NO base chain on the forward/nat
+# hooks (CNI owns those; a stray drop policy there would break container egress
+# and published ports). See docs/security/specs/H3-host-firewall-design.md §4.4.
+#
+# ROLLOUT: this ships in LOG/AUDIT mode — the input chain policy is `accept`, so
+# nothing is dropped; the final rule logs what an enforcing policy WOULD drop.
+# Collect `wendy-fw-drop:` journal evidence on real Jetson/RPi/qemu, then flip
+# the policy to `drop` to enforce (that switch + build-time interface
+# parameterization via WENDYOS_FIREWALL_MODE/_MGMT_IFACES is the documented
+# follow-up in the H3 spec §4/§6). Until then this is defence-in-depth scaffolding
+# validated for syntax and audited via the drop-log.
+
+table inet wendy_filter
+delete table inet wendy_filter
+
+table inet wendy_filter {
+    # Intended management interfaces (USB gadget + LAN). Ties into H4.
+    define mgmt_ifaces = { "usb0", "eth0", "wlan0" }
+    define ctrl_port   = 50051
+
+    chain input {
+        # LOG MODE: policy accept (nothing is dropped yet). Flip to `drop` to
+        # enforce once the drop-log is clean.
+        type filter hook input priority filter; policy accept;
+
+        # 1. Loopback.
+        iif "lo" accept
+        iif != "lo" ip  saddr 127.0.0.0/8 drop
+        iif != "lo" ip6 saddr ::1          drop
+
+        # 2. Established / related return traffic (cloud dial-out, DHCP-client
+        #    leases, OTA/package fetch, cloud_tunnel streams).
+        ct state established,related accept
+        ct state invalid drop
+
+        # 3. ICMPv6 neighbor discovery + MLD (IPv6 breaks without these).
+        ip6 nexthdr icmpv6 icmpv6 type {
+            nd-router-solicit, nd-router-advert,
+            nd-neighbor-solicit, nd-neighbor-advert,
+            mld-listener-query, mld-listener-report, mld-listener-done,
+            echo-request, echo-reply, destination-unreachable,
+            packet-too-big, time-exceeded, parameter-problem
+        } accept
+        # 4. ICMPv4 echo + errors.
+        ip protocol icmp icmp type {
+            echo-request, echo-reply, destination-unreachable,
+            time-exceeded, parameter-problem
+        } accept
+
+        # 5. Container bridge -> host (containers reach the agent/DNS via the
+        #    cni0 gateway). Scoped to the bridge iface + subnet.
+        iif "cni0" ip saddr 10.88.0.0/16 accept
+
+        # 6. Agent gRPC control plane — scoped to intended ifaces only (H4).
+        iifname $mgmt_ifaces tcp dport $ctrl_port accept
+
+        # 7. mDNS — scoped to intended ifaces only (H4).
+        iifname $mgmt_ifaces udp dport 5353 accept
+
+        # 8. DHCP client: accept server replies (broadcast; may miss conntrack).
+        udp sport 67 udp dport 68 accept
+
+        # DHCP-server (WENDYOS_USB_NET_MODE=dhcp-server) and sshd (WENDYOS_SSHD=1)
+        # allow rules are added by the enforce-mode follow-up (H3 spec §4).
+
+        # 9. What an enforcing policy would drop: log it (rate-limited), then let
+        #    the `accept` policy pass it (LOG MODE). Under enforce policy `drop`,
+        #    packets reaching here are logged and dropped.
+        limit rate 5/minute burst 10 packets \
+            log prefix "wendy-fw-drop: " level info flags all
+    }
+}
