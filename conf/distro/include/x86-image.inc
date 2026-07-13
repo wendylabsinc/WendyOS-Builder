@@ -8,11 +8,17 @@
 # here too is idempotent (the only overlap, a WICVARS list entry, dedups harmlessly).
 require conf/distro/include/wendyos-rootfs-size.inc
 
-# x86 is a PC-class target, so keep runtime package management and sshd enabled.
-# Embedded/OTA-oriented targets keep the default immutable behavior. Package
-# management also underpins the future GPU userspace feed (Phase B, see the plan
-# doc).
-WENDYOS_ENABLE_PACKAGE_MANAGEMENT:x86-wendyos ?= "1"
+# No runtime package management (dnf), matching the rest of the fleet (the distro
+# default is off; x86 used to be the only board turning it on). Two reasons:
+#   - Immutable A/B: the rootfs slot is raw-overwritten by every OTA, so anything
+#     dnf-installed into it is wiped on the next update — dnf-in-image buys nothing
+#     on an A/B rootfs. The GPU userspace feed (Phase B) must use a non-dnf path
+#     (baked / /data / container) regardless.
+#   - Fixed-size pin: shipping dnf makes oe-core's rootfs_rpm add 100 MiB to
+#     IMAGE_ROOTFS_EXTRA_SPACE, which breaks the floor==ceiling A/B slot sizing
+#     (the ext4 must equal the fixed slot exactly). Off => EXTRA_SPACE = 0.
+# sshd stays on — x86 is a dev/PC-class target and ssh is useful for bring-up.
+WENDYOS_ENABLE_PACKAGE_MANAGEMENT:x86-wendyos ?= "0"
 WENDYOS_SSHD:x86-wendyos ?= "1"
 
 # Useful on commodity PCs and harmless on machines without a given bus/device.
@@ -52,15 +58,22 @@ do_image_wic[depends] += " \
 # builds the .wendy payload) and packagegroup-wendyos-base pulls in
 # wendyos-etc-binds (identity persists on /data across A/B slots).
 #
-# 1) Pin the OTA connector to grubenv (meta-x86-extensions wendyos-update-config).
-IMAGE_INSTALL:append = "${@' wendyos-update-config' if d.getVar('WENDYOS_OTA') == 'wendy' else ''}"
+# 1) Extra packages for the wendy A/B OTA image, added only when WENDYOS_OTA=="wendy":
+#    - wendyos-update-config: pins the OTA connector to grubenv (meta-x86-extensions).
+#    - grow-data-part: grows /data to fill the disk on first boot (shared,
+#      board-agnostic; the wks makes /data the last partition so it can grow).
+WENDYOS_X86_OTA_INSTALL = " \
+    wendyos-update-config \
+    grow-data-part \
+    "
+IMAGE_INSTALL:append = "${@' ' + d.getVar('WENDYOS_X86_OTA_INSTALL') if d.getVar('WENDYOS_OTA') == 'wendy' else ''}"
 
 # 2) Drop wendyos-data-setup (pulled by wendyos-update.inc). Its explicit
 #    data.mount uses /dev/disk/by-partlabel/data and its data-init would not grow
 #    our wic-preformatted ext4 /data anyway. x86 instead relies on the
 #    fstab-generated data.mount (LABEL=data, x86-wendy-fstab) — proven mounting in
-#    Phase 1 — which also satisfies wendyos-etc-binds' Requires=data.mount. Mirrors
-#    rpi-image.inc. (First-boot /data grow is deferred — see the OTA plan Phase 3.)
+#    Phase 1 — which also satisfies wendyos-etc-binds' Requires=data.mount, plus
+#    grow-data-part above for the first-boot grow. Mirrors rpi-image.inc.
 IMAGE_INSTALL:remove = "${@'wendyos-data-setup' if d.getVar('WENDYOS_OTA') == 'wendy' else ''}"
 
 # NVIDIA dGPU compute stack. When WENDYOS_NVIDIA_DGPU=1 this bakes the full

@@ -1,11 +1,13 @@
-SUMMARY = "Grow /data to fill the storage device on first boot (RPi)"
-DESCRIPTION = "First-boot oneshot that grows /data to fill the storage device, \
-no reboot. /data is the last partition because config is placed before it by \
-the rpi-wendy-ab*.wks layouts; this also grows the MBR extended container and \
-relocates the GPT backup header (wendy A/B \
-layout) so the partition can reach the disk end. Split in two phases: the fast \
-partition grow runs offline before data.mount (grow-data-part.service), the slow \
-ext4 resize2fs runs online afterwards off the boot path (grow-data-fs-online.service)."
+SUMMARY = "Grow /data to fill the storage device on first boot"
+DESCRIPTION = "First-boot oneshot that grows /data to fill the storage device, no \
+reboot. /data is the last partition (config is placed before it by the wendy A/B \
+wks layouts), so it grows into the trailing free space; this relocates the GPT \
+backup header (and, on an MBR layout, grows the extended container) so the \
+partition can reach the disk end. Split in two phases: the fast partition grow runs \
+offline before data.mount (grow-data-part.service), the slow ext4 resize2fs runs \
+online afterwards off the boot path (grow-data-fs-online.service). Board-agnostic \
+(resolves /data by LABEL from fstab and the disk from sysfs); pulled into the image \
+only where the wendy A/B layout exists (WENDYOS_OTA == \"wendy\")."
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
 
@@ -61,5 +63,8 @@ RDEPENDS:${PN} = " \
     udev \
     "
 
-COMPATIBLE_MACHINE = "rpi"
-
+# Board-agnostic: no COMPATIBLE_MACHINE. The recipe is installed only where the
+# wendy A/B /data layout exists — RPi via packagegroup-wendyos-rpi, x86 via
+# x86-image.inc — both gated on WENDYOS_OTA == "wendy". A board without that layout
+# (WENDYOS_OTA == "none") never installs it, and the script self-noops if there is
+# no /data fstab entry, so it is safe even if accidentally present.
