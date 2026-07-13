@@ -46,6 +46,23 @@ do_image_wic[depends] += " \
     gptfdisk-native:do_populate_sysroot \
     "
 
+# --- wendyos-update (wendy OTA) image deltas for x86 -----------------------
+# All gated on WENDYOS_OTA == "wendy". When set, wendyos.conf auto-requires
+# wendyos-update.inc (installs the wendyos-update agent + wendyos-data-setup, and
+# builds the .wendy payload) and packagegroup-wendyos-base pulls in
+# wendyos-etc-binds (identity persists on /data across A/B slots).
+#
+# 1) Pin the OTA connector to grubenv (meta-x86-extensions wendyos-update-config).
+IMAGE_INSTALL:append = "${@' wendyos-update-config' if d.getVar('WENDYOS_OTA') == 'wendy' else ''}"
+
+# 2) Drop wendyos-data-setup (pulled by wendyos-update.inc). Its explicit
+#    data.mount uses /dev/disk/by-partlabel/data and its data-init would not grow
+#    our wic-preformatted ext4 /data anyway. x86 instead relies on the
+#    fstab-generated data.mount (LABEL=data, x86-wendy-fstab) — proven mounting in
+#    Phase 1 — which also satisfies wendyos-etc-binds' Requires=data.mount. Mirrors
+#    rpi-image.inc. (First-boot /data grow is deferred — see the OTA plan Phase 3.)
+IMAGE_INSTALL:remove = "${@'wendyos-data-setup' if d.getVar('WENDYOS_OTA') == 'wendy' else ''}"
+
 # NVIDIA dGPU compute stack. When WENDYOS_NVIDIA_DGPU=1 this bakes the full
 # driver stack into the image: the open kernel modules, the matching proprietary
 # userspace, the container toolkit and the wendyos-gpu-cdi detect/CDI helper.
