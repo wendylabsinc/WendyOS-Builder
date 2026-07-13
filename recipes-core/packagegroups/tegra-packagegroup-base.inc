@@ -32,7 +32,7 @@ RDEPENDS:${PN}:append = " optee-os"
 
 # OP-TEE secure-storage persistence:
 # bind-mount /var/lib/tee -> /data/tee so PKCS#11 tokens / device keys
-# survive Mender A/B OTA (the rootfs copy of /var/lib/tee is wiped on
+# survive A/B OTA (the rootfs copy of /var/lib/tee is wiped on
 # every A/B switch). 
 # Gated on OP-TEE, which is present on every Tegra machine.
 # QEMU/RPi have no OP-TEE.

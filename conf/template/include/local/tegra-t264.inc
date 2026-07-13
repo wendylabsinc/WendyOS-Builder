@@ -1,5 +1,5 @@
-# Tegra T264 (Thor): wendyos-update OTA (no Mender, no UEFI capsule update yet).
-# WENDYOS_UPDATE_BOOTLOADER gates the Mender capsule artefact; Thor uses
+# Tegra T264 (Thor): wendyos-update OTA (no UEFI capsule update yet).
+# WENDYOS_UPDATE_BOOTLOADER gates the UEFI capsule artefact; Thor uses
 # wendyos-update with rootfs-only swaps for now, so keep it off.
 WENDYOS_UPDATE_BOOTLOADER = "1"
 

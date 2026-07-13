@@ -32,17 +32,17 @@ RPI_WENDY_FSTAB_TEMPLATE:raspberrypi3-64 = "rpi-wendy-mbr-fstab"
 
 do_install:append() {
     if [ "${WENDYOS_OTA}" = "wendy" ]; then
-        # wendyos-update A/B layout (RPi3/4/5): no Mender postprocess to generate
-        # fstab. Install our A/B fstab (no "/" entry — the kernel mounts the
+        # wendyos-update A/B layout (RPi3/4/5): nothing else generates the
+        # fstab, so install our A/B fstab (no "/" entry — the kernel mounts the
         # slot via boot-ab.cmd.in's root=; /boot stays mounted for fw_setenv's
         # uboot.env). /boot, /config and /data are all referenced by LABEL, so
         # there is no placeholder to substitute on this path (WDY-1768).
         install -m 0644 ${UNPACKDIR}/${RPI_WENDY_FSTAB_TEMPLATE} ${D}${sysconfdir}/fstab
     elif [ "${WENDYOS_RPI_UBOOT}" = "1" ]; then
-        # Mender-managed MBR layout: boot/A/B/extended{config,data}. The
+        # Legacy single-rootfs MBR layout: boot/A/B/extended{config,data}. The
         # poky-stock /etc/fstab (already installed by base-files's own
         # do_install) is correct here — the kernel mounts / via the
-        # ${mender_kernel_root} cmdline arg, and Mender's image-build
+        # root= cmdline arg, and the image-build
         # postprocess appends /data and /uboot (the wendyos-image bbappend
         # fixes up the /config line). Our rpi-fstab hard-codes /boot and
         # /config entries that don't match this layout, so we skip it here.

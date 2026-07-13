@@ -24,7 +24,7 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
 #     NVMe keeps its own required PREBOOT from nvme-boot.cfg.
 #   - rpi5-bootdelay.cfg (both machines, from #154): CONFIG_BOOTDELAY=-2. The
 #     autoboot countdown's stdin poll is a known Pi 5 wedge across U-Boot
-#     versions; Mender-based 0.16.x shipped -2 (verified in the 0.16.0 binary)
+#     versions; the 0.16.x images shipped -2 (verified in the 0.16.0 binary)
 #     and never hit it, nightlies shipped the default 2 and did.
 # See docs/docs-ext/rpi5-nvme.md.
 #
@@ -51,7 +51,7 @@ SRCREV:raspberrypi5 = "1296a428c67cf103eca482d4a63349661c1b799f"
 # Skip the autoboot countdown on BOTH rpi5 machines (raspberrypi5-nvme carries
 # the raspberrypi5 override). The countdown's stdin poll wedges BCM2712 hard at
 # the U-Boot logo; the symptom is reported upstream across 2024.04/2025.04/
-# master, so it is NOT rc4-specific. 0.16.x Mender images boot because their
+# master, so it is NOT rc4-specific. The 0.16.x images boot because their
 # U-Boot integration sets the same -2. See rpi5-bootdelay.cfg for the
 # trade-off (autoboot can no longer be interrupted from serial).
 SRC_URI:append:raspberrypi5 = " file://rpi5-bootdelay.cfg"

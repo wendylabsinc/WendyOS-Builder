@@ -1,9 +1,8 @@
 inherit partuuid-rpi
 
-# All Mender-enabled RPi machines (RPi3/4/5) let meta-mender-raspberrypi's
-# rpi-cmdline.bbappend manage `root=` via ${mender_kernel_root} (U-Boot
-# resolves it at boot to the active A/B slot). We only contribute WendyOS
-# console + USB-gadget additions via :append:rpi.
+# `root=` is set at boot by the A/B boot script (boot-ab.cmd, rpi-u-boot-scr)
+# from the selected slot. We only contribute WendyOS console + USB-gadget
+# additions via :append:rpi.
 #
 # `modules-load=dwc2` is correct for every WendyOS RPi target that opts
 # into USB gadget mode:

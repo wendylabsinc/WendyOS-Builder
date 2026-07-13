@@ -179,7 +179,7 @@ echo "  pyyaml: $PYYAML_VERSION (+ LICENSE)"
 # ---------------------------------------------------------------------------
 log "Step 4: validate"
 # ---------------------------------------------------------------------------
-magic() { head -c4 "$1" | tr -d '\0'; }
+magic() { head -c4 "$1" | LC_ALL=C tr -d '\0'; }
 [ "$(magic "$FP/stage1/br_bct_BR.bct")" = "BCTB" ] || err "br_bct_BR.bct: bad magic (expected BCTB)"
 for f in mb1_t264_prod_aligned_sigheader.bin.encrypt \
          psc_bl1_t264_prod_aligned_sigheader.bin.encrypt \

@@ -8,8 +8,8 @@ After=data.mount
 
 # Wait for the /data fs grow so a first-boot image pull can't hit ENOSPC while the
 # fs is still small. Growers are board-specific, inert where absent:
-# mender-systemd-growfs-data (Tegra), grow-data-fs-online (RPi).
-After=mender-systemd-growfs-data.service grow-data-fs-online.service
+# grow-data-fs-online (RPi); safe if the unit doesn't exist.
+After=grow-data-fs-online.service
 
 # Must be mounted before containerd starts
 Before=containerd.service

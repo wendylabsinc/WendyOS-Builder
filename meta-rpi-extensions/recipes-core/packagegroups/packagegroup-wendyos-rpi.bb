@@ -11,7 +11,7 @@ RDEPENDS:${PN} = " \
     pi-bluetooth \
     "
 # expand-rootfs grows the ROOT partition to fill the card — correct for the
-# single-rootfs Mender layout, but fatal for the wendy A/B layout (it would
+# single-rootfs layout, but fatal for the wendy A/B layout (it would
 # grow rootfsA over rootfsB). Excluded when WENDYOS_OTA="wendy"; grow-data-part
 # (kept) grows /data, the last partition, instead.
 # pi-bluetooth ships hciuart.service, which attaches the onboard BT radio to

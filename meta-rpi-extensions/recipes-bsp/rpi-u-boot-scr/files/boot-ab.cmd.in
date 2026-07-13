@@ -4,8 +4,8 @@
 # boot.scr by mkimage. Selects the A/B rootfs slot from the U-Boot env and
 # implements trial boot with an in-script bootcount: stock meta-raspberrypi
 # U-Boot, environment stored as uboot.env on the FAT boot partition (no U-Boot
-# patches). Mirrors meta-mender-raspberrypi's mechanics under WendyOS variable
-# names. The on-device connector (wendyos-update internal/connector/ubootenv)
+# patches), using WendyOS variable names. The on-device connector
+# (wendyos-update internal/connector/ubootenv)
 # reads/writes the same vars via fw_setenv from Linux.
 #
 # Env-var contract (kept identical to the connector):
@@ -29,7 +29,7 @@ if test ! -e @@WENDYOS_UBOOT_IF@@ @@WENDYOS_UBOOT_DEV@@:1 uboot.env; then saveen
 # attempts. A healthy boot is finalized by `wendyos-update commit`, which clears
 # the flag and zeroes the counter from Linux. A slot that never commits keeps
 # climbing bootcount until it exceeds bootlimit, then we fall back to the other
-# slot (clearing the flag — matches mender_altbootcmd).
+# slot (clearing the flag).
 if test "${wendyos_upgrade_available}" = "1"; then
     setexpr bootcount ${bootcount} + 1
     saveenv

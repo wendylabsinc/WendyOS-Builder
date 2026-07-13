@@ -7,7 +7,7 @@
 # stuck in "unbootable" (0xFF) state.
 #
 # On NVIDIA Jetson (L4T R36.x / JetPack 6), the UEFI firmware tracks rootfs
-# slot health via EFI variables (RootfsStatusSlot{A,B}). When a Mender OTA
+# slot health via EFI variables (RootfsStatusSlot{A,B}). When an OTA
 # update fails or rolls back, UEFI marks the target slot as unbootable (0xFF).
 # Since nvbootctrl mark-boot-successful was removed in L4T 35.2.1, nothing
 # resets this flag -- the slot stays permanently unbootable until fixed.
@@ -249,64 +249,6 @@ done
 log ""
 
 ###############################################################################
-# Mender Root Device Check
-###############################################################################
-
-log "=== Mender Root Device ==="
-
-# What is actually mounted as root?
-actual_root=$(findmnt -no SOURCE / 2>/dev/null || echo "unknown")
-log "Mounted root: ${actual_root}"
-
-# Map slot to expected root device via mender.conf
-# Mender uses split-config: RootfsPartA/B are in the persistent config
-# at /data/mender/mender.conf, not in /etc/mender/mender.conf (transient).
-expected_root=""
-rootfs_a=""
-rootfs_b=""
-for conf in /data/mender/mender.conf /var/lib/mender/mender.conf /etc/mender/mender.conf; do
-    [ -f "${conf}" ] || continue
-    if [ -z "${rootfs_a}" ]; then
-        rootfs_a=$(sed -n 's/.*"RootfsPartA"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "${conf}" | head -1)
-    fi
-    if [ -z "${rootfs_b}" ]; then
-        rootfs_b=$(sed -n 's/.*"RootfsPartB"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "${conf}" | head -1)
-    fi
-done
-log "Mender config: RootfsPartA=${rootfs_a:-not set}  RootfsPartB=${rootfs_b:-not set}"
-
-case "${current_slot}" in
-    0) expected_root="${rootfs_a}" ;;
-    1) expected_root="${rootfs_b}" ;;
-esac
-
-# Check for upgrade_available flag (indicates uncommitted update)
-upgrade_marker="/var/lib/mender/upgrade_available"
-if [ -f "${upgrade_marker}" ]; then
-    printf "Upgrade pending: ${YELLOW}yes (uncommitted update)${NC}\n"
-else
-    printf "Upgrade pending: ${GREEN}no${NC}\n"
-fi
-
-# Cross-reference: does the mounted root match what nvbootctrl + mender.conf expect?
-root_mismatch=0
-if [ -n "${expected_root}" ] && [ "${actual_root}" != "unknown" ]; then
-    if [ "${actual_root}" = "${expected_root}" ]; then
-        printf "Root device check: ${GREEN}OK${NC} (slot ${slot_label} = ${expected_root})\n"
-    else
-        root_mismatch=1
-        printf "Root device check: ${RED}MISMATCH${NC}\n"
-        printf "  Expected: ${expected_root} (slot ${slot_label} per mender.conf)\n"
-        printf "  Actual:   ${actual_root}\n"
-        printf "  ${YELLOW}UEFI likely fell back to the wrong slot due to an unbootable target.${NC}\n"
-        printf "  ${YELLOW}Fix: run '$0 --fix' then reboot.${NC}\n"
-    fi
-else
-    log "Root device check: could not verify (mender.conf missing or slot unknown)"
-fi
-log ""
-
-###############################################################################
 # Capsule and ESRT Status
 ###############################################################################
 
@@ -376,22 +318,15 @@ fi
 log ""
 
 ###############################################################################
-# Mender Marker Files
+# Update Marker Files
 ###############################################################################
 
-log "=== Mender Markers ==="
+log "=== Update Markers ==="
 
 if [ -f /var/lib/wendyos/update-bootloader ]; then
     printf "Bootloader capsule updates: ${GREEN}enabled${NC}\n"
 else
     printf "Bootloader capsule updates: ${YELLOW}disabled${NC}\n"
-fi
-
-if [ -f /data/mender/tegra-bl-version-before ]; then
-    ver=$(cat /data/mender/tegra-bl-version-before 2>/dev/null || echo "unreadable")
-    printf "BL version-before file: ${YELLOW}PRESENT (${ver})${NC}\n"
-else
-    printf "BL version-before file: ${GREEN}absent (clean)${NC}\n"
 fi
 log ""
 
@@ -412,11 +347,7 @@ log ""
 slots_to_fix=$(echo "${slots_to_fix}" | tr -s ' ' | sed 's/^ //')
 
 if [ -z "${slots_to_fix}" ]; then
-    if [ "${root_mismatch}" -eq 1 ]; then
-        printf "All UEFI slot variables are healthy, but ${RED}root device mismatch detected${NC}.\n"
-        log "This likely means UEFI fell back after a previous slot was marked unbootable,"
-        log "and the slot has since been repaired. Reboot to let UEFI boot the correct slot."
-    elif [ "${MODE}" != "dual" ]; then
+    if [ "${MODE}" != "dual" ]; then
         printf "All rootfs slots are ${GREEN}healthy${NC}.\n"
     fi
     if [ "${MODE}" != "dual" ]; then
@@ -465,18 +396,6 @@ if [ "${MODE}" = "fix" ] && [ -n "${slots_to_fix}" ]; then
     done
 
     log ""
-
-    # Clean up stale marker
-    STALE_MARKER="/data/mender/tegra-bl-version-before"
-    if [ -f "${STALE_MARKER}" ]; then
-        rm -f "${STALE_MARKER}"
-        printf "Stale marker: ${GREEN}cleaned${NC} (${STALE_MARKER})\n"
-    fi
-
-    if [ "${root_mismatch}" -eq 1 ]; then
-        log ""
-        printf "${YELLOW}Root device mismatch detected. Reboot after fix to let UEFI boot the correct slot.${NC}\n"
-    fi
 
     log ""
     log "=== Post-fix Slot Status ==="

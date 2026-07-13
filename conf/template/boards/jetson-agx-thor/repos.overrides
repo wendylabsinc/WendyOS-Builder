@@ -54,5 +54,5 @@ SRCREV_TEGRA="d0b2f4d81dc3cd286a6cfd244044a20cc61ebfe5"
 # blacksail-compatible (see blacksail-compat.inc).
 SRCREV_TEGRA_COMM="931db8c0f56eefbfb028d340ade0953b91006d54"
 
-# Mender SRCREVs are intentionally NOT overridden — JetPack 7 has no Mender
-# support; Thor uses the wendyos-update OTA stack (WENDYOS_OTA = "wendy").
+# OTA-related SRCREVs are left at their upstream defaults — Thor uses the
+# wendyos-update OTA stack (WENDYOS_OTA = "wendy").

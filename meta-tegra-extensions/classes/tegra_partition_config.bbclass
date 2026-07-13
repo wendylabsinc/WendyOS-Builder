@@ -7,31 +7,18 @@
 #
 #   1. Remove the 'reserved' partition (blocks expansion, not needed)
 #   2. Remove <filename> from UDA (kept for NVIDIA compat, not used)
-#   3. Persistent 'data' partition (mounted at /data), gated independently
-#      of Mender:
-#      - WENDYOS_OTA = "mender": rename 'permanet_user_storage' -> 'data'
-#        if present (meta-mender-tegra p3768 boards), or create 'data'
-#        from scratch (BSP XML), with <filename>DATAFILE</filename> so the
-#        flash tools write the Mender .dataimg into it.
-#      - WENDYOS_DATA_PART = "1" without Mender (e.g. WENDYOS_OTA = "wendy"):
-#        create 'data' with the same placement and numbering but NO
-#        <filename> — there is no .dataimg artifact without the Mender build
-#        machinery, and a dangling filename makes tegraparser_v2 fail at
+#   3. Persistent 'data' partition (mounted at /data):
+#      - WENDYOS_DATA_PART = "1" (any OTA stack selected): create 'data' with
+#        NO <filename> — a dangling filename makes tegraparser_v2 fail at
 #        flash time.  The flash tools allocate the partition empty; a
 #        first-boot unit formats and expands it.
 #      - WENDYOS_DATA_PART = "0": no data partition.
 #   4. Insert a FAT32 'config' partition.  Anchored before the data
 #      partition when that exists, before secondary_gpt otherwise.
 #
-# The BSP tarball's _rootfs_ab.xml does NOT contain permanet_user_storage —
-# that partition only exists in meta-mender-tegra's custom XML for p3768
-# upstream boards.  For WendyOS machines, the data partition is always created from
-# scratch.  The rename path is kept as defensive code.
-#
 # Build pipeline context:
 #
 #   tegra-storage-layout-base do_install()       <- NVIDIA BSP installs raw XMLs
-#     -> meta-mender-tegra do_install:append()   <- adds DATAFILE to UDA
 #     -> do_modify_partition_layout()            <- THIS TASK
 #     -> do_populate_sysroot                     <- publishes modified XMLs
 #     -> tegra-storage-layout do_compile()       <- reads our XMLs, replaces
@@ -58,13 +45,11 @@ python do_modify_partition_layout() {
     # Read partition configuration from BitBake variables.
     # WENDYOS_CONFIG_PART_SIZE_MB: distro config (wendyos.conf), default 64 MB.
     # WENDYOS_CONFIG_PART_NUMBER: GPT partition number for config, default 16.
-    # Data partition GPT number: WENDYOS_DATA_PART_NUMBER (Mender-free
-    # boards), falling back to MENDER_DATA_PART_NUMBER (Mender boards set
-    # it in their machine conf), then 17.
+    # Data partition GPT number: WENDYOS_DATA_PART_NUMBER, default 17.
     config_size_mb = d.getVar('WENDYOS_CONFIG_PART_SIZE_MB')
     config_size_bytes = int(config_size_mb) * 1024 * 1024
     config_part_num = int(d.getVar('WENDYOS_CONFIG_PART_NUMBER') or '16')
-    data_part_num = int(d.getVar('WENDYOS_DATA_PART_NUMBER') or d.getVar('MENDER_DATA_PART_NUMBER') or '17')
+    data_part_num = int(d.getVar('WENDYOS_DATA_PART_NUMBER') or '17')
 
     # Partition start alignment, in bytes. Default 4 MiB — matches the RPi
     # wic layout (rpi-*.wks use --align 4096 KiB) for a single cross-board
@@ -105,7 +90,7 @@ python do_modify_partition_layout() {
 
         # allocation_attribute: 0x8 = fixed size (no fill-to-end).
         # Bit 0x800 would mean "fill to end of disk" which we don't want —
-        # runtime expansion via parted/mender-grow-data handles that instead.
+        # runtime expansion via parted handles that instead.
         sub('allocation_attribute', alloc_attr)
 
         # partition_type_guid: GPT partition type.
@@ -153,7 +138,7 @@ python do_modify_partition_layout() {
     #
     # The 'id' attribute sets the GPT partition number (NOT physical order).
     # This is how APP ends up as /dev/nvme0n1p1 despite not being first
-    # physically.  parted/sgdisk use these numbers, so mender-grow-data's
+    # physically.  parted/sgdisk use these numbers, so the first-boot grower's
     # "parted resizepart 17 100%" targets the right partition regardless
     # of where config (id=16) sits physically.
     def modify_device(device, layout_path):
@@ -178,8 +163,8 @@ python do_modify_partition_layout() {
 
         # Step 2: Remove <filename> from UDA
         #
-        # meta-mender-tegra's do_install:append() adds <filename>DATAFILE</filename>
-        # to UDA, which tells NVIDIA flash tools to write the Mender data image
+        # Legacy layers added <filename>DATAFILE</filename> to UDA, which
+        # tells NVIDIA flash tools to write a data image
         # there.  We don't use UDA for data (we use the data partition instead), so
         # this filename must be removed.  If left, the flash tools try to write
         # a large data image into the 400 MB UDA partition, which fails.
@@ -191,93 +176,24 @@ python do_modify_partition_layout() {
                 uda.remove(fn)
                 bb.note('  Removed <filename> from UDA')
 
-        # Step 3: Create or rename the data partition
+        # Step 3: Create the data partition
         #
-        # The partition is named 'data' (mounted at /data) in every case.
-        # Two gates decide whether/how it is created:
-        #   WENDYOS_OTA = "mender"          -> 'data' with DATAFILE filename
-        #                                      (flash tools write Mender's .dataimg)
-        #   WENDYOS_DATA_PART = "1" + not    -> 'data' with NO filename
-        #     Mender (e.g. WENDYOS_OTA=wendy)   (allocated empty at flash time;
-        #                                      a first-boot unit formats and
-        #                                      expands it — wendyos-update OTA)
-        #   WENDYOS_DATA_PART = "0"          -> skipped entirely
+        # The partition is named 'data' (mounted at /data).
+        #   WENDYOS_DATA_PART = "1" -> 'data' with NO filename (allocated
+        #                              empty at flash time; a first-boot unit
+        #                              formats and expands it)
+        #   WENDYOS_DATA_PART = "0" -> skipped entirely
         #
-        # The no-filename rule is what makes the Mender-free path flashable:
-        # there is no .dataimg artifact without the Mender build machinery,
-        # and a dangling <filename> makes tegraparser_v2 fail at flash time.
-        #
-        # Two possible input states when Mender is on:
-        #
-        # A) BSP XML (normal case for WendyOS machines):
-        #    The XML has no permanet_user_storage.  We create the 'data'
-        #    partition from scratch and insert it before secondary_gpt.
-        #
-        # B) meta-mender-tegra custom XML (p3768 upstream boards only):
-        #    The XML has permanet_user_storage (id=17, alloc_attr=0x808).
-        #    We rename it to 'data' and fix its attributes:
-        #    - size: 400 MB -> 512 MB
-        #    - alloc_attr: 0x808 -> 0x8 (remove fill-to-end bit so runtime
-        #      expansion via mender-grow-data.service works correctly)
-        #    - add Linux filesystem GUID
-        #
-        # Path B is defensive code — it's not exercised by WendyOS machines
-        # but is kept for upstream compatibility.
-        mender_enabled = (d.getVar('WENDYOS_OTA') or 'none') == 'mender'
+        # No <filename>: there is no data image artifact, and a dangling
+        # <filename> makes tegraparser_v2 fail at flash time.
         data_part_enabled = (d.getVar('WENDYOS_DATA_PART') or '0') == '1'
         data_part = None
-        if mender_enabled:
-            pus = device.find('./partition[@name="permanet_user_storage"]')
-            if pus is not None:
-                # Path B: rename in-place
-                pus.set('name', 'data')
-                pus.set('id', str(data_part_num))
-                size_el = pus.find('size')
-                if size_el is not None:
-                    size_el.text = ' 536870912 '
-                alloc_el = pus.find('allocation_attribute')
-                if alloc_el is not None:
-                    alloc_el.text = ' 0x8 '
-                guid_el = pus.find('partition_type_guid')
-                if guid_el is None:
-                    guid_el = ET.SubElement(pus, 'partition_type_guid')
-                guid_el.text = ' 0FC63DAF-8483-4772-8E79-3D69D8477DE4 '
-                desc_el = pus.find('description')
-                if desc_el is None:
-                    desc_el = ET.SubElement(pus, 'description')
-                desc_el.text = (' **WendyOS.** Data partition for persistent'
-                                ' storage. Auto-expands via mender-grow-data.service'
-                                ' on first boot. ')
-                bb.note('  Renamed "permanet_user_storage" -> "data" (id=%d)' % data_part_num)
-                data_part = pus
-            else:
-                # Path A: create from scratch and insert before secondary_gpt.
-                # list(device).index(sec_gpt) finds the child position of
-                # secondary_gpt, then device.insert(idx, ...) places the data
-                # partition just before it — making it the last real partition
-                # on disk (before the GPT backup header).  This is required for
-                # "parted resizepart <N> 100%" to expand it to fill free space.
-                data_part = make_partition_element(
-                    name='data',
-                    part_id=data_part_num,
-                    size=536870912,
-                    alloc_attr='0x8',
-                    type_guid='0FC63DAF-8483-4772-8E79-3D69D8477DE4',
-                    filename='DATAFILE',
-                    description=('**WendyOS.** Data partition for persistent'
-                                 ' storage. Auto-expands via mender-grow-data.service'
-                                 ' on first boot.'),
-                )
-                sec_gpt = device.find('./partition[@name="secondary_gpt"]')
-                if sec_gpt is None:
-                    bb.fatal('%s: "secondary_gpt" partition not found' % layout_path)
-                idx = list(device).index(sec_gpt)
-                device.insert(idx, data_part)
-                bb.note('  Created "data" partition (id=%d)' % data_part_num)
-        elif data_part_enabled:
-            # Mender-free data partition (JP7 / wendyos-update OTA).
-            # Same placement and numbering as the Mender path, but no
-            # <filename> — allocated empty at flash time, formatted on
+        if data_part_enabled:
+            # Create the data partition from scratch and insert it before
+            # secondary_gpt — making it the last real partition on disk
+            # (before the GPT backup header), which is required for
+            # "parted resizepart <N> 100%" to expand it to fill free space.
+            # No <filename>: allocated empty at flash time, formatted on
             # first boot.
             data_part = make_partition_element(
                 name='data',
@@ -421,7 +337,6 @@ do_modify_partition_layout[vardeps] += " \
     WENDYOS_CONFIG_PART_SIZE_MB \
     WENDYOS_CONFIG_PART_NUMBER \
     WENDYOS_PART_ALIGN \
-    MENDER_DATA_PART_NUMBER \
     PARTITION_LAYOUT_EXTERNAL \
     PARTITION_LAYOUT_TEMPLATE \
     "

@@ -59,7 +59,7 @@ test_jetson_nvme() {
   assert_eq "jetson nvme: bundle"      "$d/wendyos-image-$M.tegraflash-tar" "$(field TEGRAFLASH_BUNDLE <<<"$out")"
   assert_eq "jetson nvme: recovery"    true  "$(field RECOVERY_EXPECTED  <<<"$out")"
   assert_eq "jetson nvme: bmap"        true  "$(field BMAP_REQUIRED      <<<"$out")"
-  assert_eq "jetson nvme: flashpack"   false "$(field FLASHPACK_REQUIRED <<<"$out")"
+  assert_eq "jetson nvme: flashpack"   true  "$(field FLASHPACK_REQUIRED <<<"$out")"
   assert_eq "jetson nvme: pass_storage" true "$(field PASS_STORAGE       <<<"$out")"
   rm -rf "$d"
 }
@@ -74,6 +74,7 @@ test_jetson_emmc() {
   assert_eq "jetson emmc: image"  "$d/wendyos-image-$M.tegraflash-tar" "$(field IMAGE_FILE <<<"$out")"
   assert_eq "jetson emmc: bundle" "$d/wendyos-image-$M.tegraflash-tar" "$(field TEGRAFLASH_BUNDLE <<<"$out")"
   assert_eq "jetson emmc: bmap"        false "$(field BMAP_REQUIRED <<<"$out")"
+  assert_eq "jetson emmc: flashpack"   true  "$(field FLASHPACK_REQUIRED <<<"$out")"
   assert_eq "jetson emmc: pass_storage" true "$(field PASS_STORAGE  <<<"$out")"
   rm -rf "$d"
 }
@@ -100,6 +101,7 @@ test_tegraflash_zst() {
   assert_eq "zst variant: exits 0" 0 "$rc"
   assert_eq "zst variant: kind"   generated-nvme-img "$(field IMAGE_KIND <<<"$out")"
   assert_eq "zst variant: bundle" "$d/wendyos-image-$M.tegraflash-tar.zst" "$(field TEGRAFLASH_BUNDLE <<<"$out")"
+  assert_eq "zst variant: flashpack" true "$(field FLASHPACK_REQUIRED <<<"$out")"
   rm -rf "$d"
 }
 

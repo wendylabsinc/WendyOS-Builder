@@ -1,7 +1,7 @@
 [Unit]
 Description=WendyOS grow /data PARTITION to fill the storage device (offline, first boot)
-# Phase 1: grow the /data PARTITION while it's still unmounted, like Mender's own
-# mender-grow-data. local-fs-pre.target is ordered before every local mount AND
+# Phase 1: grow the /data PARTITION while it's still unmounted.
+# local-fs-pre.target is ordered before every local mount AND
 # before systemd-fsck@<dev>, so ordering Before it guarantees /data is unmounted
 # and unopened when parted operates -- no race with fsck. /data is the LAST
 # partition (config sits before it), so it grows into the trailing free space.
