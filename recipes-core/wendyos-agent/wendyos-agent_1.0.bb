@@ -36,12 +36,13 @@ SRC_URI = "https://github.com/wendylabsinc/WendyOS/releases/download/${WENDYOS_A
            file://agent-verify-key.pem"
 SRC_URI[agent.sha256sum] = "${WENDYOS_AGENT_SHA256}"
 
-# Finding C3: public key the auto-updater verifies release signatures against.
-# THIS IS A DEV KEY — production builds MUST override it with the real public
-# key (whose private half signs agent releases and is kept in CI secrets / an
-# HSM, never in this tree). Regenerate with scripts/generate-agent-signing-key.sh.
-# The updater fails closed: with no matching signed release it simply won't
-# update, so shipping the dev key never weakens a device.
+# Finding C3: files/agent-verify-key.pem is the public key the auto-updater
+# verifies release signatures against. THIS IS A DEV KEY — production builds MUST
+# replace it with the real public key (whose private half signs agent releases
+# and is kept in CI secrets / an HSM, never in this tree); regenerate with
+# scripts/generate-agent-signing-key.sh, or override it from a downstream layer
+# via FILESEXTRAPATHS. The updater fails closed: with no matching signed release
+# it simply won't update, so shipping the dev key never weakens a device.
 
 S = "${UNPACKDIR}"
 
@@ -79,7 +80,7 @@ do_install() {
     # Install the auto-updater signature verify key (finding C3). The download
     # script fails closed if this file is absent, so it must ship.
     install -d ${D}${sysconfdir}/wendyos
-    install -m 0644 ${UNPACKDIR}/${WENDYOS_AGENT_VERIFY_KEY} ${D}${sysconfdir}/wendyos/agent-verify-key.pem
+    install -m 0644 ${UNPACKDIR}/agent-verify-key.pem ${D}${sysconfdir}/wendyos/agent-verify-key.pem
 
     # Create runtime directories
     install -d ${D}/var/lib/wendyos-agent
