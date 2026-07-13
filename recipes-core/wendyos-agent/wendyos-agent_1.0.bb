@@ -32,8 +32,17 @@ SRC_URI = "https://github.com/wendylabsinc/WendyOS/releases/download/${WENDYOS_A
            file://wendyos-agent-updater.service \
            file://wendyos-agent-updater.timer \
            file://wendyos-agent-updater.sh \
-           file://download-wendyos-agent.sh"
+           file://download-wendyos-agent.sh \
+           file://agent-verify-key.pem"
 SRC_URI[agent.sha256sum] = "${WENDYOS_AGENT_SHA256}"
+
+# Finding C3: files/agent-verify-key.pem is the public key the auto-updater
+# verifies release signatures against. THIS IS A DEV KEY — production builds MUST
+# replace it with the real public key (whose private half signs agent releases
+# and is kept in CI secrets / an HSM, never in this tree); regenerate with
+# scripts/generate-agent-signing-key.sh, or override it from a downstream layer
+# via FILESEXTRAPATHS. The updater fails closed: with no matching signed release
+# it simply won't update, so shipping the dev key never weakens a device.
 
 S = "${UNPACKDIR}"
 
@@ -68,6 +77,11 @@ do_install() {
     install -m 0755 ${UNPACKDIR}/wendyos-agent-updater.sh ${D}/opt/wendyos/bin/
     install -m 0755 ${UNPACKDIR}/download-wendyos-agent.sh ${D}/opt/wendyos/bin/
 
+    # Install the auto-updater signature verify key (finding C3). The download
+    # script fails closed if this file is absent, so it must ship.
+    install -d ${D}${sysconfdir}/wendyos
+    install -m 0644 ${UNPACKDIR}/agent-verify-key.pem ${D}${sysconfdir}/wendyos/agent-verify-key.pem
+
     # Create runtime directories
     install -d ${D}/var/lib/wendyos-agent
     install -d ${D}/var/lib/wendy-agent
@@ -77,6 +91,7 @@ do_install() {
 FILES:${PN} = "/usr/local/bin/wendy-agent \
                /opt/wendyos/bin/* \
                /opt/wendy \
+               ${sysconfdir}/wendyos/agent-verify-key.pem \
                ${systemd_system_unitdir}/* \
                /var/lib/wendyos-agent \
                /var/lib/wendy-agent"
@@ -94,6 +109,6 @@ FILES:${PN} = "/usr/local/bin/wendy-agent \
 #                      skip once releases ship trimmed binaries.
 INSANE_SKIP:${PN} += "already-stripped buildpaths"
 
-# Runtime dependencies
-# curl/wget needed for auto-updater, tar for extraction
-RDEPENDS:${PN} = "bash curl tar"
+# Runtime dependencies: curl/wget fetch the update, tar extracts it, and openssl
+# verifies the release signature before install (finding C3, fail-closed).
+RDEPENDS:${PN} = "bash curl tar openssl-bin"

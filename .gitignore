@@ -3,3 +3,6 @@
 worktree
 
 docs/superpowers
+
+# Go build output — CI rebuilds the publisher from source; never commit the binary (finding L1)
+/tools/publisher/publisher

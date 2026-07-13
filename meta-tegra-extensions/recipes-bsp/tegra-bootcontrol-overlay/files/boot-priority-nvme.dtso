@@ -13,7 +13,13 @@
                             /* Valid tokens include: sd, nvme, usb, emmc, sata, http, pxe, shell */
                             DefaultBootPriority {
                                 /* NVMe first so wendy os install works out of the box */
-                                data = "nvme, sd, usb, http, pxe";
+                                /* Finding H5: internal storage only. usb/http/pxe
+                                 * are deliberately excluded so an attacker with
+                                 * physical access (USB stick) or on the LAN (rogue
+                                 * DHCP/HTTP/PXE) cannot boot arbitrary code ahead of
+                                 * internal media. Recovery flashing uses Tegra
+                                 * recovery mode, not the UEFI boot order. */
+                                data = "nvme, sd";
                                 locked;
                             };
                         };

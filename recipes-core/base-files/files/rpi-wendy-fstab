@@ -21,6 +21,9 @@ tmpfs                   /var/volatile  tmpfs  defaults              0 0
 # /data is grown to fill the card on first boot by grow-data-part, which reads
 # this entry; it resolves LABEL=data to the device. /config is the FAT
 # provisioning partition.
-LABEL=boot              /boot    vfat  defaults,nofail       0 2
-LABEL=config            /config  vfat  defaults,nofail       0 0
-LABEL=data              /data    ext4  defaults,noatime,nofail  0 2
+# Finding H6: nosuid,nodev on every writable/removable mount so a planted setuid
+# binary or device node can't be used for privilege escalation; noexec too on the
+# non-executable FAT partitions. /data keeps exec (apps/containers/home run from it).
+LABEL=boot              /boot    vfat  defaults,nofail,nosuid,nodev,noexec  0 2
+LABEL=config            /config  vfat  defaults,nofail,nosuid,nodev,noexec  0 0
+LABEL=data              /data    ext4  defaults,noatime,nofail,nosuid,nodev  0 2

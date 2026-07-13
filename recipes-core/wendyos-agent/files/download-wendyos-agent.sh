@@ -22,6 +22,15 @@ BACKUP_DIR="/opt/wendy/bin"
 BINARY_NAME="wendy-agent"
 TEMP_DIR="/tmp/wendy-agent-download-$$"
 
+# Finding C3: the auto-updater fetches a root-privileged binary over the network,
+# so it MUST verify a cryptographic signature before installing it. The public
+# verify key is baked into the image; the matching private key signs the release
+# asset (a detached "<asset>.sig" published alongside the tarball). Verification
+# is FAIL-CLOSED: a missing key, missing/undownloadable signature, missing
+# openssl, or a signature mismatch aborts the update and leaves the running
+# binary untouched. Override the key path via /etc/default/wendy-agent if needed.
+VERIFY_KEY="${WENDYOS_AGENT_VERIFY_KEY:-/etc/wendyos/agent-verify-key.pem}"
+
 # Logging
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
@@ -38,6 +47,38 @@ cleanup() {
     rm -rf "${TEMP_DIR}"
 }
 trap cleanup EXIT
+
+# Verify a detached signature over the downloaded artifact against the baked
+# public key (finding C3). FAIL-CLOSED: any missing prerequisite or a bad
+# signature aborts the update via error() so the running binary is untouched.
+#   $1 = artifact download URL (the ".sig" asset is fetched from "<url>.sig")
+#   $2 = local path to the downloaded artifact to verify
+verify_signature() {
+    local artifact_url="$1" artifact_path="$2"
+    local sig_url="${artifact_url}.sig"
+    local sig_path="${artifact_path}.sig"
+
+    if ! command -v openssl >/dev/null 2>&1; then
+        error "openssl not available — cannot verify agent signature; refusing to install"
+    fi
+    if [ ! -f "${VERIFY_KEY}" ]; then
+        error "verify key ${VERIFY_KEY} missing — refusing to install an unverifiable agent"
+    fi
+
+    log "Fetching signature: ${sig_url}"
+    if command -v wget >/dev/null 2>&1; then
+        wget -q -O "${sig_path}" "${sig_url}" || error "signature download failed — refusing to install"
+    else
+        curl -fsSL -o "${sig_path}" "${sig_url}" || error "signature download failed — refusing to install"
+    fi
+    [ -s "${sig_path}" ] || error "empty signature — refusing to install"
+
+    if openssl dgst -sha256 -verify "${VERIFY_KEY}" -signature "${sig_path}" "${artifact_path}" >/dev/null 2>&1; then
+        log "Signature OK"
+    else
+        error "SIGNATURE VERIFICATION FAILED for ${artifact_url} — refusing to install"
+    fi
+}
 
 # Check for required tools
 check_requirements() {
@@ -121,6 +162,9 @@ download_binary() {
     else
         curl -L -o "${TEMP_DIR}/${filename}" "${download_url}" || error "Download failed"
     fi
+
+    # Verify the signature BEFORE trusting the archive (finding C3). Fail-closed.
+    verify_signature "${download_url}" "${TEMP_DIR}/${filename}"
 
     # Extract the archive
     log "Extracting archive"
