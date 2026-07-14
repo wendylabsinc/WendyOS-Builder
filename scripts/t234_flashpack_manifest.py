@@ -15,6 +15,16 @@ SCHEMA = 2
 PROTOCOL = "usb-mass-storage-v1"
 USB_PRODUCT_ID = "0x7023"
 
+# Partition types the host CLI generates natively (protective MBR + both GPT
+# copies) instead of reading from the flashpack — see tegraflash/t234/plan.go,
+# which skips exactly these. They carry a <filename> in the layout but are never
+# staged into stage2/flash, so validation must skip them too.
+HOST_GENERATED_PARTITION_TYPES = frozenset({
+    "protective_master_boot_record",
+    "primary_gpt",
+    "secondary_gpt",
+})
+
 TARGETS = {
     ("jetson-orin-nano", "nvme"): {
         "module_id": "3767", "module_sku": "0005",
@@ -84,8 +94,10 @@ def validate_partition_images(root: pathlib.Path, layout: str,
             f"got {len(devices)}"
         )
     filenames: list[str] = []
-    for elem in devices[0].findall("partition/filename"):
-        name = (elem.text or "").strip()
+    for partition in devices[0].findall("partition"):
+        if (partition.get("type") or "").strip() in HOST_GENERATED_PARTITION_TYPES:
+            continue
+        name = (partition.findtext("filename") or "").strip()
         if name:
             filenames.append(name)
             require_file(root, f"stage2/flash/{name}")
