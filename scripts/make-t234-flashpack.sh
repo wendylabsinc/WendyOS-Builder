@@ -82,7 +82,7 @@ export MACHINE
 export BOARDID="${DEFAULTS[BOARDID]-}" FAB="${DEFAULTS[FAB]-}" BOARDSKU="${DEFAULTS[BOARDSKU]-}"
 export BOARDREV="${DEFAULTS[BOARDREV]-}" CHIPREV="${DEFAULTS[CHIPREV]-}"
 export serial_number=""
-[ -n "$BOARDID" ] && [ -n "$FAB" ] || err "DEFAULTS[BOARDID]/[FAB] missing from .env.initrd-flash"
+{ [ -n "$BOARDID" ] && [ -n "$FAB" ]; } || err "DEFAULTS[BOARDID]/[FAB] missing from .env.initrd-flash"
 
 logfile="$here/make-t234-flashpack.log"
 : > "$logfile"
