@@ -690,7 +690,12 @@ jobs:
         # the Orin family). The flash tools' dependencies (i386 libs for Thor's
         # NVIDIA tools, build-essential/e2fsprogs for T234) are baked into the
         # self-hosted runner image (wendylabsinc/ci); no apt-get here.
-        if: github.event_name != 'pull_request' && matrix.storage != 'sd' && contains(fromJSON('["jetson-agx-thor", "jetson-agx-orin", "jetson-orin-nano"]'), matrix.device)
+        #
+        # Runs on PRs too so `wendy install --pr <N>` can exercise the recovery
+        # flow against sandboxed pr/<N>/ flashpacks before merge. Cost: each PR
+        # push now builds + zstd-compresses + uploads ~3 GB per Jetson flashpack.
+        # Narrow to a label gate here if that per-PR cost becomes a problem.
+        if: matrix.storage != 'sd' && contains(fromJSON('["jetson-agx-thor", "jetson-agx-orin", "jetson-orin-nano"]'), matrix.device)
         env:
           UPLOAD_VERSION: ${{ needs.detect-changes.outputs.version }}
           MACHINE: ${{ steps.vars.outputs.machine }}
@@ -824,10 +829,11 @@ jobs:
           # storage-scoped (nvme_flashpack_* / emmc_flashpack_*) when --storage
           # is passed, top-level otherwise (Thor). FLASHPACK_REQUIRED (from the
           # device map) is the single source of truth for which builds carry a
-          # flashpack; it is true only on non-PR builds where the previous step
-          # set FLASHPACK_FILE, so gating on FLASHPACK_FILE being set keeps PR
-          # builds (which skip the build-flashpack step) clean. Set-but-missing
-          # is a build bug; fail rather than silently publish without a flashpack.
+          # flashpack; gating on FLASHPACK_FILE being set keeps clean any build
+          # whose device carries no flashpack (the build-flashpack step left it
+          # unset). On PRs the flashpack rides into the pr/<N>/ subtree via the
+          # --pr arg above. Set-but-missing is a build bug; fail rather than
+          # silently publish without a flashpack.
           if [[ "$FLASHPACK_REQUIRED" == "true" && -n "${FLASHPACK_FILE:-}" ]]; then
             if [[ ! -f "$FLASHPACK_FILE" ]]; then
               echo "::error::FLASHPACK_FILE set but missing: $FLASHPACK_FILE" >&2
