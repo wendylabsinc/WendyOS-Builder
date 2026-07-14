@@ -1,0 +1,90 @@
+#!/usr/sbin/nft -f
+#
+# WendyOS host firewall -- finding H3 (2026-07 security hardening audit).
+#
+# Goal: close the INPUT attack surface (every listening service was previously
+# exposed on every network) WITHOUT bricking the device.
+#
+#   * INPUT chain  : DEFAULT-DENY, with an explicit allow-list (below).
+#   * FORWARD chain: LEFT PERMISSIVE (policy accept). The CNI bridge plugin
+#                    (10.88.0.0/16, ipMasq=true) + portmap drive container
+#                    traffic through the forward + nat hooks; filtering here
+#                    risks breaking nerdctl/container networking. Future work.
+#   * OUTPUT chain : LEFT PERMISSIVE (policy accept). Device-originated traffic.
+#
+# IMPORTANT: this file is applied with a SCOPED table replace, NOT
+# `flush ruleset`. `flush ruleset` would also wipe the nat/masquerade/portmap
+# rules that the CNI bridge + portmap plugins install (via iptables-nft) and
+# break container networking on any reload. We only ever create/replace our
+# own `inet wendyos_filter` table and never touch other tables.
+
+# Ensure the table exists so the following `delete` never errors on first load,
+# then delete + recreate it so re-applying this file is idempotent and only
+# affects our table (leaving CNI's iptables-nft tables intact).
+table inet wendyos_filter
+delete table inet wendyos_filter
+
+table inet wendyos_filter {
+	chain input {
+		type filter hook input priority filter; policy drop;
+
+		# Established/related fast-path; drop clearly invalid packets early.
+		ct state established,related accept
+		ct state invalid drop
+
+		# Loopback.
+		iif lo accept
+
+		# Trusted interfaces -- accept everything arriving on them:
+		#   usb0 - USB gadget link to the directly-connected management host.
+		#          This is the trusted out-of-band control path (wendy CLI /
+		#          agent / SSH over USB); it must never be filtered.
+		#   cni0 - container bridge (10.88.0.0/16). Containers reach host
+		#          services (DNS, portmap hairpin, agent) via this interface.
+		iifname { "usb0", "cni0" } accept
+
+		# ICMPv6 -- REQUIRED for IPv6 to work at all. Neighbor discovery and
+		# router solicitation/advertisement (SLAAC on usb0 via radvd) live
+		# here; dropping ICMPv6 breaks IPv6 connectivity. Allow all of it.
+		meta l4proto ipv6-icmp accept
+
+		# ICMPv4 -- echo/ping, path-MTU discovery, etc.
+		ip protocol icmp accept
+
+		# DHCPv4 client: replies from a DHCP server (sport 67) to us (dport 68).
+		udp sport 67 udp dport 68 accept
+
+		# DHCPv6 client: replies from a DHCPv6 server (sport 547) to us (546).
+		udp sport 547 udp dport 546 accept
+
+		# mDNS / Avahi service discovery (multicast, 5353/udp).
+		udp dport 5353 accept
+
+		# wendy-agent gRPC control plane. gRPC is HTTP/2 over TCP; the mDNS
+		# advert (_wendyos._udp in
+		# recipes-connectivity/avahi/files/wendyos-mdns.service) names port
+		# 50051, so allow TCP (the actual transport) and UDP (belt-and-braces
+		# to match the advertised record).
+		tcp dport 50051 accept
+		udp dport 50051 accept
+
+		# SSH. Deliberate anti-lockout measure BEYOND the audit's minimum
+		# allow-list: keeps a remote recovery path open if the usb0 management
+		# link is unavailable. Tighten/remove once fleet SSH exposure is
+		# reviewed (e.g. restrict to usb0 only, which is already covered above).
+		tcp dport 22 accept
+
+		# Everything else on INPUT is dropped by the chain policy.
+	}
+
+	chain forward {
+		# Permissive on purpose -- see header. Do not add a drop policy here
+		# without accounting for CNI container forwarding + masquerade.
+		type filter hook forward priority filter; policy accept;
+	}
+
+	chain output {
+		# Permissive on purpose -- device-originated traffic.
+		type filter hook output priority filter; policy accept;
+	}
+}

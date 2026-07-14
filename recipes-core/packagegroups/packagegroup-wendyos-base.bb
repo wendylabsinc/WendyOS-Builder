@@ -33,6 +33,13 @@ RDEPENDS:${PN} = " \
     xdg-dbus-proxy \
     "
 
+# Host firewall (finding H3, 2026-07 hardening audit): default-deny INPUT
+# nftables ruleset applied at boot. Enabled by default; set WENDYOS_FIREWALL
+# = "0" in local.conf or a machine conf to opt out.
+RDEPENDS:${PN}:append = " \
+    ${@'wendyos-firewall' if (d.getVar('WENDYOS_FIREWALL') or '1') == '1' else ''} \
+    "
+
 # Recipes that bind-mount or otherwise depend on the /data partition the
 # OTA stack provides. Gated on WENDYOS_OTA != "none" (set in wendyos.conf):
 # with no OTA stack (e.g. QEMU) there is no /data partition and these

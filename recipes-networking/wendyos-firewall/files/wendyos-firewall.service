@@ -1,0 +1,23 @@
+[Unit]
+Description=WendyOS host firewall (nftables default-deny INPUT, finding H3)
+Documentation=https://github.com/wendylabsinc/meta-wendyos-jetson
+# Apply the ruleset before the network comes up so no window exists where a
+# listening service is exposed unfiltered.
+Wants=network-pre.target
+Before=network-pre.target
+# nftables package ships the nft binary; if a stock nftables.service exists,
+# order after it so our scoped table is the last word without racing it.
+After=nftables.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Loads only our `inet wendyos_filter` table (the file does a scoped
+# delete+recreate, never `flush ruleset`), so CNI/container nat rules survive.
+ExecStart=/usr/sbin/nft -f /etc/nftables.d/wendyos-firewall.nft
+ExecReload=/usr/sbin/nft -f /etc/nftables.d/wendyos-firewall.nft
+# Remove only our table on stop; `-` so a missing table is not an error.
+ExecStop=-/usr/sbin/nft delete table inet wendyos_filter
+
+[Install]
+WantedBy=multi-user.target
