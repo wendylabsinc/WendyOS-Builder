@@ -7,6 +7,12 @@ SRC_URI:append:rpi = "${@' file://container.cfg' if d.getVar('WENDYOS_CONTAINER_
 SRC_URI:append:rpi = "${@' file://usb-gadget.cfg' if d.getVar('WENDYOS_USB_GADGET') == '1' else ''}"
 SRC_URI += "file://0001-dwc2-force-g_dma-false-for-BCM2712-in-peripheral-mod.patch"
 
+# Kernel hardening + module signing (finding M3). RPi ships only in-tree modules,
+# so MODULE_SIG_ALL auto-signs them with a per-build ephemeral key. Tegra is
+# deliberately NOT wired to module-sig here (its out-of-tree vendor modules would
+# fail to load under SIG_FORCE) — see docs/security/specs/M3-*.
+SRC_URI:append:rpi = " file://hardening-common.cfg file://hardening-arm64.cfg file://module-sig.cfg"
+
 # CVE backports below are 6.6.y stable backports — they apply to (and are only
 # needed on) the 6.6 kernel that the scarthgap meta-raspberrypi ships. Newer
 # kernels already carry these fixes upstream and the 6.6-context patches do NOT
