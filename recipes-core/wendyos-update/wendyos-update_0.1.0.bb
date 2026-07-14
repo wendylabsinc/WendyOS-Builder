@@ -23,7 +23,34 @@ GO_IMPORT = "github.com/wendylabsinc/wendyos-update"
 # to go.bbclass where it already sets this.
 GO_SRCURI_DESTSUFFIX ?= "${@os.path.join(os.path.basename(d.getVar('S')), 'src', d.getVar('GO_IMPORT')) + '/'}"
 
-SRC_URI = "git://${GO_IMPORT};protocol=https;branch=main;destsuffix=${GO_SRCURI_DESTSUFFIX}"
+SRC_URI = "git://${GO_IMPORT};protocol=https;branch=main;destsuffix=${GO_SRCURI_DESTSUFFIX} \
+           file://artifact-verify-key.pem \
+           file://config.json"
+
+# --- Finding C1b: OTA artifact-signature scaffolding (builder side ONLY) ---
+# BLOCKED / NOT YET EFFECTIVE. files/artifact-verify-key.pem is the public key
+# the OTA client is INTENDED to verify each downloaded artifact's detached
+# signature against, and files/config.json requests that verification
+# (require_signature). BUT the pinned wendyos-update Go binary (SRCREV below,
+# github.com/wendylabsinc/wendyos-update) does NOT yet implement cryptographic
+# signature verification — it only does structural validation + an install-time
+# checksum. So baking this key + config authenticates NOTHING on its own; the
+# binary currently ignores both. This is deliberately just the builder half of
+# a cross-repo change (docs/security/hardening-findings.md, C1b):
+#   (1) implement detached-signature verification in the wendyos-update Go repo
+#       (verify against this baked key; REFUSE unsigned/mismatched artifacts) —
+#       UPSTREAM, out of scope for this recipe;
+#   (2) bake the key + config here (this change);
+#   (3) release CI signs artifacts with the PRIVATE half (CI secrets / offline).
+# Doing (2) alone is security theater until (1) lands. THIS IS A DEV KEY —
+# production MUST replace it with the real public key (private half in CI
+# secrets / an HSM, never in this tree); regenerate with
+# scripts/generate-wendyos-update-signing-key.sh, or override from a downstream
+# layer via FILESEXTRAPATHS. Fail-closed intent: once (1) lands, an artifact
+# with no valid signature must be rejected, never installed.
+#
+# config.json schema is a documented PLACEHOLDER (require_signature / verify_key)
+# PENDING the upstream docs/cli-contract.md, which does not yet define signing.
 # 20ec14e (main, wendyos-update#10): drive rootfs A/B on Orin (t234) by switching
 # the BOOT CHAIN (nvbootctrl WITHOUT `-t rootfs`) instead of the rootfs-redundancy
 # slot, and skip the redundancy preflight on Orin. RootfsRedundancyLevel is
@@ -130,6 +157,15 @@ do_install:append:class-target() {
     install -d ${D}${sysconfdir}/wendyos-update/health.d
     install -d ${D}${sysconfdir}/wendyos-update/post-commit.d
     install -d ${D}${sysconfdir}/wendyos-update/on-failure.d
+
+    # Finding C1b (builder-side scaffolding, blocked on upstream — see the
+    # SRC_URI note above). Bake the OTA artifact-signature verify key and a
+    # config requesting signature verification. Literal filenames only (the
+    # file:// sources land in ${UNPACKDIR}); a sibling finding broke do_install
+    # by referencing an undefined ${VAR} in the install path. NOT effective
+    # until the wendyos-update Go binary implements verification.
+    install -m 0644 ${UNPACKDIR}/artifact-verify-key.pem ${D}${sysconfdir}/wendyos-update/artifact-verify-key.pem
+    install -m 0644 ${UNPACKDIR}/config.json ${D}${sysconfdir}/wendyos-update/config.json
 }
 
 # The Go source tree (incl. vendor/) installed by go_do_install lands in the

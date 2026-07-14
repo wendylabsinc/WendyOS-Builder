@@ -1,0 +1,11 @@
+{
+  "//": "Finding C1b — PLACEHOLDER SCHEMA, PENDING the upstream wendyos-update",
+  "//1": "cli-contract (docs/cli-contract.md@github.com/wendylabsinc/wendyos-update)",
+  "//2": "which does NOT yet define artifact signing. Field names below are a",
+  "//3": "documented guess and MUST be reconciled with the contract once the Go",
+  "//4": "binary implements detached-signature verification. Until then the",
+  "//5": "binary ignores these keys, so this config authenticates nothing on",
+  "//6": "its own — it is builder-side scaffolding only (fail-closed intent).",
+  "require_signature": true,
+  "verify_key": "/etc/wendyos-update/artifact-verify-key.pem"
+}
