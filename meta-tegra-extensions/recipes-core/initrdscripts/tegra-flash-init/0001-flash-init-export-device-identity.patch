@@ -6,6 +6,8 @@ Subject: [PATCH] flash-init: export recovery device identity
 Expose the exact T234 module/carrier tuple and USB session in the first
 flashpkg LUN. The Wendy host validates this before replacing the LUN, which is
 the destructive QSPI/rootfs handoff boundary.
+
+Upstream-Status: Inappropriate [wendy-specific]
 ---
  init-flash.sh | 30 +++++++++++++++++++++++++++++-
  1 file changed, 29 insertions(+), 1 deletion(-)
