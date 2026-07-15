@@ -1,0 +1,42 @@
+From 9e4a1fec589bb88f0bfd5d40bc4527622a6d5d26 Mon Sep 17 00:00:00 2001
+From: Wendy Labs <engineering@wendy.dev>
+Date: Wed, 15 Jul 2026 16:26:06 +1000
+Subject: [PATCH] flash-init: accept host medium-eject as a LUN release signal
+
+A macOS host cannot issue the SCSI power-off Linux's udisksctl uses to
+release a flashpkg/rootfs LUN; diskutil eject only ejects the medium and
+never drops the UDC, so wait_for_disconnect (which polls only the UDC
+state) hangs forever and the device never advances to the next LUN.
+
+The mass_storage LUN is removable, so the gadget clears its backing file
+when the host ejects the medium. Treat an emptied backing file as the
+host having finished with this LUN, alongside the existing UDC-disconnect
+check. Lets the macOS recovery installer advance with a plain eject.
+
+Upstream-Status: Inappropriate [wendy-specific]
+---
+ init-flash.sh | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/init-flash.sh b/init-flash.sh
+index 42b75ed..c374c1b 100755
+--- a/init-flash.sh
++++ b/init-flash.sh
+@@ -112,6 +112,14 @@ wait_for_disconnect() {
+ 	    echo "[disconnected]"
+ 	    break
+ 	fi
++	# A macOS host cannot send the SCSI power-off Linux uses to release a
++	# LUN; diskutil eject only ejects the medium. The LUN is removable, so
++	# the gadget clears its backing file on eject — an emptied file means
++	# the host has finished with this LUN.
++	if [ -z "$(cat /sys/kernel/config/usb_gadget/l4t/functions/mass_storage.l4t_storage/lun.0/file 2>/dev/null)" ]; then
++	    echo "[medium ejected]"
++	    break
++	fi
+ 	sleep 1
+ 	count=$(expr $count \+ 1)
+ 	if [ $count -ge 5 ]; then
+-- 
+2.50.1 (Apple Git-155)
+
