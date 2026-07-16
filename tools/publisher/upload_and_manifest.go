@@ -117,6 +117,7 @@ type DeviceManifest struct {
 
 // VersionMetadata contains metadata about a specific OS version
 type VersionMetadata struct {
+	InstallMode        string     `json:"install_mode,omitempty"`
 	ReleaseDate        time.Time  `json:"release_date"`
 	Path               string     `json:"path"`
 	Checksum           string     `json:"checksum,omitempty"`
@@ -179,15 +180,29 @@ type VersionMetadata struct {
 	// image hence no zst). Each zst carries a checksum and size so the CLI
 	// can verify integrity before and after download without a separate bmap
 	// file.
-	ZstPath            string `json:"zst_path,omitempty"`
-	ZstChecksum        string `json:"zst_checksum,omitempty"`
-	ZstSizeBytes       int64  `json:"zst_size_bytes,omitempty"`
-	NVMEZstPath        string `json:"nvme_zst_path,omitempty"`
-	NVMEZstChecksum    string `json:"nvme_zst_checksum,omitempty"`
-	NVMEZstSizeBytes   int64  `json:"nvme_zst_size_bytes,omitempty"`
-	SDCardZstPath      string `json:"sd_zst_path,omitempty"`
-	SDCardZstChecksum  string `json:"sd_zst_checksum,omitempty"`
-	SDCardZstSizeBytes int64  `json:"sd_zst_size_bytes,omitempty"`
+	ZstPath                    string `json:"zst_path,omitempty"`
+	ZstChecksum                string `json:"zst_checksum,omitempty"`
+	ZstSizeBytes               int64  `json:"zst_size_bytes,omitempty"`
+	NVMEZstPath                string `json:"nvme_zst_path,omitempty"`
+	NVMEZstChecksum            string `json:"nvme_zst_checksum,omitempty"`
+	NVMEZstSizeBytes           int64  `json:"nvme_zst_size_bytes,omitempty"`
+	SDCardZstPath              string `json:"sd_zst_path,omitempty"`
+	SDCardZstChecksum          string `json:"sd_zst_checksum,omitempty"`
+	SDCardZstSizeBytes         int64  `json:"sd_zst_size_bytes,omitempty"`
+	NVMERootfsOnlyPath         string `json:"nvme_rootfs_only_path,omitempty"`
+	NVMERootfsOnlyChecksum     string `json:"nvme_rootfs_only_checksum,omitempty"`
+	NVMERootfsOnlySizeBytes    int64  `json:"nvme_rootfs_only_size_bytes,omitempty"`
+	NVMERootfsOnlyBmapPath     string `json:"nvme_rootfs_only_bmap_path,omitempty"`
+	NVMERootfsOnlyZstPath      string `json:"nvme_rootfs_only_zst_path,omitempty"`
+	NVMERootfsOnlyZstChecksum  string `json:"nvme_rootfs_only_zst_checksum,omitempty"`
+	NVMERootfsOnlyZstSizeBytes int64  `json:"nvme_rootfs_only_zst_size_bytes,omitempty"`
+	SDRootfsOnlyPath           string `json:"sd_rootfs_only_path,omitempty"`
+	SDRootfsOnlyChecksum       string `json:"sd_rootfs_only_checksum,omitempty"`
+	SDRootfsOnlySizeBytes      int64  `json:"sd_rootfs_only_size_bytes,omitempty"`
+	SDRootfsOnlyBmapPath       string `json:"sd_rootfs_only_bmap_path,omitempty"`
+	SDRootfsOnlyZstPath        string `json:"sd_rootfs_only_zst_path,omitempty"`
+	SDRootfsOnlyZstChecksum    string `json:"sd_rootfs_only_zst_checksum,omitempty"`
+	SDRootfsOnlyZstSizeBytes   int64  `json:"sd_rootfs_only_zst_size_bytes,omitempty"`
 	// Storage-specific flashpacks. A flashpack is built per MACHINE, and the
 	// AGX Orin nvme and emmc machines share one device manifest, so each
 	// storage variant gets its own fields. The top-level FlashpackPath above
@@ -2195,6 +2210,48 @@ func applyFlashpack(meta *VersionMetadata, storageType, flashpackPath, flashpack
 	}
 }
 
+func isRecoveryFirstT234(deviceType string) bool {
+	return deviceType == "jetson-orin-nano" || deviceType == "jetson-agx-orin"
+}
+
+// applyRecoveryRootfsOnly publishes raw media solely under explicit
+// *_rootfs_only_* fields and clears every legacy image route. This makes old
+// CLIs fail artifact resolution instead of installing a JP rootfs beside stale
+// QSPI firmware.
+func applyRecoveryRootfsOnly(meta *VersionMetadata, storageType, imagePath string, imageSize int64, imageChecksum, bmapPath, zstPath, zstChecksum string, zstSize int64) {
+	meta.InstallMode = "recovery"
+	switch storageType {
+	case "nvme":
+		if imagePath != "" {
+			meta.NVMERootfsOnlyPath, meta.NVMERootfsOnlySizeBytes, meta.NVMERootfsOnlyChecksum = imagePath, imageSize, imageChecksum
+		}
+		if bmapPath != "" {
+			meta.NVMERootfsOnlyBmapPath = bmapPath
+		}
+		if zstPath != "" {
+			meta.NVMERootfsOnlyZstPath, meta.NVMERootfsOnlyZstChecksum, meta.NVMERootfsOnlyZstSizeBytes = zstPath, zstChecksum, zstSize
+		}
+	case "sd":
+		if imagePath != "" {
+			meta.SDRootfsOnlyPath, meta.SDRootfsOnlySizeBytes, meta.SDRootfsOnlyChecksum = imagePath, imageSize, imageChecksum
+		}
+		if bmapPath != "" {
+			meta.SDRootfsOnlyBmapPath = bmapPath
+		}
+		if zstPath != "" {
+			meta.SDRootfsOnlyZstPath, meta.SDRootfsOnlyZstChecksum, meta.SDRootfsOnlyZstSizeBytes = zstPath, zstChecksum, zstSize
+		}
+	}
+	meta.Path, meta.Checksum, meta.SizeBytes = "", "", 0
+	meta.NVMEPath, meta.NVMEChecksum, meta.NVMESizeBytes = "", "", 0
+	meta.SDCardPath, meta.SDCardChecksum, meta.SDCardSizeBytes = "", "", 0
+	meta.EMMCPath, meta.EMMCChecksum, meta.EMMCSizeBytes = "", "", 0
+	meta.BmapPath, meta.NVMEBmapPath, meta.SDCardBmapPath = "", "", ""
+	meta.ZstPath, meta.ZstChecksum, meta.ZstSizeBytes = "", "", 0
+	meta.NVMEZstPath, meta.NVMEZstChecksum, meta.NVMEZstSizeBytes = "", "", 0
+	meta.SDCardZstPath, meta.SDCardZstChecksum, meta.SDCardZstSizeBytes = "", "", 0
+}
+
 // seekableFrameSize is the uncompressed size of each independent zstd frame
 // written by compressSeekableZstd. 4 MiB balances random-access granularity
 // against seek-table overhead.
@@ -2282,6 +2339,91 @@ func copyManifestArtifact(ctx context.Context, logger *logrus.Entry, bucket *sto
 	}
 	logger.Infof("%s copied successfully", label)
 	return destPath
+}
+
+type promotedRecoveryPaths struct {
+	topFlashpack, nvmeFlashpack, emmcFlashpack string
+	nvmeRootfs, nvmeRootfsBmap, nvmeRootfsZst  string
+	sdRootfs, sdRootfsBmap, sdRootfsZst        string
+}
+
+// applyPromotedRecoveryFields keeps recovery-first metadata coupled to the
+// objects that were actually copied. A failed/absent copy never leaves a stale
+// checksum or size advertising an artifact with an empty path.
+func applyPromotedRecoveryFields(dest *VersionMetadata, source VersionMetadata, paths promotedRecoveryPaths) {
+	dest.FlashpackPath = paths.topFlashpack
+	if paths.topFlashpack != "" {
+		if paths.nvmeFlashpack != "" {
+			dest.FlashpackChecksum, dest.FlashpackSizeBytes = source.NVMEFlashpackChecksum, source.NVMEFlashpackSizeBytes
+		} else {
+			dest.FlashpackChecksum, dest.FlashpackSizeBytes = source.FlashpackChecksum, source.FlashpackSizeBytes
+		}
+	}
+	dest.NVMEFlashpackPath = paths.nvmeFlashpack
+	if paths.nvmeFlashpack != "" {
+		dest.NVMEFlashpackChecksum, dest.NVMEFlashpackSizeBytes = source.NVMEFlashpackChecksum, source.NVMEFlashpackSizeBytes
+	}
+	dest.EMMCFlashpackPath = paths.emmcFlashpack
+	if paths.emmcFlashpack != "" {
+		dest.EMMCFlashpackChecksum, dest.EMMCFlashpackSizeBytes = source.EMMCFlashpackChecksum, source.EMMCFlashpackSizeBytes
+	}
+
+	dest.NVMERootfsOnlyPath = paths.nvmeRootfs
+	if paths.nvmeRootfs != "" {
+		dest.NVMERootfsOnlyChecksum, dest.NVMERootfsOnlySizeBytes = source.NVMERootfsOnlyChecksum, source.NVMERootfsOnlySizeBytes
+	}
+	dest.NVMERootfsOnlyBmapPath = paths.nvmeRootfsBmap
+	dest.NVMERootfsOnlyZstPath = paths.nvmeRootfsZst
+	if paths.nvmeRootfsZst != "" {
+		dest.NVMERootfsOnlyZstChecksum, dest.NVMERootfsOnlyZstSizeBytes = source.NVMERootfsOnlyZstChecksum, source.NVMERootfsOnlyZstSizeBytes
+	}
+	dest.SDRootfsOnlyPath = paths.sdRootfs
+	if paths.sdRootfs != "" {
+		dest.SDRootfsOnlyChecksum, dest.SDRootfsOnlySizeBytes = source.SDRootfsOnlyChecksum, source.SDRootfsOnlySizeBytes
+	}
+	dest.SDRootfsOnlyBmapPath = paths.sdRootfsBmap
+	dest.SDRootfsOnlyZstPath = paths.sdRootfsZst
+	if paths.sdRootfsZst != "" {
+		dest.SDRootfsOnlyZstChecksum, dest.SDRootfsOnlyZstSizeBytes = source.SDRootfsOnlyZstChecksum, source.SDRootfsOnlyZstSizeBytes
+	}
+}
+
+func validateRecoveryPromotion(deviceType string, source VersionMetadata, paths promotedRecoveryPaths) error {
+	if source.InstallMode != "recovery" {
+		return nil
+	}
+	required := []struct{ label, source, copied string }{
+		{"NVMe flashpack", source.NVMEFlashpackPath, paths.nvmeFlashpack},
+		{"NVMe rootfs-only image", source.NVMERootfsOnlyPath, paths.nvmeRootfs},
+	}
+	switch deviceType {
+	case "jetson-orin-nano":
+		required = append(required, struct{ label, source, copied string }{"SD rootfs-only image", source.SDRootfsOnlyPath, paths.sdRootfs})
+	case "jetson-agx-orin":
+		required = append(required, struct{ label, source, copied string }{"eMMC flashpack", source.EMMCFlashpackPath, paths.emmcFlashpack})
+	default:
+		return fmt.Errorf("unsupported recovery-first promotion target %q", deviceType)
+	}
+	for _, artifact := range required {
+		if artifact.source == "" {
+			return fmt.Errorf("nightly is missing required %s", artifact.label)
+		}
+		if artifact.copied == "" {
+			return fmt.Errorf("failed to copy required %s", artifact.label)
+		}
+	}
+	optionalCopies := []struct{ label, source, copied string }{
+		{"NVMe rootfs-only block map", source.NVMERootfsOnlyBmapPath, paths.nvmeRootfsBmap},
+		{"NVMe rootfs-only seekable-zstd", source.NVMERootfsOnlyZstPath, paths.nvmeRootfsZst},
+		{"SD rootfs-only block map", source.SDRootfsOnlyBmapPath, paths.sdRootfsBmap},
+		{"SD rootfs-only seekable-zstd", source.SDRootfsOnlyZstPath, paths.sdRootfsZst},
+	}
+	for _, artifact := range optionalCopies {
+		if artifact.source != "" && artifact.copied == "" {
+			return fmt.Errorf("failed to copy published %s", artifact.label)
+		}
+	}
+	return nil
 }
 
 func updateDeviceManifest(ctx context.Context, logger *logrus.Entry, bucket *storage.BucketHandle, prefix, deviceType, version, filePath string, fileSize int64, fileChecksum string, bmapPath string, zstPath, zstChecksum string, zstSize int64, otaUpdatePath string, otaUpdateSize int64, otaUpdateChecksum string, recoveryPath string, recoverySize int64, recoveryChecksum string, flashpackPath string, flashpackSize int64, flashpackChecksum string, sbomPath string, sbomSize int64, sbomChecksum string, storageType string, isNightly bool) error {
@@ -2380,7 +2522,10 @@ func updateDeviceManifest(ctx context.Context, logger *logrus.Entry, bucket *sto
 		// also updated so that older CLI versions continue to work. For "sd"
 		// Path is only set when no prior value exists (i.e. this is the first
 		// image ever published for this version).
-		if filePath != "" {
+		recoveryFirst := isRecoveryFirstT234(deviceType)
+		if recoveryFirst {
+			applyRecoveryRootfsOnly(&versionMetadata, storageType, filePath, fileSize, fileChecksum, bmapPath, zstPath, zstChecksum, zstSize)
+		} else if filePath != "" {
 			switch storageType {
 			case "nvme":
 				versionMetadata.NVMEPath = filePath
@@ -2436,9 +2581,11 @@ func updateDeviceManifest(ctx context.Context, logger *logrus.Entry, bucket *sto
 		// shared bmap_path would let the last storage variant published clobber
 		// it, leaving top-level bmap_path describing a different image than
 		// top-level path (the orin-nano NVMe-vs-SD mismatch).
-		setBmapPath(&versionMetadata, storageType, bmapPath)
-		// Same per-storage routing for the seekable-zstd image.
-		setZstPath(&versionMetadata, storageType, zstPath, zstChecksum, zstSize)
+		if !recoveryFirst {
+			setBmapPath(&versionMetadata, storageType, bmapPath)
+			// Same per-storage routing for the seekable-zstd image.
+			setZstPath(&versionMetadata, storageType, zstPath, zstChecksum, zstSize)
+		}
 
 		// Update OTA update fields only if provided. NVMe artifacts are routed
 		// to the NVMe-specific field so storage variants don't clobber each
@@ -2470,6 +2617,9 @@ func updateDeviceManifest(ctx context.Context, logger *logrus.Entry, bucket *sto
 		// clobber each other (see applyFlashpack).
 		if flashpackPath != "" {
 			applyFlashpack(&versionMetadata, storageType, flashpackPath, flashpackChecksum, flashpackSize)
+			if recoveryFirst {
+				versionMetadata.InstallMode = "recovery"
+			}
 			logger.WithFields(logrus.Fields{
 				"storage":            storageType,
 				"flashpack_path":     flashpackPath,
@@ -2493,7 +2643,7 @@ func updateDeviceManifest(ctx context.Context, logger *logrus.Entry, bucket *sto
 		}
 
 		// Validate that at least one file is provided
-		if filePath == "" && otaUpdatePath == "" && recoveryPath == "" {
+		if filePath == "" && otaUpdatePath == "" && recoveryPath == "" && flashpackPath == "" {
 			logger.Error("Cannot create version entry with no files")
 			return fmt.Errorf("cannot create version entry with no files - at least one of OS image, OTA update, or recovery file must be provided")
 		}
@@ -2872,29 +3022,22 @@ func promoteNightlyToStable(ctx context.Context, bucket *storage.BucketHandle, p
 
 	// Get source file path and parse to create destination path
 	sourcePath := sourceVersionMeta.Path
-	parts := strings.Split(sourcePath, "/")
-	if len(parts) < 4 {
-		logger.WithField("path", sourcePath).Fatal("Invalid source file path format")
+	var destinationPath string
+	if sourcePath != "" {
+		parts := strings.Split(sourcePath, "/")
+		if len(parts) < 4 {
+			logger.WithField("path", sourcePath).Fatal("Invalid source file path format")
+		}
+		destinationPath = imageObjectPath(prefix, deviceType, stableVersion, parts[len(parts)-1])
+		logger.WithFields(logrus.Fields{"source_path": sourcePath, "destination_path": destinationPath}).Info("Copying file to stable path")
+		attrs, err := bucket.Object(destinationPath).CopierFrom(bucket.Object(sourcePath)).Run(ctx)
+		if err != nil {
+			logger.WithError(err).Fatal("Failed to copy file to stable path")
+		}
+		logger.WithField("size_bytes", attrs.Size).Info("File copied successfully")
+	} else if sourceVersionMeta.InstallMode != "recovery" {
+		logger.Fatal("Version has no primary image path")
 	}
-	filename := parts[len(parts)-1]
-	destinationPath := imageObjectPath(prefix, deviceType, stableVersion, filename)
-
-	logger.WithFields(logrus.Fields{
-		"source_path":      sourcePath,
-		"destination_path": destinationPath,
-	}).Info("Copying file to stable path")
-
-	// Copy GCS file to new stable path using server-side copy
-	srcObj := bucket.Object(sourcePath)
-	dstObj := bucket.Object(destinationPath)
-	copier := dstObj.CopierFrom(srcObj)
-
-	attrs, err := copier.Run(ctx)
-	if err != nil {
-		logger.WithError(err).Fatal("Failed to copy file to stable path")
-	}
-
-	logger.WithField("size_bytes", attrs.Size).Info("File copied successfully")
 
 	// Copy OTA update file if it exists
 	var otaDestPath string
@@ -3000,6 +3143,15 @@ func promoteNightlyToStable(ctx context.Context, bucket *storage.BucketHandle, p
 		topZstDest = copyManifestArtifact(ctx, logger, bucket, prefix, sourceVersionMeta.ZstPath, deviceType, stableVersion, "seekable-zstd")
 	}
 
+	// Recovery-first T234 raw images remain available only through explicit
+	// rootfs-only fields; preserve that fail-closed routing during promotion.
+	nvmeRootfsDest := copyManifestArtifact(ctx, logger, bucket, prefix, sourceVersionMeta.NVMERootfsOnlyPath, deviceType, stableVersion, "NVMe rootfs-only image")
+	sdRootfsDest := copyManifestArtifact(ctx, logger, bucket, prefix, sourceVersionMeta.SDRootfsOnlyPath, deviceType, stableVersion, "SD rootfs-only image")
+	nvmeRootfsBmapDest := copyManifestArtifact(ctx, logger, bucket, prefix, sourceVersionMeta.NVMERootfsOnlyBmapPath, deviceType, stableVersion, "NVMe rootfs-only block map")
+	sdRootfsBmapDest := copyManifestArtifact(ctx, logger, bucket, prefix, sourceVersionMeta.SDRootfsOnlyBmapPath, deviceType, stableVersion, "SD rootfs-only block map")
+	nvmeRootfsZstDest := copyManifestArtifact(ctx, logger, bucket, prefix, sourceVersionMeta.NVMERootfsOnlyZstPath, deviceType, stableVersion, "NVMe rootfs-only seekable-zstd")
+	sdRootfsZstDest := copyManifestArtifact(ctx, logger, bucket, prefix, sourceVersionMeta.SDRootfsOnlyZstPath, deviceType, stableVersion, "SD rootfs-only seekable-zstd")
+
 	// Copy flashpacks, mirroring bmap/zst promotion. Flashpacks are
 	// per-storage artifacts; the top-level fields mirror the NVMe one and are
 	// the only fields on single-storage devices (Thor).
@@ -3012,11 +3164,20 @@ func promoteNightlyToStable(ctx context.Context, bucket *storage.BucketHandle, p
 	case sourceVersionMeta.FlashpackPath != "":
 		topFlashpackDest = copyManifestArtifact(ctx, logger, bucket, prefix, sourceVersionMeta.FlashpackPath, deviceType, stableVersion, "flashpack")
 	}
+	promotionRecoveryPaths := promotedRecoveryPaths{
+		topFlashpack: topFlashpackDest, nvmeFlashpack: nvmeFlashpackDest, emmcFlashpack: emmcFlashpackDest,
+		nvmeRootfs: nvmeRootfsDest, nvmeRootfsBmap: nvmeRootfsBmapDest, nvmeRootfsZst: nvmeRootfsZstDest,
+		sdRootfs: sdRootfsDest, sdRootfsBmap: sdRootfsBmapDest, sdRootfsZst: sdRootfsZstDest,
+	}
+	if err := validateRecoveryPromotion(deviceType, sourceVersionMeta, promotionRecoveryPaths); err != nil {
+		logger.WithError(err).Fatal("Cannot promote incomplete recovery artifacts")
+	}
 
 	// Create new stable version entry with promotion metadata
 	promotedAt := time.Now()
 	sourceVersion := nightlyVersion
 	stableVersionMeta := VersionMetadata{
+		InstallMode:    sourceVersionMeta.InstallMode,
 		ReleaseDate:    sourceVersionMeta.ReleaseDate,
 		Path:           destinationPath,
 		Checksum:       sourceVersionMeta.Checksum,
@@ -3084,52 +3245,8 @@ func promoteNightlyToStable(ctx context.Context, bucket *storage.BucketHandle, p
 		RecoveryPath:       recoveryDestPath,
 		RecoveryChecksum:   sourceVersionMeta.RecoveryChecksum,
 		RecoverySizeBytes:  sourceVersionMeta.RecoverySizeBytes,
-		FlashpackPath:      topFlashpackDest,
-		FlashpackChecksum: func() string {
-			if nvmeFlashpackDest != "" {
-				return sourceVersionMeta.NVMEFlashpackChecksum
-			}
-			if topFlashpackDest != "" {
-				return sourceVersionMeta.FlashpackChecksum
-			}
-			return ""
-		}(),
-		FlashpackSizeBytes: func() int64 {
-			if nvmeFlashpackDest != "" {
-				return sourceVersionMeta.NVMEFlashpackSizeBytes
-			}
-			if topFlashpackDest != "" {
-				return sourceVersionMeta.FlashpackSizeBytes
-			}
-			return 0
-		}(),
-		NVMEFlashpackPath: nvmeFlashpackDest,
-		NVMEFlashpackChecksum: func() string {
-			if nvmeFlashpackDest != "" {
-				return sourceVersionMeta.NVMEFlashpackChecksum
-			}
-			return ""
-		}(),
-		NVMEFlashpackSizeBytes: func() int64 {
-			if nvmeFlashpackDest != "" {
-				return sourceVersionMeta.NVMEFlashpackSizeBytes
-			}
-			return 0
-		}(),
-		EMMCFlashpackPath: emmcFlashpackDest,
-		EMMCFlashpackChecksum: func() string {
-			if emmcFlashpackDest != "" {
-				return sourceVersionMeta.EMMCFlashpackChecksum
-			}
-			return ""
-		}(),
-		EMMCFlashpackSizeBytes: func() int64 {
-			if emmcFlashpackDest != "" {
-				return sourceVersionMeta.EMMCFlashpackSizeBytes
-			}
-			return 0
-		}(),
 	}
+	applyPromotedRecoveryFields(&stableVersionMeta, sourceVersionMeta, promotionRecoveryPaths)
 
 	// Clear OTA/recovery fields if copy failed
 	if otaDestPath == "" {
@@ -3294,6 +3411,9 @@ func swapImageFile(ctx context.Context, bucket *storage.BucketHandle, prefix, de
 	if !exists {
 		logger.WithField("version", version).Fatal("Cannot swap - version does not exist. Use normal upload to create new version.")
 	}
+	if existingVersion.InstallMode == "recovery" && isRecoveryFirstT234(deviceType) {
+		logger.Fatal("Cannot use --swap on a recovery-first T234 release: it would recreate a legacy image path. Republish the storage-scoped rootfs-only artifact instead.")
+	}
 
 	// Verify IsNightly flag matches
 	if existingVersion.IsNightly != isNightly {
@@ -3369,6 +3489,7 @@ func swapImageFile(ctx context.Context, bucket *storage.BucketHandle, prefix, de
 
 	updatedVersion := VersionMetadata{
 		// Preserved fields
+		InstallMode:  existingVersion.InstallMode,
 		ReleaseDate:  existingVersion.ReleaseDate,
 		Changelog:    existingVersion.Changelog,
 		IsLatest:     existingVersion.IsLatest,
@@ -3391,15 +3512,29 @@ func swapImageFile(ctx context.Context, bucket *storage.BucketHandle, prefix, de
 		// Flashpacks preserved from existing: like the recovery bundle they
 		// are self-contained artifacts, not derived from the swapped image.
 		// (Bmap/zst stay dropped — they describe the replaced image.)
-		FlashpackPath:          existingVersion.FlashpackPath,
-		FlashpackChecksum:      existingVersion.FlashpackChecksum,
-		FlashpackSizeBytes:     existingVersion.FlashpackSizeBytes,
-		NVMEFlashpackPath:      existingVersion.NVMEFlashpackPath,
-		NVMEFlashpackChecksum:  existingVersion.NVMEFlashpackChecksum,
-		NVMEFlashpackSizeBytes: existingVersion.NVMEFlashpackSizeBytes,
-		EMMCFlashpackPath:      existingVersion.EMMCFlashpackPath,
-		EMMCFlashpackChecksum:  existingVersion.EMMCFlashpackChecksum,
-		EMMCFlashpackSizeBytes: existingVersion.EMMCFlashpackSizeBytes,
+		FlashpackPath:              existingVersion.FlashpackPath,
+		FlashpackChecksum:          existingVersion.FlashpackChecksum,
+		FlashpackSizeBytes:         existingVersion.FlashpackSizeBytes,
+		NVMEFlashpackPath:          existingVersion.NVMEFlashpackPath,
+		NVMEFlashpackChecksum:      existingVersion.NVMEFlashpackChecksum,
+		NVMEFlashpackSizeBytes:     existingVersion.NVMEFlashpackSizeBytes,
+		EMMCFlashpackPath:          existingVersion.EMMCFlashpackPath,
+		EMMCFlashpackChecksum:      existingVersion.EMMCFlashpackChecksum,
+		EMMCFlashpackSizeBytes:     existingVersion.EMMCFlashpackSizeBytes,
+		NVMERootfsOnlyPath:         existingVersion.NVMERootfsOnlyPath,
+		NVMERootfsOnlyChecksum:     existingVersion.NVMERootfsOnlyChecksum,
+		NVMERootfsOnlySizeBytes:    existingVersion.NVMERootfsOnlySizeBytes,
+		NVMERootfsOnlyBmapPath:     existingVersion.NVMERootfsOnlyBmapPath,
+		NVMERootfsOnlyZstPath:      existingVersion.NVMERootfsOnlyZstPath,
+		NVMERootfsOnlyZstChecksum:  existingVersion.NVMERootfsOnlyZstChecksum,
+		NVMERootfsOnlyZstSizeBytes: existingVersion.NVMERootfsOnlyZstSizeBytes,
+		SDRootfsOnlyPath:           existingVersion.SDRootfsOnlyPath,
+		SDRootfsOnlyChecksum:       existingVersion.SDRootfsOnlyChecksum,
+		SDRootfsOnlySizeBytes:      existingVersion.SDRootfsOnlySizeBytes,
+		SDRootfsOnlyBmapPath:       existingVersion.SDRootfsOnlyBmapPath,
+		SDRootfsOnlyZstPath:        existingVersion.SDRootfsOnlyZstPath,
+		SDRootfsOnlyZstChecksum:    existingVersion.SDRootfsOnlyZstChecksum,
+		SDRootfsOnlyZstSizeBytes:   existingVersion.SDRootfsOnlyZstSizeBytes,
 	}
 
 	// Recovery: use new if provided, otherwise preserve existing

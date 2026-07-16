@@ -308,10 +308,45 @@ make build
 
 ### Flash the SD Card or NVMe
 
-The build produces a flash package at:
+For released WendyOS artifacts, the supported default is `wendy install` full
+USB recovery. It updates T234 QSPI boot firmware and rootfs storage together and
+supports exactly Orin Nano P3767-0005/P3768-0000 with NVMe and AGX Orin
+P3701-0005/P3737-0000 with NVMe or eMMC. The raw-image procedures below are
+developer/builder workflows equivalent to `wendy install --rootfs-only`; they
+do **not** update QSPI and can leave boot firmware and rootfs on incompatible
+L4T families.
+
+```bash
+wendy install --device-type jetson-orin-nano
+wendy install --device-type jetson-agx-orin --storage nvme
+wendy install --device-type jetson-agx-orin --storage emmc
 ```
-build/tmp/deploy/images/<machine>/wendyos-image-<machine>.rootfs.tegraflash.tar.gz
+
+The explicit raw-media escape hatch remains available for Nano SD/NVMe and
+AGX NVMe. It requires a removable target drive and never updates QSPI:
+
+```bash
+wendy install --device-type jetson-orin-nano --rootfs-only --storage sd --drive /dev/sdX
+wendy install --device-type jetson-orin-nano --rootfs-only --storage nvme --drive /dev/nvmeXn1
+wendy install --device-type jetson-agx-orin --rootfs-only --storage nvme --drive /dev/nvmeXn1
 ```
+
+There is no eMMC rootfs-only mode.
+
+Full recovery is destructive to QSPI and every partition on the selected
+NVMe/eMMC, including `/data`. It is supported from macOS and Linux; Windows can
+only use explicit rootfs-only imaging. Secure Boot/fused modules, custom
+carriers, and keyed flashpacks are not supported by the initial recovery flow.
+
+Current T234 builds produce a tegraflash bundle at:
+```
+build/tmp/deploy/images/<machine>/wendyos-image-<machine>.tegraflash-tar
+```
+
+CI derives the published Nano SD/NVMe and AGX NVMe rootfs-only images from that
+bundle with `scripts/make-jetson-disk-img.py`. The `doexternal.sh`/`dosdcard.sh`
+instructions below apply to older JP6 bundles that still include those helper
+scripts; they are not the supported release installation path.
 
 **Important**: The flashing script differs based on your target machine:
 - **NVMe** (`jetson-orin-nano-devkit-nvme-wendyos`, `jetson-agx-orin-devkit-nvme-wendyos`) → use `doexternal.sh`
@@ -413,9 +448,13 @@ sync
 - Raspberry Pi Imager
 - GNOME Disks
 
-### Alternative: Flashing with initrd-flash (USB Recovery Mode)
+### Low-level alternative: Flashing with initrd-flash (USB Recovery Mode)
 
-The `initrd-flash` method is an alternative USB-based flashing approach provided by NVIDIA. Use this method when:
+The manual `initrd-flash` method is the low-level builder equivalent of the
+host-independent recovery flashpack consumed by `wendy install`. Prefer the CLI
+for released artifacts because it validates the module/carrier identity before
+persistent writes, correlates every USB LUN to the selected physical port and
+session, and requires the device's final `SUCCESS` status. Use the manual method when:
 
 - **Your device is bricked or won't boot** (recovery/unbrick method)
 - You want to flash internal storage (NVMe/eMMC) over USB

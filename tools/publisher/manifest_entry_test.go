@@ -69,6 +69,10 @@ func TestManifestEntryValidate(t *testing.T) {
 			e.FilePath, e.OTAUpdatePath = "", ""
 			e.RecoveryPath = "images/d/v/recovery.tar.gz"
 		}, ""},
+		{"flashpack only ok", func(e *ManifestEntry) {
+			e.FilePath, e.OTAUpdatePath, e.RecoveryPath = "", "", ""
+			e.FlashpackPath = "images/d/v/recovery.flashpack.tar.zst"
+		}, ""},
 	}
 
 	for _, tt := range tests {
