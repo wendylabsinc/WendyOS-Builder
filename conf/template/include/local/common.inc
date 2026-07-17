@@ -22,24 +22,22 @@ BB_DISKMON_DIRS ??= "\
     HALT,${SSTATE_DIR},100M,1K \
     HALT,/tmp,10M,1K"
 
-# Memory pressure management. The CI builders are c8id.8xlarge (32 vCPU /
-# 64 GiB = only 2 GiB/core), and BitBake otherwise defaults BB_NUMBER_THREADS
-# and PARALLEL_MAKE to nproc (32). The heavy native C++ compiles — notably
-# llvm-native and grpc-native — spawn ~32 cc1plus processes that each peak
-# well above 2 GiB, so on a cold sstate cache the kernel OOM-killer takes out
-# the compiler ("g++: fatal error: Killed signal terminated program cc1plus")
-# or starves the bitbake cooker ("No reply from server in 30s"). This only
-# bit us once the blacksail series bumped to llvm 22.1.7 / grpc 1.80.0 with no
-# cache to fall back on.
+# Per-recipe parallelism caps for the heavy native C++ compiles. The self-hosted
+# builder runs each job in a container with a hard 16 GiB memory cgroup
+# (MemoryMax=16G / MemoryHigh=14G, see wendylabsinc/ci); uncapped, these natives
+# spawn enough cc1plus to blow past it and the cgroup OOM-killer takes out the
+# compiler or the runner agent (surfaces as "runner lost communication").
 #
-# BB_PRESSURE_MAX_MEMORY throttles scheduling of new tasks via the kernel's
-# memory PSI (/proc/pressure/memory) so cross-recipe parallelism backs off
-# under pressure, and the per-recipe PARALLEL_MAKE caps bound peak RSS within
-# the two worst offenders. Both are cheap insurance — they only slow the
-# first cold build of these natives; everything else stays cache-served.
-BB_PRESSURE_MAX_MEMORY ?= "15000"
-PARALLEL_MAKE:pn-llvm-native = "-j 16"
+# llvm-native and clang-native are x86-only: generic-x86-64 is the only board
+# that pulls the LLVM/OpenCL graphics stack (mesa gallium-llvm + libclc, gated
+# PACKAGECONFIG:append:x86-64), so they are never in an arm build and never in
+# the shared sstate cache — x86 CI compiles both cold. At -j 4, plus x86's
+# BB_NUMBER_THREADS cap (see x86.inc), the cold x86 stack peaks ~12 GiB. Both
+# build under cmake/ninja, which honours PARALLEL_MAKE via
+# CMAKE_BUILD_PARALLEL_LEVEL (cmake.bbclass).
+PARALLEL_MAKE:pn-llvm-native = "-j 4"
 PARALLEL_MAKE:pn-grpc-native = "-j 16"
+PARALLEL_MAKE:pn-clang-native = "-j 4"
 
 PACKAGECONFIG:append:pn-qemu-system-native = " sdl"
 CONF_VERSION = "2"
