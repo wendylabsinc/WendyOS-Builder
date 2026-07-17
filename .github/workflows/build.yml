@@ -505,7 +505,7 @@ jobs:
 
       # --- Upload image and update device manifest (master manifest is handled by the publish job) ---
 
-      # Rootfs sizes are pinned per platform (8 GiB RPi / 12 GiB Jetson,
+      # Rootfs sizes are pinned per platform (8 GiB RPi / 12 GiB Jetson + x86,
       # conf/distro/include/wendyos-rootfs-size.inc): the deployed ext4 and the
       # .wendy OTA payload must be EXACTLY that size on every build, so nightly
       # and release artifacts are byte-identical in size and an OTA image can
@@ -513,19 +513,13 @@ jobs:
       # bitbake floor==ceiling pin and the image_types_wendy pack-time assert;
       # runs on PRs too so drift fails fast. No sudo: in host-build mode the
       # deploy tree is runner-owned (see the SBOM staging step below).
-      #
-      # Skipped for generic-x86-64: it has no A/B OTA (WENDYOS_OTA="none"), so it
-      # ships no .wendy payload and its ext4 is sized by IMAGE_ROOTFS_SIZE (a
-      # minimum, not a floor==ceiling pin) — there is no fixed-size slot contract
-      # to enforce. Revisit if x86 ever gains a wendy-update A/B layout.
       - name: Verify pinned rootfs size
-        if: matrix.device != 'generic-x86-64'
         env:
           DEPLOY_DIR: ${{ github.workspace }}/build/tmp/deploy/images/${{ steps.vars.outputs.machine }}
           DEVICE: ${{ matrix.device }}
         run: |
           set -euo pipefail
-          EXPECTED_KB=12582912  # 12 GiB, Jetson
+          EXPECTED_KB=12582912  # 12 GiB, Jetson + generic-x86-64
           case "$DEVICE" in
             raspberry-pi-*) EXPECTED_KB=8388608 ;;  # 8 GiB, RPi
           esac
@@ -813,10 +807,12 @@ jobs:
               fi
               ;;
             wic-disk)
-              # generic-x86-64: IMAGE_FILE is the .wic disk image. Regenerate the
-              # bmap here (deterministic, not dependent on Yocto's wic.bmap
-              # naming) and upload the .wic uncompressed — the publisher
-              # recompresses it. No gzip, no recovery bundle, no OTA.
+              # generic-x86-64: IMAGE_FILE is the .wic disk image (the flashable
+              # install artifact). Regenerate the bmap here (deterministic, not
+              # dependent on Yocto's wic.bmap naming) and upload the .wic
+              # uncompressed — the publisher recompresses it. No gzip and no
+              # tegraflash recovery bundle. The A/B OTA payload (.wendy) is
+              # uploaded separately by the device-agnostic OTA glob below.
               bmaptool create "$IMAGE_FILE" > "${IMAGE_FILE}.bmap"
               BMAP_FILE="${IMAGE_FILE}.bmap"
               ;;

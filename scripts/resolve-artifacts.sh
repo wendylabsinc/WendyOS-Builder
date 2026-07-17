@@ -137,11 +137,15 @@ case "$IMAGE_KIND" in
     fi
     ;;
   wic-disk)
-    # Generic x86_64 PC: a single directly-flashable UEFI/BIOS .wic disk image
-    # (IMAGE_FSTYPES="wic wic.bmap ..." in genericx86-64-wendyos.conf). No A/B
-    # OTA (WENDYOS_OTA="none"), so no tegraflash bundle and no .wendy/.mender.
-    # Uploaded as-is (bmap generated in the workflow like the RPi wic path); the
-    # publisher recompresses .wic. A missing wic here is fatal.
+    # Generic x86_64 PC: the primary flashable artifact is a directly-flashable
+    # UEFI/BIOS .wic disk image (IMAGE_FSTYPES="wic wic.bmap ..." in
+    # genericx86-64-wendyos.conf) — this is what a fresh install is written to.
+    # x86 runs the wendy A/B OTA stack (WENDYOS_OTA="wendy"), so it also builds a
+    # .wendy payload, but that is published by the workflow's device-agnostic OTA
+    # glob (--ota-update), not resolved here; this kind only names the flashable
+    # image. No tegraflash bundle (not a Tegra board). Uploaded as-is (bmap
+    # generated in the workflow like the RPi wic path); the publisher
+    # recompresses .wic. A missing wic here is fatal.
     wic="$DEPLOY_DIR/wendyos-image-${MACHINE}.rootfs.wic"
     if [[ ! -f "$wic" ]]; then
       fail "no x86 disk image for $KEY ($MACHINE): expected wendyos-image-${MACHINE}.rootfs.wic in $DEPLOY_DIR (map entry image_kind=wic-disk)"
