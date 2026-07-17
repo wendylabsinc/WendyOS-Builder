@@ -1,0 +1,21 @@
+# WendyOS x86 A/B fstab (wendyos-update OTA stack).
+#
+# Deliberately NO "/" entry: the rootfs slot is A/B and is mounted by the kernel
+# from the root= that GRUB sets per slot (root=PARTLABEL=rootfsA|rootfsB, see
+# grubAB.cfg), so a fixed root device here would be wrong on the other slot. GRUB
+# mounts "/" read-write via `rw` in the kernel cmdline, matching the RPi A/B fstab.
+#
+# /var/volatile tmpfs: shipped by stock oe-core base-files (our custom fstab
+# replaces that file, so carry it). Keeps churny /var data in RAM.
+#
+# /boot is the shared EFI System Partition (GRUB + grubenv). It must stay mounted:
+# the wendyos-update grubenv connector (Phase 2) edits /boot/EFI/BOOT/grubenv via
+# grub-editenv. Referenced by LABEL, not a per-build PARTUUID, since OTA writes
+# only the rootfs slot and never re-partitions.
+#
+# /data is grown to fill the disk on first boot. /config is the FAT provisioning
+# partition. All by LABEL, all nofail.
+tmpfs                   /var/volatile  tmpfs  defaults              0 0
+LABEL=boot              /boot    vfat  defaults,nofail          0 2
+LABEL=config            /config  vfat  defaults,nofail          0 0
+LABEL=data              /data    ext4  defaults,noatime,nofail  0 2

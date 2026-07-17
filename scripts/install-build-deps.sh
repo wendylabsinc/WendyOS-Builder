@@ -23,7 +23,7 @@ apt-get update
 apt-get -qy upgrade
 
 # Yocto / OE build prerequisites for Scarthgap on Ubuntu 24.04, plus a few
-# wendyos-specific extras (mender, jetson tegraflash, image builder).
+# wendyos-specific extras (jetson tegraflash, image builder).
 apt-get -qy install \
     gawk wget git-core diffstat unzip texinfo \
     build-essential chrpath socat cpio \

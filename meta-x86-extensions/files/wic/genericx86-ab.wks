@@ -1,0 +1,35 @@
+# WendyOS x86 A/B layout for the wendyos-update OTA stack.
+#
+# Device-agnostic GPT. Nothing here pins a runtime device: --ondisk names the
+# disk only while wic assembles the raw image, and the resulting .wic is written
+# unchanged to whatever the target boots from (NVMe, SATA/eMMC or USB). At runtime
+# everything is found by GPT partlabel / fs-label — GRUB does `search --label`, the
+# kernel gets root=PARTLABEL=, and the fstab mounts by LABEL. So one image boots
+# any of those disks with no per-disk variant.
+#
+# Partition ORDER is load-bearing and mirrors meta-rpi-extensions/files/wic/
+# rpi-wendy-ab.wks:
+#   p1 boot    (FAT)  EFI System Partition: GRUB (EFI/BOOT/bootx64.efi + grub.cfg)
+#                     + the A/B grubenv. Shared, not per-slot. The kernel is NOT
+#                     kept here (install-kernel-into-boot-dir=false) — GRUB loads
+#                     it from the selected slot's own /boot instead (A/B-safe).
+#   p2 config  (FAT)  first-boot provisioning seed (label "config").
+#   p3 rootfsA (ext4) slot 0  ─┐ both slots flashed with the SAME rootfs so the
+#   p4 rootfsB (ext4) slot 1  ─┘ device is bootable + recoverable from the factory
+#                              and A->B->A is testable immediately.
+#   p5 data    (ext4) persistent /data — LAST so it can grow to fill the disk on
+#                     first boot.
+#
+# The A/B trial/rollback logic lives in grubAB.cfg (copied verbatim to
+# EFI/BOOT/grub.cfg by the bootimg_efi plugin via `bootloader --configfile`).
+# rootfsA/rootfsB are --fixed-size so the OTA agent raw-writes a full rootfs image
+# into a slot without repartitioning: image == slot == .wendy payload, one pinned
+# constant (WENDYOS_ROOTFS_SIZE_KB in conf/distro/include/wendyos-rootfs-size.inc).
+# Do NOT add expand-rootfs: it would grow rootfsA over rootfsB. The /data grow is
+# a separate first-boot step.
+bootloader --ptable gpt --configfile="grubAB.cfg" --timeout=3
+part /boot --source bootimg_efi --sourceparams="loader=grub-efi,install-kernel-into-boot-dir=false" --ondisk sda --fstype=vfat --label boot --active --align 1024 --size 128M
+part --ondisk sda --fstype=vfat --label config --align 1024 --size 256M
+part --source rootfs --ondisk sda --fstype=ext4 --label rootfsA --align 1024 --fixed-size ${WENDYOS_ROOTFS_SIZE_KB}K
+part --source rootfs --ondisk sda --fstype=ext4 --label rootfsB --align 1024 --fixed-size ${WENDYOS_ROOTFS_SIZE_KB}K
+part --ondisk sda --fstype=ext4 --label data --align 1024 --size 512M

@@ -5,7 +5,7 @@
 # implements trial boot via an in-script bootcount. Env lives in uboot.env on
 # the FAT boot partition (stock meta-raspberrypi U-Boot — no patches). For any
 # other WENDYOS_OTA value the original do_compile behaviour is preserved
-# verbatim, so Mender/non-OTA RPi builds are unaffected.
+# verbatim, so non-OTA RPi builds are unaffected.
 FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
 
 SRC_URI += "${@' file://boot-ab.cmd.in' if d.getVar('WENDYOS_OTA') == 'wendy' else ''}"
@@ -16,7 +16,7 @@ WENDYOS_ROOTFS_PART_A ?= "3"
 WENDYOS_ROOTFS_PART_B ?= "4"
 
 # Trial-boot retry budget: how many times the new slot may boot without being
-# committed before U-Boot falls back. 1 = one attempt (matches Mender's default).
+# committed before U-Boot falls back. 1 = one attempt.
 WENDYOS_BOOTLIMIT ?= "1"
 
 # root= device base and the U-Boot load interface/device. Defaults target the

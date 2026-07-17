@@ -224,7 +224,6 @@ func TestIsOSImage(t *testing.T) {
 		{"archive.tgz", true},
 		{"compressed.xz", true},
 		{"compressed.zst", true},
-		{"update.mender", true},
 		{"document.pdf", false},
 		{"text.txt", false},
 		{"script.sh", false},
@@ -321,7 +320,7 @@ func TestDeviceManifestSerialization(t *testing.T) {
 				SizeBytes:          1024 * 1024,
 				IsLatest:           true,
 				IsNightly:          false,
-				OTAUpdatePath:      "images/test-device/1.0.0/update.mender.xz",
+				OTAUpdatePath:      "images/test-device/1.0.0/update.wendy.xz",
 				OTAUpdateChecksum:  "def456",
 				OTAUpdateSizeBytes: 512 * 1024,
 			},
@@ -597,8 +596,8 @@ func TestSetBmapPath(t *testing.T) {
 
 func TestApplyOTAUpdate(t *testing.T) {
 	const (
-		nvmeOTA = "images/jetson-orin-nano/v1/wendyos-image-jetson-orin-nano-devkit-nvme-wendyos.mender"
-		sdOTA   = "images/jetson-orin-nano/v1/wendyos-image-jetson-orin-nano-devkit-wendyos.mender"
+		nvmeOTA = "images/jetson-orin-nano/v1/wendyos-image-jetson-orin-nano-devkit-nvme-wendyos.wendy"
+		sdOTA   = "images/jetson-orin-nano/v1/wendyos-image-jetson-orin-nano-devkit-wendyos.wendy"
 	)
 
 	t.Run("nvme routes to nvme field and seeds default", func(t *testing.T) {
@@ -760,6 +759,65 @@ func TestSetZstPath(t *testing.T) {
 		setZstPath(m, "nvme", "", "", 0)
 		if m.ZstPath != "existing" || m.ZstChecksum != "cs" || m.NVMEZstPath != "" {
 			t.Errorf("empty zstPath should not change anything, got %+v", m)
+		}
+	})
+}
+
+func TestApplyFlashpack(t *testing.T) {
+	t.Run("no storage lands on top-level only", func(t *testing.T) {
+		m := &VersionMetadata{}
+		applyFlashpack(m, "", "images/x/thor.flashpack.tar.zst", "abc123", 1024)
+		if m.FlashpackPath != "images/x/thor.flashpack.tar.zst" || m.FlashpackChecksum != "abc123" || m.FlashpackSizeBytes != 1024 {
+			t.Errorf("top-level flashpack = %q/%q/%d", m.FlashpackPath, m.FlashpackChecksum, m.FlashpackSizeBytes)
+		}
+		if m.NVMEFlashpackPath != "" || m.EMMCFlashpackPath != "" {
+			t.Errorf("storage-specific fields should be empty, got %+v", m)
+		}
+	})
+
+	t.Run("nvme sets per-storage and top-level", func(t *testing.T) {
+		m := &VersionMetadata{}
+		applyFlashpack(m, "nvme", "images/x/nvme.flashpack.tar.zst", "abc123", 1024)
+		if m.NVMEFlashpackPath != "images/x/nvme.flashpack.tar.zst" || m.NVMEFlashpackChecksum != "abc123" || m.NVMEFlashpackSizeBytes != 1024 {
+			t.Errorf("NVMe flashpack = %q/%q/%d", m.NVMEFlashpackPath, m.NVMEFlashpackChecksum, m.NVMEFlashpackSizeBytes)
+		}
+		if m.FlashpackPath != "images/x/nvme.flashpack.tar.zst" {
+			t.Errorf("FlashpackPath = %q, want NVMe flashpack mirrored", m.FlashpackPath)
+		}
+	})
+
+	t.Run("emmc does not clobber nvme top-level", func(t *testing.T) {
+		m := &VersionMetadata{}
+		applyFlashpack(m, "nvme", "images/x/nvme.flashpack.tar.zst", "abc123", 1024)
+		applyFlashpack(m, "emmc", "images/x/emmc.flashpack.tar.zst", "def456", 512)
+		if m.EMMCFlashpackPath != "images/x/emmc.flashpack.tar.zst" || m.EMMCFlashpackChecksum != "def456" || m.EMMCFlashpackSizeBytes != 512 {
+			t.Errorf("eMMC flashpack = %q/%q/%d", m.EMMCFlashpackPath, m.EMMCFlashpackChecksum, m.EMMCFlashpackSizeBytes)
+		}
+		if m.FlashpackPath != "images/x/nvme.flashpack.tar.zst" {
+			t.Errorf("FlashpackPath = %q, want NVMe flashpack preserved", m.FlashpackPath)
+		}
+	})
+
+	t.Run("emmc before nvme leaves top-level for nvme", func(t *testing.T) {
+		m := &VersionMetadata{}
+		applyFlashpack(m, "emmc", "images/x/emmc.flashpack.tar.zst", "def456", 512)
+		if m.FlashpackPath != "" {
+			t.Errorf("FlashpackPath = %q, want empty until NVMe publishes", m.FlashpackPath)
+		}
+		applyFlashpack(m, "nvme", "images/x/nvme.flashpack.tar.zst", "abc123", 1024)
+		if m.FlashpackPath != "images/x/nvme.flashpack.tar.zst" {
+			t.Errorf("FlashpackPath = %q, want NVMe flashpack", m.FlashpackPath)
+		}
+		if m.EMMCFlashpackPath != "images/x/emmc.flashpack.tar.zst" {
+			t.Errorf("EMMCFlashpackPath = %q, want eMMC preserved", m.EMMCFlashpackPath)
+		}
+	})
+
+	t.Run("empty flashpack path is a no-op", func(t *testing.T) {
+		m := &VersionMetadata{FlashpackPath: "existing", FlashpackChecksum: "cs", FlashpackSizeBytes: 99}
+		applyFlashpack(m, "nvme", "", "", 0)
+		if m.FlashpackPath != "existing" || m.FlashpackChecksum != "cs" || m.NVMEFlashpackPath != "" {
+			t.Errorf("empty flashpackPath should not change anything, got %+v", m)
 		}
 	})
 }

@@ -510,8 +510,6 @@ declare -a repos=(
     "1|${URL_TEGRA}||${SRCREV_TEGRA}"
     "1|${URL_TEGRA_COMM}||${SRCREV_TEGRA_COMM}"
     "1|${URL_VIRT}||${SRCREV_VIRT}"
-    "1|${URL_MENDER}||${SRCREV_MENDER}"
-    "1|${URL_MENDER_COMM}||${SRCREV_MENDER_COMM}"
     "1|${URL_RPI}||${SRCREV_RPI}"
     "1|${URL_LTS_MIXINS}||${SRCREV_LTS_MIXINS}"
 )

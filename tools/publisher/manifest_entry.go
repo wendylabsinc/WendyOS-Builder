@@ -38,8 +38,9 @@ type ManifestEntry struct {
 	RecoverySize     int64  `json:"recovery_size,omitempty"`
 	RecoveryChecksum string `json:"recovery_checksum,omitempty"`
 
-	// Flashpack is the Thor (jetson-agx-thor) USB-recovery flash artifact
-	// (a .tar.zst the wendy CLI downloads, extracts and flashes).
+	// Flashpack is the Jetson USB-recovery flash artifact (a .tar.zst the
+	// wendy CLI downloads, extracts and flashes). Built per MACHINE, so
+	// Storage above disambiguates variants sharing a device manifest.
 	FlashpackPath     string `json:"flashpack_path,omitempty"`
 	FlashpackSize     int64  `json:"flashpack_size,omitempty"`
 	FlashpackChecksum string `json:"flashpack_checksum,omitempty"`

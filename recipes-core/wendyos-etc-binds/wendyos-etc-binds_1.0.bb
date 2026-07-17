@@ -1,7 +1,7 @@
 
 SUMMARY = "Bind mount persistent /etc files from /data partition"
 DESCRIPTION = "Systemd service to bind-mount identity and configuration files from \
-/data/etc/ to /etc/ for persistence across Mender OTA updates. Ensures device UUID, \
+/data/etc/ to /etc/ for persistence across A/B OTA updates. Ensures device UUID, \
 hostname, and network configurations persist when switching between A/B rootfs slots."
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"

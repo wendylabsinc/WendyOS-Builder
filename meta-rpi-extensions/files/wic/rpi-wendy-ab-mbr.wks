@@ -6,7 +6,7 @@
 # MBR has only 4 primary slots, and an A/B image needs 5 partitions, so wic
 # auto-creates an extended partition (p4) and places the overflow as logical
 # partitions from p5 (see oe-core wic direct.py). The resulting geometry mirrors
-# the proven Mender RPi3 layout exactly:
+# the proven RPi3 A/B layout exactly:
 #
 #   p1 boot    (FAT,  primary)  RPi firmware + u-boot.bin + boot.scr + config.txt
 #                               + cmdline.txt + uboot.env (the U-Boot environment).

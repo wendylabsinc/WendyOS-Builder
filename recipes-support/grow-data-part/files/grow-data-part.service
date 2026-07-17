@@ -1,0 +1,24 @@
+[Unit]
+Description=WendyOS grow /data PARTITION to fill the storage device (offline, first boot)
+# Phase 1: grow the /data PARTITION while it's still unmounted.
+# local-fs-pre.target is ordered before every local mount AND
+# before systemd-fsck@<dev>, so ordering Before it guarantees /data is unmounted
+# and unopened when parted operates -- no race with fsck. /data is the LAST
+# partition (config sits before it), so it grows into the trailing free space.
+# The slow ext4 grow is split off into grow-data-fs-online.service (online, off
+# the boot path) so it can't gate data.mount. Idempotent: parted no-ops once full.
+DefaultDependencies=no
+Before=local-fs-pre.target data.mount
+Conflicts=shutdown.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Fast phase (sgdisk/parted + clean-flag e2fsck); a tight bound fails a wedged tool
+# rather than stalling boot for DefaultTimeoutStartSec.
+TimeoutStartSec=120
+ExecStart=/usr/sbin/grow-data-part.sh partition
+
+[Install]
+WantedBy=data.mount
+

@@ -23,8 +23,8 @@ This repository provides the meta-layer and build flow to build **WendyOS** — 
 | Raspberry Pi 4 | Broadcom BCM2711 | 1–8GB | `rpi4-sd` | `raspberrypi4-64-wendyos` | SD | Mender |
 | Raspberry Pi 5 | Broadcom BCM2712 | 8GB | `rpi5-sd` | `raspberrypi5-wendyos` | SD | Mender |
 | Raspberry Pi 5 | Broadcom BCM2712 | 8GB | `rpi5-nvme` | `raspberrypi5-nvme-wendyos` | NVMe | Mender |
-| QEMU ARM64 | virtual | configurable | `qemu-arm64` | `qemuarm64-wendyos` | virtio | none 
-| Generic x86_64 PC | Intel/AMD x86_64 | varies | `genericx86-64-wendyos` | `.wic` disk image |
+| QEMU ARM64 | virtual | configurable | `qemu-arm64` | `qemuarm64-wendyos` | virtio | none |
+| Generic x86_64 PC | Intel/AMD x86_64 | varies | `generic-x86-64` | `genericx86-64-wendyos` | USB / disk (.wic) | none |
 
 ## TL;DR
 

@@ -2,9 +2,6 @@
 127.0.0.1       localhost
 127.0.1.1 wendyos
 
-# Mender server
-192.168.55.24 docker.mender.io s3.docker.mender.io
-
 # The following lines are desirable for IPv6 capable hosts
 ::1     localhost ip6-localhost ip6-loopback
 fe00::0 ip6-localnet

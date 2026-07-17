@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Setup bind mounts for persistent /etc files on /data partition
-# This ensures device identity (UUID, hostname) persists across Mender OTA updates
+# This ensures device identity (UUID, hostname) persists across OTA updates
 
 set -e
 

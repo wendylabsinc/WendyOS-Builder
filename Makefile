@@ -93,7 +93,7 @@ help:
 	@printf "  BOARD=$(BOARD)       (board-id for 'make setup', e.g. rpi5-sd, jetson-agx-orin)\n"
 	@printf "  MACHINE=$(MACHINE)   (yocto machine name for 'make build', e.g. raspberrypi5-wendyos)\n"
 	@printf "  IMAGE_TARGET=$(IMAGE_TARGET)\n"
-	@printf "  FLASH_IMAGE_SIZE=$(FLASH_IMAGE_SIZE)  (must match WENDYOS_FLASH_IMAGE_SIZE)\n"
+	@printf "  FLASH_IMAGE_SIZE=$(FLASH_IMAGE_SIZE)  (offline flash image size)\n"
 	@printf "  FLASH_DEVICE=        (e.g., /dev/disk4)\n"
 	@printf "  FLASH_CONFIRM=       (set to 'yes' for non-interactive mode)\n"
 	@printf "\n"
@@ -392,12 +392,10 @@ flash-to-external: _check-machine
 	elif echo "$(MACHINE)" | grep -q "raspberrypi"; then \
 		SDIMG="$(PROJECT_DIR)/build/tmp/deploy/images/$(MACHINE)/$(IMAGE_TARGET)-$(MACHINE).sdimg"; \
 		WIC_IMG="$(PROJECT_DIR)/build/tmp/deploy/images/$(MACHINE)/$(IMAGE_TARGET)-$(MACHINE).rootfs.wic"; \
-		if [ -f "$$SDIMG" ]; then \
-			SRC="$$SDIMG"; KIND="Mender sdimg"; \
-		elif [ -f "$$WIC_IMG" ]; then \
+		if [ -f "$$WIC_IMG" ]; then \
 			SRC="$$WIC_IMG"; KIND="wic"; \
 		else \
-			printf "$(RED)Error: neither sdimg nor wic image found in $(PROJECT_DIR)/build/tmp/deploy/images/$(MACHINE)/$(NC)\n"; \
+			printf "$(RED)Error: no wic image found in $(PROJECT_DIR)/build/tmp/deploy/images/$(MACHINE)/$(NC)\n"; \
 			printf "Run 'make build MACHINE=$(MACHINE)' first.\n"; \
 			exit 1; \
 		fi; \

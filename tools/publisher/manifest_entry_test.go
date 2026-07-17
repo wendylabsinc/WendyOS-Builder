@@ -17,7 +17,7 @@ func validEntry() ManifestEntry {
 		FilePath:          "images/jetson-agx-orin/0.15.1-nightly/wendyos-image.tegraflash.tar.gz",
 		FileSize:          2971666096,
 		FileChecksum:      "21f44094492a79d77b0e4ee248eafc9a11b819470e7eb6459ada5ab018328827",
-		OTAUpdatePath:     "images/jetson-agx-orin/0.15.1-nightly/wendyos-image.mender",
+		OTAUpdatePath:     "images/jetson-agx-orin/0.15.1-nightly/wendyos-image.wendy",
 		OTAUpdateSize:     2889977344,
 		OTAUpdateChecksum: "d04d8a8991e621bf62f4bcde5882973bd2cb2948dc841e3469874de2cdddcc66",
 		SBOMPath:          "images/jetson-agx-orin/0.15.1-nightly/wendyos-image.spdx.tar.zst",

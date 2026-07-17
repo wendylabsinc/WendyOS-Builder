@@ -1,7 +1,6 @@
 # Tegra/Jetson-specific image configuration
 # This file is included when building for Tegra machines (MACHINEOVERRIDES contains 'tegra')
 
-# Note: tegra-mender-setup inheritance lives in conf/distro/include/mender.inc
 # (gated on MACHINEOVERRIDES containing 'tegra'). INHERIT must be set at
 # config-parse time; this file is required from wendyos-image.bb (recipe
 # parse), which is too late.
@@ -23,9 +22,7 @@ TEGRA_BPMP_SERIAL_LOGGING ?= "0"
 # packagegroup-wendyos-tegra pulls in tegra-bootcontrol-overlay,
 # setup-nv-boot-control, packagegroup-nvidia-container, and
 # conditionally tegra-uefi-capsules/bootloader-update.
-# mender-esp is included only for WENDYOS_OTA = "mender" (Mender-specific).
 IMAGE_INSTALL:append = " \
-    ${@'mender-esp' if d.getVar('WENDYOS_OTA') == 'mender' else ''} \
     packagegroup-wendyos-tegra \
     gstreamer1.0-plugins-nvvideo4linux2 \
     gstreamer1.0-plugins-nvarguscamerasrc \

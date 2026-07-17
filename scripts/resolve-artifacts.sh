@@ -4,7 +4,7 @@
 #
 # .github/device-artifacts.json is the SINGLE SOURCE OF TRUTH for how each
 # device+storage combo's flashable artifacts are named and which extras
-# (recovery tegraflash bundle, bmap, Thor flashpack, publisher --storage) apply.
+# (recovery tegraflash bundle, bmap, flashpack, publisher --storage) apply.
 # This script is its only consumer: it turns that map plus a live deploy dir
 # into paths, and fails loudly — naming the device, the map entry, the expected
 # pattern and the actual deploy-dir contents — when an expected artifact is
@@ -34,7 +34,8 @@
 #                      empty when the device has none (Raspberry Pi).
 #   RECOVERY_EXPECTED  true when a tegraflash bundle is expected (all Jetsons).
 #   BMAP_REQUIRED      true when the workflow should `bmaptool create` the image.
-#   FLASHPACK_REQUIRED true when a Thor flashpack is built and attached.
+#   FLASHPACK_REQUIRED true when a flashpack is built and attached (Thor T264
+#                      and the Orin T234 family).
 #   PASS_STORAGE       true when the publisher gets --storage (multi-storage device).
 #   RPI_NEEDS_GZIP     true when IMAGE_FILE is a raw sdimg the workflow must gzip.
 #
@@ -123,13 +124,13 @@ case "$IMAGE_KIND" in
     sdimg="$DEPLOY_DIR/wendyos-image-${MACHINE}.sdimg"
     wic="$DEPLOY_DIR/wendyos-image-${MACHINE}.rootfs.wic"
     if [[ -f "$sdimg" ]]; then
-      # Mender build: prefer .sdimg. Resolve the Yocto symlink chain now — gzip
+      # .sdimg present: prefer it. Resolve the Yocto symlink chain now — gzip
       # fails with ELOOP on deep chains, so the workflow must gzip the real
       # file, not the symlink.
       IMAGE_FILE=$(readlink -f "$sdimg")
       RPI_NEEDS_GZIP=true
     elif [[ -f "$wic" ]]; then
-      # Pre-Mender fallback.
+      # Fallback to the .wic image.
       IMAGE_FILE="$wic"
     else
       fail "no Raspberry Pi image for $KEY ($MACHINE): expected wendyos-image-${MACHINE}.sdimg (preferred) or wendyos-image-${MACHINE}.rootfs.wic in $DEPLOY_DIR (map entry image_kind=sdimg-gz-with-wic-fallback)"
