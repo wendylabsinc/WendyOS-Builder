@@ -1,0 +1,74 @@
+From 0000000000000000000000000000000000000003 Mon Sep 17 00:00:00 2001
+From: Wendy Labs <engineering@wendy.dev>
+Date: Thu, 17 Jul 2026 12:00:00 +1000
+Subject: [PATCH] flash-init: present the flashing gadget as an IAD composite
+
+Windows fails to enumerate the initrd flashing gadget: a USBPcap trace of
+an AGX Orin recovery shows GET_DESCRIPTOR(DEVICE) completing with
+USBD_STATUS_INVALID_PARAMETER + USBD_STATUS_XACT_ERROR on EP0, so usbstor
+never binds and the flash stalls waiting for the flashpkg LUN. A usbmon
+capture of the identical gadget on Linux shows a completely clean EP0
+enumeration, so the device descriptor is valid — the failure is a
+Windows-xHCI <-> tegra-xudc EP0 transaction interaction specific to this
+gadget's shape (bcdUSB is not the cause; 0x0210 and 0x0200 both fail).
+
+The decisive contrast: WendyOS's runtime gadget (an IAD composite,
+bDeviceClass 0xEF, NCM+ACM) enumerates fine on the same Windows host and
+tegra-xudc, while the flashing gadget (a bare single-function mass-storage
+device, bDeviceClass 0x00) does not. Match the runtime's Windows-friendly
+profile: declare an IAD composite device class and add a CDC-ACM function
+alongside mass storage, so the gadget presents as a multi-interface
+composite the way the runtime one does. Also declare plain USB 2.0
+(bcdUSB 0x0200); the gadget is High-Speed only and never negotiates
+SuperSpeed, so this drops the unused BOS advertisement. init-flash.sh
+still drives the mass_storage.l4t_storage LUN unchanged; the extra ACM
+interface only changes how the device enumerates. Linux/macOS are
+unaffected (they already enumerate the gadget cleanly).
+
+Upstream-Status: Inappropriate [wendy-specific]
+---
+ initrd-flash.scheme.in | 20 +++++++++++++++++---
+ 1 file changed, 17 insertions(+), 3 deletions(-)
+
+diff --git a/initrd-flash.scheme.in b/initrd-flash.scheme.in
+index e846bf8..cda51b8 100644
+--- a/initrd-flash.scheme.in
++++ b/initrd-flash.scheme.in
+@@ -1,9 +1,9 @@
+ attrs :
+ {
+-    bcdUSB = 0x210;
+-    bDeviceClass = 0x0;
+-    bDeviceSubClass = 0x0;
+-    bDeviceProtocol = 0x0;
++    bcdUSB = 0x200;
++    bDeviceClass = 0xEF;
++    bDeviceSubClass = 0x02;
++    bDeviceProtocol = 0x01;
+     bMaxPacketSize0 = 0x40;
+     idVendor = 0x1D6B;
+     idProduct = 0x104;
+@@ -43,6 +43,11 @@ functions :
+         };
+         os_descs = ( );
+     };
++    acm_l4t :
++    {
++        instance = "l4t_console";
++        type = "acm";
++    };
+ };
+ configs = (
+     {
+@@ -62,5 +67,9 @@ configs = (
+             {
+                 name = "ums.0";
+                 function = "mass_storage_l4t";
++            },
++            {
++                name = "acm.0";
++                function = "acm_l4t";
+             } );
+     } );
+--
+2.50.1
