@@ -1,5 +1,7 @@
 .vscode
 *.log
 worktree
+__pycache__/
+*.py[cod]
 
 docs/superpowers
