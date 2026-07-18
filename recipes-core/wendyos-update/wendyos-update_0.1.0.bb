@@ -80,7 +80,10 @@ SRC_URI = "git://${GO_IMPORT};protocol=https;branch=main;destsuffix=${GO_SRCURI_
 # slot — kills the Orin Nano stale-inactive-slot false-positive, validated
 # against the real r39.2 efivar format) + structured per-slot `status` and the
 # `switch` verb.
-SRCREV = "2ef50a953e29809f2bd2a59df0f50625e2030289"
+#
+# cb2c7b5: Thor capsule OTA fix.
+# Capsule staging now survives the agent's sync-less hard reboot.
+SRCREV = "cb2c7b5a5ed67c7f3d9d04315e32bdd3902024e9"
 
 inherit go-mod systemd
 
