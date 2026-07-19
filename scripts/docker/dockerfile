@@ -66,8 +66,9 @@ RUN usermod -aG sudo ${USER_NAME}
 RUN echo 'dev ALL=(ALL:ALL) NOPASSWD: ALL' > /etc/sudoers.d/dev && \
     chmod 0440 /etc/sudoers.d/dev
 
-# Set password for dev user
-RUN echo 'dev:wendyos' | chpasswd
+# No baked password for the dev user (H8): a committed credential is pure
+# downside. The container is entered via `docker exec`/CMD as the dev user and
+# escalates via the sudoers.d rules above, so no login password is needed.
 
 COPY files/.bash_history /home/$USER_NAME
 

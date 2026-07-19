@@ -182,7 +182,14 @@ jobs:
   build:
     name: Build ${{ matrix.device }} (${{ matrix.storage }})
     needs: detect-changes
-    if: needs.detect-changes.outputs.devices != ''
+    # Never run untrusted fork-PR code on the self-hosted builder: it shares a
+    # persistent, writable sstate/downloads cache across jobs, so a poisoned PR
+    # build could corrupt release-image artifacts. Same-repo PRs, push, and
+    # workflow_dispatch are unaffected (H1).
+    if: >-
+      needs.detect-changes.outputs.devices != '' &&
+      (github.event_name != 'pull_request' ||
+       github.event.pull_request.head.repo.full_name == github.repository)
     permissions:
       contents: read
       # GitHub mints the OIDC token (not the runner), so GCP Workload Identity
@@ -739,7 +746,7 @@ jobs:
           GITHUB_EVENT_NAME: ${{ github.event_name }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          TOKEN=$(gcloud auth print-access-token)
+          export WENDYOS_GCS_ACCESS_TOKEN=$(gcloud auth print-access-token)
 
           # Resolve every artifact path + expectation from the checked-in device
           # map (.github/device-artifacts.json) via the single resolver — the
@@ -801,7 +808,6 @@ jobs:
             --device "$DEVICE"
             --version "$UPLOAD_VERSION"
             --file "$IMAGE_FILE"
-            --access-token "$TOKEN"
             --upload-only
             --metadata-out "$ENTRY_FILE"
           )
@@ -986,7 +992,7 @@ jobs:
             exit 0
           fi
           echo "published=true" >> "$GITHUB_OUTPUT"
-          TOKEN=$(gcloud auth print-access-token)
+          export WENDYOS_GCS_ACCESS_TOKEN=$(gcloud auth print-access-token)
           cd "$GITHUB_WORKSPACE/wendyos/tools/publisher"
           # Build once; up to 15 invocations follow across this step and the
           # master manifest step ($RUNNER_TEMP persists between steps).
@@ -996,7 +1002,7 @@ jobs:
           for entry in "${entries[@]}"; do
             echo "::group::apply $(basename "$entry")"
             cat "$entry"
-            "$RUNNER_TEMP/publisher" --apply-metadata "$entry" --access-token "$TOKEN"
+            "$RUNNER_TEMP/publisher" --apply-metadata "$entry"
             echo "::endgroup::"
           done
 
@@ -1009,7 +1015,7 @@ jobs:
             echo "No manifest entries; skipping master manifest update."
             exit 0
           fi
-          TOKEN=$(gcloud auth print-access-token)
+          export WENDYOS_GCS_ACCESS_TOKEN=$(gcloud auth print-access-token)
           cd "$GITHUB_WORKSPACE/wendyos/tools/publisher"
           # Reuse the binary from the previous step; rebuild only if missing
           # (e.g. this step re-run in isolation).
@@ -1028,7 +1034,6 @@ jobs:
               --device "$DEVICE"
               --version "$VERSION"
               --master-manifest-only
-              --access-token "$TOKEN"
             )
             if [[ "$NIGHTLY" == "true" ]]; then
               ARGS+=(--nightly)
@@ -1163,13 +1168,13 @@ jobs:
             echo "::warning::No manifest entries found (did every build fail?); nothing to publish."
             exit 0
           fi
-          TOKEN=$(gcloud auth print-access-token)
+          export WENDYOS_GCS_ACCESS_TOKEN=$(gcloud auth print-access-token)
           cd "$GITHUB_WORKSPACE/wendyos/tools/publisher"
           go build -o "$RUNNER_TEMP/publisher" .
           for entry in "${entries[@]}"; do
             echo "::group::apply $(basename "$entry")"
             cat "$entry"
-            "$RUNNER_TEMP/publisher" --apply-metadata "$entry" --access-token "$TOKEN"
+            "$RUNNER_TEMP/publisher" --apply-metadata "$entry"
             echo "::endgroup::"
           done
 
@@ -1184,12 +1189,12 @@ jobs:
             echo "No manifest entries; skipping PR master manifest update."
             exit 0
           fi
-          TOKEN=$(gcloud auth print-access-token)
+          export WENDYOS_GCS_ACCESS_TOKEN=$(gcloud auth print-access-token)
           cd "$GITHUB_WORKSPACE/wendyos/tools/publisher"
           [[ -x "$RUNNER_TEMP/publisher" ]] || go build -o "$RUNNER_TEMP/publisher" .
           readarray -t rows < <(jq -sc '[.[] | {device, version}] | unique_by(.device) | .[]' "${entries[@]}")
           for row in "${rows[@]}"; do
             DEVICE=$(jq -r .device <<<"$row")
             VERSION=$(jq -r .version <<<"$row")
-            "$RUNNER_TEMP/publisher" --device "$DEVICE" --version "$VERSION" --pr "$PR_NUMBER" --master-manifest-only --nightly --access-token "$TOKEN" </dev/null
+            "$RUNNER_TEMP/publisher" --device "$DEVICE" --version "$VERSION" --pr "$PR_NUMBER" --master-manifest-only --nightly </dev/null
           done

@@ -17,8 +17,10 @@
 # /data is grown to fill the card on first boot by grow-data-part, which reads
 # this entry; it resolves LABEL=data to the device. /config is the FAT
 # provisioning partition.
+# Hardened mount flags (H6): FAT /boot and /config get nosuid,nodev,noexec;
+# /data gets nosuid,nodev but NOT noexec (it backs container/app execution).
 tmpfs        /var/volatile  tmpfs  defaults                 0 0
-LABEL=boot   /boot          vfat   defaults                 0 2
-LABEL=config /config        vfat   defaults,nofail          0 0
-LABEL=data   /data          ext4   defaults,noatime,nofail  0 2
+LABEL=boot   /boot          vfat   defaults,nosuid,nodev,noexec  0 2
+LABEL=config /config        vfat   defaults,nofail,nosuid,nodev,noexec  0 0
+LABEL=data   /data          ext4   defaults,noatime,nofail,nosuid,nodev  0 2
 
