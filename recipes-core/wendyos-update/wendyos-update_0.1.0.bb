@@ -83,7 +83,9 @@ SRC_URI = "git://${GO_IMPORT};protocol=https;branch=main;destsuffix=${GO_SRCURI_
 #
 # cb2c7b5: Thor capsule OTA fix.
 # Capsule staging now survives the agent's sync-less hard reboot.
-SRCREV = "cb2c7b5a5ed67c7f3d9d04315e32bdd3902024e9"
+#
+# 964c0ea: enable capsule-on-disk bootloader updates on Orin (t234)
+SRCREV = "5a89cbd990c3c3d10d4f886c5012284c705533cd"
 
 inherit go-mod systemd
 
