@@ -31,6 +31,7 @@ RDEPENDS:${PN} = " \
     wendyos-motd \
     containerd-config \
     xdg-dbus-proxy \
+    usb-power-config \
     "
 
 # Recipes that bind-mount or otherwise depend on the /data partition the
