@@ -3,6 +3,11 @@
 
 inherit journal-persist-rpi
 
+# Build systemd-sysext (off by default in oe-core) so signed driver/firmware add-ons
+# merge onto the immutable /usr at runtime. RPi-only for now — the driver add-on
+# feature currently targets RPi5; other machines gain it when they come into scope.
+PACKAGECONFIG:append = " sysext"
+
 # systemd persistent log
 # Install the drop-in and tmpfiles rule ONLY when this feature is enabled.
 do_install:append:journal_persist-on() {
