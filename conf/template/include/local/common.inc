@@ -52,11 +52,17 @@ CONF_VERSION = "2"
 # auto.conf (parsed before local.conf per bitbake.conf) is not clobbered.
 WENDYOS_DEBUG ??= "0"
 WENDYOS_DEBUG_UART ??= "0"
-
-# Dev-only: re-enable local console/serial login + passwordless root on
-# non-fortress (PR) builds. NEVER set on release or nightly. See wendyos-image.bb.
-WENDYOS_DEV_LOGIN ??= "0"
 WENDYOS_SSHD ??= "0"
+
+# Local interactive login, split by console type — both default OFF on every
+# image (a login prompt is pure attack surface). CI opts UART login in on PR
+# builds only (see build.yml); enable either knob explicitly in local.conf or
+# board config otherwise. UART/serial = serial-getty@ + console-getty on
+# serial-console boards; VT = getty@ + autovt@ (+ console-getty on x86, where
+# /dev/console is tty0). Root is never opened — log in as the wendy user
+# (passwordless sudo).
+WENDYOS_ENABLE_UART_LOGIN ??= "0"
+WENDYOS_ENABLE_VT_LOGIN ??= "0"
 
 # Build provenance stamped into the image (boot screen /etc/issue + /etc/wendyos/commit).
 # CI overrides these in auto.conf per build: VERSION is the release/nightly/PR tag

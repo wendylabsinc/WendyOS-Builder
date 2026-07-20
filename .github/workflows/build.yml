@@ -388,10 +388,11 @@ jobs:
           } >> "$GITHUB_WORKSPACE/build/conf/auto.conf"
 
       - name: Enable developer profile (PR builds)
-        # PR images are open-book debug builds: full debug tooling, SSH, UART
-        # console, and a local passwordless login so the PR is debuggable on
-        # real hardware. Never applied to nightly (in-between) or release
-        # (fortress) builds. See WENDYOS_DEV_LOGIN in wendyos-image.bb.
+        # PR images are open-book debug builds: full debug tooling, SSH, serial
+        # boot output, and a serial (UART) login as the wendy user (passwordless
+        # sudo) so the PR is debuggable on real hardware — root stays locked.
+        # Login is opt-in (both knobs default off), so enable UART login here.
+        # Never applied to nightly or release (fortress) builds.
         if: github.event_name == 'pull_request'
         run: |
           {
@@ -400,7 +401,7 @@ jobs:
             echo 'WENDYOS_DEBUG = "1"'
             echo 'WENDYOS_SSHD = "1"'
             echo 'WENDYOS_DEBUG_UART = "1"'
-            echo 'WENDYOS_DEV_LOGIN = "1"'
+            echo 'WENDYOS_ENABLE_UART_LOGIN = "1"'
           } >> "$GITHUB_WORKSPACE/build/conf/auto.conf"
 
       - name: Enable SBOM generation for release builds

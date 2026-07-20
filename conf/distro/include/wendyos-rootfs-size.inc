@@ -28,6 +28,17 @@
 WENDYOS_ROOTFS_SIZE_KB = "12582912"
 WENDYOS_ROOTFS_SIZE_KB:rpi = "8388608"
 
+# Generic x86 A/B (genericx86-ab.wks): 12 GiB/slot, same as the base default. x86
+# bakes the NVIDIA compute stack (open kmod + userspace + container toolkit + full
+# linux-firmware) but the rootfs content fits under 12 GiB. (The earlier 12 GiB
+# build failures were NOT content-too-big — they were dnf's 100 MiB
+# IMAGE_ROOTFS_EXTRA_SPACE, resolved by disabling package management on x86; with
+# that off, EXTRA_SPACE is 0 and content is well under the floor.) floor==ceiling
+# fails the build loudly if it ever outgrows this, so bump here (keep a multiple of
+# 128 MiB = 131072 KiB) only if that happens. x86 requires this include directly
+# from x86-image.inc.
+WENDYOS_ROOTFS_SIZE_KB:x86-wendyos = "12582912"
+
 # Expose it to wic so the RPi A/B slots derive their --fixed-size straight from
 # this one constant (rpi-wendy-ab*.wks: `--fixed-size ${WENDYOS_ROOTFS_SIZE_KB}K`
 # — wic reads a K suffix as KiB, so slot == the pinned image size exactly, with

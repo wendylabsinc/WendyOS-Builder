@@ -14,7 +14,23 @@ fi
 # Default values if not configured
 GITHUB_REPO="${WENDYOS_AGENT_GITHUB_REPO:-wendylabsinc/wendy-agent}"
 VERSION="${WENDYOS_AGENT_VERSION:-latest}"
-ARCH="aarch64"  # Hardcoded for RPi
+
+normalize_arch() {
+    case "$1" in
+        x86_64|amd64)
+            echo "amd64"
+            ;;
+        aarch64|arm64)
+            echo "arm64"
+            ;;
+        *)
+            echo "Unsupported architecture: $1" >&2
+            exit 1
+            ;;
+    esac
+}
+
+ARCH="$(normalize_arch "${WENDYOS_AGENT_ARCH:-$(uname -m)}")"
 
 # Paths
 INSTALL_DIR="/usr/local/bin"
@@ -94,18 +110,18 @@ download_binary() {
     # Create temp directory
     mkdir -p "${TEMP_DIR}"
 
-    # Extract download URL for aarch64 binary
+    # Extract download URL for the current architecture.
     # Expected asset name format (guaranteed by workflow):
-    #   wendy-agent-linux-static-musl-aarch64-vX.Y.Z.tar.gz
-    # Example: wendy-agent-linux-static-musl-aarch64-v0.2.0.tar.gz
+    #   wendy-agent-linux-amd64-vX.Y.Z.tar.gz
+    #   wendy-agent-linux-arm64-vX.Y.Z.tar.gz
     local download_url
 
     if command -v jq >/dev/null 2>&1; then
         # Use jq if available - match wendy-agent platform archive (not wendy-cli)
-        download_url=$(echo "${release_info}" | jq -r '.assets[]? | select(.name | test("wendy-agent-linux-arm64.*\\.tar\\.gz$")) | .browser_download_url' 2>/dev/null | head -1)
+        download_url=$(echo "${release_info}" | jq -r --arg arch "${ARCH}" '.assets[]? | select(.name | test("^wendy-agent-linux-" + $arch + ".*\\.tar\\.gz$")) | .browser_download_url' 2>/dev/null | head -1)
     else
         # Fallback to grep - look for the URL pattern
-        download_url=$(echo "${release_info}" | grep -o '"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]*wendy-agent-linux-arm64[^"]*\.tar\.gz[^"]*"' | head -1 | cut -d'"' -f4)
+        download_url=$(echo "${release_info}" | grep -o '"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]*wendy-agent-linux-'"${ARCH}"'[^"]*\.tar\.gz[^"]*"' | head -1 | cut -d'"' -f4)
     fi
 
     if [ -z "${download_url}" ] || [ "${download_url}" = "null" ]; then

@@ -24,6 +24,10 @@ GO_IMPORT = "github.com/wendylabsinc/wendyos-update"
 GO_SRCURI_DESTSUFFIX ?= "${@os.path.join(os.path.basename(d.getVar('S')), 'src', d.getVar('GO_IMPORT')) + '/'}"
 
 SRC_URI = "git://${GO_IMPORT};protocol=https;branch=main;destsuffix=${GO_SRCURI_DESTSUFFIX}"
+# 2ef50a95 (main): add the grubenv connector (generic x86-64 GRUB-EFI A/B) — the
+# third connector, wiring up x86 A/B OTA Phase 2. Jetson
+# (tegrauefi) and RPi (ubootenv) are unaffected and each board still selects its
+# own connector at runtime.
 # 20ec14e (main, wendyos-update#10): drive rootfs A/B on Orin (t234) by switching
 # the BOOT CHAIN (nvbootctrl WITHOUT `-t rootfs`) instead of the rootfs-redundancy
 # slot, and skip the redundancy preflight on Orin. RootfsRedundancyLevel is
@@ -76,7 +80,12 @@ SRC_URI = "git://${GO_IMPORT};protocol=https;branch=main;destsuffix=${GO_SRCURI_
 # slot — kills the Orin Nano stale-inactive-slot false-positive, validated
 # against the real r39.2 efivar format) + structured per-slot `status` and the
 # `switch` verb.
-SRCREV = "20ec14eaef589967ca0279fdff98d431ade315ab"
+#
+# cb2c7b5: Thor capsule OTA fix.
+# Capsule staging now survives the agent's sync-less hard reboot.
+#
+# 964c0ea: enable capsule-on-disk bootloader updates on Orin (t234)
+SRCREV = "5a89cbd990c3c3d10d4f886c5012284c705533cd"
 
 inherit go-mod systemd
 

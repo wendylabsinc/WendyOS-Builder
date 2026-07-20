@@ -7,3 +7,4 @@ inherit packagegroup
 SUMMARY:${PN} = "Kernel package group"
 RDEPENDS:${PN} = " \
     "
+

@@ -38,3 +38,6 @@ hostname:pn-base-files = "wendyos"
 
 # RPi5-specific extensions — isolated so Tegra/QEMU builds are unaffected
 require ${@'rpi-base-files.inc' if 'rpi' in d.getVar('MACHINEOVERRIDES').split(':') else ''}
+
+# x86 A/B fstab — isolated so other boards are unaffected
+require ${@'x86-base-files.inc' if 'x86-wendyos' in d.getVar('MACHINEOVERRIDES').split(':') else ''}

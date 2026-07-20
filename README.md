@@ -8,6 +8,7 @@ This repository provides the meta-layer and build flow to build **WendyOS** — 
 - **NVIDIA Jetson** Developer Kits — Orin Nano, AGX Orin, and AGX Thor
 - **Raspberry Pi** — Pi 3, Pi 4, and Pi 5 (SD card; Pi 5 also supports NVMe boot)
 - **QEMU ARM64** (virtual machine, for development)
+- **Generic x86_64 PCs** (experimental UEFI/BIOS disk image)
 
 ### Supported Hardware
 
@@ -23,6 +24,7 @@ This repository provides the meta-layer and build flow to build **WendyOS** — 
 | Raspberry Pi 5 | Broadcom BCM2712 | 8GB | `rpi5-sd` | `raspberrypi5-wendyos` | SD | Mender |
 | Raspberry Pi 5 | Broadcom BCM2712 | 8GB | `rpi5-nvme` | `raspberrypi5-nvme-wendyos` | NVMe | Mender |
 | QEMU ARM64 | virtual | configurable | `qemu-arm64` | `qemuarm64-wendyos` | virtio | none |
+| Generic x86_64 PC | Intel/AMD x86_64 | varies | `generic-x86-64` | `genericx86-64-wendyos` | USB / disk (.wic) | none |
 
 ## TL;DR
 
@@ -64,6 +66,9 @@ make flash-to-external  # Flash to external NVMe/USB drive
   - [Supported Machines](#supported-machines)
   - [Build](#build)
   - [Flash the Image](#flash-the-image)
+- [Generic x86_64 PCs](#generic-x86_64-pcs)
+  - [Build](#x86-build)
+  - [Flash the Image](#x86-flash-the-image)
 - [QEMU (ARM64)](#qemu-arm64)
   - [Prerequisites](#qemu-prerequisites)
   - [Build](#qemu-build)
@@ -143,7 +148,7 @@ make shell
 |--------|-------------|
 | `make setup` | First-time setup: clone repos, create Docker image |
 | `make build` | Build the complete WendyOS image |
-| `make deploy` | Copy tegraflash tarball from Docker volume to `./deploy/` (macOS only) |
+| `make deploy` | Copy build artifacts from Docker volume to `./deploy/` (macOS only) |
 | `make flash-to-external` | Interactive flash to external NVMe/USB drive (macOS & Linux) |
 | `make build-sdk` | Build the SDK for application development |
 | `make shell` | Open interactive shell in build container |
@@ -192,6 +197,10 @@ make build
 # QEMU (ARM64, for development)
 make setup BOARD=qemu-arm64
 make build
+
+# Generic x86_64 PC (experimental)
+make setup BOARD=generic-x86-64
+make build MACHINE=genericx86-64-wendyos
 ```
 
 > `BOARD` must be set to a board id matching a directory
@@ -242,6 +251,7 @@ make build
    BOARD=rpi5-sd               ./meta-wendyos/bootstrap.sh
    BOARD=rpi5-nvme             ./meta-wendyos/bootstrap.sh
    BOARD=qemu-arm64            ./meta-wendyos/bootstrap.sh
+   BOARD=generic-x86-64        ./meta-wendyos/bootstrap.sh
    ```
 
    `MACHINE=<board-id>` remains supported as a deprecated alias (prints a
@@ -274,6 +284,7 @@ make build
      - `rpi5-sd`                 → `raspberrypi5-wendyos`
      - `rpi5-nvme`               → `raspberrypi5-nvme-wendyos`
      - `qemu-arm64`              → `qemuarm64-wendyos`
+     - `generic-x86-64`          → `genericx86-64-wendyos`
    - `WENDYOS_FLASH_IMAGE_SIZE` - Flash image size: "64GB"):
      - `"4GB"` - 3.2GB Mender storage (~1.3GB per rootfs partition)
      - `"8GB"` - 6.4GB Mender storage (~2.9GB per rootfs partition)
@@ -704,6 +715,7 @@ The build produces multiple image formats:
 - `tegraflash` - Complete Tegra flash package (bootloader, kernel, rootfs, DTBs)
 - `mender` - Mender OTA update artifact (.mender file)
 - `dataimg` - Data partition image
+- `wic` / `wic.bmap` - Disk image and block map for Raspberry Pi and generic x86_64 targets
 - `ext4` - Raw rootfs (for debugging)
 
 ## USB Gadget Networking
@@ -997,6 +1009,58 @@ overrides — today's shipped placeholders are exactly that. The shared
 `repos/` directory holds at most one clone per folder name, so two boards
 that override the same folder to different commits will cause a re-checkout
 when switching. Use `REPOS_EXTRA` with a different folder name to avoid that.
+
+## Generic x86_64 PCs
+
+WendyOS includes an experimental generic x86_64 PC target for Intel/AMD mini PCs,
+NUC-class systems, and desktop PCs. It uses Yocto's `genericx86-64` reference BSP
+from `meta-yocto-bsp` and produces a directly flashable `.wic` disk image.
+
+This target is an MVP. Mender A/B updates, Secure Boot policy, and desktop NVIDIA
+driver packaging are not enabled yet. When `WENDYOS_NVIDIA_DGPU = "1"`, the image
+includes a lightweight CDI generation service that no-ops unless an NVIDIA driver
+and `nvidia-ctk` are present.
+
+ROCm is also optional on x86. The base image ships the open AMD graphics stack,
+but ROCm userland is installed only from a configured WendyOS driver feed via
+`packagegroup-wendyos-rocm`. The installer schedules ROCm automatically only for
+AMD Ryzen AI / AI Max APUs that match AMD's current Ryzen ROCm support matrix,
+such as Ryzen AI 9 HX 370-class and Ryzen AI Max+ 395-class systems. AMD's Ryzen
+ROCm install guide currently requires a 6.14-1018 OEM-or-newer class kernel, so
+older WendyOS x86 kernels will skip ROCm installation until the kernel is updated.
+
+### x86 Build
+
+```bash
+cd /path/to/project
+BOARD=generic-x86-64 ./meta-wendyos/bootstrap.sh
+make build MACHINE=genericx86-64-wendyos
+```
+
+The build produces:
+```
+build/tmp/deploy/images/genericx86-64-wendyos/wendyos-image-genericx86-64-wendyos.rootfs.wic
+build/tmp/deploy/images/genericx86-64-wendyos/wendyos-image-genericx86-64-wendyos.rootfs.wic.bmap
+```
+
+### x86 Flash the Image
+
+Use the common flash helper:
+
+```bash
+make flash-to-external MACHINE=genericx86-64-wendyos
+```
+
+Or write the `.wic` image directly with `bmaptool` or `dd`:
+
+```bash
+sudo bmaptool copy wendyos-image-genericx86-64-wendyos.rootfs.wic /dev/sdX
+sudo dd if=wendyos-image-genericx86-64-wendyos.rootfs.wic of=/dev/sdX bs=4M status=progress conv=fsync
+sync
+```
+
+Replace `/dev/sdX` with the target disk, such as `/dev/sdb` for a USB SSD or
+`/dev/nvme0n1` for an NVMe drive.
 
 ## Raspberry Pi
 

@@ -20,14 +20,30 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda
 # when you want local builds to track a newer agent; CI always overrides them
 # with the latest stable release.
 WENDYOS_AGENT_VERSION ??= "2026.07.03-194041"
-WENDYOS_AGENT_SHA256  ??= "c84d35aee93a25866b9da41a112463f887f6cbb4cebcf2093c9795e8f3fafaa9"
+
+# The release publishes one tarball per arch (see WENDYOS_AGENT_RELEASE_ARCH
+# below), each with its own checksum. WENDYOS_AGENT_SHA256 defaults to the hash
+# matching the arch THIS build fetches, picked from the per-arch defaults. CI
+# still passes WENDYOS_AGENT_SHA256 directly via the environment for whichever
+# arch it builds; because this default is weak (??=), that env value wins. Bump
+# these together with WENDYOS_AGENT_VERSION.
+WENDYOS_AGENT_SHA256_arm64 ??= "c84d35aee93a25866b9da41a112463f887f6cbb4cebcf2093c9795e8f3fafaa9"
+WENDYOS_AGENT_SHA256_amd64 ??= "33e3ac7ad8bdb3e715d1465e74a0fcd58bf548d12faa799d17e9f65b3317f9e3"
+WENDYOS_AGENT_SHA256  ??= "${@d.getVar('WENDYOS_AGENT_SHA256_' + (d.getVar('WENDYOS_AGENT_RELEASE_ARCH') or 'arm64'))}"
 
 # Surface the resolved agent version as the package version for traceability
 # (e.g. in the image manifest). Hyphens are not valid in PV, so map them to
 # dots: 2026.06.10-142200 -> 2026.06.10.142200.
 PV = "${@d.getVar('WENDYOS_AGENT_VERSION').replace('-', '.')}"
 
-SRC_URI = "https://github.com/wendylabsinc/WendyOS/releases/download/${WENDYOS_AGENT_VERSION}/wendy-agent-linux-arm64-${WENDYOS_AGENT_VERSION}.tar.gz;name=agent \
+# Release asset architecture. The upstream release publishes one tarball per
+# arch (wendy-agent-linux-<arch>-<version>.tar.gz). Default to arm64 for
+# Tegra/RPi; the x86 machines override this to amd64. CI passes the matching
+# WENDYOS_AGENT_SHA256 for whichever tarball this build fetches.
+WENDYOS_AGENT_RELEASE_ARCH = "arm64"
+WENDYOS_AGENT_RELEASE_ARCH:x86-wendyos = "amd64"
+
+SRC_URI = "https://github.com/wendylabsinc/WendyOS/releases/download/${WENDYOS_AGENT_VERSION}/wendy-agent-linux-${WENDYOS_AGENT_RELEASE_ARCH}-${WENDYOS_AGENT_VERSION}.tar.gz;name=agent \
            file://wendyos-agent.service \
            file://wendyos-agent-updater.service \
            file://wendyos-agent-updater.timer \
@@ -46,7 +62,7 @@ do_install() {
     # Install the pre-built binary (fetched + checksum-verified by do_fetch)
     # into /usr/local/bin so it lives alongside runtime updates written by
     # wendyos-agent-updater.sh. The tarball unpacks to
-    # wendy-agent-linux-arm64/wendy-agent; find it rather than hard-coding the
+    # wendy-agent-linux-<arch>/wendy-agent; find it rather than hard-coding the
     # inner directory so a future asset layout change fails loudly here instead
     # of silently shipping nothing.
     BINARY=$(find ${S} -type f -name wendy-agent ! -path "*/wendy-cli*" | head -1)

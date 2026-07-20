@@ -14,7 +14,23 @@ fi
 # Default values if not configured
 GITHUB_REPO="${WENDYOS_AGENT_GITHUB_REPO:-wendylabsinc/wendy-agent}"
 VERSION="${WENDYOS_AGENT_VERSION:-latest}"
-ARCH="aarch64"  # Hardcoded for RPi
+
+normalize_arch() {
+    case "$1" in
+        x86_64|amd64)
+            echo "amd64"
+            ;;
+        aarch64|arm64)
+            echo "arm64"
+            ;;
+        *)
+            echo "Unsupported architecture: $1" >&2
+            exit 1
+            ;;
+    esac
+}
+
+ARCH="$(normalize_arch "${WENDYOS_AGENT_ARCH:-$(uname -m)}")"
 
 # Paths
 INSTALL_DIR="/usr/local/bin"
