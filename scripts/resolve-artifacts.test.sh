@@ -105,6 +105,21 @@ test_tegraflash_zst() {
   rm -rf "$d"
 }
 
+# Orin Nano SD retains an explicit raw rootfs-only image, generated from the
+# sdcard device in flash.xml.in. It does not produce a recovery flashpack.
+test_jetson_nano_sd() {
+  local d M; d=$(newdir); M=jetson-orin-nano-devkit-wendyos
+  : >"$d/wendyos-image-$M.tegraflash-tar"
+  local out; out=$(run_resolver jetson-orin-nano sd "$M" "$d"); local rc=$?
+  assert_eq "nano sd: exits 0" 0 "$rc"
+  assert_eq "nano sd: kind" generated-sd-img "$(field IMAGE_KIND <<<"$out")"
+  assert_eq "nano sd: image" "$d/wendyos-image-$M-sd.img" "$(field IMAGE_FILE <<<"$out")"
+  assert_eq "nano sd: bmap" true "$(field BMAP_REQUIRED <<<"$out")"
+  assert_eq "nano sd: no flashpack" false "$(field FLASHPACK_REQUIRED <<<"$out")"
+  assert_eq "nano sd: pass_storage" true "$(field PASS_STORAGE <<<"$out")"
+  rm -rf "$d"
+}
+
 # RPi sdimg: prefer .sdimg, resolve the symlink chain to the real file, gzip flag set.
 test_rpi_sdimg() {
   local d M; d=$(newdir); M=raspberrypi4-64-wendyos
@@ -117,7 +132,7 @@ test_rpi_sdimg() {
   assert_eq "rpi sdimg: kind"       sdimg-gz-with-wic-fallback "$(field IMAGE_KIND <<<"$out")"
   assert_eq "rpi sdimg: needs_gzip" true "$(field RPI_NEEDS_GZIP <<<"$out")"
   # readlink -f resolves the symlink to the real file.
-  assert_eq "rpi sdimg: image real path" "$d/wendyos-image-$M.sdimg.real" "$(field IMAGE_FILE <<<"$out")"
+  assert_eq "rpi sdimg: image real path" "$(readlink -f "$d/wendyos-image-$M.sdimg.real")" "$(field IMAGE_FILE <<<"$out")"
   assert_eq "rpi sdimg: no bundle" "" "$(field TEGRAFLASH_BUNDLE <<<"$out")"
   assert_eq "rpi sdimg: bmap"        true  "$(field BMAP_REQUIRED <<<"$out")"
   assert_eq "rpi sdimg: pass_storage" false "$(field PASS_STORAGE <<<"$out")"
@@ -233,6 +248,7 @@ test_matrix_coverage() {
     jetson-agx-orin/nvme
     jetson-agx-orin/emmc
     jetson-orin-nano/nvme
+    jetson-orin-nano/sd
     raspberry-pi-5/nvme
     raspberry-pi-5/sd
     raspberry-pi-4/sd
@@ -261,6 +277,7 @@ test_jetson_nvme
 test_jetson_emmc
 test_thor
 test_tegraflash_zst
+test_jetson_nano_sd
 test_rpi_sdimg
 test_rpi_wic
 test_rpi5_pass_storage

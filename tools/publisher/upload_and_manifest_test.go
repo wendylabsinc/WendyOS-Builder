@@ -42,6 +42,96 @@ func TestMasterManifestPath(t *testing.T) {
 	}
 }
 
+func TestApplyRecoveryRootfsOnlyFailsClosed(t *testing.T) {
+	meta := VersionMetadata{
+		Path: "legacy.img", NVMEPath: "legacy-nvme.img", SDCardPath: "legacy-sd.img",
+		BmapPath: "legacy.bmap", ZstPath: "legacy.zst",
+	}
+	applyRecoveryRootfsOnly(&meta, "nvme", "rootfs.img", 1234, "sha", "rootfs.bmap", "rootfs.zst", "zsha", 567)
+	if meta.InstallMode != "recovery" || meta.NVMERootfsOnlyPath != "rootfs.img" || meta.NVMERootfsOnlyBmapPath != "rootfs.bmap" || meta.NVMERootfsOnlyZstPath != "rootfs.zst" {
+		t.Fatalf("rootfs-only metadata not routed: %+v", meta)
+	}
+	if meta.Path != "" || meta.NVMEPath != "" || meta.SDCardPath != "" || meta.BmapPath != "" || meta.ZstPath != "" {
+		t.Fatalf("legacy artifact route survived recovery publication: %+v", meta)
+	}
+}
+
+func TestApplyRecoveryRootfsOnlyPreservesOtherStorage(t *testing.T) {
+	meta := VersionMetadata{}
+	applyRecoveryRootfsOnly(&meta, "nvme", "nvme.img", 1, "n", "n.bmap", "n.zst", "nz", 2)
+	applyRecoveryRootfsOnly(&meta, "sd", "sd.img", 3, "s", "s.bmap", "s.zst", "sz", 4)
+	if meta.NVMERootfsOnlyPath != "nvme.img" || meta.SDRootfsOnlyPath != "sd.img" {
+		t.Fatalf("storage-scoped rootfs artifacts clobbered each other: %+v", meta)
+	}
+}
+
+func TestApplyFlashpackStorageRouting(t *testing.T) {
+	meta := VersionMetadata{}
+	applyFlashpack(&meta, "nvme", "nvme.flashpack", "n", 1)
+	applyFlashpack(&meta, "emmc", "emmc.flashpack", "e", 2)
+	if meta.NVMEFlashpackPath != "nvme.flashpack" || meta.EMMCFlashpackPath != "emmc.flashpack" {
+		t.Fatalf("flashpack storage routing failed: %+v", meta)
+	}
+}
+
+func TestPromotionPreservesRecoveryArtifactsAndFailsClosed(t *testing.T) {
+	source := VersionMetadata{
+		InstallMode:       "recovery",
+		FlashpackChecksum: "top", FlashpackSizeBytes: 10,
+		NVMEFlashpackChecksum: "nvme-fp", NVMEFlashpackSizeBytes: 11,
+		EMMCFlashpackChecksum: "emmc-fp", EMMCFlashpackSizeBytes: 12,
+		NVMERootfsOnlyChecksum: "nvme-root", NVMERootfsOnlySizeBytes: 13,
+		NVMERootfsOnlyZstChecksum: "nvme-zst", NVMERootfsOnlyZstSizeBytes: 14,
+		SDRootfsOnlyChecksum: "sd-root", SDRootfsOnlySizeBytes: 15,
+		SDRootfsOnlyZstChecksum: "sd-zst", SDRootfsOnlyZstSizeBytes: 16,
+	}
+	var promoted VersionMetadata
+	applyPromotedRecoveryFields(&promoted, source, promotedRecoveryPaths{
+		topFlashpack: "stable/nvme.flashpack", nvmeFlashpack: "stable/nvme.flashpack",
+		emmcFlashpack: "stable/emmc.flashpack", nvmeRootfs: "stable/nvme.img",
+		nvmeRootfsBmap: "stable/nvme.bmap", nvmeRootfsZst: "stable/nvme.zst",
+		sdRootfs: "stable/sd.img", sdRootfsBmap: "stable/sd.bmap", sdRootfsZst: "stable/sd.zst",
+	})
+	if promoted.NVMEFlashpackChecksum != "nvme-fp" || promoted.EMMCFlashpackChecksum != "emmc-fp" ||
+		promoted.NVMERootfsOnlyChecksum != "nvme-root" || promoted.SDRootfsOnlyChecksum != "sd-root" {
+		t.Fatalf("promoted recovery metadata was not preserved: %+v", promoted)
+	}
+
+	var missing VersionMetadata
+	applyPromotedRecoveryFields(&missing, source, promotedRecoveryPaths{})
+	if missing.FlashpackChecksum != "" || missing.NVMERootfsOnlyChecksum != "" || missing.SDRootfsOnlySizeBytes != 0 {
+		t.Fatalf("missing promoted objects retained stale metadata: %+v", missing)
+	}
+}
+
+func TestValidateRecoveryPromotionRequiresQualifiedMatrix(t *testing.T) {
+	nano := VersionMetadata{
+		InstallMode: "recovery", NVMEFlashpackPath: "nightly/nvme.flashpack",
+		NVMERootfsOnlyPath: "nightly/nvme.img", SDRootfsOnlyPath: "nightly/sd.img",
+		NVMERootfsOnlyBmapPath: "nightly/nvme.bmap",
+	}
+	paths := promotedRecoveryPaths{
+		nvmeFlashpack: "stable/nvme.flashpack", nvmeRootfs: "stable/nvme.img",
+		sdRootfs: "stable/sd.img", nvmeRootfsBmap: "stable/nvme.bmap",
+	}
+	if err := validateRecoveryPromotion("jetson-orin-nano", nano, paths); err != nil {
+		t.Fatal(err)
+	}
+	paths.sdRootfs = ""
+	if err := validateRecoveryPromotion("jetson-orin-nano", nano, paths); err == nil {
+		t.Fatal("promotion accepted a missing Nano SD artifact")
+	}
+
+	agx := nano
+	agx.SDRootfsOnlyPath = ""
+	agx.EMMCFlashpackPath = "nightly/emmc.flashpack"
+	paths.sdRootfs = ""
+	paths.emmcFlashpack = ""
+	if err := validateRecoveryPromotion("jetson-agx-orin", agx, paths); err == nil {
+		t.Fatal("promotion accepted a missing AGX eMMC flashpack")
+	}
+}
+
 // Test validation functions
 func TestValidateDeviceType(t *testing.T) {
 	tests := []struct {

@@ -1,11 +1,21 @@
 [Unit]
 Description=WendyOS /data partition first-boot init (format + grow)
 DefaultDependencies=no
-# Runs after udev has populated /dev/disk/by-partlabel, before /data is
+# Wait for udev to announce the data partition, then run before /data is
 # mounted and before anything that needs /data.
-After=systemd-udevd.service
+#
+# This must be a device dependency, NOT ConditionPathExists: conditions are
+# evaluated the moment the job runs, which races udev's coldplug of the disk.
+# On a genuinely first boot losing that race skipped the format ("skipped,
+# unmet condition check ConditionPathExists=..."), data.mount then failed on
+# the unformatted partition, and the whole Requires= chain hanging off it
+# (etc-binds -> uuid/device-name generation) collapsed — the device came up
+# advertising mDNS placeholder names (WDY-1888). Every wendyos-update board
+# carves a "data" partition, so if the device never appears the board is
+# broken anyway and data.mount fails on its own device timeout regardless.
+Wants=dev-disk-by\x2dpartlabel-data.device
+After=systemd-udevd.service dev-disk-by\x2dpartlabel-data.device
 Before=data.mount
-ConditionPathExists=/dev/disk/by-partlabel/data
 
 [Service]
 Type=oneshot

@@ -23,9 +23,9 @@
 #
 # Output: KEY=VALUE lines on stdout, safe to `eval` in a step or append to
 # $GITHUB_ENV. Diagnostics and errors go to stderr.
-#   IMAGE_KIND         generated-nvme-img | tegraflash-bundle |
+#   IMAGE_KIND         generated-nvme-img | generated-sd-img | tegraflash-bundle |
 #                      sdimg-gz-with-wic-fallback | wic-disk
-#   IMAGE_FILE         primary artifact path. For generated-nvme-img this is the
+#   IMAGE_FILE         primary artifact path. For generated-*-img this is the
 #                      MACHINE-scoped target path the "Generate flashable image"
 #                      step writes (it does NOT exist at Yocto deploy time, so it
 #                      is intentionally not existence-checked here). For sdimg it
@@ -35,7 +35,8 @@
 #   RECOVERY_EXPECTED  true when a tegraflash bundle is expected (all Jetsons).
 #   BMAP_REQUIRED      true when the workflow should `bmaptool create` the image.
 #   FLASHPACK_REQUIRED true when a flashpack is built and attached (Thor T264
-#                      and the Orin T234 family).
+#                      and supported Orin NVMe/eMMC recovery targets; Nano SD
+#                      remains rootfs-only).
 #   PASS_STORAGE       true when the publisher gets --storage (multi-storage device).
 #   RPI_NEEDS_GZIP     true when IMAGE_FILE is a raw sdimg the workflow must gzip.
 #
@@ -119,6 +120,11 @@ case "$IMAGE_KIND" in
     # stale-image guard for it). Resolve only its canonical MACHINE-scoped path,
     # which the generate step writes to and the upload step reads.
     IMAGE_FILE="$DEPLOY_DIR/wendyos-image-${MACHINE}-nvme.img"
+    ;;
+  generated-sd-img)
+    # Same offline layout writer as generated-nvme-img, selecting flash.xml.in's
+    # sdcard device instead of external-flash.xml.in's external device.
+    IMAGE_FILE="$DEPLOY_DIR/wendyos-image-${MACHINE}-sd.img"
     ;;
   sdimg-gz-with-wic-fallback)
     sdimg="$DEPLOY_DIR/wendyos-image-${MACHINE}.sdimg"

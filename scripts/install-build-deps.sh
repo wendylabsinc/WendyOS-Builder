@@ -81,6 +81,12 @@ esac
 tmp_s5=$(mktemp -d)
 wget -qO "${tmp_s5}/s5cmd.tar.gz" \
     "https://github.com/peak/s5cmd/releases/download/v${S5CMD_VERSION}/s5cmd_${S5CMD_VERSION}_Linux-${s5cmd_arch}.tar.gz"
+# Verify the download against the release's published checksums (finding H9).
+wget -qO "${tmp_s5}/checksums.txt" \
+    "https://github.com/peak/s5cmd/releases/download/v${S5CMD_VERSION}/s5cmd_${S5CMD_VERSION}_checksums.txt"
+s5cmd_sha="$(awk -v f="s5cmd_${S5CMD_VERSION}_Linux-${s5cmd_arch}.tar.gz" '$2 == f {print $1}' "${tmp_s5}/checksums.txt")"
+[[ -n "${s5cmd_sha}" ]] || { echo "no checksum for s5cmd_${S5CMD_VERSION}_Linux-${s5cmd_arch}.tar.gz" >&2; exit 1; }
+echo "${s5cmd_sha}  ${tmp_s5}/s5cmd.tar.gz" | sha256sum -c -
 tar -xzf "${tmp_s5}/s5cmd.tar.gz" -C "${tmp_s5}" s5cmd
 install -m 0755 "${tmp_s5}/s5cmd" /usr/local/bin/s5cmd
 rm -rf "${tmp_s5}"
@@ -93,25 +99,21 @@ rm -rf "${tmp_s5}"
 # location). A profile.d entry and /usr/local/bin symlinks make it
 # reachable from login and non-login (docker exec) shells alike.
 #
-# Defaults to the latest stable release (resolved from go.dev). Pin a
-# specific version for a reproducible build by exporting
-# GO_VERSION=1.26.0 before running this script.
+# Pinned to a specific version AND checksum for a reproducible, verified
+# toolchain (finding H9 — no longer resolved live to whatever "latest" is).
+# To bump: set GO_VERSION and refresh BOTH checksums from https://go.dev/dl/
+# (each file has a .sha256 sidecar; the JSON index lists them too).
+GO_VERSION="${GO_VERSION:-1.26.5}"
 case "${arch}" in
-    amd64) go_arch="amd64" ;;
-    arm64) go_arch="arm64" ;;
+    amd64) go_arch="amd64"; go_sha256="5c2c3b16caefa1d968a94c1daca04a7ca301a496d9b086e17ad77bb81393f053" ;;
+    arm64) go_arch="arm64"; go_sha256="fe4789e92b1f33358680864bbe8704289e7bb5fc207d80623c308935bd696d49" ;;
     *)     echo "Unsupported arch for go: ${arch}" >&2; exit 1 ;;
 esac
-if [[ -n "${GO_VERSION:-}" ]]; then
-    go_tag="go${GO_VERSION}"
-else
-    # go.dev/VERSION?m=text returns the latest stable tag (e.g. "go1.26.0")
-    # on its first line.
-    go_tag="$(wget -qO- 'https://go.dev/VERSION?m=text' | head -1)"
-fi
-[[ "${go_tag}" == go* ]] || { echo "could not resolve Go version (got '${go_tag}')" >&2; exit 1; }
+go_tag="go${GO_VERSION}"
 tmp_go=$(mktemp -d)
 wget -qO "${tmp_go}/go.tar.gz" \
     "https://go.dev/dl/${go_tag}.linux-${go_arch}.tar.gz"
+echo "${go_sha256}  ${tmp_go}/go.tar.gz" | sha256sum -c -
 rm -rf /usr/local/go
 tar -C /usr/local -xzf "${tmp_go}/go.tar.gz"
 rm -rf "${tmp_go}"

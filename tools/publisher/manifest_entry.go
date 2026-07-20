@@ -69,8 +69,8 @@ func (e *ManifestEntry) validate() error {
 	if e.Storage != "" && e.Storage != "nvme" && e.Storage != "sd" && e.Storage != "emmc" {
 		return fmt.Errorf("invalid storage %q: must be nvme, sd, or emmc", e.Storage)
 	}
-	if e.FilePath == "" && e.OTAUpdatePath == "" && e.RecoveryPath == "" {
-		return fmt.Errorf("entry contains no files - at least one of OS image, OTA update, or recovery file is required")
+	if e.FilePath == "" && e.OTAUpdatePath == "" && e.RecoveryPath == "" && e.FlashpackPath == "" {
+		return fmt.Errorf("entry contains no files - at least one OS image, OTA update, recovery file, or flashpack is required")
 	}
 	return nil
 }

@@ -53,6 +53,22 @@ set_txt() {
 
 set_txt id "$UUID"
 
+# Self-heal a missing device name before publishing: the generator's queued
+# job is lost when a failed first-boot /data mount collapses its Requires=
+# chain (WDY-1888), and this publisher is the last identity step that still
+# runs. generate-device-name.sh is idempotent and writes through the (by now
+# retried and bound) /etc/wendyos, so this is a real name, not a junk
+# fallback. Re-derive the hostname from it so the device does not keep the
+# machine-id fallback hostname until the next reboot (avahi starts after us
+# and picks the new hostname up).
+if [ ! -s "$DEVICE_NAME_FILE" ] && [ -x /usr/bin/generate-device-name.sh ]; then
+    echo "Warning: $DEVICE_NAME_FILE missing; generating it (self-heal)"
+    /usr/bin/generate-device-name.sh || true
+    if [ -s "$DEVICE_NAME_FILE" ] && [ -x /usr/sbin/generate-hostname.sh ]; then
+        /usr/sbin/generate-hostname.sh || true
+    fi
+fi
+
 # Only set name/displayname when we actually have a device name; otherwise leave
 # whatever is there (placeholder or a prior good value) for a later run — never
 # burn a junk fallback into the advertisement.
