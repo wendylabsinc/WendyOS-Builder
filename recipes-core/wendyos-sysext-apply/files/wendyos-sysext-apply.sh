@@ -20,8 +20,13 @@ KVER="$(uname -r)"
 MODDIR="/usr/lib/modules/$KVER"
 OVL="$STORE/modules-overlay/$KVER"
 
-# Nothing to do on a stock device with no add-ons: leave /data and /usr untouched.
-if [ -z "$(find "$ENABLED" -maxdepth 1 -name '*.raw' -print -quit 2>/dev/null)" ]; then
+# Skip only on a truly stock device (never had add-ons). If a prior apply left
+# state behind (stale /run links or a module overlay), fall through even when
+# enabled/ is empty, so removing the last add-on unmerges it instead of leaving
+# /usr stale until the next reboot.
+if [ -z "$(find "$ENABLED" -maxdepth 1 -name '*.raw' -print -quit 2>/dev/null)" ] \
+   && [ -z "$(find "$RUNDIR" -maxdepth 1 -type l -print -quit 2>/dev/null)" ] \
+   && ! mountpoint -q "$MODDIR"; then
     exit 0
 fi
 
@@ -46,6 +51,12 @@ fi
 if ! systemd-sysext refresh; then
     echo "wendyos-sysext-apply: systemd-sysext refresh failed" >&2
     exit 1
+fi
+
+# Last add-on removed: the refresh above unmerged it; nothing left to overlay or
+# depmod, so stop before re-stacking an empty overlay.
+if [ -z "$(find "$ENABLED" -maxdepth 1 -name '*.raw' -print -quit 2>/dev/null)" ]; then
+    exit 0
 fi
 
 # 3. Stack a writable overlay on the module dir so depmod can index merged modules.
