@@ -23,7 +23,8 @@
 #
 # Output: KEY=VALUE lines on stdout, safe to `eval` in a step or append to
 # $GITHUB_ENV. Diagnostics and errors go to stderr.
-#   IMAGE_KIND         generated-nvme-img | generated-sd-img | tegraflash-bundle | sdimg-gz-with-wic-fallback
+#   IMAGE_KIND         generated-nvme-img | generated-sd-img | tegraflash-bundle |
+#                      sdimg-gz-with-wic-fallback | wic-disk
 #   IMAGE_FILE         primary artifact path. For generated-*-img this is the
 #                      MACHINE-scoped target path the "Generate flashable image"
 #                      step writes (it does NOT exist at Yocto deploy time, so it
@@ -140,6 +141,22 @@ case "$IMAGE_KIND" in
     else
       fail "no Raspberry Pi image for $KEY ($MACHINE): expected wendyos-image-${MACHINE}.sdimg (preferred) or wendyos-image-${MACHINE}.rootfs.wic in $DEPLOY_DIR (map entry image_kind=sdimg-gz-with-wic-fallback)"
     fi
+    ;;
+  wic-disk)
+    # Generic x86_64 PC: the primary flashable artifact is a directly-flashable
+    # UEFI/BIOS .wic disk image (IMAGE_FSTYPES="wic wic.bmap ..." in
+    # genericx86-64-wendyos.conf) — this is what a fresh install is written to.
+    # x86 runs the wendy A/B OTA stack (WENDYOS_OTA="wendy"), so it also builds a
+    # .wendy payload, but that is published by the workflow's device-agnostic OTA
+    # glob (--ota-update), not resolved here; this kind only names the flashable
+    # image. No tegraflash bundle (not a Tegra board). Uploaded as-is (bmap
+    # generated in the workflow like the RPi wic path); the publisher
+    # recompresses .wic. A missing wic here is fatal.
+    wic="$DEPLOY_DIR/wendyos-image-${MACHINE}.rootfs.wic"
+    if [[ ! -f "$wic" ]]; then
+      fail "no x86 disk image for $KEY ($MACHINE): expected wendyos-image-${MACHINE}.rootfs.wic in $DEPLOY_DIR (map entry image_kind=wic-disk)"
+    fi
+    IMAGE_FILE="$wic"
     ;;
   *)
     echo "::error::unknown image_kind '$IMAGE_KIND' for $KEY in $MAP_FILE" >&2

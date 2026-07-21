@@ -7,5 +7,6 @@
   "raspberry-pi-5/nvme":    { "image_kind": "sdimg-gz-with-wic-fallback", "recovery_bundle_expected": false, "bmap": true,  "flashpack": false, "pass_storage": true },
   "raspberry-pi-5/sd":      { "image_kind": "sdimg-gz-with-wic-fallback", "recovery_bundle_expected": false, "bmap": true,  "flashpack": false, "pass_storage": true },
   "raspberry-pi-4/sd":      { "image_kind": "sdimg-gz-with-wic-fallback", "recovery_bundle_expected": false, "bmap": true,  "flashpack": false, "pass_storage": false },
-  "raspberry-pi-3/sd":      { "image_kind": "sdimg-gz-with-wic-fallback", "recovery_bundle_expected": false, "bmap": true,  "flashpack": false, "pass_storage": false }
+  "raspberry-pi-3/sd":      { "image_kind": "sdimg-gz-with-wic-fallback", "recovery_bundle_expected": false, "bmap": true,  "flashpack": false, "pass_storage": false },
+  "generic-x86-64/disk":    { "image_kind": "wic-disk",                   "recovery_bundle_expected": false, "bmap": true,  "flashpack": false, "pass_storage": false }
 }
