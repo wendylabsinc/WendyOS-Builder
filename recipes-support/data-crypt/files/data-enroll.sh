@@ -16,6 +16,14 @@ DATA=/dev/disk/by-partlabel/data
 BK=/run/data-bootstrap.key
 INIT_MAP=data_init
 
+# PCR policy for the TPM keyslot. Default PCR 7 (x86 legacy: Secure Boot state).
+# /etc/data-crypt.conf (shipped by this recipe) may set TPM_PCRS: a PCR list, or
+# empty for SRK-only (no PCR binding) -- Jetson uses empty until secure boot lands.
+TPM_PCRS="7"
+[ -r /etc/data-crypt.conf ] && . /etc/data-crypt.conf
+PCR_ARG=""
+[ -n "$TPM_PCRS" ] && PCR_ARG="--tpm2-pcrs=$TPM_PCRS"
+
 # Emit to the journal (stdout) and, when present, the console + serial UART.
 announce() {
     echo "$*"
@@ -107,8 +115,10 @@ cryptsetup open --key-file="$BK" "$DATA" "$INIT_MAP" || fail "open (bootstrap) f
 mkfs.ext4 -q -L data "/dev/mapper/$INIT_MAP" || { cryptsetup close "$INIT_MAP"; fail "mkfs.ext4 failed"; }
 cryptsetup close "$INIT_MAP" || true
 
-# 5) Seal a keyslot to the TPM, bound to PCR 7 (Secure Boot state -- OTA-stable).
-systemd-cryptenroll --unlock-key-file="$BK" --tpm2-device=auto --tpm2-pcrs=7 "$DATA" \
+# 5) Seal a keyslot to the TPM. PCR binding per $PCR_ARG (set at top from
+#    /etc/data-crypt.conf): a PCR list on x86 (Secure Boot state), SRK-only (no
+#    --tpm2-pcrs) on Jetson until secure boot lands.
+systemd-cryptenroll --unlock-key-file="$BK" --tpm2-device=auto $PCR_ARG "$DATA" \
     || fail "TPM enrollment failed"
 
 # 6) Enrol a recovery key and surface it. INTERIM: journal + console only, escrow
