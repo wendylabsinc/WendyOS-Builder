@@ -3350,6 +3350,12 @@ func promoteNightlyToStable(ctx context.Context, bucket *storage.BucketHandle, p
 		RecoveryPath:       recoveryDestPath,
 		RecoveryChecksum:   sourceVersionMeta.RecoveryChecksum,
 		RecoverySizeBytes:  sourceVersionMeta.RecoverySizeBytes,
+
+		// Carry driver add-ons across promotion (else --promote silently drops
+		// extensions[]). Path still points at the source version's .raw, which
+		// promotion does not delete; a later refinement can copy each .raw into
+		// the stable version dir like the image/OTA/flashpack artifacts.
+		Extensions: sourceVersionMeta.Extensions,
 	}
 	applyPromotedRecoveryFields(&stableVersionMeta, sourceVersionMeta, promotionRecoveryPaths)
 
@@ -3640,6 +3646,10 @@ func swapImageFile(ctx context.Context, bucket *storage.BucketHandle, prefix, de
 		SDRootfsOnlyZstPath:        existingVersion.SDRootfsOnlyZstPath,
 		SDRootfsOnlyZstChecksum:    existingVersion.SDRootfsOnlyZstChecksum,
 		SDRootfsOnlyZstSizeBytes:   existingVersion.SDRootfsOnlyZstSizeBytes,
+
+		// Driver add-ons are per-version artifacts, not derived from the swapped
+		// image, so preserve them (else --swap silently drops extensions[]).
+		Extensions: existingVersion.Extensions,
 	}
 
 	// Recovery: use new if provided, otherwise preserve existing
