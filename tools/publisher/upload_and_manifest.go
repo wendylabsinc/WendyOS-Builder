@@ -115,6 +115,20 @@ type DeviceManifest struct {
 	Versions map[string]VersionMetadata `json:"versions"`
 }
 
+// ExtensionMetadata describes one driver add-on (a systemd-sysext .raw) built
+// for a specific kernel and published alongside the OS version it targets. The
+// fields match the wendy CLI's driverResolution so the manifest resolves directly.
+type ExtensionMetadata struct {
+	Name          string   `json:"name"`
+	Version       string   `json:"version,omitempty"`
+	KernelVersion string   `json:"kernel_version"`
+	Path          string   `json:"path"`
+	SHA256        string   `json:"sha256"`
+	SizeBytes     int64    `json:"size_bytes"`
+	Signature     string   `json:"signature,omitempty"`
+	ModulesLoad   []string `json:"modules_load,omitempty"`
+}
+
 // VersionMetadata contains metadata about a specific OS version
 type VersionMetadata struct {
 	InstallMode        string     `json:"install_mode,omitempty"`
@@ -214,6 +228,9 @@ type VersionMetadata struct {
 	EMMCFlashpackPath      string `json:"emmc_flashpack_path,omitempty"`
 	EMMCFlashpackChecksum  string `json:"emmc_flashpack_checksum,omitempty"`
 	EMMCFlashpackSizeBytes int64  `json:"emmc_flashpack_size_bytes,omitempty"`
+	// Extensions are driver add-ons (systemd-sysext .raw images) targeting this
+	// OS version, keyed on kernel_version so the CLI picks the matching build.
+	Extensions []ExtensionMetadata `json:"extensions,omitempty"`
 }
 
 // MasterManifest represents the top-level manifest
@@ -1069,6 +1086,12 @@ func main() {
 	flashpackFile := flag.String("flashpack-file", "", "Optional Jetson flashpack (.tar.zst) file path to upload")
 	bmapFile := flag.String("bmap-file", "", "Optional .bmap block-map file to upload alongside the OS image")
 	sbomFile := flag.String("sbom", "", "Optional SPDX SBOM bundle (.spdx.tar.zst) to upload alongside the OS image and record in the manifest")
+	extensionFile := flag.String("extension-file", "", "Optional driver add-on .raw (systemd-sysext image) to upload and record in the manifest")
+	extensionName := flag.String("extension-name", "", "Driver add-on name = EXTENSION_NAME, the on-device <name>.raw (required with --extension-file)")
+	extensionVersion := flag.String("extension-version", "", "Driver add-on version")
+	extensionKernel := flag.String("extension-kernel", "", "Kernel version (uname -r) the driver .ko was built for (required with --extension-file)")
+	extensionModules := flag.String("extension-modules", "", "Comma-separated kernel module names to load after merge")
+	extensionSig := flag.String("extension-sig", "", "Base64 detached signature over the .raw sha256 (from wendyos-sign; empty until a signing key ships)")
 	storage := flag.String("storage", "", "Storage type for multi-artifact devices: nvme or sd (omit for single-storage devices)")
 	updateOnly := flag.Bool("update-only", false, "Only update manifests without uploading")
 	skipMasterManifest := flag.Bool("skip-master-manifest", false, "Skip master manifest update (a separate job will handle it)")
@@ -1184,6 +1207,9 @@ func main() {
 		if *sbomFile != "" {
 			log.Fatal("--sbom is not supported for firmware uploads")
 		}
+		if *extensionFile != "" {
+			log.Fatal("--extension-file is not supported for firmware uploads")
+		}
 	} else if *createDevice {
 		// For creating a device, we only need the device type
 		if err := validateDeviceType(*deviceType); err != nil {
@@ -1291,6 +1317,20 @@ func main() {
 					log.WithError(err).Fatal("Invalid SBOM file")
 				}
 			}
+
+			// Validate driver add-on if provided. name + kernel are required so
+			// the object lands at <name>.raw and the CLI can match by kernel.
+			if *extensionFile != "" {
+				if err := validateFileExists(*extensionFile); err != nil {
+					log.WithError(err).Fatal("Invalid extension file")
+				}
+				if *extensionName == "" {
+					log.Fatal("--extension-name is required with --extension-file")
+				}
+				if *extensionKernel == "" {
+					log.Fatal("--extension-kernel is required with --extension-file")
+				}
+			}
 		}
 	}
 
@@ -1382,6 +1422,7 @@ func main() {
 			entry.RecoveryPath, entry.RecoverySize, entry.RecoveryChecksum,
 			entry.FlashpackPath, entry.FlashpackSize, entry.FlashpackChecksum,
 			entry.SBOMPath, entry.SBOMSize, entry.SBOMChecksum,
+			entry.Extensions,
 			entry.Storage, entry.Nightly, entry.Stability, *notifyDiscord, true,
 		)
 		return
@@ -1619,6 +1660,36 @@ func main() {
 			bmapUploadChan = uploadFileAsync(ctx, bucket, prefix, *bmapFile, *deviceType, *version)
 		}
 
+		// Driver add-on (.raw). It is already squashfs-xz, so it must be uploaded
+		// verbatim (never the OS-image compress path) — the device checks
+		// sha256(downloaded)==manifest.sha256, so sha256 is taken over the exact
+		// local bytes. Symlinking to <name>.raw makes the basename-derived
+		// uploader land the object at the on-device name without a rename.
+		var extUploadChan <-chan uploadResult
+		var extChecksum string
+		if *extensionFile != "" {
+			log.Info("Processing driver add-on (.raw)...")
+			sum, sumErr := calculateChecksum(*extensionFile)
+			if sumErr != nil {
+				log.WithError(sumErr).Fatal("Failed to checksum extension file")
+			}
+			extChecksum = sum
+			absExt, absErr := filepath.Abs(*extensionFile)
+			if absErr != nil {
+				log.WithError(absErr).Fatal("Failed to resolve extension file path")
+			}
+			extLinkDir, tmpErr := os.MkdirTemp("", "wendy-ext-*")
+			if tmpErr != nil {
+				log.WithError(tmpErr).Fatal("Failed to stage extension upload")
+			}
+			defer os.RemoveAll(extLinkDir)
+			linkPath := filepath.Join(extLinkDir, *extensionName+".raw")
+			if linkErr := os.Symlink(absExt, linkPath); linkErr != nil {
+				log.WithError(linkErr).Fatal("Failed to stage extension upload")
+			}
+			extUploadChan = uploadFileAsync(ctx, bucket, prefix, linkPath, *deviceType, *version)
+		}
+
 		// The seekable-zstd OS image now IS the main file (compressFile produced
 		// it in place of a gzip .img.gz), so there is no separate .zst artifact
 		// to generate or upload here — the manifest .zst fields reuse the main
@@ -1688,6 +1759,32 @@ func main() {
 			log.Info("SBOM file uploaded successfully")
 		}
 
+		// Build the driver add-on record from the upload result + local sha256.
+		var extensions []ExtensionMetadata
+		if extUploadChan != nil {
+			extUpload := <-extUploadChan
+			if extUpload.err != nil {
+				log.WithError(extUpload.err).Fatal("Failed to upload extension file")
+			}
+			log.Info("Extension file uploaded successfully")
+			var modules []string
+			for _, m := range strings.Split(*extensionModules, ",") {
+				if m = strings.TrimSpace(m); m != "" {
+					modules = append(modules, m)
+				}
+			}
+			extensions = append(extensions, ExtensionMetadata{
+				Name:          *extensionName,
+				Version:       *extensionVersion,
+				KernelVersion: *extensionKernel,
+				Path:          extUpload.path,
+				SHA256:        extChecksum,
+				SizeBytes:     extUpload.size,
+				Signature:     *extensionSig,
+				ModulesLoad:   modules,
+			})
+		}
+
 		// Seekable-zstd manifest fields. When the main OS image is itself a
 		// seekable .zst (Jetson raw .img), it doubles as the .zst artifact, so
 		// reuse the single upload rather than a second identical object.
@@ -1729,6 +1826,7 @@ func main() {
 				SBOMPath:          sbomUpload.path,
 				SBOMSize:          sbomUpload.size,
 				SBOMChecksum:      sbomResult.checksum,
+				Extensions:        extensions,
 			}
 			if err := writeManifestEntry(*metadataOut, entry); err != nil {
 				log.WithError(err).Fatal("Failed to write manifest entry")
@@ -1747,6 +1845,7 @@ func main() {
 			recoveryUpload.path, recoveryUpload.size, recoveryResult.checksum,
 			flashpackUpload.path, flashpackUpload.size, flashpackResult.checksum,
 			sbomUpload.path, sbomUpload.size, sbomResult.checksum,
+			extensions,
 			*storage, *nightly, *stability, *notifyDiscord, *skipMasterManifest,
 		)
 	} else {
@@ -1821,7 +1920,7 @@ func main() {
 			recoverySize = recoveryAttrs.Size
 		}
 
-		updateManifests(ctx, bucket, prefix, *deviceType, *version, imagePath, attrs.Size, mainChecksum, "", "", "", 0, otaUpdatePath, otaUpdateSize, otaUpdateChecksum, recoveryPath, recoverySize, recoveryChecksum, "", 0, "", "", 0, "", *storage, *nightly, *stability, *notifyDiscord, *skipMasterManifest)
+		updateManifests(ctx, bucket, prefix, *deviceType, *version, imagePath, attrs.Size, mainChecksum, "", "", "", 0, otaUpdatePath, otaUpdateSize, otaUpdateChecksum, recoveryPath, recoverySize, recoveryChecksum, "", 0, "", "", 0, "", nil, *storage, *nightly, *stability, *notifyDiscord, *skipMasterManifest)
 	}
 }
 
@@ -2007,7 +2106,7 @@ func uploadFile(ctx context.Context, bucket *storage.BucketHandle, prefix, local
 	return destinationPath, nil
 }
 
-func updateManifests(ctx context.Context, bucket *storage.BucketHandle, prefix, deviceType, version, filePath string, fileSize int64, fileChecksum string, bmapPath string, zstPath, zstChecksum string, zstSize int64, otaUpdatePath string, otaUpdateSize int64, otaUpdateChecksum string, recoveryPath string, recoverySize int64, recoveryChecksum string, flashpackPath string, flashpackSize int64, flashpackChecksum string, sbomPath string, sbomSize int64, sbomChecksum string, storage string, isNightly bool, stability string, notifyDiscord bool, skipMasterManifest bool) {
+func updateManifests(ctx context.Context, bucket *storage.BucketHandle, prefix, deviceType, version, filePath string, fileSize int64, fileChecksum string, bmapPath string, zstPath, zstChecksum string, zstSize int64, otaUpdatePath string, otaUpdateSize int64, otaUpdateChecksum string, recoveryPath string, recoverySize int64, recoveryChecksum string, flashpackPath string, flashpackSize int64, flashpackChecksum string, sbomPath string, sbomSize int64, sbomChecksum string, extensions []ExtensionMetadata, storage string, isNightly bool, stability string, notifyDiscord bool, skipMasterManifest bool) {
 	logger := log.WithFields(logrus.Fields{
 		"device_type":     deviceType,
 		"version":         version,
@@ -2033,7 +2132,7 @@ func updateManifests(ctx context.Context, bucket *storage.BucketHandle, prefix, 
 
 	if skipMasterManifest {
 		logger.Info("Updating device manifest (master manifest will be updated by a separate publish job)")
-		if err := updateDeviceManifest(ctx, deviceLogger, bucket, prefix, deviceType, version, filePath, fileSize, fileChecksum, bmapPath, zstPath, zstChecksum, zstSize, otaUpdatePath, otaUpdateSize, otaUpdateChecksum, recoveryPath, recoverySize, recoveryChecksum, flashpackPath, flashpackSize, flashpackChecksum, sbomPath, sbomSize, sbomChecksum, storage, isNightly); err != nil {
+		if err := updateDeviceManifest(ctx, deviceLogger, bucket, prefix, deviceType, version, filePath, fileSize, fileChecksum, bmapPath, zstPath, zstChecksum, zstSize, otaUpdatePath, otaUpdateSize, otaUpdateChecksum, recoveryPath, recoverySize, recoveryChecksum, flashpackPath, flashpackSize, flashpackChecksum, sbomPath, sbomSize, sbomChecksum, extensions, storage, isNightly); err != nil {
 			logger.WithError(err).Fatal("Failed to update device manifest")
 		}
 	} else {
@@ -2055,7 +2154,7 @@ func updateManifests(ctx context.Context, bucket *storage.BucketHandle, prefix, 
 
 		go func() {
 			defer wg.Done()
-			deviceErrChan <- updateDeviceManifest(ctx, deviceLogger, bucket, prefix, deviceType, version, filePath, fileSize, fileChecksum, bmapPath, zstPath, zstChecksum, zstSize, otaUpdatePath, otaUpdateSize, otaUpdateChecksum, recoveryPath, recoverySize, recoveryChecksum, flashpackPath, flashpackSize, flashpackChecksum, sbomPath, sbomSize, sbomChecksum, storage, isNightly)
+			deviceErrChan <- updateDeviceManifest(ctx, deviceLogger, bucket, prefix, deviceType, version, filePath, fileSize, fileChecksum, bmapPath, zstPath, zstChecksum, zstSize, otaUpdatePath, otaUpdateSize, otaUpdateChecksum, recoveryPath, recoverySize, recoveryChecksum, flashpackPath, flashpackSize, flashpackChecksum, sbomPath, sbomSize, sbomChecksum, extensions, storage, isNightly)
 		}()
 
 		go func() {
@@ -2426,7 +2525,7 @@ func validateRecoveryPromotion(deviceType string, source VersionMetadata, paths 
 	return nil
 }
 
-func updateDeviceManifest(ctx context.Context, logger *logrus.Entry, bucket *storage.BucketHandle, prefix, deviceType, version, filePath string, fileSize int64, fileChecksum string, bmapPath string, zstPath, zstChecksum string, zstSize int64, otaUpdatePath string, otaUpdateSize int64, otaUpdateChecksum string, recoveryPath string, recoverySize int64, recoveryChecksum string, flashpackPath string, flashpackSize int64, flashpackChecksum string, sbomPath string, sbomSize int64, sbomChecksum string, storageType string, isNightly bool) error {
+func updateDeviceManifest(ctx context.Context, logger *logrus.Entry, bucket *storage.BucketHandle, prefix, deviceType, version, filePath string, fileSize int64, fileChecksum string, bmapPath string, zstPath, zstChecksum string, zstSize int64, otaUpdatePath string, otaUpdateSize int64, otaUpdateChecksum string, recoveryPath string, recoverySize int64, recoveryChecksum string, flashpackPath string, flashpackSize int64, flashpackChecksum string, sbomPath string, sbomSize int64, sbomChecksum string, extensions []ExtensionMetadata, storageType string, isNightly bool) error {
 	manifestPath := deviceManifestPath(prefix, deviceType)
 	logger = logger.WithField("manifest_path", manifestPath)
 	logger.Info("Processing device manifest")
@@ -2640,6 +2739,12 @@ func updateDeviceManifest(ctx context.Context, logger *logrus.Entry, bucket *sto
 				"sbom_size":     sbomSize,
 				"sbom_checksum": sbomChecksum,
 			}).Info("Updating SBOM metadata")
+		}
+
+		// Update driver add-ons only if provided (whole-list replace, like SBOM).
+		if len(extensions) > 0 {
+			versionMetadata.Extensions = extensions
+			logger.WithField("extension_count", len(extensions)).Info("Updating extension metadata")
 		}
 
 		// Validate that at least one file is provided

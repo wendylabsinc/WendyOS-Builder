@@ -52,6 +52,10 @@ type ManifestEntry struct {
 	SBOMPath     string `json:"sbom_path,omitempty"`
 	SBOMSize     int64  `json:"sbom_size,omitempty"`
 	SBOMChecksum string `json:"sbom_checksum,omitempty"`
+
+	// Extensions are driver add-ons (systemd-sysext .raw images) uploaded with
+	// this build; carried through to the per-version manifest record verbatim.
+	Extensions []ExtensionMetadata `json:"extensions,omitempty"`
 }
 
 func (e *ManifestEntry) validate() error {
