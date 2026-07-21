@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -23,6 +24,15 @@ func validEntry() ManifestEntry {
 		SBOMPath:          "images/jetson-agx-orin/0.15.1-nightly/wendyos-image.spdx.tar.zst",
 		SBOMSize:          14829056,
 		SBOMChecksum:      "9f2c1e6c0b7a4d3e8f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e",
+		Extensions: []ExtensionMetadata{{
+			Name:          "nvidia-drivers",
+			Version:       "1.0.0",
+			KernelVersion: "5.15.0-tegra",
+			Path:          "images/jetson-agx-orin/0.15.1-nightly/nvidia-drivers.raw",
+			SHA256:        "aa11bb22cc33dd44ee55ff66aa11bb22cc33dd44ee55ff66aa11bb22cc33dd44",
+			SizeBytes:     4194304,
+			ModulesLoad:   []string{"nvidia", "nvidia_modeset"},
+		}},
 	}
 }
 
@@ -37,7 +47,7 @@ func TestManifestEntryRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("readManifestEntry: %v", err)
 	}
-	if got != want {
+	if !reflect.DeepEqual(got, want) {
 		t.Errorf("round-trip mismatch:\n got %+v\nwant %+v", got, want)
 	}
 }
