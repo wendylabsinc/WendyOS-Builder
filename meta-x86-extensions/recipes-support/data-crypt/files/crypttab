@@ -1,0 +1,12 @@
+# WendyOS x86: /data encrypted with LUKS2, key sealed to the TPM (PCR 7).
+# systemd-cryptsetup opens it at boot from the systemd-tpm2 token in the LUKS2
+# header (no passphrase). Resolved by GPT PARTLABEL because luksFormat wipes the
+# ext4 fs label but the partition name survives (same reason the rootfs uses
+# root=PARTLABEL=). Options:
+#   tpm2-device=auto  find the one TPM and unseal from the header token
+#   headless          never prompt on a console that may be absent
+#   nofail            a slot that cannot open (e.g. a changed PCR 7) does not block
+#                     boot; recover with the recovery key
+# First-boot creation/enrollment is done by data-enroll.service (10-enroll.conf
+# orders it before this unlock). See docs/plans/x86-security.md.
+data  /dev/disk/by-partlabel/data  -  tpm2-device=auto,headless,nofail
