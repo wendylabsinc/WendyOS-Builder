@@ -27,6 +27,19 @@ WENDYOS_FTPM_DTBO:tegra264 = "tegra264-ftpm.dtbo"
 TEGRA_BOOTCONTROL_OVERLAYS:append = "${@(' ' + d.getVar('WENDYOS_FTPM_DTBO')) if d.getVar('WENDYOS_ENABLE_TPM') == '1' and d.getVar('WENDYOS_FTPM_DTBO') else ''}"
 EXTRA_IMAGEDEPENDS:append = "${@' tegra-ftpm-overlay' if d.getVar('WENDYOS_ENABLE_TPM') == '1' and d.getVar('WENDYOS_FTPM_DTBO') else ''}"
 
+# TPM2 + LUKS2 userspace for /data encryption (gated on WENDYOS_ENABLE_TPM).
+# Mirrors x86-image.inc: cryptsetup (luksFormat/open), systemd-crypt
+# (systemd-cryptenroll + the boot-time systemd-cryptsetup@data), the shared
+# data-crypt (first-boot enroll + crypttab), and tpm2-tools (on-device debug).
+# libtss2 arrives as a systemd runtime dependency once the tpm2 PACKAGECONFIG is on.
+WENDYOS_TEGRA_TPM_INSTALL = " \
+    cryptsetup \
+    systemd-crypt \
+    data-crypt \
+    tpm2-tools \
+    "
+IMAGE_INSTALL:append = "${@' ' + d.getVar('WENDYOS_TEGRA_TPM_INSTALL') if d.getVar('WENDYOS_ENABLE_TPM') == '1' else ''}"
+
 # Silence the BPMP coprocessor's serial logging. meta-tegra defaults
 # TEGRA_BPMP_SERIAL_LOGGING to "1" (see tegra-bootfiles_*.bb), which
 # keeps the BPMP firmware's /serial DT node alive and floods the

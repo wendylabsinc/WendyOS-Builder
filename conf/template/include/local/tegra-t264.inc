@@ -50,3 +50,14 @@ WENDYOS_EFI_DEBUG = "0"
 # recipe serves Thor (t264) and Orin (t234).
 # (Was "0" in the wrynose/r38.4 era when no DeepStream recipe existed for Thor.)
 WENDYOS_DEEPSTREAM = "1"
+
+# TPM 2.0 (fTPM over OP-TEE) /data encryption. Opt-in, default off (the ?= default
+# lives in tegra-image.inc). meta-tpm gates bbappends/PREFERRED_VERSION on the tpm2
+# DISTRO feature, so add it only when the stack is on (mirrors local/x86.inc). Set
+# WENDYOS_ENABLE_TPM = "1" in local.conf to enable.
+DISTRO_FEATURES:append = "${@' tpm2' if d.getVar('WENDYOS_ENABLE_TPM') == '1' else ''}"
+
+# PCR policy for the TPM keyslot: empty = SRK-only (no PCR binding). Thor stays
+# SRK-only until secure boot lands (then bind an OTA-stable PCR). The data-crypt
+# recipe defaults this to "7" for x86 (Secure Boot state); override to SRK-only.
+WENDYOS_TPM_PCRS = ""
