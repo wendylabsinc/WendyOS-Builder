@@ -552,6 +552,22 @@ jobs:
             echo "::endgroup::"
           done
 
+      - name: Build driver add-ons
+        # Driver add-ons (systemd-sysext) are RPi-only today
+        # (WENDYOS_DRIVER_EXTENSIONS=1 on the RPi machines). Build the
+        # wendyos_hello test add-on so its .raw is published into the version's
+        # extensions[]. Reuses this build's sstate; the module + sysext are tiny.
+        if: startsWith(matrix.device, 'raspberry-pi-')
+        working-directory: ${{ github.workspace }}/wendyos
+        env:
+          MACHINE: ${{ steps.vars.outputs.machine }}
+        run: |
+          set -euo pipefail
+          make build MACHINE="$MACHINE" IMAGE_TARGET=wendyos-driver-hello-image || {
+            echo "::warning::driver add-on build failed on first attempt; retrying once"
+            make build MACHINE="$MACHINE" IMAGE_TARGET=wendyos-driver-hello-image
+          }
+
       # The persistent NVMe cache is written in place by the build (sstate,
       # downloads, repos are symlinked onto it) — no upload/save step needed.
 
@@ -987,6 +1003,26 @@ jobs:
             SBOM_FILE=$(find "$DEPLOY_DIR" -maxdepth 1 -name '*.spdx.tar.zst' -print -quit 2>/dev/null || true)
             if [[ -n "$SBOM_FILE" && -f "$SBOM_FILE" ]]; then
               ARGS+=(--sbom "$SBOM_FILE")
+            fi
+
+            # Driver add-ons (RPi): publish the built sysext .raw into this
+            # version's extensions[]. Pin it to the kernel ABI the .ko was built
+            # for, read from the image's module dir. It rides the OS image's entry
+            # (a pure-extension entry would fail the "needs an image" check).
+            DRV_RAW=$(find "$DEPLOY_DIR" -maxdepth 1 -name 'wendyos-driver-hello-image-*.sysext.squashfs-xz' ! -type l -print -quit 2>/dev/null || true)
+            if [[ -n "$DRV_RAW" ]]; then
+              DRV_KVER=$(unsquashfs -l "$DRV_RAW" 2>/dev/null | grep -oE 'usr/lib/modules/[^/[:space:]]+' | head -1 | awk -F/ '{print $4}')
+              if [[ -z "$DRV_KVER" ]]; then
+                echo "::error::could not determine kernel version from $DRV_RAW" >&2
+                exit 1
+              fi
+              ARGS+=(
+                --extension-file "$DRV_RAW"
+                --extension-name "wendyos-hello"
+                --extension-version "$UPLOAD_VERSION"
+                --extension-kernel "$DRV_KVER"
+                --extension-modules "wendyos_hello"
+              )
             fi
 
             # No retry loop: uploads go to unique per-version paths (no shared
