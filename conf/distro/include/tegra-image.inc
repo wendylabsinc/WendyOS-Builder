@@ -8,6 +8,25 @@
 # Apply our UEFI boot-priority overlay during flash
 TEGRA_BOOTCONTROL_OVERLAYS += "boot-priority.dtbo"
 
+# fTPM device-tree overlay (opt-in via WENDYOS_ENABLE_TPM, off by default).
+# NVIDIA ships the firmware/ftpm node status="disabled" in its DTS, so the
+# tpm_ftpm_tee driver never binds and /dev/tpmrm0 is absent. tegra-ftpm-overlay
+# re-emits it status="okay". The fTPM TA is already in OP-TEE for tegra264, so no
+# firmware rebuild is needed there. Per SoC: only tegra264 (Thor) is validated.
+# Orin (tegra234) additionally needs its own overlay + OPTEE_ENABLE_FTPM:tegra234
+# = "1" (an OP-TEE rebuild) -- map WENDYOS_FTPM_DTBO:tegra234 once validated.
+# Enabling a TPM has export-compliance implications on some Jetson SKUs; clear with
+# compliance before shipping a TPM-enabled unit.
+#
+# Opt-in gate, default off (loaded here because this file is required for every
+# tegra image via wendyos-image.bb). Set WENDYOS_ENABLE_TPM = "1" in local.conf to
+# enable. Mirrors the x86 gate of the same name.
+WENDYOS_ENABLE_TPM ?= "0"
+WENDYOS_FTPM_DTBO = ""
+WENDYOS_FTPM_DTBO:tegra264 = "tegra264-ftpm.dtbo"
+TEGRA_BOOTCONTROL_OVERLAYS:append = "${@(' ' + d.getVar('WENDYOS_FTPM_DTBO')) if d.getVar('WENDYOS_ENABLE_TPM') == '1' and d.getVar('WENDYOS_FTPM_DTBO') else ''}"
+EXTRA_IMAGEDEPENDS:append = "${@' tegra-ftpm-overlay' if d.getVar('WENDYOS_ENABLE_TPM') == '1' and d.getVar('WENDYOS_FTPM_DTBO') else ''}"
+
 # Silence the BPMP coprocessor's serial logging. meta-tegra defaults
 # TEGRA_BPMP_SERIAL_LOGGING to "1" (see tegra-bootfiles_*.bb), which
 # keeps the BPMP firmware's /serial DT node alive and floods the
