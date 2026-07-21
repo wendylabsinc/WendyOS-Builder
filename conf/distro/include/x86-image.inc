@@ -76,6 +76,27 @@ IMAGE_INSTALL:append = "${@' ' + d.getVar('WENDYOS_X86_OTA_INSTALL') if d.getVar
 #    grow-data-part above for the first-boot grow. Mirrors rpi-image.inc.
 IMAGE_INSTALL:remove = "${@'wendyos-data-setup' if d.getVar('WENDYOS_OTA') == 'wendy' else ''}"
 
+# TPM2 + LUKS2 userspace for /data encryption.
+# - cryptsetup does luksFormat/open
+# - tpm2-tools is for on-device TPM inspection/debug
+# - systemd-cryptenroll seals the LUKS2 key to the TPM
+#   (shipped in the systemd-crypt package once the
+#   tpm2+cryptsetup PACKAGECONFIG is on, via the meta-x86-extensions systemd bbappend)
+# - libtss2 arrives as a systemd runtime dependency.
+WENDYOS_TPM_INSTALL = " \
+    cryptsetup \
+    tpm2-tools \
+    systemd-crypt \
+    data-crypt \
+    "
+IMAGE_INSTALL:append = "${@' ' + d.getVar('WENDYOS_TPM_INSTALL') if d.getVar('WENDYOS_ENABLE_TPM') == '1' else ''}"
+
+# When the TPM stack owns /data (WENDYOS_ENABLE_TPM), the first-boot enroll service
+# (data-crypt) grows the data partition itself before formatting it LUKS2, so the
+# shared grow-data-part must not also run on /data -- it resolves /data from fstab
+# (now /dev/mapper/data) and would only defer/no-op. Drop it in that case (D4/§13).
+IMAGE_INSTALL:remove = "${@'grow-data-part' if d.getVar('WENDYOS_ENABLE_TPM') == '1' else ''}"
+
 # NVIDIA dGPU compute stack. When WENDYOS_NVIDIA_DGPU=1 this bakes the full
 # driver stack into the image: the open kernel modules, the matching proprietary
 # userspace, the container toolkit and the wendyos-gpu-cdi detect/CDI helper.
