@@ -1,10 +1,9 @@
-SUMMARY = "First-boot LUKS2 + TPM enrollment for the x86 /data partition"
+SUMMARY = "First-boot LUKS2 + TPM enrollment of the /data partition"
 DESCRIPTION = "Ships /etc/crypttab (the /data TPM2 unlock entry), a first-boot \
 oneshot (data-enroll.service) that grows the data partition, formats it LUKS2, \
-seals a keyslot to the TPM (PCR 7), enrols a recovery key and makes the ext4 \
-filesystem, and a drop-in ordering the enroll before the boot-time unlock. x86 \
-only, pulled in by x86-image.inc when WENDYOS_ENABLE_TPM=1. See \
-docs/plans/x86-security.md."
+seals a keyslot to the TPM, enrols a recovery key and makes the ext4 filesystem, \
+and a drop-in ordering the enroll before the boot-time unlock. Board-agnostic; \
+pulled into an image by the per-board image include when WENDYOS_ENABLE_TPM=1."
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
 
@@ -19,7 +18,10 @@ SRC_URI = " \
 
 S = "${UNPACKDIR}"
 
-COMPATIBLE_MACHINE = "(genericx86-64-wendyos)"
+# Board-agnostic, like grow-data-part: parsed on every machine but only pulled
+# into an image when WENDYOS_ENABLE_TPM=1 (see the per-board image includes), so no
+# COMPATIBLE_MACHINE restriction. The kernel TPM driver, the fstab -> /dev/mapper
+# rewrite and the meta-tpm layer are wired per board.
 
 # data-enroll.service is NOT enabled: it is pulled in and ordered by the drop-in
 # (Requires=data-enroll.service on systemd-cryptsetup@data.service), so no [Install]
