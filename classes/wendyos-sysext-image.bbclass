@@ -29,6 +29,14 @@ IMAGE_FSTYPES:remove = "wic"
 # needed. NOTE: this gates on OS *version*, not the kernel ABI (a kernel or CVE bump
 # keeps the same VERSION_ID), so the agent must also verify uname -r before merging.
 
+# Name the extension-release after a short, stable id (default: the recipe name),
+# not the long image filename. systemd-sysext merges an image X.raw only when its
+# extension-release is named exactly extension-release.X, and the strict-relax xattr
+# is not reliably honored from a squashfs — so the agent places the add-on under
+# this name (e.g. <id>.raw) and it matches without depending on the xattr.
+WENDYOS_SYSEXT_NAME ?= "${PN}"
+EXTENSION_NAME = "${WENDYOS_SYSEXT_NAME}"
+
 # An add-on is not a bootable rootfs: no image features, locales, or recommends —
 # keep it to exactly the driver payload.
 IMAGE_FEATURES = ""
