@@ -1,0 +1,16 @@
+# /etc/udev/rules.d/99-wendyos-usb-no-autosuspend.rules
+#
+# Keep USB autosuspend off for every USB device (WDY-1924).
+#
+# The kernel default (usbcore.autosuspend=2) suspends any USB device idle
+# for 2 seconds whose power/control is "auto". Low-traffic robotics
+# peripherals — USB-CAN adapters (e.g. CANable-2 gs_usb 1d50:606f) driving
+# robot arms — go idle whenever the arm is disabled, get autosuspended,
+# fail to resume, and drop off the bus entirely; recovery needs a physical
+# re-seat. Cameras stream constantly and never trip the timeout, which is
+# why only the quiet devices vanish.
+#
+# On a wall-powered robotics/edge device, bus stability beats USB power
+# saving, so pin every device to "on". systemd-udev-trigger replays "add"
+# for devices present before udev started, so this also covers coldplug.
+ACTION=="add", SUBSYSTEM=="usb", TEST=="power/control", ATTR{power/control}="on"
