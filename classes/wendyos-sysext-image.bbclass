@@ -42,3 +42,22 @@ EXTENSION_NAME = "${WENDYOS_SYSEXT_NAME}"
 IMAGE_FEATURES = ""
 IMAGE_LINGUAS = ""
 NO_RECOMMENDATIONS = "1"
+
+# Bake the add-on's module list into the image so it is self-describing: the driver
+# declares its own modules here, and no --module (or manifest modules_load) is needed
+# at install time. wendyos-sysext-apply reads /usr/lib/modules-load.d/<name>.conf from
+# the merged add-on (a /data override still wins for bench/dev). Space-separated;
+# depmod resolves deps, so a top module pulls in what it needs (e.g. "apex" -> gasket).
+WENDYOS_SYSEXT_MODULES ?= ""
+
+wendyos_sysext_write_modules_load() {
+    if [ -n "${WENDYOS_SYSEXT_MODULES}" ]; then
+        install -d ${IMAGE_ROOTFS}/usr/lib/modules-load.d
+        conf=${IMAGE_ROOTFS}/usr/lib/modules-load.d/${WENDYOS_SYSEXT_NAME}.conf
+        : > $conf
+        for m in ${WENDYOS_SYSEXT_MODULES}; do
+            echo "$m" >> $conf
+        done
+    fi
+}
+ROOTFS_POSTPROCESS_COMMAND += "wendyos_sysext_write_modules_load;"
