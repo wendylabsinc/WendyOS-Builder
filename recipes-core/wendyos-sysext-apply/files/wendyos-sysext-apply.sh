@@ -19,6 +19,9 @@ RUNDIR=/run/extensions
 KVER="$(uname -r)"
 MODDIR="/usr/lib/modules/$KVER"
 OVL="$STORE/modules-overlay/$KVER"
+# Add-ons bake their module list into the image at /usr/lib/modules-load.d/<name>.conf;
+# it becomes visible here once the add-on is merged into /usr.
+MODLOADDIR="/usr/lib/modules-load.d"
 
 # Skip only on a truly stock device (never had add-ons). If a prior apply left
 # state behind (stale /run links or a module overlay), fall through even when
@@ -72,11 +75,20 @@ if ! depmod -a "$KVER"; then
     exit 1
 fi
 
-# 5. Load declared modules (one name per line; '#' comments allowed). Best-effort:
-#    keep going past a failure but exit non-zero so the unit reflects it.
+# 5. Load each enabled add-on's modules (one name per line; '#' comments allowed).
+#    Source per add-on: a /data override ($STORE/modules-load.d/<name>.conf, written
+#    by the agent from --module / manifest modules_load) wins for bench/dev; else the
+#    list baked into the add-on image at $MODLOADDIR/<name>.conf (self-describing —
+#    the driver declares its own modules, no install-time flag needed). depmod above
+#    resolved deps, so a top module pulls in what it needs. Best-effort: keep going
+#    past a failure but exit non-zero so the unit reflects it.
 rc=0
-for conf in "$STORE"/modules-load.d/*.conf; do
-    [ -e "$conf" ] || continue
+for raw in "$ENABLED"/*.raw; do
+    [ -e "$raw" ] || continue
+    name=$(basename "$raw" .raw)
+    conf="$STORE/modules-load.d/$name.conf"
+    [ -f "$conf" ] || conf="$MODLOADDIR/$name.conf"
+    [ -f "$conf" ] || continue
     while IFS= read -r mod || [ -n "$mod" ]; do
         mod=$(printf '%s' "$mod" | tr -d '[:space:]')     # strip CR/whitespace
         case "$mod" in

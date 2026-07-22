@@ -1016,12 +1016,14 @@ jobs:
                 echo "::error::could not determine kernel version from $DRV_RAW" >&2
                 exit 1
               fi
+              # No --extension-modules: the add-on bakes its own module list into
+              # the image (modules-load.d), so the manifest carries none and the
+              # device loads from the baked-in list.
               ARGS+=(
                 --extension-file "$DRV_RAW"
                 --extension-name "wendyos-hello"
                 --extension-version "$UPLOAD_VERSION"
                 --extension-kernel "$DRV_KVER"
-                --extension-modules "wendyos_hello"
               )
             fi
 
