@@ -61,3 +61,49 @@ wendyos_sysext_write_modules_load() {
     fi
 }
 ROOTFS_POSTPROCESS_COMMAND += "wendyos_sysext_write_modules_load;"
+
+# Strip the image down to exactly the driver payload before it is packed.
+# `inherit sysext-image` builds a full rootfs and the module package hard-RDEPENDS
+# the whole kernel package, so the tree otherwise carries base-files, bash, glibc,
+# ld-linux, libtinfo and the kernel's module metadata. systemd-sysext merges the
+# extension's ENTIRE /usr onto the host, so those files would SHADOW the host's own
+# copies — a stale glibc/bash could silently un-patch the host after a same-VERSION_ID
+# security update — and bloat every driver .raw many-fold. Keep only: the out-of-tree
+# .ko(s) (modules/<kver>/updates), the baked module-load + modprobe config, firmware,
+# and the extension-release marker. Runs in IMAGE_PREPROCESS_COMMAND so it is after
+# every do_rootfs step (extension-release, modules-load, depmod) and just before the
+# squashfs is built. Host build tooling, so GNU coreutils are fine here.
+# Delete in place rather than stage-and-copy: under do_image's pseudo context a
+# cp -a to a dir outside the rootfs cannot preserve ownership (EINVAL). Keep only
+# /usr/lib/{extension-release.d,modules-load.d,modprobe.d,firmware} and
+# /usr/lib/modules/<kver>/updates (the out-of-tree .ko); drop everything else,
+# including the stock module tree + the incomplete modules.dep (the on-device
+# apply runs depmod after merge). The host's own /lib->/usr/lib resolves the .ko,
+# so the extension needs no base symlinks.
+wendyos_sysext_strip_to_payload() {
+    root="${IMAGE_ROOTFS}"
+
+    find "$root" -mindepth 1 -maxdepth 1 ! -name usr -exec rm -rf {} +
+    if [ -d "$root/usr" ]; then
+        find "$root/usr" -mindepth 1 -maxdepth 1 ! -name lib -exec rm -rf {} +
+    fi
+    if [ -d "$root/usr/lib" ]; then
+        find "$root/usr/lib" -mindepth 1 -maxdepth 1 \
+            ! -name extension-release.d ! -name modules-load.d \
+            ! -name modprobe.d ! -name firmware ! -name modules \
+            -exec rm -rf {} +
+    fi
+    if [ -d "$root/usr/lib/modules" ]; then
+        for kv in "$root/usr/lib/modules"/*; do
+            [ -d "$kv" ] || continue
+            find "$kv" -mindepth 1 -maxdepth 1 ! -name updates -exec rm -rf {} +
+            [ -d "$kv/updates" ] || rm -rf "$kv"
+        done
+        rmdir "$root/usr/lib/modules" 2>/dev/null || true
+    fi
+
+    if [ ! -e "$root/usr/lib/extension-release.d" ]; then
+        bbfatal "wendyos-sysext: extension-release.d missing after strip; refusing to build an unmergeable add-on"
+    fi
+}
+IMAGE_PREPROCESS_COMMAND += "wendyos_sysext_strip_to_payload;"
