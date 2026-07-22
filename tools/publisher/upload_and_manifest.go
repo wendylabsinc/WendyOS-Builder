@@ -129,6 +129,26 @@ type ExtensionMetadata struct {
 	ModulesLoad   []string `json:"modules_load,omitempty"`
 }
 
+// mergeExtensions upserts incoming entries into existing, keyed by
+// (name, kernel_version), preserving previously-published drivers.
+func mergeExtensions(existing, incoming []ExtensionMetadata) []ExtensionMetadata {
+	merged := append([]ExtensionMetadata(nil), existing...)
+	for _, in := range incoming {
+		replaced := false
+		for i, e := range merged {
+			if e.Name == in.Name && e.KernelVersion == in.KernelVersion {
+				merged[i] = in
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			merged = append(merged, in)
+		}
+	}
+	return merged
+}
+
 // VersionMetadata contains metadata about a specific OS version
 type VersionMetadata struct {
 	InstallMode        string     `json:"install_mode,omitempty"`
@@ -1330,6 +1350,10 @@ func main() {
 				if *extensionKernel == "" {
 					log.Fatal("--extension-kernel is required with --extension-file")
 				}
+			} else if *extensionName != "" || *extensionVersion != "" || *extensionKernel != "" ||
+				*extensionModules != "" || *extensionSig != "" {
+				// Metadata without an artifact would be silently dropped.
+				log.Fatal("--extension-* flags require --extension-file")
 			}
 		}
 	}
@@ -2741,10 +2765,12 @@ func updateDeviceManifest(ctx context.Context, logger *logrus.Entry, bucket *sto
 			}).Info("Updating SBOM metadata")
 		}
 
-		// Update driver add-ons only if provided (whole-list replace, like SBOM).
+		// Upsert driver add-ons by (name, kernel) rather than replacing the
+		// list: each publisher run carries at most one extension, so a whole-
+		// list replace would wipe previously-published sibling drivers.
 		if len(extensions) > 0 {
-			versionMetadata.Extensions = extensions
-			logger.WithField("extension_count", len(extensions)).Info("Updating extension metadata")
+			versionMetadata.Extensions = mergeExtensions(versionMetadata.Extensions, extensions)
+			logger.WithField("extension_count", len(versionMetadata.Extensions)).Info("Updating extension metadata")
 		}
 
 		// Validate that at least one file is provided

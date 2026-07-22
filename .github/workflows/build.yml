@@ -557,7 +557,11 @@ jobs:
         # (WENDYOS_DRIVER_EXTENSIONS=1 on the RPi machines). Build the
         # wendyos_hello test add-on so its .raw is published into the version's
         # extensions[]. Reuses this build's sstate; the module + sysext are tiny.
-        if: startsWith(matrix.device, 'raspberry-pi-')
+        # sd-only: extensions[] is per-device (storage-agnostic) and the .raw
+        # object path has no storage component, so if the nvme and sd matrix
+        # rows both published, two independently-built .raws would race the
+        # same GCS object and the manifest sha256 could describe the loser.
+        if: startsWith(matrix.device, 'raspberry-pi-') && matrix.storage == 'sd'
         working-directory: ${{ github.workspace }}/wendyos
         env:
           MACHINE: ${{ steps.vars.outputs.machine }}
