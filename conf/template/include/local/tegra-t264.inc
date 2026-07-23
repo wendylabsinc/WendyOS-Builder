@@ -1,6 +1,15 @@
-# Tegra T264 (Thor): wendyos-update OTA (no UEFI capsule update yet).
-# WENDYOS_UPDATE_BOOTLOADER gates the UEFI capsule artefact; Thor uses
-# wendyos-update with rootfs-only swaps for now, so keep it off.
+
+# Tegra T264 (Thor): wendyos-update OTA with UEFI capsule bootloader updates.
+# WENDYOS_UPDATE_BOOTLOADER gates the UEFI capsule artefact AND the
+# /var/lib/wendyos/update-bootloader marker (packagegroup-wendyos-tegra), so with
+# it on, every wendyos-update install stages the capsule (the connector reads the
+# marker from the TARGET rootfs) and the reboot rewrites the inactive boot chain.
+# That is safe only because the capsule now carries the same boot-control
+# overlays as the flash (conf/distro/wendyos.conf) -- an overlay-less capsule
+# erased the fTPM DT node from chain B and left the encrypted /data locked
+# (Thor). Known behaviour: the capsule is staged even for
+# same-version no-op updates (marker is unconditional); gate it per-artifact if
+# that ever becomes a problem.
 WENDYOS_UPDATE_BOOTLOADER = "1"
 
 # Thor runs the wendyos-update OTA stack (wendyos.conf defaults tegra264 to
@@ -51,10 +60,14 @@ WENDYOS_EFI_DEBUG = "0"
 # (Was "0" in the wrynose/r38.4 era when no DeepStream recipe existed for Thor.)
 WENDYOS_DEEPSTREAM = "1"
 
-# TPM 2.0 (fTPM over OP-TEE) /data encryption. Opt-in, default off (the ?= default
-# lives in tegra-image.inc). meta-tpm gates bbappends/PREFERRED_VERSION on the tpm2
-# DISTRO feature, so add it only when the stack is on (mirrors local/x86.inc). Set
-# WENDYOS_ENABLE_TPM = "1" in local.conf to enable.
+# TPM 2.0 (fTPM over OP-TEE) /data encryption. Opt-in, default off; set
+# WENDYOS_ENABLE_TPM = "1" in local.conf to enable (mirrors local/x86.inc).
+# Validated end-to-end on tegra264 (enroll, auto-unlock, persistence), but the
+# fleet-wide default stays off until the no-TPM fallback (D1) and recovery-key
+# escrow (D3) are resolved -- see docs/plans/jetson-security.md. meta-tpm gates
+# bbappends/PREFERRED_VERSION on the tpm2 DISTRO feature, so add it only when
+# the stack is on.
+WENDYOS_ENABLE_TPM ?= "0"
 DISTRO_FEATURES:append = "${@' tpm2' if d.getVar('WENDYOS_ENABLE_TPM') == '1' else ''}"
 
 # PCR policy for the TPM keyslot: empty = SRK-only (no PCR binding). Thor stays
