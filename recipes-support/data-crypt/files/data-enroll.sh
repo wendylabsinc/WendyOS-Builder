@@ -3,9 +3,10 @@
 #
 # Runs once, ordered before the boot-time unlock (systemd-cryptsetup@data, via the
 # 10-enroll.conf drop-in). It grows the data partition to fill the disk, formats it
-# LUKS2, seals a keyslot to the TPM (PCR 7), enrols a recovery key, drops the
-# throwaway bootstrap slot, and makes the ext4 filesystem. Every later boot it is a
-# fast no-op (the partition is already LUKS). See docs/plans/x86-security.md.
+# LUKS2, seals a keyslot to the TPM (PCR policy per /etc/data-crypt.conf: a PCR
+# list on x86, SRK-only on Jetson), enrols a recovery key, drops the throwaway
+# bootstrap slot, and makes the ext4 filesystem. Every later boot it is a fast
+# no-op (the partition is already LUKS).
 #
 # DEFERRED (docs/plans/x86-security.md §13): the no-TPM fallback (D1) is a stub, and
 # the recovery key is printed to the journal + console for bring-up only -- the
@@ -46,7 +47,7 @@ END_SLACK=8192
 sysblk() { cat "/sys/class/block/$1/$2" 2>/dev/null; }
 
 # True when the kernel sees the /data PARTITION reaching the disk end within slack.
-# Reads the globals data_base/disk_base set in the grow section below.
+# Reads the globals data_base/disk_base resolved right after the device check.
 data_fills_disk() {
     disk_sz=$(sysblk "$disk_base" size); disk_sz=${disk_sz:-0}
     d_start=$(sysblk "$data_base" start); d_start=${d_start:-0}
@@ -56,11 +57,26 @@ data_fills_disk() {
 
 [ -b "$DATA" ] || fail "$DATA not present"
 
-# Idempotent: once the partition is LUKS, enrollment is done -- the crypttab unlock
-# (systemd-cryptsetup@data) takes over from here.
+# Resolve the partition/disk early: the idempotence check below needs
+# data_fills_disk, not just isLuks.
+data_base=$(basename "$(readlink -f "$DATA")")
+disk_base=$(basename "$(readlink -f "/sys/class/block/$data_base/..")")
+DISK="/dev/$disk_base"
+PARTNUM=$(cat "/sys/class/block/$data_base/partition" 2>/dev/null)
+[ -n "$PARTNUM" ] || fail "cannot read partition number of $DATA"
+
+# Idempotent -- but "is LUKS" alone is not enough. A reflash recreates the data
+# partition at its small stock size WITHOUT zeroing its contents, so the LUKS
+# header of the PREVIOUS installation is still at the partition start while its
+# key material is gone (TEE/TPM state wiped with the install). An enrolled /data
+# always fills the disk (we grow before formatting and fail hard otherwise), so:
+# LUKS + fills-disk = done; LUKS + small partition = stale header, re-initialize.
 if cryptsetup isLuks "$DATA" 2>/dev/null; then
-    echo "data-enroll: $DATA already LUKS2; nothing to do."
-    exit 0
+    if data_fills_disk; then
+        echo "data-enroll: $DATA already LUKS2; nothing to do."
+        exit 0
+    fi
+    announce "data-enroll: stale LUKS header from a previous install (partition does not fill the disk); re-initializing"
 fi
 
 # No TPM -> DEFERRED fallback D1. This hardware has a confirmed TPM; if one is ever
@@ -75,12 +91,7 @@ announce "data-enroll: first-boot LUKS2 + TPM enrollment of $DATA"
 
 # 1) Grow the data partition to fill the disk BEFORE formatting, so the LUKS
 #    container and its ext4 span the whole partition and never need an online
-#    resize. x86 GPT only; mirrors grow-data-part.sh, kept x86-local (§13/D4).
-data_base=$(basename "$(readlink -f "$DATA")")
-disk_base=$(basename "$(readlink -f "/sys/class/block/$data_base/..")")
-DISK="/dev/$disk_base"
-PARTNUM=$(cat "/sys/class/block/$data_base/partition" 2>/dev/null)
-[ -n "$PARTNUM" ] || fail "cannot read partition number of $DATA"
+#    resize. GPT only; mirrors grow-data-part.sh.
 
 if data_fills_disk; then
     announce "data-enroll: /data partition already fills $DISK; no grow needed"
@@ -141,4 +152,4 @@ systemd-cryptenroll --unlock-key-file="$BK" --wipe-slot=password "$DATA" \
     || announce "data-enroll WARN: could not wipe bootstrap slot"
 rm -f "$BK" 2>/dev/null || true
 
-announce "data-enroll: done. /data is LUKS2 (TPM PCR 7 + recovery key)."
+announce "data-enroll: done. /data is LUKS2 (TPM ${TPM_PCRS:+PCR $TPM_PCRS}${TPM_PCRS:-SRK-only} + recovery key)."

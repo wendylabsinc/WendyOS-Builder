@@ -1,0 +1,26 @@
+# Full replacement for data.mount on TPM /data-encryption builds
+# (WENDYOS_ENABLE_TPM=1), installed AS data.mount by the wendyos-data-setup
+# bbappend. A drop-in cannot be used here: the base unit hard-Requires
+# wendyos-data-init.service, and per systemd.unit(5) "dependencies cannot be
+# reset to an empty list, so dependencies can only be added in drop-ins. If you
+# want to remove dependencies, you have to override the entire unit."
+#
+# Differences from the base data.mount, both required by encryption:
+#   - depends on the crypttab-driven unlock (systemd-cryptsetup@data), not on
+#     wendyos-data-init: the data-crypt first-boot enroll owns grow+format, and
+#     wendyos-data-init must never mkfs the raw (LUKS) partition;
+#   - mounts the unlocked mapper device, not the raw partition.
+[Unit]
+Description=WendyOS persistent data partition (/data, LUKS2)
+Requires=systemd-cryptsetup@data.service
+After=systemd-cryptsetup@data.service
+
+[Mount]
+What=/dev/mapper/data
+Where=/data
+Type=ext4
+Options=defaults,noatime
+
+[Install]
+WantedBy=local-fs.target
+
