@@ -62,24 +62,15 @@ wendyos_sysext_write_modules_load() {
 }
 ROOTFS_POSTPROCESS_COMMAND += "wendyos_sysext_write_modules_load;"
 
-# Strip the image down to exactly the driver payload before it is packed.
-# `inherit sysext-image` builds a full rootfs and the module package hard-RDEPENDS
-# the whole kernel package, so the tree otherwise carries base-files, bash, glibc,
-# ld-linux, libtinfo and the kernel's module metadata. systemd-sysext merges the
-# extension's ENTIRE /usr onto the host, so those files would SHADOW the host's own
-# copies — a stale glibc/bash could silently un-patch the host after a same-VERSION_ID
-# security update — and bloat every driver .raw many-fold. Keep only: the out-of-tree
-# .ko(s) (modules/<kver>/updates), the baked module-load + modprobe config, firmware,
-# and the extension-release marker. Runs in IMAGE_PREPROCESS_COMMAND so it is after
-# every do_rootfs step (extension-release, modules-load, depmod) and just before the
-# squashfs is built. Host build tooling, so GNU coreutils are fine here.
-# Delete in place rather than stage-and-copy: under do_image's pseudo context a
-# cp -a to a dir outside the rootfs cannot preserve ownership (EINVAL). Keep only
-# /usr/lib/{extension-release.d,modules-load.d,modprobe.d,firmware} and
-# /usr/lib/modules/<kver>/updates (the out-of-tree .ko); drop everything else,
-# including the stock module tree + the incomplete modules.dep (the on-device
-# apply runs depmod after merge). The host's own /lib->/usr/lib resolves the .ko,
-# so the extension needs no base symlinks.
+# Strip the image to exactly the driver payload before it is packed. `inherit
+# sysext-image` builds a full rootfs and the module package hard-RDEPENDS the whole
+# kernel package, so the tree carries base-files, bash, glibc, ld-linux, etc.
+# systemd-sysext merges the extension's ENTIRE /usr onto the host, so those would
+# SHADOW the host's own copies (a stale glibc/bash could un-patch the host after a
+# same-VERSION_ID CVE fix) and bloat every .raw. Runs in IMAGE_PREPROCESS_COMMAND,
+# after do_rootfs and before the squashfs. Delete in place, not stage-and-copy:
+# under do_image's pseudo, cp -a to a dir outside the rootfs can't preserve
+# ownership (EINVAL). The host's own /lib->/usr/lib resolves the .ko.
 wendyos_sysext_strip_to_payload() {
     root="${IMAGE_ROOTFS}"
 
