@@ -552,6 +552,26 @@ jobs:
             echo "::endgroup::"
           done
 
+      - name: Build driver add-ons
+        # Driver add-ons (systemd-sysext) are RPi-only today
+        # (WENDYOS_DRIVER_EXTENSIONS=1 on the RPi machines). Build the
+        # wendyos_hello test add-on so its .raw is published into the version's
+        # extensions[]. Reuses this build's sstate; the module + sysext are tiny.
+        # sd-only: extensions[] is per-device (storage-agnostic) and the .raw
+        # object path has no storage component, so if the nvme and sd matrix
+        # rows both published, two independently-built .raws would race the
+        # same GCS object and the manifest sha256 could describe the loser.
+        if: startsWith(matrix.device, 'raspberry-pi-') && matrix.storage == 'sd'
+        working-directory: ${{ github.workspace }}/wendyos
+        env:
+          MACHINE: ${{ steps.vars.outputs.machine }}
+        run: |
+          set -euo pipefail
+          make build MACHINE="$MACHINE" IMAGE_TARGET=wendyos-driver-hello-image || {
+            echo "::warning::driver add-on build failed on first attempt; retrying once"
+            make build MACHINE="$MACHINE" IMAGE_TARGET=wendyos-driver-hello-image
+          }
+
       # The persistent NVMe cache is written in place by the build (sstate,
       # downloads, repos are symlinked onto it) — no upload/save step needed.
 
@@ -987,6 +1007,33 @@ jobs:
             SBOM_FILE=$(find "$DEPLOY_DIR" -maxdepth 1 -name '*.spdx.tar.zst' -print -quit 2>/dev/null || true)
             if [[ -n "$SBOM_FILE" && -f "$SBOM_FILE" ]]; then
               ARGS+=(--sbom "$SBOM_FILE")
+            fi
+
+            # Driver add-ons (RPi): publish the built sysext .raw into this
+            # version's extensions[]. Pin it to the kernel ABI the .ko was built
+            # for, read from the image's module dir. It rides the OS image's entry
+            # (a pure-extension entry would fail the "needs an image" check).
+            # Resolve the stable IMAGE_LINK_NAME symlink to this build's .raw; globbing
+            # real files could pick a stale timestamped artifact left in DEPLOY_DIR by
+            # an earlier build or a step retry.
+            DRV_LINK="$DEPLOY_DIR/wendyos-driver-hello-image-${MACHINE}.sysext.squashfs-xz"
+            DRV_RAW=$(readlink -f "$DRV_LINK" 2>/dev/null || true)
+            [[ -f "$DRV_RAW" ]] || DRV_RAW=""
+            if [[ -n "$DRV_RAW" ]]; then
+              DRV_KVER=$(unsquashfs -l "$DRV_RAW" 2>/dev/null | grep -oE 'usr/lib/modules/[^/[:space:]]+' | head -1 | awk -F/ '{print $4}')
+              if [[ -z "$DRV_KVER" ]]; then
+                echo "::error::could not determine kernel version from $DRV_RAW" >&2
+                exit 1
+              fi
+              # No --extension-modules: the add-on bakes its own module list into
+              # the image (modules-load.d), so the manifest carries none and the
+              # device loads from the baked-in list.
+              ARGS+=(
+                --extension-file "$DRV_RAW"
+                --extension-name "wendyos-hello"
+                --extension-version "$UPLOAD_VERSION"
+                --extension-kernel "$DRV_KVER"
+              )
             fi
 
             # No retry loop: uploads go to unique per-version paths (no shared

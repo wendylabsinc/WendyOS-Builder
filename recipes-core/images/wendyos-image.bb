@@ -169,6 +169,12 @@ IMAGE_INSTALL:append = " \
     ${@oe.utils.ifelse(d.getVar('WENDYOS_CONTAINER_RUNTIME') == '1', ' packagegroup-wendyos-container', '')} \
     "
 
+# Driver add-ons (systemd-sysext): boot-time service that merges driver .raw
+# add-ons from /data. Gated on WENDYOS_DRIVER_EXTENSIONS (RPi-only for now).
+IMAGE_INSTALL:append = " \
+    ${@oe.utils.ifelse(d.getVar('WENDYOS_DRIVER_EXTENSIONS') == '1', ' wendyos-sysext-apply', '')} \
+    "
+
 # Note: gadget-network-config (standalone dnsmasq) removed.
 # USB gadget IPv4 mode is controlled by WENDYOS_USB_NET_MODE (see wendyos.conf).
 

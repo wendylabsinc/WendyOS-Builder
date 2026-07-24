@@ -1,0 +1,107 @@
+#!/bin/sh
+# Merge WendyOS driver add-ons stored on /data onto the running system.
+#
+# Runs late (after /data is mounted and grown). systemd-sysext merges an add-on's
+# /usr content READ-ONLY, so a merged-in .ko is absent from the base modules.dep;
+# we stack a writable overlay on the module dir and re-run depmod so modprobe can
+# resolve it. This works without systemd-sysext "mutable" mode (systemd 256+).
+# Idempotent: safe to re-run every boot and after each install.
+#
+# Trust: this layer does NOT verify signatures — it merges whatever is under
+# /data/extensions and modprobes names from modules-load.d, so anything able to
+# write /data can load a module as root. /data must be a trusted store; signing is
+# enforced by the agent/OTA layer, not here.
+set -u
+
+STORE=/data/extensions
+ENABLED="$STORE/enabled"
+RUNDIR=/run/extensions
+KVER="$(uname -r)"
+MODDIR="/usr/lib/modules/$KVER"
+OVL="$STORE/modules-overlay/$KVER"
+# Add-ons bake their module list into the image at /usr/lib/modules-load.d/<name>.conf;
+# it becomes visible here once the add-on is merged into /usr.
+MODLOADDIR="/usr/lib/modules-load.d"
+
+# True if any add-on is enabled (a .raw under $ENABLED).
+has_enabled() {
+    [ -n "$(find "$ENABLED" -maxdepth 1 -name '*.raw' -print -quit 2>/dev/null)" ]
+}
+
+# Skip only on a truly stock device (never had add-ons). If a prior apply left
+# state behind (stale /run links or a module overlay), fall through even when
+# enabled/ is empty, so removing the last add-on unmerges it instead of leaving
+# /usr stale until the next reboot.
+if ! has_enabled \
+   && [ -z "$(find "$RUNDIR" -maxdepth 1 -type l -print -quit 2>/dev/null)" ] \
+   && ! mountpoint -q "$MODDIR"; then
+    exit 0
+fi
+
+mkdir -p "$ENABLED" "$STORE/modules-load.d" "$OVL/upper" "$OVL/work" "$RUNDIR"
+
+# 1. Expose enabled add-ons to systemd-sysext via /run/extensions (tmpfs search
+#    dir). Clear stale links first (busybox find lacks -delete, so loop).
+for link in "$RUNDIR"/*; do
+    [ -L "$link" ] && rm -f "$link"
+done
+for raw in "$ENABLED"/*.raw; do
+    [ -e "$raw" ] || continue
+    ln -sf "$raw" "$RUNDIR/$(basename "$raw")"
+done
+
+# 2. Tear down any prior module overlay so refresh sees a clean /usr, then merge.
+#    (The overlay is a submount of /usr and would block sysext's /usr unmerge.)
+umount "$MODDIR" 2>/dev/null || umount -l "$MODDIR" 2>/dev/null || true
+if mountpoint -q "$MODDIR"; then
+    echo "wendyos-sysext-apply: could not unmount prior overlay on $MODDIR" >&2
+fi
+if ! systemd-sysext refresh; then
+    echo "wendyos-sysext-apply: systemd-sysext refresh failed" >&2
+    exit 1
+fi
+
+# Last add-on removed: the refresh above unmerged it; nothing left to overlay or
+# depmod, so stop before re-stacking an empty overlay.
+if ! has_enabled; then
+    exit 0
+fi
+
+# 3. Stack a writable overlay on the module dir so depmod can index merged modules.
+if ! mount -t overlay wendyos-modules \
+        -o "lowerdir=$MODDIR,upperdir=$OVL/upper,workdir=$OVL/work" "$MODDIR"; then
+    echo "wendyos-sysext-apply: overlay mount on $MODDIR failed" >&2
+    exit 1
+fi
+
+# 4. Rebuild the unified dependency index (base + all merged add-ons).
+if ! depmod -a "$KVER"; then
+    echo "wendyos-sysext-apply: depmod failed" >&2
+    exit 1
+fi
+
+# 5. Load each enabled add-on's modules (one name per line; '#' comments allowed).
+#    Source per add-on: a /data override ($STORE/modules-load.d/<name>.conf, written
+#    by the agent from --module / manifest modules_load) wins for bench/dev; else the
+#    list baked into the add-on image at $MODLOADDIR/<name>.conf (self-describing —
+#    the driver declares its own modules, no install-time flag needed). depmod above
+#    resolved deps, so a top module pulls in what it needs. Best-effort: keep going
+#    past a failure but exit non-zero so the unit reflects it.
+rc=0
+for raw in "$ENABLED"/*.raw; do
+    [ -e "$raw" ] || continue
+    name=$(basename "$raw" .raw)
+    conf="$STORE/modules-load.d/$name.conf"
+    [ -f "$conf" ] || conf="$MODLOADDIR/$name.conf"
+    [ -f "$conf" ] || continue
+    while IFS= read -r mod || [ -n "$mod" ]; do
+        mod=$(printf '%s' "$mod" | tr -d '[:space:]')     # strip CR/whitespace
+        case "$mod" in
+            ''|\#*) continue ;;
+            *[!A-Za-z0-9_.-]*)
+                echo "wendyos-sysext-apply: bad module name '$mod'" >&2; rc=1; continue ;;
+        esac
+        modprobe -- "$mod" || { echo "wendyos-sysext-apply: modprobe $mod failed" >&2; rc=1; }
+    done < "$conf"
+done
+exit "$rc"

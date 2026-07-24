@@ -6,6 +6,18 @@ DL_DIR = "${TOPDIR}/../downloads"
 # signatures or accidentally collide. Downloads stay shared — source
 # tarballs are keyed by URL/checksum and reusable across series.
 SSTATE_DIR = "${TOPDIR}/../sstate-cache/${WENDYOS_LAYER_TREE}"
+
+# Optional CI source premirror. When a runner image bakes a Yocto source mirror
+# at WENDYOS_SOURCE_MIRROR_DIR, large git fetches resolve from it first instead of
+# a cold clone from upstream. This exists for the multi-GB raspberrypi/linux
+# kernel: a kernel-config change forces a kernel rebuild whose do_fetch would
+# otherwise time out on a fresh runner (mainline hits kernel sstate and never
+# fetches). The mirror holds standard bitbake mirror tarballs, e.g.
+# git2_github.com.raspberrypi.linux.git.tar.gz. Self-gating on directory
+# existence: the premirror is added only when the dir is present, so developer
+# builds — which have no such dir — are completely unaffected.
+WENDYOS_SOURCE_MIRROR_DIR ??= "/opt/source-mirror"
+PREMIRRORS:prepend = "${@'git://.*/.* file://%s/ gitsm://.*/.* file://%s/ ' % ((d.getVar('WENDYOS_SOURCE_MIRROR_DIR'),) * 2) if os.path.isdir(d.getVar('WENDYOS_SOURCE_MIRROR_DIR') or '') else ''}"
 #TMPDIR = "${TOPDIR}/tmp"
 DISTRO = "wendyos"
 #EXTRA_IMAGE_FEATURES ?= "debug-tweaks"
