@@ -5,9 +5,9 @@
 # it on, every wendyos-update install stages the capsule (the connector reads the
 # marker from the TARGET rootfs) and the reboot rewrites the inactive boot chain.
 # That is safe only because the capsule now carries the same boot-control
-# overlays as the flash (conf/distro/wendyos.conf) -- an overlay-less capsule
-# erased the fTPM DT node from chain B and left the encrypted /data locked
-# (Thor). Known behaviour: the capsule is staged even for
+# overlays as the flash (conf/distro/include/tegra-overlays.inc, required by
+# both packaging consumers) -- an overlay-less capsule erased the fTPM DT node
+# from chain B and left the encrypted /data locked (Thor). Known behaviour: the capsule is staged even for
 # same-version no-op updates (marker is unconditional); gate it per-artifact if
 # that ever becomes a problem.
 WENDYOS_UPDATE_BOOTLOADER = "1"

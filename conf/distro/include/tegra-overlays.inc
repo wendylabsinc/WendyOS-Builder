@@ -17,11 +17,12 @@
 # UEFI boot-priority overlay (NVMe first on NVMe machines).
 TEGRA_BOOTCONTROL_OVERLAYS:append = " boot-priority.dtbo"
 
-# fTPM device-tree overlay (opt-in via WENDYOS_ENABLE_TPM). NVIDIA ships the
-# firmware/ftpm node status="disabled"; tegra-ftpm-overlay re-emits it "okay" so
-# tpm_ftpm_tee binds and /dev/tpmrm0 appears. Only tegra264 (Thor) is validated;
-# Orin needs its own overlay + OPTEE_ENABLE_FTPM:tegra234="1" (an OP-TEE rebuild)
-# -- map WENDYOS_FTPM_DTBO:tegra234 once validated.
+# fTPM device-tree overlay (opt-in via WENDYOS_ENABLE_TPM). Thor's kernel DTB
+# has no firmware/ftpm node, so tegra-ftpm-overlay ships it with status="okay"
+# and tpm_ftpm_tee binds -> /dev/tpmrm0. tegra264 is the ONLY SoC that needs
+# this: t234 (Orin) stays unmapped on purpose -- its boards already carry the
+# node (disabled) via NVIDIA's tegra-optee.dtbo and the UEFI kernel-DTB fixup
+# arms it whenever the fTPM TA exists (see local/tegra-t234.inc).
 WENDYOS_FTPM_DTBO = ""
 WENDYOS_FTPM_DTBO:tegra264 = "tegra264-ftpm.dtbo"
 TEGRA_BOOTCONTROL_OVERLAYS:append = "${@(' ' + d.getVar('WENDYOS_FTPM_DTBO')) if d.getVar('WENDYOS_ENABLE_TPM') == '1' and d.getVar('WENDYOS_FTPM_DTBO') else ''}"

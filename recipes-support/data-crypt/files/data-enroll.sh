@@ -152,4 +152,6 @@ systemd-cryptenroll --unlock-key-file="$BK" --wipe-slot=password "$DATA" \
     || announce "data-enroll WARN: could not wipe bootstrap slot"
 rm -f "$BK" 2>/dev/null || true
 
-announce "data-enroll: done. /data is LUKS2 (TPM ${TPM_PCRS:+PCR $TPM_PCRS}${TPM_PCRS:-SRK-only} + recovery key)."
+POLICY="SRK-only"
+[ -n "$TPM_PCRS" ] && POLICY="PCR $TPM_PCRS"
+announce "data-enroll: done. /data is LUKS2 (TPM $POLICY + recovery key)."

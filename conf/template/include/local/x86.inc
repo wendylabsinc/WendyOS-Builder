@@ -23,11 +23,12 @@ BB_NUMBER_THREADS = "8"
 PARALLEL_MAKE = "-j 8"
 
 # Master gate for the TPM 2.0 stack.
-# Opt-in, default on for x86. Set to "0" to build the pre-TPM image.
-# Gates the kernel TPM drivers (x86-tpm.cfg), systemd's tpm2 +
-# cryptsetup support, and the TPM/LUKS userspace, and (later) the first-boot enroll
-# service. Defined here so it stays x86-only for now
-# (it can move to common config if other boards adopt TPM).
+# Opt-in, default off (fleet-wide policy until the no-TPM fallback D1 and
+# recovery-key escrow D3 are resolved); set WENDYOS_ENABLE_TPM = "1" in
+# local.conf to enable. Gates the kernel TPM drivers (x86-tpm.cfg), systemd's
+# tpm2 + cryptsetup support, the TPM/LUKS userspace, and the first-boot enroll
+# service (data-crypt). Jetson has the same gate in local/tegra-t264.inc /
+# tegra-t234.inc.
 WENDYOS_ENABLE_TPM ?= "0"
 
 # meta-tpm gates some of its bbappends and PREFERRED_VERSION settings on the tpm2

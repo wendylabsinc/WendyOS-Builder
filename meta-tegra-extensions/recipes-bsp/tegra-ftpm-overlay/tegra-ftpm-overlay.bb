@@ -14,14 +14,21 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
 # no validated overlay (i.e. everything except tegra264 today).
 COMPATIBLE_MACHINE = "(tegra)"
 
-# Per-SoC overlay source. Only tegra264 (Thor) is validated + shipped today.
-# To add Orin (tegra234):
-#   - drop a validated tegra234-ftpm.dtso in files/ (from NVIDIA's t23x-public-dts),
-#   - set FTPM_DTSO:tegra234 and add it to SRC_URI below,
-#   - AND flip OPTEE_ENABLE_FTPM:tegra234 = "1" (tegra234's OP-TEE does not build the
-#     fTPM TA by default, unlike tegra264 -- that is an OP-TEE rebuild, so validate
-#     the TA comes up before enabling),
-#   - then map WENDYOS_FTPM_DTBO:tegra234 in tegra-image.inc.
+# Per-SoC overlay source. Only tegra264 (Thor) needs one: its kernel DTB has no
+# firmware/ftpm node at all, so we ship it ourselves with status "okay".
+#
+# tegra234 (Orin) is DELIBERATELY unmapped -- it needs no overlay. 
+# Every t234 board already gets NVIDIA's tegra-optee.dtbo
+# (TEGRA_PLUGIN_MANAGER_OVERLAYS in the machine includes), which ships
+# firmware/ftpm status "disabled", and the UEFI kernel-DTB fixup
+# (EnableFtpmNode, edk2-nvidia DxeDtPlatformDtbKernelLoaderLib) flips it to
+# "okay" exactly when the fTPM TA in OP-TEE answers. Enabling TPM on Orin is
+# config-only: see the block in conf/template/include/local/tegra-t234.inc.
+#
+# Map a new SoC here ONLY if its kernel DTB lacks the node AND the UEFI fixup
+# cannot arm it (the Thor situation): drop a validated .dtso in files/, set
+# FTPM_DTSO:<soc>, and map WENDYOS_FTPM_DTBO:<soc> in
+# conf/distro/include/tegra-overlays.inc.
 FTPM_DTSO = ""
 FTPM_DTSO:tegra264 = "tegra264-ftpm.dtso"
 FTPM_DTBO = "${@d.getVar('FTPM_DTSO').replace('.dtso', '.dtbo') if d.getVar('FTPM_DTSO') else ''}"
@@ -40,7 +47,7 @@ DEPLOYDIR = "${DEPLOY_DIR_IMAGE}"
 python () {
     if not d.getVar('FTPM_DTSO'):
         raise bb.parse.SkipRecipe(
-            "no fTPM overlay for MACHINE '%s' (this SoC has no validated fTPM DT overlay yet)"
+            "no fTPM overlay for MACHINE '%s' (only tegra264 needs one; t234 self-arms via UEFI)"
             % d.getVar('MACHINE'))
 }
 
@@ -64,3 +71,4 @@ do_install() {
 }
 
 FILES:${PN} += "${sysconfdir}/tegra/bootcontrol/overlays/*.dtbo"
+

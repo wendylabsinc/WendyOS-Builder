@@ -52,3 +52,28 @@ WENDYOS_EFI_DEBUG = "0"
 # for when to drop the vendored recipe). COMPATIBLE_MACHINE=(tegra), so the same
 # recipe serves Orin (t234) and Thor (t264).
 WENDYOS_DEEPSTREAM = "1"
+
+# TPM 2.0 (fTPM over OP-TEE) /data encryption. Opt-in, default off; set
+# WENDYOS_ENABLE_TPM = "1" in local.conf to enable (mirrors tegra-t264.inc).
+# t234 needs no DT overlay, unlike Thor: NVIDIA's tegra-optee.dtbo (applied to
+# the kernel DTB on every t234 board via TEGRA_PLUGIN_MANAGER_OVERLAYS) already
+# carries firmware/ftpm status="disabled", and the UEFI kernel-DTB fixup
+# (EnableFtpmNode, edk2-nvidia DxeDtPlatformDtbKernelLoaderLib) flips it to
+# "okay" exactly when the fTPM TA in OP-TEE answers — self-arming. meta-tpm
+# gates bbappends/PREFERRED_VERSION on the tpm2 DISTRO feature, so add it only
+# when the stack is on.
+WENDYOS_ENABLE_TPM ?= "0"
+DISTRO_FEATURES:append = "${@' tpm2' if d.getVar('WENDYOS_ENABLE_TPM') == '1' else ''}"
+
+# Build the fTPM TA into OP-TEE (upstream optee-l4t.inc defaults this on only
+# for tegra264). Gated on the TPM knob so a TPM-off Orin build keeps today's
+# bit-identical firmware — and because the UEFI fixup above enables the DT node
+# whenever the TA exists, an ungated "1" would surface /dev/tpmrm0 without the
+# sequencing userspace (no modprobe blacklist -> early load -> RAM-only fTPM).
+OPTEE_ENABLE_FTPM = "${@'1' if d.getVar('WENDYOS_ENABLE_TPM') == '1' else '0'}"
+
+# PCR policy for the TPM keyslot: empty = SRK-only (no PCR binding), until
+# secure boot lands (then bind an OTA-stable PCR). The data-crypt recipe
+# defaults this to "7" for x86 (Secure Boot state); override to SRK-only.
+WENDYOS_TPM_PCRS = ""
+
