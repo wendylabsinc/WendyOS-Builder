@@ -23,11 +23,16 @@ OVL="$STORE/modules-overlay/$KVER"
 # it becomes visible here once the add-on is merged into /usr.
 MODLOADDIR="/usr/lib/modules-load.d"
 
+# True if any add-on is enabled (a .raw under $ENABLED).
+has_enabled() {
+    [ -n "$(find "$ENABLED" -maxdepth 1 -name '*.raw' -print -quit 2>/dev/null)" ]
+}
+
 # Skip only on a truly stock device (never had add-ons). If a prior apply left
 # state behind (stale /run links or a module overlay), fall through even when
 # enabled/ is empty, so removing the last add-on unmerges it instead of leaving
 # /usr stale until the next reboot.
-if [ -z "$(find "$ENABLED" -maxdepth 1 -name '*.raw' -print -quit 2>/dev/null)" ] \
+if ! has_enabled \
    && [ -z "$(find "$RUNDIR" -maxdepth 1 -type l -print -quit 2>/dev/null)" ] \
    && ! mountpoint -q "$MODDIR"; then
     exit 0
@@ -58,7 +63,7 @@ fi
 
 # Last add-on removed: the refresh above unmerged it; nothing left to overlay or
 # depmod, so stop before re-stacking an empty overlay.
-if [ -z "$(find "$ENABLED" -maxdepth 1 -name '*.raw' -print -quit 2>/dev/null)" ]; then
+if ! has_enabled; then
     exit 0
 fi
 

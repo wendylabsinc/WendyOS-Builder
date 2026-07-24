@@ -1013,7 +1013,12 @@ jobs:
             # version's extensions[]. Pin it to the kernel ABI the .ko was built
             # for, read from the image's module dir. It rides the OS image's entry
             # (a pure-extension entry would fail the "needs an image" check).
-            DRV_RAW=$(find "$DEPLOY_DIR" -maxdepth 1 -name 'wendyos-driver-hello-image-*.sysext.squashfs-xz' ! -type l -print -quit 2>/dev/null || true)
+            # Resolve the stable IMAGE_LINK_NAME symlink to this build's .raw; globbing
+            # real files could pick a stale timestamped artifact left in DEPLOY_DIR by
+            # an earlier build or a step retry.
+            DRV_LINK="$DEPLOY_DIR/wendyos-driver-hello-image-${MACHINE}.sysext.squashfs-xz"
+            DRV_RAW=$(readlink -f "$DRV_LINK" 2>/dev/null || true)
+            [[ -f "$DRV_RAW" ]] || DRV_RAW=""
             if [[ -n "$DRV_RAW" ]]; then
               DRV_KVER=$(unsquashfs -l "$DRV_RAW" 2>/dev/null | grep -oE 'usr/lib/modules/[^/[:space:]]+' | head -1 | awk -F/ '{print $4}')
               if [[ -z "$DRV_KVER" ]]; then
