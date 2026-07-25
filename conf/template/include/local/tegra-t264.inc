@@ -60,14 +60,11 @@ WENDYOS_EFI_DEBUG = "0"
 # (Was "0" in the wrynose/r38.4 era when no DeepStream recipe existed for Thor.)
 WENDYOS_DEEPSTREAM = "1"
 
-# TPM 2.0 (fTPM over OP-TEE) /data encryption. Opt-in, default off; set
-# WENDYOS_ENABLE_TPM = "1" in local.conf to enable (mirrors local/x86.inc).
-# Validated end-to-end on tegra264 (enroll, auto-unlock, persistence), but the
-# fleet-wide default stays off until the no-TPM fallback (D1) and recovery-key
-# escrow (D3) are resolved -- see docs/plans/jetson-security.md. meta-tpm gates
-# bbappends/PREFERRED_VERSION on the tpm2 DISTRO feature, so add it only when
-# the stack is on.
-WENDYOS_ENABLE_TPM ?= "0"
+# TPM 2.0 (fTPM over OP-TEE) /data encryption. Default ON
+# Set # WENDYOS_ENABLE_TPM = "0" in local.conf for a pre-TPM image.
+# meta-tpm gates bbappends/PREFERRED_VERSION on the tpm2 DISTRO feature, so add
+# it only when the stack is on.
+WENDYOS_ENABLE_TPM ?= "1"
 DISTRO_FEATURES:append = "${@' tpm2' if d.getVar('WENDYOS_ENABLE_TPM') == '1' else ''}"
 
 # PCR policy for the TPM keyslot: empty = SRK-only (no PCR binding). Thor stays

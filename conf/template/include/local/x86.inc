@@ -1,3 +1,4 @@
+
 # Generic x86_64 PC defaults.
 #
 # MVP target: commodity UEFI/BIOS PCs such as Intel NUC-class systems,
@@ -23,16 +24,17 @@ BB_NUMBER_THREADS = "8"
 PARALLEL_MAKE = "-j 8"
 
 # Master gate for the TPM 2.0 stack.
-# Opt-in, default off (fleet-wide policy until the no-TPM fallback D1 and
-# recovery-key escrow D3 are resolved); set WENDYOS_ENABLE_TPM = "1" in
-# local.conf to enable. Gates the kernel TPM drivers (x86-tpm.cfg), systemd's
-# tpm2 + cryptsetup support, the TPM/LUKS userspace, and the first-boot enroll
+# Default ON
+# Set WENDYOS_ENABLE_TPM = "0" in local.conf for a pre-TPM image.
+# Gates the kernel TPM drivers (x86-tpm.cfg), systemd's tpm2 +
+# cryptsetup support, the TPM/LUKS userspace, and the first-boot enroll
 # service (data-crypt). Jetson has the same gate in local/tegra-t264.inc /
 # tegra-t234.inc.
-WENDYOS_ENABLE_TPM ?= "0"
+WENDYOS_ENABLE_TPM ?= "1"
 
 # meta-tpm gates some of its bbappends and PREFERRED_VERSION settings on the tpm2
 # DISTRO feature. Without it bitbake warns and those settings silently do not apply.
 # Add it when the TPM stack is enabled. Gated + defined in this x86-only include, so
 # other boards and a TPM-off x86 build are untouched.
 DISTRO_FEATURES:append = "${@' tpm2' if d.getVar('WENDYOS_ENABLE_TPM') == '1' else ''}"
+

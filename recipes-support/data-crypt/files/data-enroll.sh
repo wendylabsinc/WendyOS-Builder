@@ -79,6 +79,21 @@ if cryptsetup isLuks "$DATA" 2>/dev/null; then
     announce "data-enroll: stale LUKS header from a previous install (partition does not fill the disk); re-initializing"
 fi
 
+# Migration guard: a non-LUKS /data that has both been grown to fill the disk
+# and carries a filesystem is a provisioned installation from a TPM-off build
+# (every install path grows /data only on its first boot, right before
+# formatting it). Encrypting it here would luksFormat over live user data, so
+# refuse loudly and leave the partition untouched -- the TPM-off -> TPM-on
+# migration story is an open topic. /data stays unmounted this boot (the LUKS
+# mount path expects /dev/mapper/data), but the data survives on disk.
+# Fresh installs are unaffected: their stock /data is small (tegra flashes it
+# empty, the x86 wic ships a 512M empty ext4), so fills-disk is false and
+# enrollment proceeds.
+if data_fills_disk && [ -n "$(lsblk -no FSTYPE "$DATA" 2>/dev/null | head -1)" ]; then
+    announce "data-enroll REFUSING to encrypt: $DATA holds a grown filesystem from a previous (TPM-off) installation -- formatting would destroy its data. Leaving it untouched; /data will NOT mount until the device is migrated or re-flashed."
+    exit 0
+fi
+
 # No TPM -> DEFERRED fallback D1. This hardware has a confirmed TPM; if one is ever
 # absent, do not brick first boot -- leave /data unformatted and warn. Proper
 # fallback (passphrase-only vs plaintext) is still to be decided.
