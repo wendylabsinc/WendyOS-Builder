@@ -203,6 +203,10 @@ jobs:
       # Federation still works on the self-hosted platform.
       id-token: write
     runs-on: [self-hosted, linux, x64, wendyos-builder]
+    # TEMPORARY (WDY-1929): a hung fetch previously kept the job alive until the
+    # runner's ~2h max life killed it with no archived log. Bound it so a stall
+    # fails cleanly instead.
+    timeout-minutes: 150
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.detect-changes.outputs.matrix) }}
@@ -231,6 +235,63 @@ jobs:
             ln -sfn "$base/$d" "$GITHUB_WORKSPACE/$d"
             echo "linked $GITHUB_WORKSPACE/$d -> $base/$d"
           done
+
+      # TEMPORARY diagnostic (WDY-1929, REVERT after): the post-purge RPi build
+      # hung ~2h in the kernel do_fetch and was infra-killed. Two suspects, both
+      # checkable from inside a job: (a) that killed run left a half-written
+      # yocto-kernel-cache clonedir in the shared DL_DIR — bitbake then skips
+      # mirrors and re-clones it from upstream; (b) job-time egress to
+      # git.yoctoproject.org hangs. Heal (a), measure (b), and only proceed to
+      # the real build if the kernel fetch can actually succeed.
+      - name: DEBUG probe egress + heal clonedirs (WDY-1929 - remove me)
+        if: startsWith(matrix.device, 'raspberry-pi-')
+        run: |
+          set -uo pipefail
+          DL="$GITHUB_WORKSPACE/downloads"
+          export GIT_TERMINAL_PROMPT=0
+
+          echo "::group::1) heal invalid git2 clonedirs (poison left by killed fetches)"
+          for dir in "$DL"/git2/*/; do
+            [ -d "$dir" ] || continue
+            if ! git -C "$dir" rev-parse --absolute-git-dir >/dev/null 2>&1; then
+              echo "INVALID -> purging: $dir"
+              ls -la "$dir" 2>/dev/null | head -12
+              rm -rf "$dir"
+            fi
+          done
+          rm -f "$DL"/git2_*.tar.gz.tmp
+          echo "kmeta clonedir now: $(ls -d "$DL/git2/git.yoctoproject.org.yocto-kernel-cache" 2>/dev/null || echo ABSENT)"
+          echo "rpi.linux clonedir: $(git -C "$DL/git2/github.com.raspberrypi.linux.git" rev-parse --absolute-git-dir 2>/dev/null || echo ABSENT/INVALID)"
+          echo "::endgroup::"
+
+          echo "::group::2) probe job-time git egress (30s timeout each)"
+          probe() {
+            local label="$1" url="$2" ref="$3" rc=0
+            timeout 30 git ls-remote "$url" "$ref" >/dev/null 2>"$RUNNER_TEMP/probe.err" || rc=$?
+            case "$rc" in
+              0)   echo "$label: OK" ;;
+              124) echo "$label: HANG (30s timeout -- blackholed egress; matches a silent multi-hour do_fetch)" ;;
+              *)   echo "$label: FAIL rc=$rc: $(head -2 "$RUNNER_TEMP/probe.err" | tr '\n' ' ')" ;;
+            esac
+            return "$rc"
+          }
+          GH_RC=0; probe "github.com (control)      " https://github.com/raspberrypi/linux.git refs/heads/rpi-6.12.y || GH_RC=$?
+          YP_RC=0; probe "git.yoctoproject.org kmeta" https://git.yoctoproject.org/yocto-kernel-cache refs/heads/yocto-6.12 || YP_RC=$?
+          echo "::endgroup::"
+
+          echo "::group::3) verdict"
+          if [ "$YP_RC" -eq 0 ]; then
+            echo "git.yoctoproject.org reachable -> the hang was the poisoned-clonedir path;"
+            echo "cache healed above, so the kernel fetch should succeed now. Continuing to the build."
+          else
+            [ "$GH_RC" -ne 0 ] && echo "NOTE: the github.com control probe failed too -> job-time git egress is broken in general."
+            echo "git.yoctoproject.org unreachable (rc=$YP_RC) -> the kernel-cache (KMETA) fetch cannot"
+            echo "succeed from this job; failing fast instead of hanging for hours."
+            echo "Fix: deliver the repo via a reachable mirror -- baked tarball (ci repo d60c49b),"
+            echo "or a github.com/wendylabsinc mirror mapped via PREMIRRORS."
+            exit 1
+          fi
+          echo "::endgroup::"
 
       # ---------- Build ----------
 
