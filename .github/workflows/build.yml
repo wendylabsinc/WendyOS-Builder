@@ -203,10 +203,11 @@ jobs:
       # Federation still works on the self-hosted platform.
       id-token: write
     runs-on: [self-hosted, linux, x64, wendyos-builder]
-    # TEMPORARY (WDY-1929): a hung fetch previously kept the job alive until the
-    # runner's ~2h max life killed it with no archived log. Bound it so a stall
-    # fails cleanly instead.
-    timeout-minutes: 150
+    # TEMPORARY (WDY-1929): the platform tears the runner down at 240min
+    # (ci repositories/WendyOS-Builder/configuration.yaml timeout_minutes),
+    # which loses the job log. Cancel gracefully just under it so an overrun
+    # keeps its logs. A solo from-zero kernel build needs ~2.5h — do not lower.
+    timeout-minutes: 230
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.detect-changes.outputs.matrix) }}
