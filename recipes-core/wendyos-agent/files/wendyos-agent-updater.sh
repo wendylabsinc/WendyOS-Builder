@@ -64,10 +64,15 @@ check_network() {
 get_current_version() {
     local current_version=""
 
-    # Try to get version from the binary itself
+    # Try to get version from the binary itself.
+    # The version must be captured IN FULL, including the calver time suffix
+    # ("2026.07.27-003050", not just "2026.07.27"): release tags carry the
+    # suffix, so truncating here made current != latest on every nightly run —
+    # the updater re-downloaded and re-installed the SAME release each night,
+    # leaking a 22MB backup per run until the root fs filled (WDY-2185).
     if [ -f "${INSTALL_DIR}/${BINARY_NAME}" ]; then
         if "${INSTALL_DIR}/${BINARY_NAME}" --version >/dev/null 2>&1; then
-            current_version=$("${INSTALL_DIR}/${BINARY_NAME}" --version 2>&1 | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "")
+            current_version=$("${INSTALL_DIR}/${BINARY_NAME}" --version 2>&1 | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+(-[0-9]+)?' || echo "")
         fi
     fi
 
@@ -225,9 +230,27 @@ perform_update() {
     fi
 }
 
+# Prune old timestamped backups, keeping the newest N. Mirrors the rotation in
+# download-wendyos-agent.sh but runs on EVERY nightly check (even "already up
+# to date"), so devices that accumulated a backlog before rotation existed
+# (WDY-2185: 68 copies / 1.3GB on one pilot box) self-heal on the first run
+# after an OS image update ships this script — no manual fleet cleanup.
+KEEP_BACKUPS=2
+
+prune_backups() {
+    ls -t "${BACKUP_DIR}/${BINARY_NAME}".backup.* 2>/dev/null \
+        | tail -n "+$((KEEP_BACKUPS + 1))" \
+        | while IFS= read -r old; do
+            log "Pruning old backup: ${old}"
+            rm -f -- "${old}"
+        done
+}
+
 # Main execution
 main() {
     log "Starting wendy-agent update check"
+
+    prune_backups
 
     # Check network connectivity first
     check_network

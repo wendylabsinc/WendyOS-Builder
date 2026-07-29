@@ -156,6 +156,22 @@ download_binary() {
     log "Binary downloaded and prepared successfully"
 }
 
+# Prune old timestamped backups, keeping the newest N. Without this the
+# nightly updater leaks one ~22MB copy per run until the root filesystem
+# fills and agent/OS updates start failing with ENOSPC (WDY-2185). The
+# restore path only ever uses ${BINARY_NAME}.latest; timestamped copies are
+# forensic convenience, so a couple is plenty.
+KEEP_BACKUPS=2
+
+prune_backups() {
+    ls -t "${BACKUP_DIR}/${BINARY_NAME}".backup.* 2>/dev/null \
+        | tail -n "+$((KEEP_BACKUPS + 1))" \
+        | while IFS= read -r old; do
+            log "Pruning old backup: ${old}"
+            rm -f -- "${old}"
+        done
+}
+
 # Install the binary
 install_binary() {
     # Create directories if they don't exist
@@ -169,6 +185,7 @@ install_binary() {
     if [ -f "${INSTALL_DIR}/${BINARY_NAME}" ]; then
         log "Backing up existing binary"
         cp "${INSTALL_DIR}/${BINARY_NAME}" "${BACKUP_DIR}/${BINARY_NAME}.backup.$(date +%Y%m%d_%H%M%S)"
+        prune_backups
     fi
 
     # Install new binary
