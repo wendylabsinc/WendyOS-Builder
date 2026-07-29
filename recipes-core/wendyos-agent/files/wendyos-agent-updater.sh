@@ -6,31 +6,30 @@
 
 set -e
 
-# Load configuration
-if [ -f /etc/default/wendy-agent ]; then
-    source /etc/default/wendy-agent
-fi
+# Load configuration. /etc is on the A/B rootfs and is replaced wholesale by an
+# OS OTA, so a pin written there is lost on the next `wendy os update`. /data is
+# the only writable storage that survives a slot switch, so a copy there is read
+# second and wins. Devices with no OTA stack (QEMU) have no /data and just skip
+# it. Keep this list in sync with download-wendyos-agent.sh.
+for conf in /etc/default/wendy-agent /data/etc/default/wendy-agent; do
+    if [ -f "${conf}" ]; then
+        # shellcheck source=/dev/null
+        source "${conf}"
+    fi
+done
 
-# Default values if not configured
+# Default values if not configured.
+#
+# WENDYOS_AGENT_VERSION pins the agent to one release tag (e.g.
+# "2026.07.27-081952"); "latest" tracks the newest stable release. A pin is an
+# operator override and is honoured exactly, including installing an OLDER
+# build than the one running -- that is the point of it. See check_update.
+#
+# Not to be confused with the WENDYOS_AGENT_VERSION in wendyos-agent_1.0.bb,
+# which is a build-time pin for the binary baked into the image. This one is
+# runtime only, read from /etc/default/wendy-agent.
 GITHUB_REPO="${WENDYOS_AGENT_GITHUB_REPO:-wendylabsinc/wendy-agent}"
 VERSION="${WENDYOS_AGENT_VERSION:-latest}"
-
-normalize_arch() {
-    case "$1" in
-        x86_64|amd64)
-            echo "amd64"
-            ;;
-        aarch64|arm64)
-            echo "arm64"
-            ;;
-        *)
-            echo "Unsupported architecture: $1" >&2
-            exit 1
-            ;;
-    esac
-}
-
-ARCH="$(normalize_arch "${WENDYOS_AGENT_ARCH:-$(uname -m)}")"
 
 # Paths
 INSTALL_DIR="/usr/local/bin"
@@ -60,40 +59,24 @@ check_network() {
     fi
 }
 
-# Get current installed version
+# Get the version string reported by the installed binary. `wendy-agent
+# --version` prints exactly the build's version.Version on its own line (e.g.
+# "dev", "2026.06.30-133859-dev", "2026.07.27-081952"). It is used verbatim:
+# agent versions are YYYY.MM.DD-HHMMSS, so extracting a semver-shaped prefix
+# drops the time and makes every build cut on a given day compare equal --
+# which downgrades a same-day nightly onto stable and reinstalls stable over
+# itself forever (WDY-2038). Falls back to the stored version file only if the
+# binary will not run.
 get_current_version() {
     local current_version=""
 
-    # Try to get version from the binary itself
-    if [ -f "${INSTALL_DIR}/${BINARY_NAME}" ]; then
-        if "${INSTALL_DIR}/${BINARY_NAME}" --version >/dev/null 2>&1; then
-            current_version=$("${INSTALL_DIR}/${BINARY_NAME}" --version 2>&1 | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "")
-        fi
-    fi
-
-    # Fall back to stored version file
-    if [ -z "${current_version}" ] && [ -f "${VERSION_FILE}" ]; then
-        current_version=$(cat "${VERSION_FILE}")
+    if [ -f "${INSTALL_DIR}/${BINARY_NAME}" ] && "${INSTALL_DIR}/${BINARY_NAME}" --version >/dev/null 2>&1; then
+        current_version=$("${INSTALL_DIR}/${BINARY_NAME}" --version 2>&1 | head -1 | tr -d '[:space:]')
+    elif [ -f "${VERSION_FILE}" ]; then
+        current_version=$(head -1 "${VERSION_FILE}" | tr -d '[:space:]')
     fi
 
     echo "${current_version}"
-}
-
-# Get the raw, unmodified version string reported by the installed binary.
-# `wendy-agent --version` prints exactly the build's version.Version on its own
-# line (e.g. "dev", "2026.06.30-133859-dev", or "2026.06.17-194156"). Unlike
-# get_current_version() this preserves the "-dev" suffix so is_dev_build() can
-# see it. Falls back to the stored version file only if the binary won't run.
-get_raw_current_version() {
-    local raw_version=""
-
-    if [ -f "${INSTALL_DIR}/${BINARY_NAME}" ] && "${INSTALL_DIR}/${BINARY_NAME}" --version >/dev/null 2>&1; then
-        raw_version=$("${INSTALL_DIR}/${BINARY_NAME}" --version 2>&1 | head -1 | tr -d '[:space:]')
-    elif [ -f "${VERSION_FILE}" ]; then
-        raw_version=$(head -1 "${VERSION_FILE}" | tr -d '[:space:]')
-    fi
-
-    echo "${raw_version}"
 }
 
 # Report whether a version string is a development build. Mirrors version.IsDev
@@ -135,45 +118,92 @@ get_latest_version() {
     echo "${latest_version}"
 }
 
-# Compare versions
-version_gt() {
-    # Returns 0 if version1 > version2
-    local version1="$1"
-    local version2="$2"
+# Resolve the version this device should be running: the pin when one is set,
+# otherwise the newest stable release.
+get_target_version() {
+    if [ "${VERSION}" != "latest" ]; then
+        echo "${VERSION#v}"
+        return 0
+    fi
 
-    if [ -z "${version1}" ] || [ -z "${version2}" ]; then
+    get_latest_version
+}
+
+# Report whether version1 is strictly newer than version2. Mirrors
+# version.CompareVersions in the Go CLI: split on "." and "-", compare fields
+# numerically when both sides are numeric and lexicographically otherwise, so
+# "2026.07.27-081952" > "2026.07.27-003050". Arithmetic rather than `sort -V`
+# so shell and Go agree, and so there is no capability probe whose failure
+# branch treated "any difference" as "newer".
+version_gt() {
+    local version1="${1#v}"
+    local version2="${2#v}"
+
+    if [ -z "${version1}" ] || [ -z "${version2}" ] || [ "${version1}" = "${version2}" ]; then
         return 1
     fi
 
-    # Use sort -V if available
-    if command -v sort >/dev/null 2>&1 && sort --help 2>&1 | grep -q -- '-V'; then
-        [ "$(printf '%s\n' "${version1}" "${version2}" | sort -V | tail -1)" = "${version1}" ] && [ "${version1}" != "${version2}" ]
-    else
-        # Simple comparison
-        [ "${version1}" != "${version2}" ]
+    local a b n i ap bp
+    IFS='.-' read -r -a a <<< "${version1}"
+    IFS='.-' read -r -a b <<< "${version2}"
+
+    n=${#a[@]}
+    if [ "${#b[@]}" -gt "${n}" ]; then
+        n=${#b[@]}
     fi
+
+    for ((i = 0; i < n; i++)); do
+        ap="${a[i]:-0}"
+        bp="${b[i]:-0}"
+        if [ "${ap}" = "${bp}" ]; then
+            continue
+        fi
+        # 10# forces base 10: agent timestamps like 081952 are not valid octal.
+        if [[ "${ap}" =~ ^[0-9]+$ && "${bp}" =~ ^[0-9]+$ ]]; then
+            if [ "$((10#${ap}))" -gt "$((10#${bp}))" ]; then return 0; else return 1; fi
+        fi
+        if [[ "${ap}" > "${bp}" ]]; then return 0; else return 1; fi
+    done
+
+    return 1
 }
 
 # Check if update is needed
 check_update() {
-    local current_version=$(get_current_version)
-    local latest_version=$(get_latest_version)
+    local current_version target_version
+    current_version=$(get_current_version)
+    target_version=$(get_target_version)
 
-    if [ -z "${latest_version}" ]; then
-        log "Could not determine latest version"
+    if [ -z "${target_version}" ]; then
+        log "Could not determine target version"
         return 1
     fi
 
     log "Current version: ${current_version:-unknown}"
-    log "Latest stable version: ${latest_version}"
+
+    # Pinned: converge on exactly this tag. An explicit pin outranks the
+    # never-go-backwards rule below, so this WILL install an older build --
+    # that is what a pin is for (e.g. holding a fleet on a known-good agent
+    # while a regression is investigated).
+    if [ "${VERSION}" != "latest" ]; then
+        log "Pinned version: ${target_version}"
+        if [ "${current_version#v}" = "${target_version}" ]; then
+            log "Already at the pinned version"
+            return 1
+        fi
+        log "Pin mismatch: ${current_version:-unknown} -> ${target_version}"
+        return 0
+    fi
+
+    log "Latest stable version: ${target_version}"
 
     if [ -z "${current_version}" ]; then
         log "No current version found, update needed"
         return 0
     fi
 
-    if version_gt "${latest_version}" "${current_version}"; then
-        log "Update available: ${current_version} -> ${latest_version}"
+    if version_gt "${target_version}" "${current_version}"; then
+        log "Update available: ${current_version} -> ${target_version}"
         return 0
     else
         log "Already up to date"
@@ -197,7 +227,7 @@ perform_update() {
 
         # Store the new version
         mkdir -p "$(dirname "${VERSION_FILE}")"
-        get_latest_version > "${VERSION_FILE}"
+        get_target_version > "${VERSION_FILE}"
 
         # Restart the service if it was running
         if systemctl is-enabled --quiet wendyos-agent.service; then
@@ -244,7 +274,7 @@ main() {
     # place rather than replacing it with the latest stable release. This
     # mirrors the CLI/Agent fix that stops prompting/pushing such overwrites.
     local raw_version
-    raw_version=$(get_raw_current_version)
+    raw_version=$(get_current_version)
     if is_dev_build "${raw_version}"; then
         log "Installed agent is a dev build (${raw_version:-unknown}), skipping auto-update"
         exit 0
@@ -260,5 +290,8 @@ main() {
     fi
 }
 
-# Run main function
-main "$@"
+# Run main function, unless sourced by the unit tests, which want the
+# functions without the update check firing.
+if [ -z "${WENDYOS_UPDATER_LIB_ONLY:-}" ]; then
+    main "$@"
+fi
