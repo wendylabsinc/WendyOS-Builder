@@ -1,4 +1,3 @@
-
 # Generic x86_64 PC defaults.
 #
 # MVP target: commodity UEFI/BIOS PCs such as Intel NUC-class systems,
@@ -23,8 +22,7 @@ WENDYOS_NVIDIA_DGPU ?= "1"
 BB_NUMBER_THREADS = "8"
 PARALLEL_MAKE = "-j 8"
 
-# Master gate for the TPM 2.0 stack.
-# Default ON
+# Master gate for the TPM 2.0 stack. Default ON.
 # Set WENDYOS_ENABLE_TPM = "0" in local.conf for a pre-TPM image.
 # Gates the kernel TPM drivers (x86-tpm.cfg), systemd's tpm2 +
 # cryptsetup support, the TPM/LUKS userspace, and the first-boot enroll

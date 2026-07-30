@@ -53,7 +53,7 @@ WENDYOS_EFI_DEBUG = "0"
 # recipe serves Orin (t234) and Thor (t264).
 WENDYOS_DEEPSTREAM = "1"
 
-# TPM 2.0 (fTPM over OP-TEE) /data encryption. Default ON 
+# TPM 2.0 (fTPM over OP-TEE) /data encryption. Default ON.
 # Set WENDYOS_ENABLE_TPM = "0" in local.conf for a pre-TPM image.
 # t234 needs no DT overlay, unlike Thor: NVIDIA's tegra-optee.dtbo (applied to
 # the kernel DTB on every t234 board via TEGRA_PLUGIN_MANAGER_OVERLAYS) already

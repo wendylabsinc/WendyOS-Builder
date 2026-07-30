@@ -8,9 +8,9 @@
 # bootstrap slot, and makes the ext4 filesystem. Every later boot it is a fast
 # no-op (the partition is already LUKS).
 #
-# DEFERRED (docs/plans/x86-security.md §13): the no-TPM fallback (D1) is a stub, and
-# the recovery key is printed to the journal + console for bring-up only -- the
-# production escrow path (D3) is undecided. Do NOT ship as-is.
+# DEFERRED (docs/plans/x86-security.md §13): the no-TPM fallback (D1) is a stub.
+# The recovery key is printed to the journal + console as the INTERIM escrow
+# mechanism -- accepted with the default-ON decision; revisit under D3.
 set -u
 
 DATA=/dev/disk/by-partlabel/data
@@ -77,6 +77,11 @@ if cryptsetup isLuks "$DATA" 2>/dev/null; then
         exit 0
     fi
     announce "data-enroll: stale LUKS header from a previous install (partition does not fill the disk); re-initializing"
+    # Wipe the stale header NOW: a power loss between the grow below and
+    # luksFormat would otherwise leave isLuks + fills-disk, which the
+    # idempotence check above mistakes for a completed enrollment. Wiped,
+    # an interrupted re-init just retries cleanly next boot.
+    wipefs -a "$DATA" || fail "wipefs of the stale LUKS header failed"
 fi
 
 # Migration guard: a non-LUKS /data that has both been grown to fill the disk
@@ -89,6 +94,9 @@ fi
 # Fresh installs are unaffected: their stock /data is small (tegra flashes it
 # empty, the x86 wic ships a 512M empty ext4), so fills-disk is false and
 # enrollment proceeds.
+# Fail CLOSED: without lsblk the command substitution below would be silently
+# empty and the guard would wave a provisioned /data through to luksFormat.
+command -v lsblk >/dev/null 2>&1 || fail "lsblk missing -- cannot run the migration guard"
 if data_fills_disk && [ -n "$(lsblk -no FSTYPE "$DATA" 2>/dev/null | head -1)" ]; then
     announce "data-enroll REFUSING to encrypt: $DATA holds a grown filesystem from a previous (TPM-off) installation -- formatting would destroy its data. Leaving it untouched; /data will NOT mount until the device is migrated or re-flashed."
     exit 0
@@ -103,6 +111,13 @@ if [ ! -e /dev/tpmrm0 ] && [ ! -e /dev/tpm0 ]; then
 fi
 
 announce "data-enroll: first-boot LUKS2 + TPM enrollment of $DATA"
+
+# The guard passed, so /data is known fresh (small stock partition, or already
+# wiped). Drop any stock filesystem signature (the x86 wic ships /data as an
+# empty 512M ext4) BEFORE growing: a power loss between the grow and luksFormat
+# would otherwise leave fills-disk + ext4, which the migration guard above
+# refuses forever. Failing here retries cleanly next boot (nothing changed yet).
+wipefs -a "$DATA" || fail "wipefs of the stock signature failed"
 
 # 1) Grow the data partition to fill the disk BEFORE formatting, so the LUKS
 #    container and its ext4 span the whole partition and never need an online
@@ -125,7 +140,8 @@ else
 
     # Guard: refuse to format a partition that did not actually grow (e.g. the
     # kernel did not pick up the new table), so we never luksFormat/mkfs a
-    # too-small /data. Failing here retries cleanly next boot (still not LUKS).
+    # too-small /data. Failing here retries cleanly next boot: still not LUKS,
+    # and the signature wipe above keeps the migration guard from misfiring.
     data_fills_disk || fail "grew /data but the kernel did not pick up the new size (retry next boot)"
 fi
 

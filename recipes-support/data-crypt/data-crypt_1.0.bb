@@ -71,7 +71,8 @@ FILES:${PN} = " \
 # cryptsetup: luksFormat/open/close/isLuks. systemd-crypt: systemd-cryptenroll +
 # systemd-cryptsetup (the boot-time unlock). gptfdisk: sgdisk. parted: parted +
 # partprobe. e2fsprogs-mke2fs: mkfs.ext4. coreutils: head/basename/readlink/cat.
-# udev: udevadm settle.
+# udev: udevadm settle. util-linux-lsblk: lsblk (migration guard).
+# util-linux-wipefs: wipefs (stock/stale signature wipe).
 RDEPENDS:${PN} = " \
     cryptsetup \
     systemd-crypt \
@@ -80,4 +81,6 @@ RDEPENDS:${PN} = " \
     e2fsprogs-mke2fs \
     coreutils \
     udev \
+    util-linux-lsblk \
+    util-linux-wipefs \
     "

@@ -60,8 +60,8 @@ WENDYOS_EFI_DEBUG = "0"
 # (Was "0" in the wrynose/r38.4 era when no DeepStream recipe existed for Thor.)
 WENDYOS_DEEPSTREAM = "1"
 
-# TPM 2.0 (fTPM over OP-TEE) /data encryption. Default ON
-# Set # WENDYOS_ENABLE_TPM = "0" in local.conf for a pre-TPM image.
+# TPM 2.0 (fTPM over OP-TEE) /data encryption. Default ON.
+# Set WENDYOS_ENABLE_TPM = "0" in local.conf for a pre-TPM image.
 # meta-tpm gates bbappends/PREFERRED_VERSION on the tpm2 DISTRO feature, so add
 # it only when the stack is on.
 WENDYOS_ENABLE_TPM ?= "1"
