@@ -31,6 +31,10 @@ WENDYOS_PERSIST_JOURNAL_LOGS ?= "0"
 WENDYOS_MDNS_INTERFACES ?= ""
 WENDYOS_DEBUG ?= "0"
 
+# Driver add-ons (systemd-sysext) are an RPi feature for now; enable here so the
+# distro-wide default stays "0" and Jetson/QEMU images are untouched.
+WENDYOS_DRIVER_EXTENSIONS ?= "1"
+
 # RPi boot config (consumed by rpi-config_%.bbappend)
 ENABLE_UART = "1"
 ENABLE_DWC2_PERIPHERAL = "${@oe.utils.ifelse(d.getVar('WENDYOS_USB_GADGET') == '1', '1', '0')}"
