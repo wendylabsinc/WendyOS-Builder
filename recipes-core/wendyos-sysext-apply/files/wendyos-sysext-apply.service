@@ -1,0 +1,16 @@
+[Unit]
+Description=WendyOS: merge driver add-ons from /data (sysext + depmod)
+Documentation=man:systemd-sysext(8)
+# Late: needs /data mounted and grown before reading the add-on store. After= on a
+# unit that doesn't exist (grow-data-fs-online on non-RPi) is simply ignored.
+After=data.mount grow-data-fs-online.service
+Wants=data.mount
+ConditionPathExists=/data
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/wendyos-sysext-apply.sh
+
+[Install]
+WantedBy=multi-user.target
