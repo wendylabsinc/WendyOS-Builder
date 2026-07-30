@@ -208,6 +208,11 @@ install_binary() {
 
     log "Created required directories"
 
+    # Free space before the ~22MB copy below, which on a full root fs fails
+    # under `set -e` before any prune runs. Outside the -f guard so a device
+    # with no installed binary still sheds a backlog.
+    prune_backups
+
     # Backup existing binary if it exists
     if [ -f "${INSTALL_DIR}/${BINARY_NAME}" ]; then
         log "Backing up existing binary"
