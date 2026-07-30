@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -23,6 +24,15 @@ func validEntry() ManifestEntry {
 		SBOMPath:          "images/jetson-agx-orin/0.15.1-nightly/wendyos-image.spdx.tar.zst",
 		SBOMSize:          14829056,
 		SBOMChecksum:      "9f2c1e6c0b7a4d3e8f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e",
+		Extensions: []ExtensionMetadata{{
+			Name:          "nvidia-drivers",
+			Version:       "1.0.0",
+			KernelVersion: "5.15.0-tegra",
+			Path:          "images/jetson-agx-orin/0.15.1-nightly/nvidia-drivers.raw",
+			SHA256:        "aa11bb22cc33dd44ee55ff66aa11bb22cc33dd44ee55ff66aa11bb22cc33dd44",
+			SizeBytes:     4194304,
+			ModulesLoad:   []string{"nvidia", "nvidia_modeset"},
+		}},
 	}
 }
 
@@ -37,7 +47,7 @@ func TestManifestEntryRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("readManifestEntry: %v", err)
 	}
-	if got != want {
+	if !reflect.DeepEqual(got, want) {
 		t.Errorf("round-trip mismatch:\n got %+v\nwant %+v", got, want)
 	}
 }
@@ -131,5 +141,32 @@ func TestManifestEntryPRRoundTrip(t *testing.T) {
 	}
 	if out.PR != 123 {
 		t.Fatalf("PR = %d, want 123", out.PR)
+	}
+}
+
+func TestMergeExtensions(t *testing.T) {
+	a := ExtensionMetadata{Name: "hello", KernelVersion: "6.12", SHA256: "aaa"}
+	b := ExtensionMetadata{Name: "npu", KernelVersion: "6.12", SHA256: "bbb"}
+	a2 := ExtensionMetadata{Name: "hello", KernelVersion: "6.12", SHA256: "ccc"}
+	aOther := ExtensionMetadata{Name: "hello", KernelVersion: "6.6", SHA256: "ddd"}
+
+	// Second driver must not wipe the first.
+	got := mergeExtensions([]ExtensionMetadata{a}, []ExtensionMetadata{b})
+	if len(got) != 2 {
+		t.Fatalf("adding a sibling: got %d entries, want 2", len(got))
+	}
+	// Re-publishing the same (name, kernel) replaces in place.
+	got = mergeExtensions(got, []ExtensionMetadata{a2})
+	if len(got) != 2 || got[0].SHA256 != "ccc" {
+		t.Fatalf("upsert same key: got %+v", got)
+	}
+	// Same name for a different kernel is a distinct entry.
+	got = mergeExtensions(got, []ExtensionMetadata{aOther})
+	if len(got) != 3 {
+		t.Fatalf("same name new kernel: got %d entries, want 3", len(got))
+	}
+	// Nil existing behaves.
+	if got := mergeExtensions(nil, []ExtensionMetadata{a}); len(got) != 1 {
+		t.Fatalf("nil existing: got %d, want 1", len(got))
 	}
 }
