@@ -10,6 +10,7 @@ on:
       - 'scripts/t234_flashpack_manifest*'
       - 'scripts/make-jetson-disk-img.py'
       - 'scripts/make_jetson_disk_img_test.py'
+      - 'recipes-core/wendyos-agent/files/*.sh'
       - '.github/device-artifacts.json'
       - '.github/workflows/scripts-ci.yml'
   push:
@@ -20,6 +21,7 @@ on:
       - 'scripts/t234_flashpack_manifest*'
       - 'scripts/make-jetson-disk-img.py'
       - 'scripts/make_jetson_disk_img_test.py'
+      - 'recipes-core/wendyos-agent/files/*.sh'
       - '.github/device-artifacts.json'
       - '.github/workflows/scripts-ci.yml'
 
@@ -34,10 +36,26 @@ jobs:
         run: jq empty .github/device-artifacts.json
 
       - name: shellcheck
-        run: shellcheck scripts/resolve-artifacts.sh scripts/resolve-artifacts.test.sh scripts/make-t234-flashpack.sh
+        run: |
+          shellcheck scripts/resolve-artifacts.sh scripts/resolve-artifacts.test.sh scripts/make-t234-flashpack.sh
+          shellcheck recipes-core/wendyos-agent/files/wendyos-agent-updater.sh \
+                     recipes-core/wendyos-agent/files/wendyos-agent-updater.test.sh \
+                     recipes-core/wendyos-agent/files/download-wendyos-agent.sh
 
       - name: Run resolver tests
         run: bash scripts/resolve-artifacts.test.sh
+
+      # The agent updater ships in the image and decides which agent every
+      # device runs; a comparison bug there silently moves the whole fleet
+      # (WDY-2038). Run under both shells a device might have: coreutils is in
+      # packagegroup-wendyos-base, busybox is the Yocto fallback.
+      - name: Run agent updater tests (GNU coreutils)
+        run: bash recipes-core/wendyos-agent/files/wendyos-agent-updater.test.sh
+
+      - name: Run agent updater tests (busybox)
+        run: |
+          docker run --rm -v "$PWD:/w" -w /w alpine:3 sh -c \
+            'apk add -q bash && bash recipes-core/wendyos-agent/files/wendyos-agent-updater.test.sh'
 
       - name: Run T234 flashpack manifest tests
         run: python3 -m unittest scripts/t234_flashpack_manifest_test.py

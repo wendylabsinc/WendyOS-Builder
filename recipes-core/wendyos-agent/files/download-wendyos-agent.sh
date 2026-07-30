@@ -6,10 +6,14 @@
 
 set -e
 
-# Load configuration
-if [ -f /etc/default/wendy-agent ]; then
-    source /etc/default/wendy-agent
-fi
+# Load configuration. The /data copy survives an OS OTA where the /etc one does
+# not, so it is read second and wins. See wendyos-agent-updater.sh.
+for conf in /etc/default/wendy-agent /data/etc/default/wendy-agent; do
+    if [ -f "${conf}" ]; then
+        # shellcheck source=/dev/null
+        source "${conf}"
+    fi
+done
 
 # Default values if not configured
 GITHUB_REPO="${WENDYOS_AGENT_GITHUB_REPO:-wendylabsinc/wendy-agent}"
@@ -60,17 +64,17 @@ check_requirements() {
     local missing_tools=()
 
     for tool in curl jq tar gzip; do
-        if ! command -v $tool >/dev/null 2>&1; then
-            missing_tools+=($tool)
+        if ! command -v "$tool" >/dev/null 2>&1; then
+            missing_tools+=("$tool")
         fi
     done
 
     if [ ${#missing_tools[@]} -gt 0 ]; then
         log "Installing missing tools: ${missing_tools[*]}"
         if command -v apt-get >/dev/null 2>&1; then
-            apt-get update && apt-get install -y ${missing_tools[*]}
+            apt-get update && apt-get install -y "${missing_tools[@]}"
         elif command -v opkg >/dev/null 2>&1; then
-            opkg update && opkg install ${missing_tools[*]}
+            opkg update && opkg install "${missing_tools[@]}"
         else
             error "Missing required tools: ${missing_tools[*]}"
         fi
@@ -80,23 +84,37 @@ check_requirements() {
 # Get release information from GitHub
 # Fetches latest stable release (excludes pre-releases)
 get_release_info() {
-    local api_url="https://api.github.com/repos/${GITHUB_REPO}/releases/latest"
+    local api_url
 
-    log "Fetching latest stable release from GitHub (excludes pre-releases)..." >&2
+    if [ "${VERSION}" = "latest" ]; then
+        api_url="https://api.github.com/repos/${GITHUB_REPO}/releases/latest"
+        log "Fetching latest stable release from GitHub (excludes pre-releases)..." >&2
+    else
+        # Pinned: fetch the release by tag. Unlike /releases/latest this also
+        # resolves pre-releases, so a nightly can be pinned.
+        api_url="https://api.github.com/repos/${GITHUB_REPO}/releases/tags/${VERSION}"
+        log "Fetching pinned release ${VERSION} from GitHub..." >&2
+    fi
 
     # Use wget if available, otherwise curl
     local release_json
     if command -v wget >/dev/null 2>&1; then
-        release_json=$(wget -q -O - "${api_url}" 2>/dev/null) || error "Failed to fetch latest release"
+        release_json=$(wget -q -O - "${api_url}" 2>/dev/null) || error "Failed to fetch release"
     else
-        release_json=$(curl -sL "${api_url}" 2>/dev/null) || error "Failed to fetch latest release"
+        release_json=$(curl -sL "${api_url}" 2>/dev/null) || error "Failed to fetch release"
     fi
 
-    # Validate we got a proper release
+    # Validate we got a proper release. A missing tag 404s into a JSON error
+    # body that both fetchers return successfully, so this check is what turns
+    # a bad pin into a clear failure.
     if command -v jq >/dev/null 2>&1; then
-        local tag_name=$(echo "${release_json}" | jq -r '.tag_name // empty')
+        local tag_name
+        tag_name=$(echo "${release_json}" | jq -r '.tag_name // empty')
         if [ -z "${tag_name}" ]; then
-            error "No stable releases found. Please create a release with semver tag (e.g., v1.0.0)"
+            if [ "${VERSION}" = "latest" ]; then
+                error "No stable release found in ${GITHUB_REPO}"
+            fi
+            error "No release found for pinned version ${VERSION} in ${GITHUB_REPO}"
         fi
     fi
 
@@ -199,7 +217,8 @@ main() {
 
     # Get version info if possible
     if "${INSTALL_DIR}/${BINARY_NAME}" --version >/dev/null 2>&1; then
-        local installed_version=$("${INSTALL_DIR}/${BINARY_NAME}" --version 2>&1 | head -1)
+        local installed_version
+        installed_version=$("${INSTALL_DIR}/${BINARY_NAME}" --version 2>&1 | head -1)
         log "Installed version: ${installed_version}"
     fi
 
