@@ -263,12 +263,21 @@ perform_update() {
 KEEP_BACKUPS=2
 
 prune_backups() {
-    ls -t "${BACKUP_DIR}/${BINARY_NAME}".backup.* 2>/dev/null \
-        | tail -n "+$((KEEP_BACKUPS + 1))" \
-        | while IFS= read -r old; do
-            log "Pruning old backup: ${old}"
-            rm -f -- "${old}"
-        done
+    # Suffix is `date +%Y%m%d_%H%M%S`, fixed width, so glob order is
+    # chronological. LC_ALL=C pins collation to bytes; an unmatched glob stays
+    # literal and the -f test drops it.
+    local LC_ALL=C
+    local backups=() f i cut
+
+    for f in "${BACKUP_DIR}/${BINARY_NAME}".backup.*; do
+        [ -f "${f}" ] && backups+=("${f}")
+    done
+
+    cut=$(( ${#backups[@]} - KEEP_BACKUPS ))
+    for (( i = 0; i < cut; i++ )); do
+        log "Pruning old backup: ${backups[i]}"
+        rm -f -- "${backups[i]}"
+    done
 }
 
 # Main execution
