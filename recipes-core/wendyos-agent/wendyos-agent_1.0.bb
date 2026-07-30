@@ -88,6 +88,15 @@ do_install() {
     install -d ${D}/var/lib/wendyos-agent
     install -d ${D}/var/lib/wendy-agent
     install -d ${D}/opt/wendy
+
+    # Agent identity/enrollment state. Shipped (rather than left to the agent's
+    # runtime MkdirAll) so wendyos-etc-binds has a mount point to bind
+    # /data/etc/wendy-agent onto on every platform (WDY-1884). 0700 matches the
+    # mode the agent uses — it holds the device private key. Path is literal, not
+    # ${sysconfdir}: the agent, generate-hostname.sh and setup-etc-binds.sh all
+    # hardcode /etc/wendy-agent, so a relocatable prefix here could only drift
+    # away from them.
+    install -d -m 0700 ${D}/etc/wendy-agent
 }
 
 FILES:${PN} = "/usr/local/bin/wendy-agent \
@@ -95,7 +104,8 @@ FILES:${PN} = "/usr/local/bin/wendy-agent \
                /opt/wendy \
                ${systemd_system_unitdir}/* \
                /var/lib/wendyos-agent \
-               /var/lib/wendy-agent"
+               /var/lib/wendy-agent \
+               /etc/wendy-agent"
 
 # Skip QA checks for the pre-built, vendored binary:
 #   already-stripped - upstream ships a stripped release binary.

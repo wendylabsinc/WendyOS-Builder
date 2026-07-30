@@ -215,12 +215,77 @@ else
     log_info "/etc/${NM_CONNECTIONS} already mounted, skipping"
 fi
 
+# PHASE 3: agent identity/enrollment state persistence (/etc/wendy-agent)
+log_info "Phase 3: Setting up agent state persistence"
+
+# Device key, PEMs, provisioning.json, clock floor, and the hostname set by
+# 'wendy device rename'. Per-slot on the rootfs, so an A/B OTA unenrolls the
+# device and reverts its name (WDY-1884). Bound as a directory, not per-file:
+# the agent's PEM writes use rename(), which fails EBUSY on a bound file.
+AGENT_DIR="/etc/wendy-agent"
+DATA_AGENT="${DATA_ETC}/wendy-agent"
+
+if ! mountpoint -q "${AGENT_DIR}"
+then
+    SEED_OK=1
+    if [ ! -d "${DATA_AGENT}" ] && [ -n "$(ls -A "${AGENT_DIR}" 2>/dev/null)" ]
+    then
+        # Binding over live rootfs state would mask the only copy, so the seed
+        # is load-bearing: on failure, skip the bind. Staged and renamed so an
+        # interrupted copy cannot leave a half-populated ${DATA_AGENT}.
+        log_info "Migrating existing ${AGENT_DIR} state to ${DATA_AGENT}"
+        STAGE="${DATA_ETC}/.wendy-agent.incoming"
+        rm -rf "${STAGE}"
+        if cp -a "${AGENT_DIR}" "${STAGE}" && sync
+        then
+            mv "${STAGE}" "${DATA_AGENT}" || SEED_OK=0
+        else
+            SEED_OK=0
+        fi
+        rm -rf "${STAGE}"
+
+        if [ "${SEED_OK}" -eq 1 ]
+        then
+            log_info "Migrated agent state to ${DATA_AGENT}"
+        else
+            log_error "Failed to migrate ${AGENT_DIR} to ${DATA_AGENT}; NOT binding (state stays on the rootfs)"
+        fi
+
+        # Rootfs copy is left in place: a rollback to a pre-fix slot has no bind
+        # mount and would find no state.
+    fi
+
+    if [ "${SEED_OK}" -eq 1 ]
+    then
+        if [ ! -d "${DATA_AGENT}" ]
+        then
+            log_info "Creating ${DATA_AGENT} for persistent agent state"
+            mkdir -p "${DATA_AGENT}"
+        fi
+        chmod 700 "${DATA_AGENT}"
+        mkdir -p "${AGENT_DIR}"
+
+        log_info "Bind-mounting ${DATA_AGENT} → ${AGENT_DIR}"
+        mount --bind "${DATA_AGENT}" "${AGENT_DIR}"
+
+        if mountpoint -q "${AGENT_DIR}"
+        then
+            log_info "Successfully mounted ${AGENT_DIR}"
+        else
+            log_error "Failed to bind-mount ${AGENT_DIR}"
+        fi
+    fi
+else
+    log_info "${AGENT_DIR} already mounted, skipping"
+fi
+
 # Verification...
 log_info "Verifying all bind mounts are active"
 
 MOUNT_CHECKS=(
     "/etc/wendyos"
     "/etc/${NM_CONNECTIONS}"
+    "/etc/wendy-agent"
 )
 
 FAILED=0
