@@ -174,6 +174,31 @@ download_binary() {
     log "Binary downloaded and prepared successfully"
 }
 
+# Prune old timestamped backups, keeping the newest N. Without this the
+# nightly updater leaks one ~22MB copy per run until the root filesystem
+# fills and agent/OS updates start failing with ENOSPC (WDY-2185). The
+# restore path only ever uses ${BINARY_NAME}.latest; timestamped copies are
+# forensic convenience, so a couple is plenty.
+KEEP_BACKUPS=2
+
+prune_backups() {
+    # Suffix is `date +%Y%m%d_%H%M%S`, fixed width, so glob order is
+    # chronological. LC_ALL=C pins collation to bytes; an unmatched glob stays
+    # literal and the -f test drops it.
+    local LC_ALL=C
+    local backups=() f i cut
+
+    for f in "${BACKUP_DIR}/${BINARY_NAME}".backup.*; do
+        [ -f "${f}" ] && backups+=("${f}")
+    done
+
+    cut=$(( ${#backups[@]} - KEEP_BACKUPS ))
+    for (( i = 0; i < cut; i++ )); do
+        log "Pruning old backup: ${backups[i]}"
+        rm -f -- "${backups[i]}"
+    done
+}
+
 # Install the binary
 install_binary() {
     # Create directories if they don't exist
@@ -183,10 +208,16 @@ install_binary() {
 
     log "Created required directories"
 
+    # Free space before the ~22MB copy below, which on a full root fs fails
+    # under `set -e` before any prune runs. Outside the -f guard so a device
+    # with no installed binary still sheds a backlog.
+    prune_backups
+
     # Backup existing binary if it exists
     if [ -f "${INSTALL_DIR}/${BINARY_NAME}" ]; then
         log "Backing up existing binary"
         cp "${INSTALL_DIR}/${BINARY_NAME}" "${BACKUP_DIR}/${BINARY_NAME}.backup.$(date +%Y%m%d_%H%M%S)"
+        prune_backups
     fi
 
     # Install new binary

@@ -255,9 +255,36 @@ perform_update() {
     fi
 }
 
+# Prune old timestamped backups, keeping the newest N. Mirrors the rotation in
+# download-wendyos-agent.sh but runs on EVERY nightly check (even "already up
+# to date"), so devices that accumulated a backlog before rotation existed
+# (WDY-2185: 68 copies / 1.3GB on one pilot box) self-heal on the first run
+# after an OS image update ships this script — no manual fleet cleanup.
+KEEP_BACKUPS=2
+
+prune_backups() {
+    # Suffix is `date +%Y%m%d_%H%M%S`, fixed width, so glob order is
+    # chronological. LC_ALL=C pins collation to bytes; an unmatched glob stays
+    # literal and the -f test drops it.
+    local LC_ALL=C
+    local backups=() f i cut
+
+    for f in "${BACKUP_DIR}/${BINARY_NAME}".backup.*; do
+        [ -f "${f}" ] && backups+=("${f}")
+    done
+
+    cut=$(( ${#backups[@]} - KEEP_BACKUPS ))
+    for (( i = 0; i < cut; i++ )); do
+        log "Pruning old backup: ${backups[i]}"
+        rm -f -- "${backups[i]}"
+    done
+}
+
 # Main execution
 main() {
     log "Starting wendy-agent update check"
+
+    prune_backups
 
     # Check network connectivity first
     check_network
