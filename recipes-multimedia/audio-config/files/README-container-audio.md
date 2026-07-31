@@ -10,12 +10,14 @@ are available to system services and containers without a login session.
 | Resource | Path |
 |---|---|
 | PipeWire socket | `/run/pipewire/pipewire-0` |
-| PulseAudio compatibility socket | `/run/pipewire/pulse/native` |
+| PulseAudio compatibility socket | `/run/pulse/native` |
 | ALSA devices | `/dev/snd/*` |
 | Bluetooth control | system D-Bus (`/run/dbus/system_bus_socket`) |
 
 The sockets are owned by `pipewire:pipewire` with mode `0660`, so a container
-needs either root (the default) or membership of the `pipewire` group.
+needs either root (the default) or membership of the `pipewire` group. Note the
+two sockets are not in the same directory: PipeWire listens under
+`/run/pipewire`, pipewire-pulse under `/run/pulse`.
 
 ## Running Containers with Audio
 
@@ -23,8 +25,9 @@ needs either root (the default) or membership of the `pipewire` group.
 podman run \
     --device /dev/snd \
     -v /run/pipewire:/run/pipewire \
+    -v /run/pulse:/run/pulse \
     -e PIPEWIRE_RUNTIME_DIR=/run/pipewire \
-    -e PULSE_SERVER=unix:/run/pipewire/pulse/native \
+    -e PULSE_SERVER=unix:/run/pulse/native \
     your-image:latest
 ```
 

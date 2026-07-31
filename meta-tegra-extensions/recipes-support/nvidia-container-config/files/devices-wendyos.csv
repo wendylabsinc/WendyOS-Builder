@@ -33,14 +33,14 @@ dir, /dev/snd
 file, /etc/asound.conf
 dir, /usr/share/alsa
 
-# PipeWire runtime sockets (preferred - modern audio routing)
-dir, /run/user/1000
-dir, /run/user/1000/pipewire
-dir, /run/user/1000/pulse
+# PipeWire runtime sockets (preferred - modern audio routing).
+# PipeWire and WirePlumber run system-wide as the "pipewire" user, so these live
+# under /run and not in a per-user session; /run/user/1000 does not exist.
+dir, /run/pipewire
+dir, /run/pulse
 
-# D-Bus session bus (required for Bluetooth device control)
+# D-Bus (required for Bluetooth device control). BlueZ is on the system bus.
 dir, /run/dbus
-dir, /run/user/1000/bus
 
 # PipeWire libraries and plugins (needed for containers to load PipeWire modules)
 dir, /usr/lib/pipewire-0.3
