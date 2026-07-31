@@ -7,7 +7,6 @@ inherit allarch
 
 SRC_URI = " \
     file://95-pipewire.preset \
-    file://60-wireplumber-camera-headless.conf \
     file://wireplumber-bluetooth.conf \
     file://wireplumber-state.conf \
 "
@@ -20,11 +19,6 @@ do_install() {
     # turns hardware into nodes.
     install -d ${D}${systemd_unitdir}/system-preset
     install -m 0644 ${UNPACKDIR}/95-pipewire.preset ${D}${systemd_unitdir}/system-preset/
-
-    # Install WirePlumber configuration that makes a missing V4L2 monitor fatal
-    install -d ${D}${sysconfdir}/wireplumber/wireplumber.conf.d
-    install -m 0644 ${UNPACKDIR}/60-wireplumber-camera-headless.conf \
-        ${D}${sysconfdir}/wireplumber/wireplumber.conf.d/
 
     # Install D-Bus policy for Bluetooth access
     # Allows the pipewire user to communicate with BlueZ over D-Bus
@@ -40,7 +34,6 @@ do_install() {
 
 FILES:${PN} += " \
     ${systemd_unitdir}/system-preset/95-pipewire.preset \
-    ${sysconfdir}/wireplumber/wireplumber.conf.d/60-wireplumber-camera-headless.conf \
     ${sysconfdir}/dbus-1/system.d/wireplumber-bluetooth.conf \
     ${systemd_system_unitdir}/wireplumber.service.d/state.conf \
 "
@@ -54,6 +47,7 @@ RDEPENDS:${PN} = " \
     pipewire-alsa \
     pipewire-spa-plugins-v4l2 \
     pipewire-spa-plugins-libcamera \
+    gstreamer1.0-pipewire \
     pipewire-spa-tools \
     pipewire-tools \
     bluez5 \
