@@ -1,7 +1,11 @@
-# Systemd user preset for PipeWire audio stack
-# This ensures PipeWire and WirePlumber are enabled by default for all users
+# Systemd system preset for the PipeWire multimedia stack.
+#
+# PipeWire runs system-wide as the "pipewire" user, but ships with its session
+# manager disabled. Without WirePlumber the graph stays empty: no ALSA, no
+# Bluetooth and no camera nodes are ever published.
 
-enable dbus.service
 enable pipewire.socket
-enable pipewire-pulse.socket
+enable pipewire.service
 enable wireplumber.service
+enable pipewire-pulse.socket
+enable pipewire-pulse.service

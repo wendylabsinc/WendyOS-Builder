@@ -1,76 +1,67 @@
-# Container Audio Access Guide
+# Container Audio and Camera Access Guide
 
 ## Overview
-WendyOS provides complete audio and Bluetooth speaker support for containers through PipeWire, ALSA, and D-Bus.
+WendyOS runs a single system-wide PipeWire graph. `pipewire` and `wireplumber`
+both run as the `pipewire` user under systemd, so audio, Bluetooth and cameras
+are available to system services and containers without a login session.
 
 ## How It Works
 
-Containers get audio access through:
-1. **ALSA devices** (`/dev/snd/*`) - Direct hardware access
-2. **PipeWire sockets** (`/run/user/1000/pipewire`) - Modern audio routing
-3. **PulseAudio compatibility** (`/run/user/1000/pulse`) - Legacy app support
-4. **D-Bus session** (`/run/user/1000/bus`) - Bluetooth control
+| Resource | Path |
+|---|---|
+| PipeWire socket | `/run/pipewire/pipewire-0` |
+| PulseAudio compatibility socket | `/run/pipewire/pulse/native` |
+| ALSA devices | `/dev/snd/*` |
+| Bluetooth control | system D-Bus (`/run/dbus/system_bus_socket`) |
+
+The sockets are owned by `pipewire:pipewire` with mode `0660`, so a container
+needs either root (the default) or membership of the `pipewire` group.
 
 ## Running Containers with Audio
 
-### Using CDI (Recommended)
-```bash
-# With podman
-podman run --device=nvidia.com/gpu=all \
-    -e PULSE_SERVER=unix:/run/user/1000/pulse/native \
-    -e XDG_RUNTIME_DIR=/run/user/1000 \
-    your-image:latest
-
-# With docker
-docker run --runtime=nvidia --device=nvidia.com/gpu=all \
-    -e PULSE_SERVER=unix:/run/user/1000/pulse/native \
-    -e XDG_RUNTIME_DIR=/run/user/1000 \
-    your-image:latest
-```
-
-The CDI device annotation (`--device=nvidia.com/gpu=all`) automatically mounts:
-- `/dev/snd/*` - ALSA devices
-- `/run/user/1000/*` - PipeWire/Pulse/D-Bus sockets
-- `/etc/asound.conf` - ALSA config
-- `/usr/share/alsa/` - ALSA plugins
-- `/usr/lib/pipewire-0.3/` - PipeWire modules
-
-### Manual Volume Mounts (Alternative)
 ```bash
 podman run \
     --device /dev/snd \
-    -v /run/user/1000:/run/user/1000:ro \
-    -v /etc/asound.conf:/etc/asound.conf:ro \
-    -v /usr/share/alsa:/usr/share/alsa:ro \
-    -e PULSE_SERVER=unix:/run/user/1000/pulse/native \
+    -v /run/pipewire:/run/pipewire \
+    -e PIPEWIRE_RUNTIME_DIR=/run/pipewire \
+    -e PULSE_SERVER=unix:/run/pipewire/pulse/native \
     your-image:latest
 ```
 
-## Testing Audio in Containers
+## Using a Camera from a Container
 
-### Test ALSA playback
+PipeWire owns the camera, so several consumers can read one device at the same
+time — an app and a remote viewer, or two apps.
+
 ```bash
-podman run --device=nvidia.com/gpu=all \
-    -it alpine sh -c "apk add alsa-utils && speaker-test -t wav -c 2"
+# App that speaks PipeWire natively (GStreamer, libcamera, ...)
+podman run \
+    -v /run/pipewire:/run/pipewire \
+    -e PIPEWIRE_RUNTIME_DIR=/run/pipewire \
+    your-image:latest
+
+# App that only knows /dev/videoN — redirect it through PipeWire
+pw-v4l2 your-camera-app
 ```
 
-### Test PulseAudio/PipeWire
+## Troubleshooting
+
 ```bash
-podman run --device=nvidia.com/gpu=all \
-    -e PULSE_SERVER=unix:/run/user/1000/pulse/native \
-    -it ubuntu paplay /usr/share/sounds/alsa/Front_Center.wav
+# Is the session manager up? (Without it the graph is empty.)
+systemctl status pipewire wireplumber
+
+# What did WirePlumber publish?
+sudo -u pipewire PIPEWIRE_RUNTIME_DIR=/run/pipewire wpctl status
+
+# Camera nodes only — look for media.class = Video/Source
+sudo -u pipewire PIPEWIRE_RUNTIME_DIR=/run/pipewire pw-dump | grep -A2 Video/Source
 ```
 
-### List Bluetooth devices from container
-```bash
-podman run --device=nvidia.com/gpu=all \
-    -e DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus \
-    -it alpine sh -c "apk add bluez && bluetoothctl list"
-```
+`Permission denied` on the socket means the process is neither root nor in the
+`pipewire` group.
 
 ## Pairing Bluetooth Speakers
 
-On the host (or from container with D-Bus access):
 ```bash
 bluetoothctl
 > power on
@@ -81,43 +72,4 @@ bluetoothctl
 > exit
 ```
 
-Once paired, PipeWire automatically routes audio to the Bluetooth speaker.
-
-## Troubleshooting
-
-### Container can't find audio devices
-```bash
-# Check if audio devices exist in container
-ls -la /dev/snd/
-
-# Check if PipeWire socket is accessible
-ls -la /run/user/1000/pipewire/
-```
-
-### No sound output
-```bash
-# Check PipeWire status on host
-systemctl --user status pipewire wireplumber
-
-# Check sinks (output devices)
-pactl list sinks short
-
-# Set default sink to Bluetooth speaker
-pactl set-default-sink <sink-name>
-```
-
-### Permission denied errors
-Containers may need to run with `--group-add audio` or as a user in the audio group:
-```bash
-podman run --device=nvidia.com/gpu=all \
-    --group-add audio \
-    your-image:latest
-```
-
-## Best Practices
-
-1. **Use CDI device annotation** - Automatically handles all mounts
-2. **Set PULSE_SERVER env var** - Tells apps where to find PipeWire
-3. **Use socket activation** - Don't install PulseAudio in containers
-4. **Trust Bluetooth devices** - Prevents re-pairing on reboot
-5. **Test with simple tools** - Use `speaker-test` or `paplay` before complex apps
+Once paired, PipeWire routes audio to the Bluetooth speaker automatically.

@@ -1,80 +1,59 @@
-SUMMARY = "Audio and Bluetooth Configuration for WendyOS"
-DESCRIPTION = "Configures PipeWire, WirePlumber, and BlueZ for out-of-the-box Bluetooth audio support"
+SUMMARY = "Audio, Bluetooth and Camera Configuration for WendyOS"
+DESCRIPTION = "Configures the system-wide PipeWire graph so audio, Bluetooth and cameras work out of the box on a headless device"
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
 
-inherit systemd allarch
+inherit allarch
 
 SRC_URI = " \
-    file://pipewire-user-setup.service \
-    file://pipewire-user-setup.sh \
     file://95-pipewire.preset \
-    file://50-wireplumber-headless.conf \
     file://60-wireplumber-camera-headless.conf \
     file://wireplumber-bluetooth.conf \
-    file://wireplumber-dbus.conf \
+    file://wireplumber-state.conf \
 "
 
 S = "${UNPACKDIR}"
 
-SYSTEMD_SERVICE:${PN} = "pipewire-user-setup.service"
-SYSTEMD_AUTO_ENABLE:${PN} = "enable"
-
 do_install() {
-    # Install user service enablement script (runs at boot to enable per-user services)
-    install -d ${D}${sbindir}
-    install -m 0755 ${UNPACKDIR}/pipewire-user-setup.sh ${D}${sbindir}/
+    # Systemd preset that enables WirePlumber next to the system-wide PipeWire
+    # daemon. PipeWire alone publishes nothing — the session manager is what
+    # turns hardware into nodes.
+    install -d ${D}${systemd_unitdir}/system-preset
+    install -m 0644 ${UNPACKDIR}/95-pipewire.preset ${D}${systemd_unitdir}/system-preset/
 
-    # Install systemd service to enable audio for wendy user
-    install -d ${D}${systemd_system_unitdir}
-    install -m 0644 ${UNPACKDIR}/pipewire-user-setup.service ${D}${systemd_system_unitdir}/
-
-    # Install systemd user preset to auto-enable PipeWire/WirePlumber
-    install -d ${D}${systemd_unitdir}/user-preset
-    install -m 0644 ${UNPACKDIR}/95-pipewire.preset ${D}${systemd_unitdir}/user-preset/
-
-    # Install WirePlumber configuration for headless Bluetooth
-    # Disables seat monitoring so Bluetooth works without a display server
+    # Install WirePlumber configuration that makes a missing V4L2 monitor fatal
     install -d ${D}${sysconfdir}/wireplumber/wireplumber.conf.d
-    install -m 0644 ${UNPACKDIR}/50-wireplumber-headless.conf \
-        ${D}${sysconfdir}/wireplumber/wireplumber.conf.d/
-
-    # Install WirePlumber configuration for headless camera (V4L2) support
-    # Requires V4L2 monitor so cameras are enumerated without a logind seat
     install -m 0644 ${UNPACKDIR}/60-wireplumber-camera-headless.conf \
         ${D}${sysconfdir}/wireplumber/wireplumber.conf.d/
 
     # Install D-Bus policy for Bluetooth access
-    # Allows wendy user to communicate with BlueZ over D-Bus
+    # Allows the pipewire user to communicate with BlueZ over D-Bus
     install -d ${D}${sysconfdir}/dbus-1/system.d
     install -m 0644 ${UNPACKDIR}/wireplumber-bluetooth.conf \
         ${D}${sysconfdir}/dbus-1/system.d/
 
-    # Install WirePlumber systemd service drop-in
-    # Sets D-Bus environment so WirePlumber can find the session bus
-    install -d ${D}${systemd_unitdir}/user/wireplumber.service.d
-    install -m 0644 ${UNPACKDIR}/wireplumber-dbus.conf \
-        ${D}${systemd_unitdir}/user/wireplumber.service.d/dbus.conf
+    # Give WirePlumber a writable state directory (it has no home)
+    install -d ${D}${systemd_system_unitdir}/wireplumber.service.d
+    install -m 0644 ${UNPACKDIR}/wireplumber-state.conf \
+        ${D}${systemd_system_unitdir}/wireplumber.service.d/state.conf
 }
 
 FILES:${PN} += " \
-    ${sbindir}/pipewire-user-setup.sh \
-    ${systemd_system_unitdir}/pipewire-user-setup.service \
-    ${systemd_unitdir}/user-preset/95-pipewire.preset \
-    ${sysconfdir}/wireplumber/wireplumber.conf.d/50-wireplumber-headless.conf \
+    ${systemd_unitdir}/system-preset/95-pipewire.preset \
     ${sysconfdir}/wireplumber/wireplumber.conf.d/60-wireplumber-camera-headless.conf \
     ${sysconfdir}/dbus-1/system.d/wireplumber-bluetooth.conf \
-    ${systemd_unitdir}/user/wireplumber.service.d/dbus.conf \
+    ${systemd_system_unitdir}/wireplumber.service.d/state.conf \
 "
 
 # Runtime dependencies
 RDEPENDS:${PN} = " \
-    bash \
     pipewire \
     pipewire-v4l2 \
     wireplumber \
     pipewire-pulse \
     pipewire-alsa \
+    pipewire-spa-plugins-v4l2 \
+    pipewire-spa-plugins-libcamera \
     pipewire-spa-tools \
     pipewire-tools \
     bluez5 \
