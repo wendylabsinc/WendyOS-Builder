@@ -53,8 +53,15 @@ WENDYOS_EFI_DEBUG = "0"
 # recipe serves Orin (t234) and Thor (t264).
 WENDYOS_DEEPSTREAM = "1"
 
-# TPM 2.0 (fTPM over OP-TEE) /data encryption. Default ON.
-# Set WENDYOS_ENABLE_TPM = "0" in local.conf for a pre-TPM image.
+# LUKS2 encryption of /data, sealed to the fTPM. Default ON.
+# Set WENDYOS_DATA_ENCRYPTED = "0" in local.conf for a plain-ext4 /data.
+WENDYOS_DATA_ENCRYPTED ?= "1"
+
+# Master gate for the TPM 2.0 stack itself (fTPM over OP-TEE). Encrypting
+# /data needs a TPM at runtime, so it turns this on; nothing turns encryption
+# on implicitly. Set = "1" in local.conf for a TPM with nothing consuming it.
+# Setting = "0" while WENDYOS_DATA_ENCRYPTED = "1" is a hard error
+# (wendyos-image.bb).
 # t234 needs no DT overlay, unlike Thor: NVIDIA's tegra-optee.dtbo (applied to
 # the kernel DTB on every t234 board via TEGRA_PLUGIN_MANAGER_OVERLAYS) already
 # carries firmware/ftpm status="disabled", and the UEFI kernel-DTB fixup
@@ -62,7 +69,7 @@ WENDYOS_DEEPSTREAM = "1"
 # "okay" exactly when the fTPM TA in OP-TEE answers — self-arming. meta-tpm
 # gates bbappends/PREFERRED_VERSION on the tpm2 DISTRO feature, so add it only
 # when the stack is on.
-WENDYOS_ENABLE_TPM ?= "1"
+WENDYOS_ENABLE_TPM ?= "${@'1' if d.getVar('WENDYOS_DATA_ENCRYPTED') == '1' else '0'}"
 DISTRO_FEATURES:append = "${@' tpm2' if d.getVar('WENDYOS_ENABLE_TPM') == '1' else ''}"
 
 # Build the fTPM TA into OP-TEE (upstream optee-l4t.inc defaults this on only

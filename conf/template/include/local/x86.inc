@@ -22,13 +22,20 @@ WENDYOS_NVIDIA_DGPU ?= "1"
 BB_NUMBER_THREADS = "8"
 PARALLEL_MAKE = "-j 8"
 
-# Master gate for the TPM 2.0 stack. Default ON.
-# Set WENDYOS_ENABLE_TPM = "0" in local.conf for a pre-TPM image.
-# Gates the kernel TPM drivers (x86-tpm.cfg), systemd's tpm2 +
-# cryptsetup support, the TPM/LUKS userspace, and the first-boot enroll
-# service (data-crypt). Jetson has the same gate in local/tegra-t264.inc /
-# tegra-t234.inc.
-WENDYOS_ENABLE_TPM ?= "1"
+# LUKS2 encryption of /data, sealed to the TPM. Default ON.
+# Set WENDYOS_DATA_ENCRYPTED = "0" in local.conf for a plain-ext4 /data.
+# Gates the TPM/LUKS userspace, the first-boot enroll service (data-crypt),
+# systemd's cryptsetup support, and the fstab/mount rewiring. Jetson has the
+# same knob in local/tegra-t264.inc / tegra-t234.inc.
+WENDYOS_DATA_ENCRYPTED ?= "1"
+
+# Master gate for the TPM 2.0 stack itself: the kernel TPM drivers
+# (x86-tpm.cfg), systemd's tpm2 support, and the tpm2 DISTRO feature below.
+# Encrypting /data needs a TPM at runtime, so it turns this on; nothing turns
+# encryption on implicitly. Set = "1" in local.conf for a TPM with nothing
+# consuming it. Setting = "0" while WENDYOS_DATA_ENCRYPTED = "1" is a hard
+# error (wendyos-image.bb).
+WENDYOS_ENABLE_TPM ?= "${@'1' if d.getVar('WENDYOS_DATA_ENCRYPTED') == '1' else '0'}"
 
 # meta-tpm gates some of its bbappends and PREFERRED_VERSION settings on the tpm2
 # DISTRO feature. Without it bitbake warns and those settings silently do not apply.

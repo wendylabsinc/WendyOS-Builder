@@ -89,13 +89,14 @@ WENDYOS_TPM_INSTALL = " \
     systemd-crypt \
     data-crypt \
     "
-IMAGE_INSTALL:append = "${@' ' + d.getVar('WENDYOS_TPM_INSTALL') if d.getVar('WENDYOS_ENABLE_TPM') == '1' else ''}"
+IMAGE_INSTALL:append = "${@' ' + d.getVar('WENDYOS_TPM_INSTALL') if d.getVar('WENDYOS_DATA_ENCRYPTED') == '1' else ''}"
 
-# When the TPM stack owns /data (WENDYOS_ENABLE_TPM), the first-boot enroll service
-# (data-crypt) grows the data partition itself before formatting it LUKS2, so the
-# shared grow-data-part must not also run on /data -- it resolves /data from fstab
-# (now /dev/mapper/data) and would only defer/no-op. Drop it in that case (D4/§13).
-IMAGE_INSTALL:remove = "${@'grow-data-part' if d.getVar('WENDYOS_ENABLE_TPM') == '1' else ''}"
+# When the encryption stack owns /data (WENDYOS_DATA_ENCRYPTED), the first-boot
+# enroll service (data-crypt) grows the data partition itself before formatting it
+# LUKS2, so the shared grow-data-part must not also run on /data -- it resolves
+# /data from fstab (now /dev/mapper/data) and would only defer/no-op. Drop it in
+# that case (D4/§13).
+IMAGE_INSTALL:remove = "${@'grow-data-part' if d.getVar('WENDYOS_DATA_ENCRYPTED') == '1' else ''}"
 
 # NVIDIA dGPU compute stack. When WENDYOS_NVIDIA_DGPU=1 this bakes the full
 # driver stack into the image: the open kernel modules, the matching proprietary

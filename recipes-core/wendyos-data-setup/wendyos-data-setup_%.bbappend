@@ -1,17 +1,18 @@
 FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
 
-# When the TPM /data-encryption stack owns /data (WENDYOS_ENABLE_TPM=1), the shared
+# When the encryption stack owns /data (WENDYOS_DATA_ENCRYPTED=1), the shared
 # data-crypt first-boot enroll grows + LUKS-formats the partition, and the crypttab
 # unlock (systemd-cryptsetup@data) produces /dev/mapper/data. So on those builds we
 # must NOT let wendyos-data-init format the RAW partition, and data.mount must target
-# the unlocked mapper device instead of the raw partition. Gate off (the default on
-# every board): everything here is inert and wendyos-data-setup behaves exactly as
-# before (plain ext4 /data). Note the gate only reaches this recipe when set in
-# local.conf (config scope); the ?= defaults live in image includes.
+# the unlocked mapper device instead of the raw partition. Gate off: everything here
+# is inert and wendyos-data-setup behaves exactly as before (plain ext4 /data). The
+# gate reaches this recipe because its ?= default lives in the per-board local
+# includes (conf/template/include/local/{x86,tegra-t234,tegra-t264}.inc), which each
+# board's local.conf requires -- config scope, visible to every recipe.
 
 # 1) Do not auto-enable the raw-partition formatter when encryption owns /data
 #    (data-crypt's enroll takes over the grow + format role).
-SYSTEMD_SERVICE:${PN}:remove = "${@'wendyos-data-init.service' if d.getVar('WENDYOS_ENABLE_TPM') == '1' else ''}"
+SYSTEMD_SERVICE:${PN}:remove = "${@'wendyos-data-init.service' if d.getVar('WENDYOS_DATA_ENCRYPTED') == '1' else ''}"
 
 # 2) Replace data.mount wholesale with the LUKS variant (mapper device + unlock
 #    dependency). It must be a full unit override, not a drop-in: the base
@@ -22,7 +23,7 @@ SYSTEMD_SERVICE:${PN}:remove = "${@'wendyos-data-init.service' if d.getVar('WEND
 SRC_URI += "file://data-luks.mount"
 
 do_install:append() {
-    if [ "${WENDYOS_ENABLE_TPM}" = "1" ]; then
+    if [ "${WENDYOS_DATA_ENCRYPTED}" = "1" ]; then
         install -m 0644 ${UNPACKDIR}/data-luks.mount ${D}${systemd_system_unitdir}/data.mount
     fi
 }

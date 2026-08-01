@@ -3,7 +3,7 @@ DESCRIPTION = "Ships /etc/crypttab (the /data TPM2 unlock entry), a first-boot \
 oneshot (data-enroll.service) that grows the data partition, formats it LUKS2, \
 seals a keyslot to the TPM, enrols a recovery key and makes the ext4 filesystem, \
 and a drop-in ordering the enroll before the boot-time unlock. Board-agnostic; \
-pulled into an image by the per-board image include when WENDYOS_ENABLE_TPM=1."
+pulled into an image by the per-board image include when WENDYOS_DATA_ENCRYPTED=1."
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
 
@@ -19,8 +19,8 @@ SRC_URI = " \
 S = "${UNPACKDIR}"
 
 # Board-agnostic, like grow-data-part: parsed on every machine but only pulled
-# into an image when WENDYOS_ENABLE_TPM=1 (see the per-board image includes), so no
-# COMPATIBLE_MACHINE restriction. The kernel TPM driver, the fstab -> /dev/mapper
+# into an image when WENDYOS_DATA_ENCRYPTED=1 (see the per-board image includes), so
+# no COMPATIBLE_MACHINE restriction. The kernel TPM driver, the fstab -> /dev/mapper
 # rewrite and the meta-tpm layer are wired per board.
 
 # data-enroll.service is NOT enabled: it is pulled in and ordered by the drop-in

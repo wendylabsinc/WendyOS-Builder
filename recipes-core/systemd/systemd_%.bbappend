@@ -32,10 +32,12 @@ INHIBIT_PACKAGE_DEBUG_SPLIT = "1"
 # RPi5-specific systemd extensions — isolated so Tegra/QEMU builds are unaffected
 require ${@'rpi-systemd.inc' if 'rpi' in d.getVar('MACHINEOVERRIDES').split(':') else ''}
 
-# Enable systemd's TPM2 + cryptsetup support for the /data encryption stack when
-# WENDYOS_ENABLE_TPM=1 (shared across boards; the /data enroll recipe is
-# data-crypt). The tpm2 PACKAGECONFIG pulls in libtss2 from meta-security/meta-tpm,
-# so a board turning this on must also layer meta-tpm (x86 does; other boards wire
-# it as needed). Inert — stock systemd — when the gate is off, the default on every
-# board.
-PACKAGECONFIG:append = "${@' tpm2 cryptsetup' if d.getVar('WENDYOS_ENABLE_TPM') == '1' else ''}"
+# systemd's two security PACKAGECONFIGs follow different gates. tpm2 belongs to the
+# TPM stack itself; cryptsetup belongs to /data encryption, which is what needs
+# systemd-cryptenroll and the boot-time systemd-cryptsetup@data (both ship in the
+# systemd-crypt package). The tpm2 PACKAGECONFIG pulls in libtss2 from
+# meta-security/meta-tpm, so a board turning it on must also layer meta-tpm (x86
+# does; other boards wire it as needed). Each is inert — stock systemd — when its
+# own gate is off. At the default both are on, giving the same set as before.
+PACKAGECONFIG:append = "${@' tpm2' if d.getVar('WENDYOS_ENABLE_TPM') == '1' else ''}"
+PACKAGECONFIG:append = "${@' cryptsetup' if d.getVar('WENDYOS_DATA_ENCRYPTED') == '1' else ''}"

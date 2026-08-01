@@ -19,12 +19,13 @@ S = "${UNPACKDIR}"
 SYSTEMD_SERVICE:${PN} = "var-lib-tee.mount"
 SYSTEMD_AUTO_ENABLE = "enable"
 
-# With the TPM /data-encryption stack on (WENDYOS_ENABLE_TPM=1), OP-TEE secure
-# storage cannot live on /data -- the fTPM's NV would sit inside the volume the
-# fTPM must unlock (circular, see the -tpm unit header). Install the /config-backed
-# variant AS var-lib-tee.mount in that case; a drop-in cannot do this because the
-# base unit's RequiresMountsFor=/data dependency cannot be removed by drop-ins.
-FTPM_MOUNT_VARIANT = "${@'var-lib-tee-tpm.mount' if d.getVar('WENDYOS_ENABLE_TPM') == '1' else 'var-lib-tee.mount'}"
+# With /data encryption on (WENDYOS_DATA_ENCRYPTED=1), OP-TEE secure storage
+# cannot live on /data -- the fTPM's NV would sit inside the volume the fTPM must
+# unlock (circular, see the -tpm unit header). Install the /config-backed variant
+# AS var-lib-tee.mount in that case; a drop-in cannot do this because the base
+# unit's RequiresMountsFor=/data dependency cannot be removed by drop-ins.
+# An unencrypted /data is not circular, so a TPM-only build keeps /data/tee.
+FTPM_MOUNT_VARIANT = "${@'var-lib-tee-tpm.mount' if d.getVar('WENDYOS_DATA_ENCRYPTED') == '1' else 'var-lib-tee.mount'}"
 
 do_install() {
     install -d ${D}${systemd_system_unitdir}

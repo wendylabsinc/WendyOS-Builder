@@ -60,11 +60,18 @@ WENDYOS_EFI_DEBUG = "0"
 # (Was "0" in the wrynose/r38.4 era when no DeepStream recipe existed for Thor.)
 WENDYOS_DEEPSTREAM = "1"
 
-# TPM 2.0 (fTPM over OP-TEE) /data encryption. Default ON.
-# Set WENDYOS_ENABLE_TPM = "0" in local.conf for a pre-TPM image.
+# LUKS2 encryption of /data, sealed to the fTPM. Default ON.
+# Set WENDYOS_DATA_ENCRYPTED = "0" in local.conf for a plain-ext4 /data.
+WENDYOS_DATA_ENCRYPTED ?= "1"
+
+# Master gate for the TPM 2.0 stack itself (fTPM over OP-TEE, plus the Thor
+# DT overlay in tegra-overlays.inc). Encrypting /data needs a TPM at runtime,
+# so it turns this on; nothing turns encryption on implicitly. Set = "1" in
+# local.conf for a TPM with nothing consuming it. Setting = "0" while
+# WENDYOS_DATA_ENCRYPTED = "1" is a hard error (wendyos-image.bb).
 # meta-tpm gates bbappends/PREFERRED_VERSION on the tpm2 DISTRO feature, so add
 # it only when the stack is on.
-WENDYOS_ENABLE_TPM ?= "1"
+WENDYOS_ENABLE_TPM ?= "${@'1' if d.getVar('WENDYOS_DATA_ENCRYPTED') == '1' else '0'}"
 DISTRO_FEATURES:append = "${@' tpm2' if d.getVar('WENDYOS_ENABLE_TPM') == '1' else ''}"
 
 # PCR policy for the TPM keyslot: empty = SRK-only (no PCR binding). Thor stays
