@@ -58,7 +58,7 @@ WENDYOS_DEEPSTREAM = "1"
 WENDYOS_DATA_ENCRYPTED ?= "1"
 
 # Master gate for the TPM 2.0 stack itself (fTPM over OP-TEE). Encrypting
-# /data needs a TPM at runtime, so it turns this on; nothing turns encryption
+# /data needs a TPM at runtime, so it turns this on. Nothing turns encryption
 # on implicitly. Set = "1" in local.conf for a TPM with nothing consuming it.
 # Setting = "0" while WENDYOS_DATA_ENCRYPTED = "1" is a hard error
 # (wendyos-image.bb).
@@ -71,6 +71,14 @@ WENDYOS_DATA_ENCRYPTED ?= "1"
 # when the stack is on.
 WENDYOS_ENABLE_TPM ?= "${@'1' if d.getVar('WENDYOS_DATA_ENCRYPTED') == '1' else '0'}"
 DISTRO_FEATURES:append = "${@' tpm2' if d.getVar('WENDYOS_ENABLE_TPM') == '1' else ''}"
+
+# meta-tpm warns on every parse when tpm2 is absent from DISTRO_FEATURES
+# (sanity-meta-tpm.bbclass). We layer it unconditionally because BBLAYERS cannot
+# read this gate, so on a TPM-off build that warning is expected noise rather
+# than a problem. Use the layer's own opt-out, but only while the stack is off:
+# with it on, the check still catches a DISTRO_FEATURES append that failed to
+# apply.
+SKIP_META_TPM_SANITY_CHECK = "${@'1' if d.getVar('WENDYOS_ENABLE_TPM') != '1' else '0'}"
 
 # Build the fTPM TA into OP-TEE (upstream optee-l4t.inc defaults this on only
 # for tegra264). Gated on the TPM knob so a TPM-off Orin build keeps today's

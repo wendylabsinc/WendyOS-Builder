@@ -14,9 +14,10 @@ BBLAYERS += " \
 # meta-tpm provides libtss2 (needed by systemd's tpm2 PACKAGECONFIG) plus tpm2-tools/
 # tss. Always layered here -- a BBLAYERS add cannot read WENDYOS_ENABLE_TPM (set at
 # local.conf time, after this include is parsed), so the TPM functionality is gated
-# elsewhere (DISTRO_FEATURES, systemd PACKAGECONFIG, IMAGE_INSTALL). Harmless when
-# off, aside from a benign "tpm2 not in DISTRO_FEATURES" parse warning on TPM-off
-# builds (same as x86).
+# elsewhere (DISTRO_FEATURES, systemd PACKAGECONFIG, IMAGE_INSTALL). Inert when
+# off. The layer's own "tpm2 not in DISTRO_FEATURES" parse warning is suppressed
+# on TPM-off builds via SKIP_META_TPM_SANITY_CHECK in local/tegra-t234.inc and
+# local/tegra-t264.inc (same as x86).
 BBLAYERS += " ${TOPDIR}/../repos/${WENDYOS_LAYER_TREE}/meta-security/meta-tpm "
 
 # blacksail gate bridge: meta-tpm declares LAYERSERIES_COMPAT_tpm-layer="wrynose";

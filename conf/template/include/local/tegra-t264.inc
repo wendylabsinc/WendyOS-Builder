@@ -66,13 +66,21 @@ WENDYOS_DATA_ENCRYPTED ?= "1"
 
 # Master gate for the TPM 2.0 stack itself (fTPM over OP-TEE, plus the Thor
 # DT overlay in tegra-overlays.inc). Encrypting /data needs a TPM at runtime,
-# so it turns this on; nothing turns encryption on implicitly. Set = "1" in
+# so it turns this on. Nothing turns encryption on implicitly. Set = "1" in
 # local.conf for a TPM with nothing consuming it. Setting = "0" while
 # WENDYOS_DATA_ENCRYPTED = "1" is a hard error (wendyos-image.bb).
 # meta-tpm gates bbappends/PREFERRED_VERSION on the tpm2 DISTRO feature, so add
 # it only when the stack is on.
 WENDYOS_ENABLE_TPM ?= "${@'1' if d.getVar('WENDYOS_DATA_ENCRYPTED') == '1' else '0'}"
 DISTRO_FEATURES:append = "${@' tpm2' if d.getVar('WENDYOS_ENABLE_TPM') == '1' else ''}"
+
+# meta-tpm warns on every parse when tpm2 is absent from DISTRO_FEATURES
+# (sanity-meta-tpm.bbclass). We layer it unconditionally because BBLAYERS cannot
+# read this gate, so on a TPM-off build that warning is expected noise rather
+# than a problem. Use the layer's own opt-out, but only while the stack is off:
+# with it on, the check still catches a DISTRO_FEATURES append that failed to
+# apply.
+SKIP_META_TPM_SANITY_CHECK = "${@'1' if d.getVar('WENDYOS_ENABLE_TPM') != '1' else '0'}"
 
 # PCR policy for the TPM keyslot: empty = SRK-only (no PCR binding). Thor stays
 # SRK-only until secure boot lands (then bind an OTA-stable PCR). The data-crypt

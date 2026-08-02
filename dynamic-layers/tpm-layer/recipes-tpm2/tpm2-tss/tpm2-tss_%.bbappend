@@ -1,5 +1,5 @@
 # Supply the HOMEPAGE that meta-tpm's own recipe QA flags as missing. See the
-# tpm2-tools bbappend next to this one for the full explanation; in short,
+# tpm2-tools bbappend next to this one for the full explanation. In short,
 # meta-tpm opts into the oe-core metadata check via
 #   WARN_QA:append:layer-tpm-layer = " patch-status missing-metadata"
 # (meta-security/meta-tpm/conf/layer.conf:30) but does not set HOMEPAGE itself.
