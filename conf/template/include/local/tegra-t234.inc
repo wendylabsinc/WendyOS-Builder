@@ -34,8 +34,26 @@ ROOTFSPART_SIZE_DEFAULT = "25769803776"
 IMAGE_ROOTFS_ALIGNMENT:pn-wendyos-image = "131072"
 TEGRA_BLBLOCKSIZE:pn-wendyos-image = "4096"
 
-# OTA uses the UEFI capsule-on-disk bootloader update on t234.
-WENDYOS_UPDATE_BOOTLOADER = "0"
+# OTA uses the UEFI capsule-on-disk bootloader update on t234. Enabled
+# 2026-08-04, matching Thor (tegra-t264.inc) and the distro default of "1"
+# (wendyos.conf). It had stayed "0" after the capsule path was validated on AGX
+# Orin -- the default was simply never flipped, and testing ran with a
+# local.conf override.
+#
+# t234 keeps the prebuilt UEFI firmware (both AGX Orin machine confs pin
+# tegra-uefi-prebuilt; source-built edk2-firmware-tegra is recorded as
+# boot-looping there), so capsule generation depends on the FMP GUID file
+# supplied by
+# meta-tegra-extensions/recipes-bsp/tegra-binaries/tegra-uefi-prebuilt_%.bbappend.
+#
+# UNVERIFIED ON DEVICE: the tegra234 GUID in that bbappend
+# (bf0d4599-20d4-414e-b2c5-3595b1cda402) comes from upstream's documentation,
+# not from an Orin. Only the tegra264 value has been confirmed against a live
+# ESRT. Before trusting a capsule update on Orin, check on the device:
+#   cat /sys/firmware/efi/esrt/entries/entry0/fw_class
+# A mismatch does not fail the build -- the firmware rejects the capsule at
+# update time.
+WENDYOS_UPDATE_BOOTLOADER = "1"
 
 # Persistent journal logs left at the smart default (tracks WENDYOS_OTA):
 # WENDYOS_OTA="wendy" -> persistent on /data.
