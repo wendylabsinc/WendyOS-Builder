@@ -7,25 +7,25 @@
 #
 # WENDYOS_LAYER_TREE="blacksail" makes bootstrap clone every upstream repo under
 # repos/blacksail/ (parallel to repos/scarthgap/). Base-stack SRCREVs mirror the
-# Thor blacksail canary (jetson-agx-thor/repos.overrides), resolved 2026-06-15.
+# Thor blacksail canary (jetson-agx-thor/repos.overrides), resolved 2026-08-04.
 WENDYOS_LAYER_TREE="blacksail"
 
 # Split-poky on blacksail (oe-core master: LAYERSERIES_CORENAMES="wrynose
 # blacksail", LAYERSERIES_COMPAT_core="blacksail"; meta-yocto + bitbake master).
-SRCREV_BITBAKE="30ccfbb849ec80cddb4383d198a1441af0ea760a"
+SRCREV_BITBAKE="c870f5bd96ad02efc02c58133c27bdae3a300e3e"
 # NOTE: the RPi5 NVMe bbappend (meta-rpi-extensions/recipes-bsp/u-boot/
 # u-boot_%.bbappend) force-pins blacksail rpi5 U-Boot to v2026.07-rc4 (SRCREV
 # 1296a428) + the phys->bus DMA patch, independent of this oe-core pin. So bumping
 # SRCREV_OECORE will NOT move rpi5 U-Boot — revisit/repin that bbappend's SRCREV
 # when you want rpi5 on a newer U-Boot.
-SRCREV_OECORE="294409c4bfe392471509d4cb6c1e6fb1063d2b3b"
-SRCREV_METAYOCTO="f49de2f33e37ca971d64215cc1a3669312e1e7c3"
+SRCREV_OECORE="2faf8e366df74aded7898904b72317521a08e2f6"
+SRCREV_METAYOCTO="9c6cf36c3511b94957aba04002d98bec665e9f1e"
 
 # meta-openembedded + meta-virtualization master still declare wrynose (not
 # blacksail) — bridged via blacksail-compat.inc. Re-pin + drop the bridge once
 # upstream bumps.
-SRCREV_OE="5d90e6543de4d1c39424956c67ff1925a39bf3c8"
-SRCREV_VIRT="022f4356d4a9b389f51472d40a9330aa59f6bb9a"
+SRCREV_OE="0a60011ec174b91104a110c353cbf18748951270"
+SRCREV_VIRT="526c97254fe43e0924df034aaa825f33ec30407c"
 
 # meta-raspberrypi: bumped to upstream master (the scarthgap-era default
 # SRCREV_RPI=3afc972 is ~10 months too old for blacksail oe-core — it trips
@@ -33,7 +33,7 @@ SRCREV_VIRT="022f4356d4a9b389f51472d40a9330aa59f6bb9a"
 # MACHINE_FEATURES_OPTED_OUT). master targets wrynose (one series back), which
 # intersects oe-core's LAYERSERIES_CORENAMES ("wrynose blacksail"), so it also
 # satisfies the compat gate on its own. Pinned for reproducibility (master moves).
-SRCREV_RPI="0c76b0feadbe2afa4cec4cd497636e94eca30ec3"
+SRCREV_RPI="9e41c54b4558709f4ff20f03dad77f2cf99477ed"
 
 #
 # Deliberately NO meta-lts-mixins-go REPOS_EXTRA (blacksail Go is 1.26 native),
