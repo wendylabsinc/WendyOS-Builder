@@ -10,7 +10,48 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 )
+
+// --- Per-file upload timeout -----------------------------------------------
+
+func TestUploadTimeoutFor(t *testing.T) {
+	t.Run("small files get the floor", func(t *testing.T) {
+		for _, size := range []int64{0, 1 << 20, 100 << 20} {
+			if got := uploadTimeoutFor(size); got != 10*time.Minute {
+				t.Errorf("size %d: timeout = %v, want %v", size, got, 10*time.Minute)
+			}
+		}
+	})
+
+	t.Run("large files scale with size at the 2 MiB/s floor throughput", func(t *testing.T) {
+		// 6 GiB at 2 MiB/s = 3072s of transfer + 5 min headroom.
+		got := uploadTimeoutFor(6 << 30)
+		want := 3072*time.Second + 5*time.Minute
+		if got != want {
+			t.Errorf("timeout = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("0.18.1 orin-nano recovery bundle gets well over the old shared budget", func(t *testing.T) {
+		// The 6.9 GB tegraflash bundle whose upload blew the shared 30-minute
+		// context in the 0.18.1 release build (run 30573040970 attempt 1).
+		if got := uploadTimeoutFor(6926039040); got < 45*time.Minute {
+			t.Errorf("timeout = %v, want >= 45m", got)
+		}
+	})
+
+	t.Run("never decreases as size grows", func(t *testing.T) {
+		prev := time.Duration(0)
+		for _, size := range []int64{0, 256 << 20, 1 << 30, 7 << 30, 64 << 30} {
+			got := uploadTimeoutFor(size)
+			if got < prev {
+				t.Errorf("size %d: timeout %v < previous %v", size, got, prev)
+			}
+			prev = got
+		}
+	})
+}
 
 // --- Part planning ---------------------------------------------------------
 
