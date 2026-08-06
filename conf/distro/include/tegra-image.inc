@@ -30,6 +30,20 @@ IMAGE_INSTALL:append = " \
     v4l-utils \
     "
 
+# Firmware for third-party M.2 E-key Wi-Fi cards (e.g. Intel AX210NGW).
+# The stock devkit module's Realtek blobs arrive via meta-tegra's
+# devkit-wifi.inc (MACHINE_EXTRA_RRECOMMENDS -> tegra-firmware-rtl8822,
+# consumed through core-image's packagegroup-base-extended); Intel cards
+# need linux-firmware instead: iwlwifi-ty-*.{ucode,pnvm} live in
+# -iwlwifi-misc and the Bluetooth half's ibt-* in -ibt-misc. Targeted
+# subpackages, not the ~1 GiB full linux-firmware — the A/B rootfs slot
+# is size-pinned (wendyos-rootfs-size.inc). The matching kernel modules
+# are enabled by wifi-intel.cfg in the tegra kernel bbappends.
+IMAGE_INSTALL:append = " \
+    linux-firmware-iwlwifi-misc \
+    linux-firmware-ibt-misc \
+    "
+
 # Enable DeepStream SDK support (optional - adds ~1GB to image)
 # Tegra/NVIDIA hardware only - DeepStream requires NVIDIA GPUs
 # Also enables l4t-deepstream.csv which provides:
