@@ -34,7 +34,7 @@ SRCREV_VIRT="526c97254fe43e0924df034aaa825f33ec30407c"
 # MACHINE_FEATURES_OPTED_OUT). master targets wrynose (one series back), which
 # intersects oe-core's LAYERSERIES_CORENAMES ("wrynose blacksail"), so it also
 # satisfies the compat gate on its own. Pinned for reproducibility (master moves).
-SRCREV_RPI="9e41c54b4558709f4ff20f03dad77f2cf99477ed"
+SRCREV_RPI="a0ebcf5639b391690b27381cc65c56c157a0981b"
 
 #
 # Deliberately NO meta-lts-mixins-go REPOS_EXTRA (blacksail Go is 1.26 native),

@@ -24,7 +24,7 @@ SRCREV_VIRT="526c97254fe43e0924df034aaa825f33ec30407c"
 
 # meta-raspberrypi: bumped to upstream master (scarthgap-era default is too old
 # for blacksail oe-core). Same pin as rpi5-sd. Pinned for reproducibility.
-SRCREV_RPI="9e41c54b4558709f4ff20f03dad77f2cf99477ed"
+SRCREV_RPI="a0ebcf5639b391690b27381cc65c56c157a0981b"
 
 # NOTE: unlike rpi5, rpi4 (BCM2711) gets NO U-Boot override — the rc4 bump + NVMe
 # patch in u-boot_%.bbappend are raspberrypi5-scoped, so rpi4 builds STOCK blacksail
