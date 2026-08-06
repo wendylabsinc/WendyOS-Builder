@@ -137,7 +137,7 @@ wait_for_socket "$RUNTIME_DIR/bus" || {
     exit 1
 }
 
-wait_for_socket "$RUNTIME_DIR/pipewire/pipewire-0" || {
+wait_for_socket "$RUNTIME_DIR/pipewire-0" || {
     echo "ERROR: PipeWire socket missing"
     exit 1
 }
@@ -163,7 +163,7 @@ echo "=== Audio Setup Complete ==="
 echo "User: $USER (UID: $USER_UID)"
 echo "Runtime dir: $RUNTIME_DIR"
 echo "D-Bus socket: $RUNTIME_DIR/bus"
-echo "PipeWire socket: $RUNTIME_DIR/pipewire/pipewire-0"
+echo "PipeWire socket: $RUNTIME_DIR/pipewire-0"
 echo "Pulse socket: $RUNTIME_DIR/pulse/native"
 echo ""
 echo "Container usage:"
