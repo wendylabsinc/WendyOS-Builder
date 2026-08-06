@@ -14,6 +14,8 @@
 # be redundant on 6.8 but doesn't hurt.
 FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 
+require recipes-kernel/linux/wendy-game-controller.inc
+
 SRC_URI += " \
     file://usb-gadget.cfg \
     file://usb-gadget-builtin.cfg \
