@@ -26,7 +26,16 @@ require recipes-kernel/linux/wendy-bluetooth.inc
 # race on the same USB ID. The jetson-orin-nano-devkit override token covers
 # both storage machines (their -wendyos confs prepend it to MACHINEOVERRIDES).
 WENDYOS_BLUETOOTH_ENABLE:jetson-orin-nano-devkit = "1"
-SRC_URI:append:jetson-orin-nano-devkit = " file://bluetooth-btusb-rtl.cfg"
+# The config fragment alone is not enough: NVIDIA's kernel tree marks the
+# devkit radio's USB ID (0bda:c822) BTUSB_IGNORE in btusb's device tables so
+# rtk_btusb can claim it, which makes btusb_probe() return -ENODEV with no
+# dmesg trace once the vendor driver is gone. The source patch restores the
+# mainline driver_info for that ID; it is gated to the same machines as the
+# fragment so vendor-driver boards keep NVIDIA's tables untouched.
+SRC_URI:append:jetson-orin-nano-devkit = " \
+    file://bluetooth-btusb-rtl.cfg \
+    file://0001-Bluetooth-btusb-un-ignore-Realtek-RTL8822CE-0bda-c822.patch \
+    "
 WENDYOS_BLUETOOTH_EXTRA_SYMBOLS:jetson-orin-nano-devkit = " \
     CONFIG_BT_HCIBTUSB \
     CONFIG_BT_HCIBTUSB_RTL \

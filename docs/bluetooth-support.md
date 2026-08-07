@@ -30,9 +30,20 @@ by `rtk-btusb-blacklist` (modprobe policy), and replaced by mainline
 `btusb`+`btrtl` with firmware from `linux-firmware-rtl8822`
 (`rtl_bt/rtl8822cu_fw.bin` + `_config.bin`).
 
+Removing the vendor driver is still only half the swap: NVIDIA's kernel
+tree marks `0bda:c822` `BTUSB_IGNORE` in btusb's device tables so
+`rtk_btusb` could claim it, and with the vendor driver gone `btusb_probe()`
+returns `-ENODEV` for the radio with no dmesg trace — the board simply has
+no `hci0` (observed on the 0.18.1 devkit image). The kernel source patch
+`0001-Bluetooth-btusb-un-ignore-Realtek-RTL8822CE-0bda-c822.patch`
+(machine-gated in the jp7 tegra kernel bbappend, same override as the
+transport fragment) restores the mainline `BTUSB_REALTEK |
+BTUSB_WIDEBAND_SPEECH` entry for that ID.
+
 AGX Orin and Thor intentionally keep the vendor driver until each gets its
 own validated swap: enabling `btusb` while `rtk_btusb` is installed would be
-a probe race on the same USB ID.
+a probe race on the same USB ID — and their kernels keep NVIDIA's IGNORE
+entries, which the machine gating leaves untouched.
 
 ## On-device smoke test (Orin Nano)
 

@@ -1,0 +1,51 @@
+From: Ethan <ebrogames@gmail.com>
+Subject: [PATCH] Bluetooth: btusb: un-ignore Realtek RTL8822CE (0bda:c822)
+
+NVIDIA's L4T kernel marks the RTL8822CE Bluetooth function BTUSB_IGNORE
+(in both btusb_table and quirks_table) so their out-of-tree rtk_btusb
+driver can claim the radio without racing btusb. WendyOS removes
+rtk_btusb on the Orin Nano devkit (it drops BLE HID links in a ~2 s
+connect/drop loop) and ships mainline btusb+btrtl instead — but with the
+IGNORE entries in place btusb_probe() returns -ENODEV for the radio and
+no hci device is ever created, silently: no dmesg line, no error,
+Bluetooth simply absent.
+
+Observed on-device (Orin Nano devkit, image 0.18.1, kernel
+6.8.12-l4t-r39.2.0): usb 0bda:c822 enumerates with textbook BT
+endpoints, /sys/class/bluetooth stays empty, and a manual sysfs bind
+fails with "No such device"; both table entries read driver_info=0x1
+(BTUSB_IGNORE) straight out of the shipped btusb.ko.
+
+Restore the mainline driver_info (BTUSB_REALTEK | BTUSB_WIDEBAND_SPEECH)
+for 0bda:c822 so btusb probes the radio and btrtl loads
+rtl_bt/rtl8822cu_fw.bin + rtl8822cu_config.bin, which
+linux-firmware-rtl8822 already ships. The rebranded 13d3:3549 entry is
+left ignored: it is not this board's hardware, and boards still on the
+vendor driver must not gain a probe race.
+
+Upstream-Status: Inappropriate [WendyOS reverts an NVIDIA L4T
+vendor-driver accommodation; mainline already carries these IDs]
+
+---
+--- a/drivers/bluetooth/btusb.c
++++ b/drivers/bluetooth/btusb.c
+@@ -507,7 +507,8 @@
+ 	/* Realtek 8822CE Bluetooth devices */
+ 	{ USB_DEVICE(0x0bda, 0xb00c), .driver_info = BTUSB_REALTEK |
+ 						     BTUSB_WIDEBAND_SPEECH },
+-	{ USB_DEVICE(0x0bda, 0xc822), .driver_info = BTUSB_IGNORE },
++	{ USB_DEVICE(0x0bda, 0xc822), .driver_info = BTUSB_REALTEK |
++						     BTUSB_WIDEBAND_SPEECH },
+ 
+ 	/* Realtek 8822CU Bluetooth devices */
+ 	{ USB_DEVICE(0x13d3, 0x3549), .driver_info = BTUSB_IGNORE },
+@@ -795,7 +796,8 @@
+ 						     BTUSB_WIDEBAND_SPEECH },
+ 	{ USB_DEVICE(0x13d3, 0x3548), .driver_info = BTUSB_REALTEK |
+ 						     BTUSB_WIDEBAND_SPEECH },
+-	{ USB_DEVICE(0x0bda, 0xc822), .driver_info = BTUSB_IGNORE },
++	{ USB_DEVICE(0x0bda, 0xc822), .driver_info = BTUSB_REALTEK |
++						     BTUSB_WIDEBAND_SPEECH },
+ 	{ USB_DEVICE(0x13d3, 0x3549), .driver_info = BTUSB_IGNORE },
+ 	{ USB_DEVICE(0x13d3, 0x3553), .driver_info = BTUSB_REALTEK |
+ 						     BTUSB_WIDEBAND_SPEECH },
