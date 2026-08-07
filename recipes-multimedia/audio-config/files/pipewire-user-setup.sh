@@ -74,6 +74,18 @@ wait_for_socket() {
     return 0
 }
 
+# Wait for the user manager's own D-Bus socket before running any
+# `systemctl --user` command against it. `loginctl enable-linger` starts
+# user@$USER_UID.service asynchronously: the runtime directory above appears
+# almost immediately, but the user manager's control socket ($RUNTIME_DIR/bus)
+# takes a bit longer to bind. Without this wait, the `su` block below races
+# it and fails with "Failed to connect to user scope bus via local
+# transport: No such file or directory".
+if ! wait_for_socket "$RUNTIME_DIR/bus"; then
+    echo "ERROR: user@$USER_UID.service's D-Bus socket never appeared"
+    exit 1
+fi
+
 # Enable and start user services as the wendy user
 su - "$USER" -c "
     set -e
@@ -125,7 +137,7 @@ wait_for_socket "$RUNTIME_DIR/bus" || {
     exit 1
 }
 
-wait_for_socket "$RUNTIME_DIR/pipewire/pipewire-0" || {
+wait_for_socket "$RUNTIME_DIR/pipewire-0" || {
     echo "ERROR: PipeWire socket missing"
     exit 1
 }
@@ -151,7 +163,7 @@ echo "=== Audio Setup Complete ==="
 echo "User: $USER (UID: $USER_UID)"
 echo "Runtime dir: $RUNTIME_DIR"
 echo "D-Bus socket: $RUNTIME_DIR/bus"
-echo "PipeWire socket: $RUNTIME_DIR/pipewire/pipewire-0"
+echo "PipeWire socket: $RUNTIME_DIR/pipewire-0"
 echo "Pulse socket: $RUNTIME_DIR/pulse/native"
 echo ""
 echo "Container usage:"
