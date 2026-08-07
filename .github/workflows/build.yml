@@ -1036,6 +1036,30 @@ jobs:
             python3 scripts/check_game_controller_support.py --config "$CONFIG" --manifest "$MANIFEST"
           done
 
+      # Same evidence pattern for the Bluetooth stack: every image must meet
+      # the BlueZ floor, and machines under the mainline-transport contract
+      # (wendy-bluetooth.inc) must additionally show btusb+btrtl in the
+      # effective config, the rtl_bt firmware + modprobe blacklist packages
+      # present, and the vendor rtk_btusb packages absent. The evidence
+      # config exists only where the contract is enabled; the validator
+      # itself fails contract machines that are missing it.
+      - name: Validate Bluetooth stack
+        working-directory: ${{ github.workspace }}/wendyos
+        env:
+          MAP: ${{ steps.vars.outputs.map }}
+        run: |
+          set -euo pipefail
+          for token in $MAP; do
+            IFS='|' read -r storage board machine <<< "$token"
+            DEPLOY_DIR="$GITHUB_WORKSPACE/build/tmp/deploy/images/$machine"
+            CONFIG="$DEPLOY_DIR/wendyos-bluetooth-$machine.config"
+            MANIFEST=$(find "$DEPLOY_DIR" -maxdepth 1 -name 'wendyos-image-*.manifest' ! -type l -print -quit)
+            [[ -n "$MANIFEST" ]] || { echo "::error::missing image manifest in $DEPLOY_DIR"; exit 1; }
+            ARGS=(--machine "$machine" --manifest "$MANIFEST")
+            [[ -f "$CONFIG" ]] && ARGS+=(--config "$CONFIG")
+            python3 scripts/check_bluetooth_stack.py "${ARGS[@]}"
+          done
+
       # The persistent NVMe cache is written in place by the build (sstate,
       # downloads, repos are symlinked onto it) — no upload/save step needed.
 

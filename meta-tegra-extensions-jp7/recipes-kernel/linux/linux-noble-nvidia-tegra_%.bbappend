@@ -15,6 +15,23 @@
 FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 
 require recipes-kernel/linux/wendy-game-controller.inc
+require recipes-kernel/linux/wendy-bluetooth.inc
+
+# Mainline Bluetooth transport, Orin Nano devkit only: its RTL8822CE radio is
+# unusable for BLE HID under the vendor rtk_btusb driver (~2 s connect/drop
+# loop), so that module is removed at the package level in the
+# jetson-orin-nano-devkit*-wendyos machine confs and btusb+btrtl take over.
+# AGX Orin / Thor keep the vendor driver until they get their own validated
+# swap — enabling btusb while rtk_btusb is still installed would be a probe
+# race on the same USB ID. The jetson-orin-nano-devkit override token covers
+# both storage machines (their -wendyos confs prepend it to MACHINEOVERRIDES).
+WENDYOS_BLUETOOTH_ENABLE:jetson-orin-nano-devkit = "1"
+SRC_URI:append:jetson-orin-nano-devkit = " file://bluetooth-btusb-rtl.cfg"
+WENDYOS_BLUETOOTH_EXTRA_SYMBOLS:jetson-orin-nano-devkit = " \
+    CONFIG_BT_HCIBTUSB \
+    CONFIG_BT_HCIBTUSB_RTL \
+    CONFIG_BT_RTL \
+    "
 
 SRC_URI += " \
     file://usb-gadget.cfg \

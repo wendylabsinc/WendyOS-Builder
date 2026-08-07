@@ -11,6 +11,7 @@ on:
       - 'scripts/make-jetson-disk-img.py'
       - 'scripts/make_jetson_disk_img_test.py'
       - 'scripts/check_game_controller_support*'
+      - 'scripts/check_bluetooth_stack*'
       - 'recipes-core/wendyos-agent/files/*.sh'
       - '.github/device-artifacts.json'
       - '.github/workflows/scripts-ci.yml'
@@ -23,6 +24,7 @@ on:
       - 'scripts/make-jetson-disk-img.py'
       - 'scripts/make_jetson_disk_img_test.py'
       - 'scripts/check_game_controller_support*'
+      - 'scripts/check_bluetooth_stack*'
       - 'recipes-core/wendyos-agent/files/*.sh'
       - '.github/device-artifacts.json'
       - '.github/workflows/scripts-ci.yml'
@@ -67,3 +69,6 @@ jobs:
 
       - name: Run game-controller support validator tests
         run: python3 -m unittest scripts/check_game_controller_support_test.py
+
+      - name: Run Bluetooth stack validator tests
+        run: python3 -m unittest scripts/check_bluetooth_stack_test.py

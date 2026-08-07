@@ -39,3 +39,14 @@ RDEPENDS:${PN}:append = " optee-os"
 # The mount itself self-gates on /data via RequiresMountsFor=/data, so it is
 # inert on any Tegra config that lacks a /data partition.
 RDEPENDS:${PN}:append = " systemd-mount-tee"
+
+# Mainline Bluetooth for the Orin Nano devkit's RTL8822CE: btrtl loads its
+# firmware from linux-firmware-rtl8822 (rtl_bt/ layout), and the modprobe
+# blacklist keeps the removed vendor rtk_btusb driver from ever binding the
+# radio first. Hard RDEPENDS on purpose: these are the runtime halves of the
+# wendy-bluetooth.inc kernel contract, and CI's check_bluetooth_stack.py
+# fails the build if either goes missing from the image manifest.
+RDEPENDS:${PN}:append:jetson-orin-nano-devkit = " \
+    linux-firmware-rtl8822 \
+    rtk-btusb-blacklist \
+    "

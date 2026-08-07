@@ -29,3 +29,20 @@ WENDYOS_GAME_CONTROLLER_MODULE_PACKAGES = " \
     "
 
 RRECOMMENDS:${PN}:append = "${@' ' + d.getVar('WENDYOS_GAME_CONTROLLER_MODULE_PACKAGES') if d.getVar('WENDYOS_GAME_CONTROLLER_ENABLE') == '1' else ''}"
+
+# Mainline Bluetooth contract (wendy-bluetooth.inc): same RRECOMMENDS
+# rationale as above — a package exists only where the effective config
+# resolved =m, and CI cross-checks the outcome. Opt-in per machine, matching
+# the kernel-side WENDYOS_BLUETOOTH_ENABLE gating; first adopter is the Orin
+# Nano devkit (both storage machines share the jetson-orin-nano-devkit
+# override).
+WENDYOS_BLUETOOTH_ENABLE ?= "0"
+WENDYOS_BLUETOOTH_ENABLE:jetson-orin-nano-devkit = "1"
+WENDYOS_BLUETOOTH_MODULE_PACKAGES = " \
+    kernel-module-bluetooth \
+    kernel-module-btusb \
+    kernel-module-btrtl \
+    kernel-module-rfcomm \
+    "
+
+RRECOMMENDS:${PN}:append = "${@' ' + d.getVar('WENDYOS_BLUETOOTH_MODULE_PACKAGES') if d.getVar('WENDYOS_BLUETOOTH_ENABLE') == '1' else ''}"
