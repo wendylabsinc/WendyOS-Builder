@@ -118,7 +118,19 @@ FILES:${PN} = "/usr/local/bin/wendy-agent \
 #                      debug metadata on-device. Proper fix is upstream
 #                      building the agent with `go build -trimpath`; drop this
 #                      skip once releases ship trimmed binaries.
-INSANE_SKIP:${PN} += "already-stripped buildpaths"
+#   ldflags          - Go's internal linker emits only a SysV .hash table, never
+#                      a .gnu.hash, so the GNU_HASH check fails on any
+#                      dynamically linked Go binary. This started firing with
+#                      release 2026.08.07-174446, where the agent switched from
+#                      a static CGO_ENABLED=0 build to a cgo-enabled dynamic one
+#                      (NEEDED: libc.so.6 libdl.so.2 libpthread.so.0) -- the
+#                      check silently skips static binaries, which is why earlier
+#                      releases passed. GNU_HASH is a symbol-lookup speed
+#                      optimization; the SysV table is functional, the binary
+#                      declares no versioned glibc symbols, and we do not compile
+#                      it, so there are no LDFLAGS of ours to pass. Drop this
+#                      skip if upstream returns to static linking.
+INSANE_SKIP:${PN} += "already-stripped buildpaths ldflags"
 
 # Runtime dependencies
 # curl/wget needed for auto-updater, tar for extraction
