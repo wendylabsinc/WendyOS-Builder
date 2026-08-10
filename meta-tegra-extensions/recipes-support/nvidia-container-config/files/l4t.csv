@@ -223,3 +223,58 @@ sym, /usr/lib/libnvidia-ml.so
 # =============================================================================
 lib, /usr/lib/libnvidia-ptxjitcompiler.so.540.4.0
 sym, /usr/lib/libnvidia-ptxjitcompiler.so.1
+
+# =============================================================================
+# EGL / GLES GRAPHICS (Wayland kiosk: cage, weston, sway, GPU-composited browsers)
+# =============================================================================
+# DO NOT "TIDY AWAY" THE TWO ENTRIES BELOW. They look redundant, they are not.
+#
+# meta-tegra's own drivers.csv (also fed to `nvidia-ctk cdi generate`, see
+# wendyos-cdi-generate.service) already maps the NVIDIA EGL/GLES userspace into
+# containers: libEGL_nvidia.so.0, libGLESv2_nvidia.so.2, libGLESv1_CM_nvidia.so.1,
+# libnvidia-eglcore, libnvidia-glsi, libnvidia-glvkspirv, libnvidia-egl-gbm,
+# libnvidia-allocator, and the libglvnd vendor ICD
+# /usr/share/glvnd/egl_vendor.d/10-nvidia.json. Those are NOT repeated here.
+#
+# drivers.csv misses exactly two things, and each of them makes EGL fall back to
+# Mesa *silently* (no hard error - just software rendering):
+#   libEGL warning: MESA-LOADER: failed to retrieve device information
+#   MESA: error: ZINK: vkCreateInstance failed (VK_ERROR_INCOMPATIBLE_DRIVER)
+#   libEGL warning: egl: failed to create dri2 screen
+# followed by the compositor reporting "EGLImage not supported" / "Failed to
+# create FBO" and a laggy, CPU-rendered UI.
+#
+# NOTE (scarthgap/JP6): these paths were verified on blacksail/JP7.2 hardware
+# only - no JP6 device was reachable at the time of writing. They come from
+# meta-tegra's tegra-libraries-eglcore / egl-gbm packaging, whose Yocto layout is
+# the same on both trees, so they are expected to be identical. A CSV line whose
+# host path does not exist is dropped by `nvidia-ctk cdi generate` with a warning
+# and is harmless (drivers.csv already ships several such stale lines), so the
+# worst case here is a no-op, not a broken container.
+
+# (1) EGL external-platform registry.
+# libEGL_nvidia.so.0 does not implement EGL_PLATFORM_GBM_KHR itself; it gains it
+# by scanning /usr/share/egl/egl_external_platform.d/ and dlopen()ing the library
+# named there (libnvidia-egl-gbm.so.1). The .so is already mounted by drivers.csv,
+# but with the JSON absent the NVIDIA vendor advertises no GBM platform, so
+# libglvnd walks past 10-nvidia.json and lands on 50_mesa.json.
+# Side effect to be aware of: nvidia-container-cli bind-mounts the *parent*
+# directory of a mapped file, so containers see the host's
+# /usr/share/egl/egl_external_platform.d/ in place of their own. Today the host
+# dir holds only 15_nvidia_gbm.json, so an image that shipped its own
+# 10_nvidia_wayland.json would lose it - harmless here, because WendyOS does not
+# ship libnvidia-egl-wayland.so.1 on a mapped path either, so that platform was
+# never usable in a container to begin with.
+lib, /usr/share/egl/egl_external_platform.d/15_nvidia_gbm.json
+
+# (2) GBM backend symlinks at the *multiarch* path.
+# drivers.csv maps the NVIDIA GBM backends as /usr/lib/gbm/{nvidia-drm,tegra-udrm,
+# tegra}_gbm.so - correct for a Yocto-layout consumer. Container images are
+# Debian/Ubuntu, and their libgbm.so.1 is built with
+# gbm-backends-path=/usr/lib/aarch64-linux-gnu/gbm, so it never sees them and
+# falls through to Mesa's dri_gbm.so, which cannot drive the Tegra DRM node.
+# nvidia-container-config's do_install() creates these compat symlinks on the
+# host purely so `nvidia-ctk` can mirror them into containers here.
+sym, /usr/lib/aarch64-linux-gnu/gbm/nvidia-drm_gbm.so
+sym, /usr/lib/aarch64-linux-gnu/gbm/tegra-udrm_gbm.so
+sym, /usr/lib/aarch64-linux-gnu/gbm/tegra_gbm.so
