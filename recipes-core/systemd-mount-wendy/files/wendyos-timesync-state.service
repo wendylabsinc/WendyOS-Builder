@@ -10,6 +10,21 @@ Documentation=man:systemd.mount(5)
 # (systemd-timesync:systemd-timesync, 0755). systemd-timesyncd would chown the
 # directory itself on start, but setting it here keeps the on-disk state correct
 # even on a boot where timesyncd never runs.
+#
+# The recursive chown is load-bearing, not tidying. Yocto allocates system UIDs
+# dynamically, so systemd-timesync has a DIFFERENT numeric UID in each slot's
+# image — measured 991 in one and 993 in the other on the same device. /data is
+# shared between slots, so after an A/B switch the clock file carries the other
+# slot's UID, timesyncd cannot write it ("Permission denied"), and it silently
+# declines to restore the clock: the device comes up at the Yocto build epoch
+# exactly as if this mount did not exist. Verified on hardware — before the
+# chown the agent had to jump the clock 146 days from the build epoch; after it,
+# the boot clock was already correct.
+#
+# Left failing loudly rather than prefixed with '-': if the chown does not
+# happen the restore silently does not happen either, and a failed unit is the
+# only signal. (/data/bluetooth avoids all of this by being root-owned, UID 0
+# being the one UID that cannot drift.)
 RequiresMountsFor=/data
 After=data.mount
 # The systemd-timesync user is created by sysusers; without this the install
@@ -22,6 +37,7 @@ DefaultDependencies=no
 Type=oneshot
 RemainAfterExit=yes
 ExecStart=/usr/bin/install -d -m 0755 -o systemd-timesync -g systemd-timesync /data/systemd-timesync
+ExecStart=/usr/bin/chown -R systemd-timesync:systemd-timesync /data/systemd-timesync
 
 [Install]
 WantedBy=local-fs.target
