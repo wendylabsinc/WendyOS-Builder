@@ -11,9 +11,9 @@ Documentation=man:systemd.mount(5)
 # directory itself on start, but setting it here keeps the on-disk state correct
 # even on a boot where timesyncd never runs.
 #
-# The recursive chown is load-bearing, not tidying. Yocto allocates system UIDs
-# dynamically, so systemd-timesync has a DIFFERENT numeric UID in each slot's
-# image — measured 991 in one and 993 in the other on the same device. /data is
+# The recursive chown is required for correctness, not tidiness. Yocto allocates
+# system UIDs dynamically, so systemd-timesync has a DIFFERENT numeric UID in
+# each slot's image — measured 991 in one and 993 in the other. /data is
 # shared between slots, so after an A/B switch the clock file carries the other
 # slot's UID, timesyncd cannot write it ("Permission denied"), and it silently
 # declines to restore the clock: the device comes up at the Yocto build epoch
