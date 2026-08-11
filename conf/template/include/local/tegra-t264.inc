@@ -37,11 +37,30 @@ ROOTFSPART_SIZE_DEFAULT = "25769803776"
 # (L4TLauncher's ext4 reader) rejects blocks_per_group != 8*blocksize with
 # EFI_UNSUPPORTED and the board boot-loops. 12 GiB is already a 128 MiB
 # multiple, so this is a no-op guard today. Scoped :pn-wendyos-image —
-# machine-wide would round the ESP (tegra-espimage) past its 64 MiB max and
-# fail the build; IMAGE_ROOTFS_ALIGNMENT also feeds TEGRA_BLBLOCKSIZE, pinned
-# to its current 4 KiB so mksparse / the flash helper are unchanged.
+# machine-wide would also round the ESP (tegra-espimage) up past its
+# IMAGE_ROOTFS_MAXSIZE and fail the build; IMAGE_ROOTFS_ALIGNMENT also feeds
+# TEGRA_BLBLOCKSIZE, pinned to its current 4 KiB so mksparse / the flash helper
+# are unchanged.
 IMAGE_ROOTFS_ALIGNMENT:pn-wendyos-image = "131072"
 TEGRA_BLBLOCKSIZE:pn-wendyos-image = "4096"
+
+# Fill the whole `esp` partition with the ESP filesystem. NVIDIA's t264 NVMe
+# layout allocates 512 MiB for `esp`; upstream tegra-espimage.bb builds a fixed
+# 64 MiB FAT32 image and nothing ever grows it, so a flashed Thor ran a 63 MiB
+# filesystem inside a 512 MiB partition (measured on wendystudio-walter:
+# /dev/nvme0n1p5 is 536870912 B, `df` reported 64511 KiB total).
+#
+# Thor is the only SOC where wendyos-update stages a UEFI capsule, and
+# tegra-bl.cap is ~20.3 MiB — a third of the old usable ESP per bootloader OTA.
+# A single 63 MiB ESP with a few stale or leaked capsule chains has no room to
+# stage the next one, which fails the OTA with ENOSPC and cannot be recovered in
+# the field without reformatting the partition by hand. Consumed by
+# meta-tegra-extensions/recipes-bsp/uefi/tegra-espimage_%.bbappend; must stay
+# <= the `esp` size in the flash layout (512 MiB = 524288 KiB) or tegraflash
+# refuses the image. Left at the upstream 64 MiB on t234, where the partition
+# really is 64 MiB (67108864 B in flash_l4t_t234_nvme_rootfs_ab.xml) and no
+# capsule is ever staged.
+WENDYOS_ESP_SIZE = "524288"
 
 # Persistent journal logs — left at the smart default (tracks WENDYOS_OTA):
 # WENDYOS_OTA="wendy" -> persistent on /data.
