@@ -34,18 +34,17 @@ do_install() {
     install -m 0644 ${UNPACKDIR}/wendyos-bluetooth-state.service \
         ${D}${systemd_system_unitdir}/wendyos-bluetooth-state.service
 
-    # Drop-in rather than a bbappend on bluez5: the ordering requirement comes
-    # from this recipe's mount unit, so it belongs with it.
     install -m 0644 ${UNPACKDIR}/var-lib-systemd-timesync.mount \
         ${D}${systemd_system_unitdir}/var-lib-systemd-timesync.mount
     install -m 0644 ${UNPACKDIR}/wendyos-timesync-state.service \
         ${D}${systemd_system_unitdir}/wendyos-timesync-state.service
 
+    # Drop-ins rather than bbappends on bluez5 and systemd: the ordering
+    # requirement comes from this recipe's mount units, so it belongs with them.
     install -d ${D}${systemd_system_unitdir}/bluetooth.service.d
     install -m 0644 ${UNPACKDIR}/bluetooth-persist-state.conf \
         ${D}${systemd_system_unitdir}/bluetooth.service.d/persist-state.conf
 
-    # Same reasoning: timesyncd must be ordered after this recipe's mount unit.
     install -d ${D}${systemd_system_unitdir}/systemd-timesyncd.service.d
     install -m 0644 ${UNPACKDIR}/timesyncd-persist-clock.conf \
         ${D}${systemd_system_unitdir}/systemd-timesyncd.service.d/persist-clock.conf

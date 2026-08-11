@@ -2,33 +2,27 @@
 Description=Prepare persistent systemd-timesyncd state directory on the data partition
 Documentation=man:systemd.mount(5)
 
-# The bind mount needs /data/systemd-timesync to already exist: x-systemd.mkdir
-# creates the mount point, never the source, so without this
-# var-lib-systemd-timesync.mount fails outright ("Failed to chase path").
+# Without this the mount still succeeds — x-systemd.mkdir creates the bind source
+# as well as the mount point — but creates it root:root, and timesyncd cannot then
+# write the clock file. It fails silently: the mount reads as active either way.
 #
-# Ownership matches what StateDirectory=systemd/timesync would create
-# (systemd-timesync:systemd-timesync, 0755). systemd-timesyncd would chown the
-# directory itself on start, but setting it here keeps the on-disk state correct
-# even on a boot where timesyncd never runs.
+# Ownership matches what StateDirectory=systemd/timesync would create. timesyncd
+# chowns the directory itself on start, so the recursive chown is the part that
+# matters: it reaches the clock file inside. Yocto allocates system UIDs
+# dynamically, so systemd-timesync has a different numeric UID in each slot's
+# image, and after an A/B switch the file carries the other slot's UID; timesyncd
+# cannot write it, silently declines to restore the clock, and the device boots at
+# the image epoch exactly as if this mount did not exist. (/data/bluetooth
+# sidesteps all of this by being root-owned, UID 0 being the one that cannot
+# drift.)
 #
-# The recursive chown is required for correctness, not tidiness. Yocto allocates
-# system UIDs dynamically, so systemd-timesync has a DIFFERENT numeric UID in
-# each slot's image — measured 991 in one and 993 in the other. /data is
-# shared between slots, so after an A/B switch the clock file carries the other
-# slot's UID, timesyncd cannot write it ("Permission denied"), and it silently
-# declines to restore the clock: the device comes up at the Yocto build epoch
-# exactly as if this mount did not exist. Verified on hardware — before the
-# chown the agent had to jump the clock 146 days from the build epoch; after it,
-# the boot clock was already correct.
-#
-# Left failing loudly rather than prefixed with '-': if the chown does not
-# happen the restore silently does not happen either, and a failed unit is the
-# only signal. (/data/bluetooth avoids all of this by being root-owned, UID 0
-# being the one UID that cannot drift.)
+# Not prefixed with '-': a failed chown means the restore silently does not
+# happen, and a failed unit is the only signal.
+ConditionPathExists=/usr/lib/systemd/systemd-timesyncd
 RequiresMountsFor=/data
 After=data.mount
-# The systemd-timesync user is created by sysusers; without this the install
-# below can lose the race and fail on -o.
+# systemd-timesync is created by sysusers; without this the -o below can lose the
+# race and fail.
 After=systemd-sysusers.service
 Before=var-lib-systemd-timesync.mount
 DefaultDependencies=no
