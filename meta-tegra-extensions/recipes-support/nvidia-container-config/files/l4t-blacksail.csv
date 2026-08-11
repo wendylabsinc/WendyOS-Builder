@@ -253,11 +253,10 @@ sym, /usr/lib/libnvidia-ptxjitcompiler.so.1
 # Host file verified on WendyOS 0.17.0 (blacksail, L4T R39.2, JP7.2).
 # Side effect to be aware of: nvidia-container-cli bind-mounts the *parent*
 # directory of a mapped file, so containers see the host's
-# /usr/share/egl/egl_external_platform.d/ in place of their own. Today the host
-# dir holds only 15_nvidia_gbm.json, so an image that shipped its own
-# 10_nvidia_wayland.json would lose it - harmless here, because WendyOS does not
-# ship libnvidia-egl-wayland.so.1 on a mapped path either, so that platform was
-# never usable in a container to begin with.
+# /usr/share/egl/egl_external_platform.d/ in place of their own, and any JSON an
+# image shipped there is masked. That is exactly why (3) below has to put
+# 10_nvidia_wayland.json on the *host*: an app image cannot register an EGL
+# platform for itself here, however correct its own copy is.
 lib, /usr/share/egl/egl_external_platform.d/15_nvidia_gbm.json
 
 # (2) GBM backend symlinks at the *multiarch* path.
@@ -271,3 +270,34 @@ lib, /usr/share/egl/egl_external_platform.d/15_nvidia_gbm.json
 sym, /usr/lib/aarch64-linux-gnu/gbm/nvidia-drm_gbm.so
 sym, /usr/lib/aarch64-linux-gnu/gbm/tegra-udrm_gbm.so
 sym, /usr/lib/aarch64-linux-gnu/gbm/tegra_gbm.so
+
+# (3) EGL external-platform registry, Wayland.
+# GBM covers compositors. It does not cover their clients, and the difference is
+# invisible until you look at which process is burning the CPU. A Wayland client
+# -- GTK4/epiphany, Qt, any GPU-composited browser -- asks for
+# EGL_PLATFORM_WAYLAND_EXT, which libEGL_nvidia.so.0 implements no more directly
+# than it does GBM: it needs libnvidia-egl-wayland.so.1, registered by this JSON.
+# Without it libglvnd falls to Mesa, Mesa is handed an NVIDIA node it has no DRI
+# driver for, and the client drops to the software rasterizer:
+#   libEGL warning: pci id for fd 15: 10de:2b00, driver (null)
+#   libEGL warning: egl: failed to create dri2 screen
+# Measured on 192.168.0.104 (AGX Thor, WendyOS 0.18.2): with (1) and (2) in place
+# cage composited on the GPU at ~0.4% CPU, while epiphany in the same container
+# burned 2.3 cores across threads named llvmpipe-0..13 and the TV still lagged.
+#
+# Neither the library nor the JSON existed anywhere on WendyOS before this -- not
+# on the host, not in any app image. packagegroup-nvidia-container now pulls in
+# meta-tegra's egl-wayland to put them on the host, for no reason other than to
+# map them here; the NOTE on that packagegroup explains why a wayland package
+# ships on a distro that drops the wayland DISTRO_FEATURE.
+#
+# The versioned filename tracks egl-wayland's PV (1.1.20 at meta-tegra
+# d0b2f4d8), because meson names the file from project_version() and only the
+# .so.1 soname link is stable. A CSV line whose host path does not exist is
+# dropped by `nvidia-ctk cdi generate` with a warning, so a PV bump will not
+# break the build -- it will quietly put clients back on llvmpipe. If accelerated
+# browser rendering regresses, check this line before anything else:
+#   ls /usr/lib/libnvidia-egl-wayland.so.1*
+lib, /usr/lib/libnvidia-egl-wayland.so.1.1.20
+sym, /usr/lib/libnvidia-egl-wayland.so.1
+lib, /usr/share/egl/egl_external_platform.d/10_nvidia_wayland.json
