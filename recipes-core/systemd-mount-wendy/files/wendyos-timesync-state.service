@@ -1,0 +1,27 @@
+[Unit]
+Description=Prepare persistent systemd-timesyncd state directory on the data partition
+Documentation=man:systemd.mount(5)
+
+# The bind mount needs /data/systemd-timesync to already exist: x-systemd.mkdir
+# creates the mount point, never the source, so without this
+# var-lib-systemd-timesync.mount fails outright ("Failed to chase path").
+#
+# Ownership matches what StateDirectory=systemd/timesync would create
+# (systemd-timesync:systemd-timesync, 0755). systemd-timesyncd would chown the
+# directory itself on start, but setting it here keeps the on-disk state correct
+# even on a boot where timesyncd never runs.
+RequiresMountsFor=/data
+After=data.mount
+# The systemd-timesync user is created by sysusers; without this the install
+# below can lose the race and fail on -o.
+After=systemd-sysusers.service
+Before=var-lib-systemd-timesync.mount
+DefaultDependencies=no
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/install -d -m 0755 -o systemd-timesync -g systemd-timesync /data/systemd-timesync
+
+[Install]
+WantedBy=local-fs.target

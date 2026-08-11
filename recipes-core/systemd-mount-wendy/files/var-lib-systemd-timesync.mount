@@ -1,0 +1,38 @@
+[Unit]
+Description=Bind mount /var/lib/systemd/timesync (last-known-good clock) from data partition
+Documentation=man:systemd.mount(5)
+
+# systemd-timesyncd stamps /var/lib/systemd/timesync/clock on every sync and, at
+# startup, bumps the system clock up to that file's mtime. On hardware with no
+# RTC (Raspberry Pi) that file IS the clock across a reboot. By default it lives
+# on the A/B rootfs, so an OTA boots a slot whose copy came from the image and
+# the device comes up at the Yocto build epoch instead of near real time —
+# months in the past. Back it with /data so it survives the slot switch, same
+# pattern as /var/lib/wendy -> /data/wendy (WDY-1877).
+
+RequiresMountsFor=/data
+After=data.mount
+
+# Deliberately NOT ordered after grow-data-fs-online.service, unlike
+# var-lib-wendy.mount and var-lib-bluetooth.mount. That unit is
+# WantedBy=multi-user.target, so ordering after it while also ordering before a
+# Before=sysinit.target consumer (timesyncd, below) forms a cycle that systemd
+# would break by silently dropping an edge. Safe to skip here: the clock file is
+# zero bytes, so it cannot hit ENOSPC on a not-yet-grown filesystem — the reason
+# the other mounts wait.
+
+# systemd-timesyncd reads the clock file once at startup, so mounting after it
+# would leave it looking at the rootfs copy. It is Before=sysinit.target and
+# does not wait for local-fs.target, hence the explicit ordering plus the
+# Wants=/After= drop-in on the service itself.
+Before=systemd-timesyncd.service
+DefaultDependencies=no
+
+[Mount]
+What=/data/systemd-timesync
+Where=/var/lib/systemd/timesync
+Type=none
+Options=bind,nosuid,nodev,noexec,x-systemd.mkdir
+
+[Install]
+WantedBy=local-fs.target
