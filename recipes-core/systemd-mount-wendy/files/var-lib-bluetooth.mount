@@ -1,0 +1,36 @@
+[Unit]
+Description=Bind mount /var/lib/bluetooth (Bluetooth pairing state) from data partition
+Documentation=man:systemd.mount(5)
+
+# BlueZ stores pairing state -- link keys, device names, the Trusted flag --
+# under /var/lib/bluetooth. By default that path is on the A/B rootfs, so every
+# OTA boots a slot with an empty directory and the device forgets every
+# peripheral it was paired with. Back it with /data/bluetooth (persists across
+# A/B switches), same pattern as /var/lib/wendy -> /data/wendy.
+
+# Ensure data partition is mounted and the directory has been created with the
+# restrictive mode link keys require.
+RequiresMountsFor=/data
+After=data.mount
+After=wendyos-bluetooth-state.service
+Requires=wendyos-bluetooth-state.service
+
+# Wait for the /data fs grow, same as var-lib-wendy.mount and
+# var-lib-containerd.mount. Board-specific, inert where absent.
+After=grow-data-fs-online.service
+
+# bluetoothd reads this directory once at startup, so mounting it afterwards
+# would leave it seeing an empty state and treating paired devices as unknown.
+# bluetooth.service carries a RequiresMountsFor drop-in for the same reason;
+# this ordering covers the case where it is started in the same transaction.
+Before=bluetooth.service
+DefaultDependencies=no
+
+[Mount]
+What=/data/bluetooth
+Where=/var/lib/bluetooth
+Type=none
+Options=bind,nosuid,nodev,noexec,x-systemd.mkdir
+
+[Install]
+WantedBy=local-fs.target
