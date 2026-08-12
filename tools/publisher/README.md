@@ -29,7 +29,7 @@ The WendyOS Publisher maintains a structured manifest system in GCS for distribu
 - 🔐 **SHA256 Checksums** - Automatic integrity verification
 - 🚀 **Nightly Promotion** - Convert tested nightly builds to stable releases
 - 📊 **Device Stability Levels** - Mark devices as stable, experimental, or deprecated
-- 🔑 **Auto Authentication** - Automatic gcloud authentication if credentials missing
+- 🔑 **Auto Authentication** - Offers a gcloud login when no credentials are found and a terminal is attached
 
 ## Installation
 
@@ -55,7 +55,7 @@ By default, the tool uses the `wendyos-images-public` bucket. Override with:
 ```
 
 ### Authentication
-The tool automatically triggers `gcloud auth application-default login` if credentials are not found.
+The tool uses Application Default Credentials. When none are found and stdin is a terminal, it triggers `gcloud auth application-default login`. Without a terminal — CI, cron, a container — it reports the credential error instead, so it never waits on a prompt nobody can answer. In CI, ADC comes from the workload-identity credentials file that `google-github-actions/auth` exports. See RUNBOOK.md for the full picture.
 
 ## Usage
 
@@ -419,7 +419,7 @@ for version, metadata := range manifest.Versions {
 
 The tool exits with non-zero status on errors:
 
-- **Authentication errors**: Triggers gcloud auth flow
+- **Authentication errors**: Triggers the gcloud auth flow when a terminal is attached; otherwise reported
 - **Validation errors**: Invalid device names, versions, or file paths
 - **GCS errors**: Network issues, permission problems
 - **Swap errors**: Version doesn't exist, category mismatch

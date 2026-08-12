@@ -11,17 +11,16 @@ Operational guide for publishing OS images using the WendyOS publisher (`tools/p
 
 ### Authentication
 
-The tool auto-triggers `gcloud auth application-default login` if your credentials are missing or expired. Just follow the browser prompt when it pops up.
+The tool uses Application Default Credentials. On a developer machine it auto-triggers `gcloud auth application-default login` when no credentials are found at all — just follow the browser prompt when it pops up.
 
-You can also pass a token directly with `--access-token` (useful in CI):
-```bash
-go run . --access-token "$(gcloud auth print-access-token)" [other flags]
-```
-
-If you need to manually re-auth:
+Credentials that exist but are expired or revoked do not trigger the prompt: they load lazily, so the tool starts normally and the first GCS call fails with `invalid_grant`. Re-auth manually when you see that:
 ```bash
 gcloud auth application-default login
 ```
+
+In CI, `google-github-actions/auth` exports a workload-identity credentials file as `GOOGLE_APPLICATION_CREDENTIALS` and the tool picks it up. No token is passed on the command line: the auth library exchanges that file for tokens and refreshes them against their real expiries, so an upload that outlives a single token keeps working. That holds while the GitHub runtime token embedded in the credentials file stays valid — for a job long enough to outlive it, re-run the auth action before the publish step.
+
+Without a terminal on stdin the tool never offers the interactive login — it reports the credential error instead of blocking on a prompt nobody can answer.
 
 ## Running the Tool
 
@@ -268,7 +267,6 @@ gs://wendyos-images-public/
 | `--update-only` | No | Update manifests without uploading files |
 | `--list` | No | List all images in the bucket |
 | `--notify-discord <bool>` | No | Send Discord notification (default: `true`) |
-| `--access-token <token>` | No | GCS access token (for CI or manual override) |
 | `--debug` | No | Enable verbose debug logging |
 | `--help` | No | Show help message |
 
@@ -279,7 +277,7 @@ At least one of `--file`, `--ota-update`, or `--recovery-file` is required for u
 ## Troubleshooting
 
 ### "authentication error" on first run
-The tool will auto-open a browser for Google auth. Complete the login flow and the upload will retry. Alternatively, pass `--access-token` directly.
+The tool will auto-open a browser for Google auth. Complete the login flow and the upload will retry. If you see the error without a prompt, stdin is not a terminal — run `gcloud auth application-default login` yourself first.
 
 ### "version does not exist" on swap
 The `--swap` flag requires an existing version. Check you're using the exact version string (including `-nightly` suffix if applicable).

@@ -24,10 +24,9 @@ import (
 	seekable "github.com/SaveTheRbtz/zstd-seekable-format-go/pkg"
 	"github.com/klauspost/compress/zstd"
 	"github.com/sirupsen/logrus"
-	"golang.org/x/oauth2"
+	"golang.org/x/term"
 	"google.golang.org/api/googleapi"
 	"google.golang.org/api/iterator"
-	"google.golang.org/api/option"
 )
 
 var log = logrus.New()
@@ -52,33 +51,6 @@ func masterManifestPath(prefix string) string {
 // pr/<N>/ prefix the same way imageObjectPath does.
 func imageDirPrefix(prefix, deviceType string) string {
 	return fmt.Sprintf("%simages/%s/", prefix, deviceType)
-}
-
-// gcloudTokenSource implements oauth2.TokenSource. It seeds with the caller's
-// initial access token and refreshes by running "gcloud auth print-access-token"
-// once the token is within 10 seconds of expiry (the oauth2 package's Valid()
-// check applies a 10-second buffer).
-type gcloudTokenSource struct {
-	mu    sync.Mutex
-	token *oauth2.Token
-}
-
-func (s *gcloudTokenSource) Token() (*oauth2.Token, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.token != nil && s.token.Valid() {
-		return s.token, nil
-	}
-	out, err := exec.Command("gcloud", "auth", "print-access-token").Output()
-	if err != nil {
-		return nil, fmt.Errorf("gcloud token refresh failed: %w", err)
-	}
-	s.token = &oauth2.Token{
-		AccessToken: strings.TrimSpace(string(out)),
-		TokenType:   "Bearer",
-		Expiry:      time.Now().Add(55 * time.Minute),
-	}
-	return s.token, nil
 }
 
 // manifestCacheControl is set on every manifest write. Manifests are mutable
@@ -995,60 +967,56 @@ func sendDiscordNotification(webhookURL string, deviceType, version string, isNi
 	return nil
 }
 
-// createStorageClientWithAuth creates a storage client and triggers authentication if needed
-func createStorageClientWithAuth(ctx context.Context, accessToken string) (*storage.Client, error) {
-	// If an access token is provided, seed the refreshing token source with it.
-	// GCP access tokens expire after 1 hour; gcloudTokenSource re-runs
-	// "gcloud auth print-access-token" when the token is near expiry so that
-	// long-running retry loops (412 backoff) don't hit 401 mid-flight.
-	if accessToken != "" {
-		log.Info("Using provided access token for authentication")
-		ts := &gcloudTokenSource{
-			token: &oauth2.Token{
-				AccessToken: accessToken,
-				TokenType:   "Bearer",
-				Expiry:      time.Now().Add(55 * time.Minute),
-			},
-		}
-		client, err := storage.NewClient(ctx, option.WithTokenSource(ts))
-		if err != nil {
-			return nil, fmt.Errorf("failed to create storage client with access token: %w", err)
-		}
+// missingCredentials reports whether err is the auth library saying it found no
+// Application Default Credentials at all. A malformed credentials file, a denied
+// permission or a network failure must not match: those are reported as-is
+// rather than answered with a login prompt.
+func missingCredentials(err error) bool {
+	return strings.Contains(err.Error(), "could not find default credentials")
+}
+
+// interactiveTerminal reports whether stdin is a terminal, i.e. whether a human
+// is present to complete a browser login. CI must never reach the interactive
+// path: it would wait on a prompt nobody can answer until the job timeout fires.
+// This is a real tty check, not a character-device check — CI redirects stdin
+// from /dev/null, which is itself a character device.
+func interactiveTerminal() bool {
+	return term.IsTerminal(int(os.Stdin.Fd()))
+}
+
+// createStorageClientWithAuth creates a storage client from Application Default
+// Credentials. CI supplies ADC through the workload-identity credentials file
+// that google-github-actions/auth exports as GOOGLE_APPLICATION_CREDENTIALS: the
+// auth library exchanges it for tokens itself and refreshes against each token's
+// real expiry, for as long as the GitHub runtime token embedded in that file
+// stays valid. On a developer machine ADC comes from "gcloud auth
+// application-default login", which is offered here when none is found.
+//
+// The credentials only load lazily, so an expired or revoked ADC file creates a
+// client without error and fails at the first GCS call instead of here.
+func createStorageClientWithAuth(ctx context.Context) (*storage.Client, error) {
+	client, err := storage.NewClient(ctx)
+	if err == nil {
 		return client, nil
 	}
-
-	// Try to create the client with default credentials
-	client, err := storage.NewClient(ctx)
-	if err != nil {
-		// Check if this is an authentication error
-		errMsg := err.Error()
-		if strings.Contains(errMsg, "could not find default credentials") ||
-			strings.Contains(errMsg, "application default credentials") ||
-			strings.Contains(errMsg, "credential") {
-			log.Warn("Authentication credentials not found. Triggering gcloud auth...")
-
-			// Run gcloud auth application-default login
-			cmd := exec.Command("gcloud", "auth", "application-default", "login")
-			cmd.Stdin = os.Stdin
-			cmd.Stdout = os.Stdout
-			cmd.Stderr = os.Stderr
-
-			if err := cmd.Run(); err != nil {
-				return nil, fmt.Errorf("authentication failed: %w", err)
-			}
-
-			log.Info("Authentication successful. Retrying storage client creation...")
-
-			// Retry creating the client
-			client, err = storage.NewClient(ctx)
-			if err != nil {
-				return nil, fmt.Errorf("failed to create storage client after authentication: %w", err)
-			}
-		} else {
-			return nil, err
-		}
+	if !missingCredentials(err) || !interactiveTerminal() {
+		return nil, err
 	}
 
+	log.Warn("Authentication credentials not found. Triggering gcloud auth...")
+	cmd := exec.CommandContext(ctx, "gcloud", "auth", "application-default", "login")
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("authentication failed: %w", err)
+	}
+
+	log.Info("Authentication successful. Retrying storage client creation...")
+	client, err = storage.NewClient(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create storage client after authentication: %w", err)
+	}
 	return client, nil
 }
 
@@ -1082,7 +1050,6 @@ func main() {
 	stability := flag.String("stability", "stable", "Device stability level: stable, experimental, deprecated")
 	notifyDiscord := flag.Bool("notify-discord", true, "Send Discord notification after successful publish")
 	notifyOnly := flag.Bool("notify-only", false, "Send Discord notification for an already-published release (reads sizes from manifest)")
-	accessToken := flag.String("access-token", "", "GCS access token (from gcloud auth print-access-token)")
 	debug := flag.Bool("debug", false, "Enable debug logging")
 	promote := flag.Bool("promote", false, "Promote nightly to stable by removing 'nightly' from version name")
 	swap := flag.Bool("swap", false, "Replace existing version's image file while preserving metadata")
@@ -1301,7 +1268,7 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
 	defer cancel()
 
-	client, err := createStorageClientWithAuth(ctx, *accessToken)
+	client, err := createStorageClientWithAuth(ctx)
 	if err != nil {
 		log.WithError(err).Fatal("Failed to create storage client")
 	}
