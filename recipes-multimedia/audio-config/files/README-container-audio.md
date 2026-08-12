@@ -7,7 +7,7 @@ WendyOS provides complete audio and Bluetooth speaker support for containers thr
 
 Containers get audio access through:
 1. **ALSA devices** (`/dev/snd/*`) - Direct hardware access
-2. **PipeWire sockets** (`/run/user/1000/pipewire`) - Modern audio routing
+2. **PipeWire sockets** (`/run/user/1000/pipewire-0`) - Modern audio routing
 3. **PulseAudio compatibility** (`/run/user/1000/pulse`) - Legacy app support
 4. **D-Bus session** (`/run/user/1000/bus`) - Bluetooth control
 
@@ -91,7 +91,7 @@ Once paired, PipeWire automatically routes audio to the Bluetooth speaker.
 ls -la /dev/snd/
 
 # Check if PipeWire socket is accessible
-ls -la /run/user/1000/pipewire/
+ls -la /run/user/1000/pipewire-0
 ```
 
 ### No sound output

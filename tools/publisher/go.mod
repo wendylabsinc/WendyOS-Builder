@@ -7,7 +7,7 @@ require (
 	github.com/SaveTheRbtz/zstd-seekable-format-go/pkg v0.10.0
 	github.com/klauspost/compress v1.18.6
 	github.com/sirupsen/logrus v1.9.3
-	golang.org/x/oauth2 v0.13.0
+	golang.org/x/term v0.13.0
 	google.golang.org/api v0.150.0
 )
 
@@ -26,6 +26,7 @@ require (
 	go.opencensus.io v0.24.0 // indirect
 	golang.org/x/crypto v0.14.0 // indirect
 	golang.org/x/net v0.17.0 // indirect
+	golang.org/x/oauth2 v0.13.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/sys v0.13.0 // indirect
 	golang.org/x/text v0.13.0 // indirect
