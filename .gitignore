@@ -5,3 +5,4 @@ __pycache__/
 *.py[cod]
 
 docs/superpowers
+tools/publisher/publisher
