@@ -7,7 +7,7 @@ and feeds decoded RTSP frames into it, so any container that only knows how \
 to open a V4L2 device can consume a network camera transparently."
 HOMEPAGE = "https://github.com/v4l2loopback/v4l2loopback"
 
-LICENSE = "GPL-2.0-only"
+LICENSE = "GPL-2.0-or-later"
 LIC_FILES_CHKSUM = "file://COPYING;md5=b234ee4d69f5fce4486a80fdaf4a4263"
 
 inherit module
