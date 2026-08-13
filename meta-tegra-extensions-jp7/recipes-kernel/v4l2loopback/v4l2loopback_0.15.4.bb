@@ -32,8 +32,38 @@ COMPATIBLE_MACHINE = "(tegra)"
 
 # Standard single-file Kbuild module (Kbuild just declares
 # obj-m := v4l2loopback.o at the repo root) — no nested build subdir and no
-# custom kbuild driver like NVIDIA's, so plain `inherit module` is enough;
-# no EXTRA_OEMAKE/KERNEL_SRC overrides are needed.
+# custom kbuild driver like NVIDIA's. BUT the upstream top-level Makefile
+# (which module.bbclass's do_compile actually invokes — its own default
+# `all` target, not the Kbuild file directly) resolves the kernel build
+# tree via its OWN variable `KERNEL_DIR` (default:
+# /lib/modules/`uname -r`/build), not the KERNEL_SRC/KERNEL_PATH that
+# module.bbclass's module_do_compile passes by default. Left unset, that
+# fallback resolves to the BUILD HOST's own running kernel (e.g. the
+# Docker build container's kernel) instead of the cross-built target
+# kernel, and do_compile fails with "No such file or directory" on
+# /lib/modules/<host-kernel-version>/build. Verified against an actual
+# build failure on kernel 6.8 (F3, WDY-2430) — this is not a hypothetical.
+EXTRA_OEMAKE += "KERNEL_DIR=${STAGING_KERNEL_DIR}"
+
+# The Makefile's default `all` target (which module.bbclass invokes when
+# MAKE_TARGETS is unset) also builds utils/v4l2loopback-ctl, a standalone
+# userspace CLI for exercising the control device by hand. WendyOS doesn't
+# ship or need it — the agent issues the V4L2LOOPBACK_CTL_* ioctls itself
+# (docs/v4l2loopback-support.md) — and it fails to build here anyway:
+# module_do_compile deliberately unsets CFLAGS/CPPFLAGS and hands the
+# kernel-build CC (no --sysroot) to the whole `all` target, which is
+# correct for the kernel module but leaves the plain userspace
+# v4l2loopback-ctl.c compile unable to find even <sys/types.h>. Restrict
+# the build to just the kernel module, which is also all that
+# `install:` below needs.
+MAKE_TARGETS = "v4l2loopback.ko"
+
+# module_do_install's default MODULES_INSTALL_TARGET ("modules_install")
+# doesn't exist in this Makefile either — its own install target is
+# literally named `install` (which itself invokes the kernel's
+# `modules_install` via `-C $(KERNEL_DIR)`, honoring the MODLIB= override
+# module_do_install passes).
+MODULES_INSTALL_TARGET = "install"
 
 # modules-load.d forces the module to load at boot (so the control device
 # exists for the agent); modprobe.d pins its options (control-device-only,
