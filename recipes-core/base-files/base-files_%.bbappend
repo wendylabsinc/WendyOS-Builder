@@ -8,6 +8,7 @@ SRC_URI += " \
     file://issue \
     file://issue.net \
     file://sysctl.d/99-quiet-console.conf \
+    file://sysctl.d/99-wendyos-pmtu.conf \
     "
 
 do_install:append() {
@@ -24,6 +25,9 @@ do_install:append() {
     # Install sysctl config to quiet console (reduce kernel/audit messages)
     install -d ${D}${sysconfdir}/sysctl.d
     install -m 0644 ${UNPACKDIR}/sysctl.d/99-quiet-console.conf ${D}${sysconfdir}/sysctl.d/
+
+    # Install sysctl config for PMTU black-hole recovery on LTE/CGNAT uplinks (WDY-2443)
+    install -m 0644 ${UNPACKDIR}/sysctl.d/99-wendyos-pmtu.conf ${D}${sysconfdir}/sysctl.d/
 
     # Suppress the upstream Poky /etc/motd disclaimer.
     # Dynamic MOTD comes from update-motd via /etc/profile.d/motd.sh
