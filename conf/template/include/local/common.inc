@@ -34,6 +34,14 @@ BB_DISKMON_DIRS ??= "\
     HALT,${SSTATE_DIR},100M,1K \
     HALT,/tmp,10M,1K"
 
+# Limit BitBake and make parallelism to keep memory usage within the 16 GiB CI job.
+# Keep both values explicit because the build Makefile does not pass them through.
+BB_NUMBER_THREADS ?= "8"
+PARALLEL_MAKE ?= "-j 8"
+
+# Limit zstd compression threads to avoid excessive memory usage in CI.
+ZSTD_THREADS ?= "8"
+
 # Per-recipe parallelism caps for the heavy native C++ compiles. The self-hosted
 # builder runs each job in a container with a hard 16 GiB memory cgroup
 # (MemoryMax=16G / MemoryHigh=14G, see wendylabsinc/ci); uncapped, these natives
@@ -48,7 +56,8 @@ BB_DISKMON_DIRS ??= "\
 # build under cmake/ninja, which honours PARALLEL_MAKE via
 # CMAKE_BUILD_PARALLEL_LEVEL (cmake.bbclass).
 PARALLEL_MAKE:pn-llvm-native = "-j 4"
-PARALLEL_MAKE:pn-grpc-native = "-j 16"
+# 16 would outrank the global pin above: OVERRIDES carries pn-${PN}.
+PARALLEL_MAKE:pn-grpc-native = "-j 4"
 PARALLEL_MAKE:pn-clang-native = "-j 4"
 
 PACKAGECONFIG:append:pn-qemu-system-native = " sdl"
