@@ -10,6 +10,7 @@ on:
       - 'scripts/t234_flashpack_manifest*'
       - 'scripts/make-jetson-disk-img.py'
       - 'scripts/make_jetson_disk_img_test.py'
+      - 'scripts/check_game_controller_support*'
       - 'recipes-core/wendyos-agent/files/*.sh'
       - '.github/device-artifacts.json'
       - '.github/workflows/scripts-ci.yml'
@@ -21,6 +22,7 @@ on:
       - 'scripts/t234_flashpack_manifest*'
       - 'scripts/make-jetson-disk-img.py'
       - 'scripts/make_jetson_disk_img_test.py'
+      - 'scripts/check_game_controller_support*'
       - 'recipes-core/wendyos-agent/files/*.sh'
       - '.github/device-artifacts.json'
       - '.github/workflows/scripts-ci.yml'
@@ -62,3 +64,6 @@ jobs:
 
       - name: Run Jetson raw disk image tests
         run: python3 -m unittest scripts/make_jetson_disk_img_test.py
+
+      - name: Run game-controller support validator tests
+        run: python3 -m unittest scripts/check_game_controller_support_test.py

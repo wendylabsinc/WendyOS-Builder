@@ -1017,6 +1017,25 @@ jobs:
             echo "::endgroup::"
           done
 
+      # Cross-check the post-Kconfig result emitted by each kernel recipe with
+      # the finished image manifest. A symbol may be built in; if it resolved
+      # to a module, its kernel-module package must be in this exact image.
+      - name: Validate native game-controller support
+        working-directory: ${{ github.workspace }}/wendyos
+        env:
+          MAP: ${{ steps.vars.outputs.map }}
+        run: |
+          set -euo pipefail
+          for token in $MAP; do
+            IFS='|' read -r storage board machine <<< "$token"
+            DEPLOY_DIR="$GITHUB_WORKSPACE/build/tmp/deploy/images/$machine"
+            CONFIG="$DEPLOY_DIR/wendyos-game-controller-$machine.config"
+            MANIFEST=$(find "$DEPLOY_DIR" -maxdepth 1 -name 'wendyos-image-*.manifest' ! -type l -print -quit)
+            [[ -f "$CONFIG" ]] || { echo "::error::missing effective kernel config $CONFIG"; exit 1; }
+            [[ -n "$MANIFEST" ]] || { echo "::error::missing image manifest in $DEPLOY_DIR"; exit 1; }
+            python3 scripts/check_game_controller_support.py --config "$CONFIG" --manifest "$MANIFEST"
+          done
+
       # The persistent NVMe cache is written in place by the build (sstate,
       # downloads, repos are symlinked onto it) — no upload/save step needed.
 

@@ -1,5 +1,7 @@
 FILESEXTRAPATHS:prepend := "${THISDIR}/linux-raspberrypi:"
 
+require recipes-kernel/linux/wendy-game-controller.inc
+
 # Add container support kernel config when WENDYOS_CONTAINER_RUNTIME is enabled
 SRC_URI:append:rpi = "${@' file://container.cfg' if d.getVar('WENDYOS_CONTAINER_RUNTIME') == '1' else ''}"
 
@@ -31,4 +33,3 @@ WENDYOS_RPI_CVE_31431 = " \
     "
 
 SRC_URI:append = "${@' ' + d.getVar('WENDYOS_RPI_CVE_31431') if d.getVar('WENDYOS_RPI_KERNEL_66') == '1' else ''}"
-
