@@ -6,25 +6,25 @@
 #
 # WENDYOS_LAYER_TREE="blacksail" makes bootstrap clone every upstream repo under
 # repos/blacksail/ (parallel to repos/scarthgap/). Base-stack SRCREVs mirror the
-# Thor blacksail canary (jetson-agx-thor/repos.overrides), resolved 2026-06-15;
+# Thor blacksail canary (jetson-agx-thor/repos.overrides), resolved 2026-08-04;
 # identical to rpi4-sd / rpi5-sd.
 WENDYOS_LAYER_TREE="blacksail"
 
 # Split-poky on blacksail (oe-core master: LAYERSERIES_CORENAMES="wrynose
 # blacksail", LAYERSERIES_COMPAT_core="blacksail"; meta-yocto + bitbake master).
-SRCREV_BITBAKE="30ccfbb849ec80cddb4383d198a1441af0ea760a"
-SRCREV_OECORE="294409c4bfe392471509d4cb6c1e6fb1063d2b3b"
-SRCREV_METAYOCTO="f49de2f33e37ca971d64215cc1a3669312e1e7c3"
+SRCREV_BITBAKE="c870f5bd96ad02efc02c58133c27bdae3a300e3e"
+SRCREV_OECORE="2faf8e366df74aded7898904b72317521a08e2f6"
+SRCREV_METAYOCTO="9c6cf36c3511b94957aba04002d98bec665e9f1e"
 
 # meta-openembedded + meta-virtualization master still declare wrynose (not
 # blacksail) — bridged via blacksail-compat.inc. Re-pin + drop the bridge once
 # upstream bumps.
-SRCREV_OE="5d90e6543de4d1c39424956c67ff1925a39bf3c8"
-SRCREV_VIRT="022f4356d4a9b389f51472d40a9330aa59f6bb9a"
+SRCREV_OE="0a60011ec174b91104a110c353cbf18748951270"
+SRCREV_VIRT="526c97254fe43e0924df034aaa825f33ec30407c"
 
 # meta-raspberrypi: bumped to upstream master (scarthgap-era default is too old
 # for blacksail oe-core). Same pin as rpi4-sd / rpi5-sd. Pinned for reproducibility.
-SRCREV_RPI="0c76b0feadbe2afa4cec4cd497636e94eca30ec3"
+SRCREV_RPI="a0ebcf5639b391690b27381cc65c56c157a0981b"
 
 # NOTE: like rpi4 (and unlike rpi5), rpi3 (BCM2837) gets NO U-Boot override — the
 # rc4 bump + NVMe patch in u-boot_%.bbappend are raspberrypi5-scoped, so rpi3

@@ -1,6 +1,15 @@
-# Tegra T264 (Thor): wendyos-update OTA (no UEFI capsule update yet).
-# WENDYOS_UPDATE_BOOTLOADER gates the UEFI capsule artefact; Thor uses
-# wendyos-update with rootfs-only swaps for now, so keep it off.
+
+# Tegra T264 (Thor): wendyos-update OTA with UEFI capsule bootloader updates.
+# WENDYOS_UPDATE_BOOTLOADER gates the UEFI capsule artefact AND the
+# /var/lib/wendyos/update-bootloader marker (packagegroup-wendyos-tegra), so with
+# it on, every wendyos-update install stages the capsule (the connector reads the
+# marker from the TARGET rootfs) and the reboot rewrites the inactive boot chain.
+# That is safe only because the capsule now carries the same boot-control
+# overlays as the flash (conf/distro/include/tegra-overlays.inc, required by
+# both packaging consumers) -- an overlay-less capsule erased the fTPM DT node
+# from chain B and left the encrypted /data locked (Thor). Known behaviour: the capsule is staged even for
+# same-version no-op updates (marker is unconditional); gate it per-artifact if
+# that ever becomes a problem.
 WENDYOS_UPDATE_BOOTLOADER = "1"
 
 # Thor runs the wendyos-update OTA stack (wendyos.conf defaults tegra264 to
@@ -50,3 +59,30 @@ WENDYOS_EFI_DEBUG = "0"
 # recipe serves Thor (t264) and Orin (t234).
 # (Was "0" in the wrynose/r38.4 era when no DeepStream recipe existed for Thor.)
 WENDYOS_DEEPSTREAM = "1"
+
+# LUKS2 encryption of /data, sealed to the fTPM. Default ON.
+# Set WENDYOS_DATA_ENCRYPTED = "0" in local.conf for a plain-ext4 /data.
+WENDYOS_DATA_ENCRYPTED ?= "1"
+
+# Master gate for the TPM 2.0 stack itself (fTPM over OP-TEE, plus the Thor
+# DT overlay in tegra-overlays.inc). Encrypting /data needs a TPM at runtime,
+# so it turns this on. Nothing turns encryption on implicitly. Set = "1" in
+# local.conf for a TPM with nothing consuming it. Setting = "0" while
+# WENDYOS_DATA_ENCRYPTED = "1" is a hard error (wendyos-image.bb).
+# meta-tpm gates bbappends/PREFERRED_VERSION on the tpm2 DISTRO feature, so add
+# it only when the stack is on.
+WENDYOS_ENABLE_TPM ?= "${@'1' if d.getVar('WENDYOS_DATA_ENCRYPTED') == '1' else '0'}"
+DISTRO_FEATURES:append = "${@' tpm2' if d.getVar('WENDYOS_ENABLE_TPM') == '1' else ''}"
+
+# meta-tpm warns on every parse when tpm2 is absent from DISTRO_FEATURES
+# (sanity-meta-tpm.bbclass). We layer it unconditionally because BBLAYERS cannot
+# read this gate, so on a TPM-off build that warning is expected noise rather
+# than a problem. Use the layer's own opt-out, but only while the stack is off:
+# with it on, the check still catches a DISTRO_FEATURES append that failed to
+# apply.
+SKIP_META_TPM_SANITY_CHECK = "${@'1' if d.getVar('WENDYOS_ENABLE_TPM') != '1' else '0'}"
+
+# PCR policy for the TPM keyslot: empty = SRK-only (no PCR binding). Thor stays
+# SRK-only until secure boot lands (then bind an OTA-stable PCR). The data-crypt
+# recipe defaults this to "7" for x86 (Secure Boot state); override to SRK-only.
+WENDYOS_TPM_PCRS = ""

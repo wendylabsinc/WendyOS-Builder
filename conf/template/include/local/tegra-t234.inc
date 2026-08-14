@@ -34,8 +34,26 @@ ROOTFSPART_SIZE_DEFAULT = "25769803776"
 IMAGE_ROOTFS_ALIGNMENT:pn-wendyos-image = "131072"
 TEGRA_BLBLOCKSIZE:pn-wendyos-image = "4096"
 
-# OTA uses the UEFI capsule-on-disk bootloader update on t234.
-WENDYOS_UPDATE_BOOTLOADER = "0"
+# OTA uses the UEFI capsule-on-disk bootloader update on t234. Enabled
+# 2026-08-04, matching Thor (tegra-t264.inc) and the distro default of "1"
+# (wendyos.conf). It had stayed "0" after the capsule path was validated on AGX
+# Orin -- the default was simply never flipped, and testing ran with a
+# local.conf override.
+#
+# t234 keeps the prebuilt UEFI firmware (both AGX Orin machine confs pin
+# tegra-uefi-prebuilt; source-built edk2-firmware-tegra is recorded as
+# boot-looping there), so capsule generation depends on the FMP GUID file
+# supplied by
+# meta-tegra-extensions/recipes-bsp/tegra-binaries/tegra-uefi-prebuilt_%.bbappend.
+#
+# UNVERIFIED ON DEVICE: the tegra234 GUID in that bbappend
+# (bf0d4599-20d4-414e-b2c5-3595b1cda402) comes from upstream's documentation,
+# not from an Orin. Only the tegra264 value has been confirmed against a live
+# ESRT. Before trusting a capsule update on Orin, check on the device:
+#   cat /sys/firmware/efi/esrt/entries/entry0/fw_class
+# A mismatch does not fail the build -- the firmware rejects the capsule at
+# update time.
+WENDYOS_UPDATE_BOOTLOADER = "1"
 
 # Persistent journal logs left at the smart default (tracks WENDYOS_OTA):
 # WENDYOS_OTA="wendy" -> persistent on /data.
@@ -52,3 +70,43 @@ WENDYOS_EFI_DEBUG = "0"
 # for when to drop the vendored recipe). COMPATIBLE_MACHINE=(tegra), so the same
 # recipe serves Orin (t234) and Thor (t264).
 WENDYOS_DEEPSTREAM = "1"
+
+# LUKS2 encryption of /data, sealed to the fTPM. Default ON.
+# Set WENDYOS_DATA_ENCRYPTED = "0" in local.conf for a plain-ext4 /data.
+WENDYOS_DATA_ENCRYPTED ?= "1"
+
+# Master gate for the TPM 2.0 stack itself (fTPM over OP-TEE). Encrypting
+# /data needs a TPM at runtime, so it turns this on. Nothing turns encryption
+# on implicitly. Set = "1" in local.conf for a TPM with nothing consuming it.
+# Setting = "0" while WENDYOS_DATA_ENCRYPTED = "1" is a hard error
+# (wendyos-image.bb).
+# t234 needs no DT overlay, unlike Thor: NVIDIA's tegra-optee.dtbo (applied to
+# the kernel DTB on every t234 board via TEGRA_PLUGIN_MANAGER_OVERLAYS) already
+# carries firmware/ftpm status="disabled", and the UEFI kernel-DTB fixup
+# (EnableFtpmNode, edk2-nvidia DxeDtPlatformDtbKernelLoaderLib) flips it to
+# "okay" exactly when the fTPM TA in OP-TEE answers — self-arming. meta-tpm
+# gates bbappends/PREFERRED_VERSION on the tpm2 DISTRO feature, so add it only
+# when the stack is on.
+WENDYOS_ENABLE_TPM ?= "${@'1' if d.getVar('WENDYOS_DATA_ENCRYPTED') == '1' else '0'}"
+DISTRO_FEATURES:append = "${@' tpm2' if d.getVar('WENDYOS_ENABLE_TPM') == '1' else ''}"
+
+# meta-tpm warns on every parse when tpm2 is absent from DISTRO_FEATURES
+# (sanity-meta-tpm.bbclass). We layer it unconditionally because BBLAYERS cannot
+# read this gate, so on a TPM-off build that warning is expected noise rather
+# than a problem. Use the layer's own opt-out, but only while the stack is off:
+# with it on, the check still catches a DISTRO_FEATURES append that failed to
+# apply.
+SKIP_META_TPM_SANITY_CHECK = "${@'1' if d.getVar('WENDYOS_ENABLE_TPM') != '1' else '0'}"
+
+# Build the fTPM TA into OP-TEE (upstream optee-l4t.inc defaults this on only
+# for tegra264). Gated on the TPM knob so a TPM-off Orin build keeps today's
+# bit-identical firmware — and because the UEFI fixup above enables the DT node
+# whenever the TA exists, an ungated "1" would surface /dev/tpmrm0 without the
+# sequencing userspace (no modprobe blacklist -> early load -> RAM-only fTPM).
+OPTEE_ENABLE_FTPM = "${@'1' if d.getVar('WENDYOS_ENABLE_TPM') == '1' else '0'}"
+
+# PCR policy for the TPM keyslot: empty = SRK-only (no PCR binding), until
+# secure boot lands (then bind an OTA-stable PCR). The data-crypt recipe
+# defaults this to "7" for x86 (Secure Boot state); override to SRK-only.
+WENDYOS_TPM_PCRS = ""
+

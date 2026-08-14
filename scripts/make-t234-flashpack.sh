@@ -99,11 +99,20 @@ log "Step 1: sign boot chain + partition images, generate RCM-boot blob (no devi
 # ---------------------------------------------------------------------------
 rm -rf signed rcmboot_blob bootloader_staging secureflash.xml boardvars.sh
 log "zero-key signing (unfused hardware only; fused boards need real keys)"
-# shellcheck disable=SC2153  # DTBFILE/EMC_BCT/... come from the sourced .env.initrd-flash
+# Three positional args: layout, kernel, rootfs image. The helper sources
+# ./flashvars itself for DTB_FILE/ODMDATA/BCTFILE (tegra-flash-helper.sh:154-183
+# at L4T R39.2), which is why .env.initrd-flash no longer carries DTBFILE /
+# EMMC_BCTS / ODMDATA. Same argument list as the bundle's own doexternal.sh.
 "./$FLASH_HELPER" --no-flash --sign -u "" -v "" \
-    flash.xml.in "$DTBFILE" "$EMC_BCT" "$ODMDATA" "$LNXFILE" "$ROOTFS_IMAGE" \
+    flash.xml.in "$LNXFILE" "$ROOTFS_IMAGE" \
     2>&1 | tee -a "$logfile" || err "internal signing failed"
 cp secureflash.xml internal-secureflash.xml
+# initrd-flash pairs that copy with an index rename (initrd-flash:202-203), and
+# the borrowed copy_bootloader_files_t234 reads internal-flash.idx by that name
+# (initrd-flash:408). Renaming here also means the next helper run cannot
+# clobber the internal index with its own layout's flash.idx.
+[ -f flash.idx ] || err "signing did not produce flash.idx"
+mv flash.idx internal-flash.idx
 [ -f rcmboot_blob/rcmbootcmd.txt ] || err "signing did not produce rcmboot_blob/rcmbootcmd.txt"
 # The helper resolves CHIP_SKU (from flashvars) and writes the full identity here.
 set +u
@@ -131,7 +140,7 @@ log "Step 3: external layout (sign or copy)"
 if [ -e external-flash.xml.in ]; then
     if grep -q 'oem_sign="true"' external-flash.xml.in 2>/dev/null; then
         "./$FLASH_HELPER" --no-flash --sign --external-device -u "" -v "" \
-            external-flash.xml.in "$DTBFILE" "$EMC_BCT" "$ODMDATA" "$LNXFILE" "$ROOTFS_IMAGE" \
+            external-flash.xml.in "$LNXFILE" "$ROOTFS_IMAGE" \
             2>&1 | tee -a "$logfile" || err "external signing failed"
         mv secureflash.xml external-secureflash.xml
     else
@@ -158,9 +167,18 @@ else
 fi
 # Pre-signed layouts name the sparse image; convert back to the raw image name.
 simgname="${ROOTFS_IMAGE%.*}.img"
+# The kernel DTB the boot chain was signed with. Read the name the helper
+# actually produced instead of re-deriving it from flashvars: the helper rewrites
+# DTB_FILE per BOARDSKU for some 3701 modules (tegra-flash-helper.sh:581-589),
+# and it copies the result to kernel_<dtb> in this directory
+# (tegra-flash-helper.sh:694-700). Leading space in the pattern, as upstream has
+# it (tegra-flash-helper.sh:715), so BPFDTB_FILE and friends are left alone.
+mapfile -t kernel_dtbs < <(find . -maxdepth 1 -name 'kernel_*.dtb' -printf '%f\n')
+[ "${#kernel_dtbs[@]}" -eq 1 ] || err "expected exactly 1 kernel_*.dtb after signing, found ${#kernel_dtbs[@]}"
+kernel_dtbfile="${kernel_dtbs[0]}"
 # shellcheck disable=SC2086  # $datased is intentionally a sed arg, split on space
 sed -i -e"s,$simgname,$ROOTFS_IMAGE," -e"s,APPFILE_b,$ROOTFS_IMAGE," -e"s,APPFILE,$ROOTFS_IMAGE," \
-    -e"s,DTB_FILE,kernel_$DTBFILE," $datased initrd-flash.xml
+    -e"s, DTB_FILE,$kernel_dtbfile," $datased initrd-flash.xml
 
 # ---------------------------------------------------------------------------
 log "Step 5: assemble flashpack tree"

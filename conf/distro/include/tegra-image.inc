@@ -5,8 +5,27 @@
 # config-parse time; this file is required from wendyos-image.bb (recipe
 # parse), which is too late.
 
-# Apply our UEFI boot-priority overlay during flash
-TEGRA_BOOTCONTROL_OVERLAYS += "boot-priority.dtbo"
+# Boot-control DT overlays (boot-priority + the gated fTPM overlay). The list
+# lives in tegra-overlays.inc, shared verbatim with the tegra-uefi-capsules
+# bbappend so capsule updates carry the same DTB content as the flash. 
+# This file only adds the image-build dependency on the overlay artifact.
+# Enabling a TPM has export-compliance implications on some Jetson SKUs; clear
+# with compliance before shipping a TPM-enabled unit.
+require conf/distro/include/tegra-overlays.inc
+EXTRA_IMAGEDEPENDS:append = "${@' tegra-ftpm-overlay' if d.getVar('WENDYOS_ENABLE_TPM') == '1' and d.getVar('WENDYOS_FTPM_DTBO') else ''}"
+
+# TPM2 + LUKS2 userspace for /data encryption (gated on WENDYOS_DATA_ENCRYPTED).
+# Mirrors x86-image.inc: cryptsetup (luksFormat/open), systemd-crypt
+# (systemd-cryptenroll + the boot-time systemd-cryptsetup@data), the shared
+# data-crypt (first-boot enroll + crypttab), and tpm2-tools (on-device debug).
+# libtss2 arrives as a systemd runtime dependency once the tpm2 PACKAGECONFIG is on.
+WENDYOS_TEGRA_TPM_INSTALL = " \
+    cryptsetup \
+    systemd-crypt \
+    data-crypt \
+    tpm2-tools \
+    "
+IMAGE_INSTALL:append = "${@' ' + d.getVar('WENDYOS_TEGRA_TPM_INSTALL') if d.getVar('WENDYOS_DATA_ENCRYPTED') == '1' else ''}"
 
 # Silence the BPMP coprocessor's serial logging. meta-tegra defaults
 # TEGRA_BPMP_SERIAL_LOGGING to "1" (see tegra-bootfiles_*.bb), which
