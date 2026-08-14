@@ -583,6 +583,64 @@ jobs:
             echo "WENDYOS_AGENT_SHA256=$sha"
           } >> "$GITHUB_ENV"
 
+      # The paths filter only knows that a file under a heavy directory changed.
+      # A dry run lists the tasks a real build would execute without running or
+      # stamping any of them, so no compile task means the matrix restores from
+      # sstate unaided and the warm would rebuild what it already has.
+      - name: Probe whether a warm is needed
+        id: probe
+        timeout-minutes: 30
+        continue-on-error: true
+        working-directory: ${{ github.workspace }}/wendyos
+        env:
+          MAP: ${{ steps.vars.outputs.map }}
+        run: |
+          set -euo pipefail
+          TREE=$(. "$GITHUB_WORKSPACE/build/.wendyos-env"; echo "$WENDYOS_LAYER_TREE")
+          warm=false
+          probed=0
+          for token in $MAP; do
+            IFS='|' read -r _ board machine <<< "$token"
+            probed=$((probed + 1))
+            {
+              printf 'WENDYOS_LAYER_TREE = "%s"\n\n' "$TREE"
+              cat "conf/template/boards/$board/local.conf"
+            } > "$GITHUB_WORKSPACE/build/conf/local.conf"
+            LOG="$RUNNER_TEMP/probe-$machine.log"
+            # errexit does not apply inside a condition, so without these a
+            # failed setup would let bitbake probe an unconfigured tree.
+            if ! (
+              cd "$GITHUB_WORKSPACE" || exit 1
+              set +u
+              # shellcheck source=/dev/null
+              . ./build/.wendyos-env || exit 1
+              # shellcheck source=/dev/null
+              source "./repos/${WENDYOS_LAYER_TREE}/openembedded-core/oe-init-build-env" build || exit 1
+              BB_ENV_PASSTHROUGH_ADDITIONS="MACHINE WENDYOS_AGENT_VERSION WENDYOS_AGENT_SHA256" \
+                MACHINE="$machine" bitbake -n wendyos-image
+            ) > "$LOG" 2>&1; then
+              echo "::warning::probe failed for $machine; warming"
+              tail -30 "$LOG" || true
+              warm=true; break
+            fi
+            # These rebuild on every run by construction — they embed the build
+            # commit or regenerate boot files — so their compile is noise, not
+            # work. Excluding them beats listing the heavy recipes instead: an
+            # unrecognised recipe still counts, so the gate errs toward warming.
+            noise='wendyos-identity|base-files|rpi-bootfiles|rpi-cmdline|tegra-bootcontrol-overlay'
+            compiles=$(grep -E '^NOTE: Running task .*:do_(compile|configure|compile_kernelmodules)\)$' "$LOG" \
+              | grep -vcE "/(${noise})[_.]" || true)
+            missed=$(sed -n 's/.*Sstate summary:.*Missed \([0-9]*\).*/\1/p' "$LOG" | tail -1)
+            echo "$machine: ${compiles:-?} significant compile task(s), ${missed:-?} sstate object(s) missing" \
+              | tee -a "$GITHUB_STEP_SUMMARY"
+            if [[ -z "$missed" || "${compiles:-1}" -gt 0 ]]; then
+              warm=true; break
+            fi
+          done
+          # An empty MAP is no evidence either way, so do not claim a skip.
+          [[ "$probed" -gt 0 ]] || warm=true
+          echo "warm=$warm" >> "$GITHUB_OUTPUT"
+
       # Build every storage variant of this device, one after another, in the
       # single build tree bootstrapped above. Each variant only needs its own
       # DEVICE/STORAGE/MACHINE, which all live in the board local.conf; repos,
@@ -597,6 +655,8 @@ jobs:
       # share one TMPDIR safely — they run sequentially and deploy under
       # tmp/deploy/images/<machine>/.
       - name: Build image (all storage variants)
+        # Unset when the probe itself failed, which reads as warm.
+        if: steps.probe.outputs.warm != 'false'
         working-directory: ${{ github.workspace }}/wendyos
         env:
           MAP: ${{ steps.vars.outputs.map }}
@@ -661,6 +721,8 @@ jobs:
     # !cancelled() keeps the skipped-warm path alive, since a plain `needs`
     # on a skipped job would skip this job too. A FAILED warm build stops the
     # run here: the matrix would fail the same way, just eight times slower.
+    # A warm skipped by the probe compiled nothing, so that early-failure
+    # guarantee only covers builds the probe judged worth warming.
     if: ${{ !cancelled() && needs.detect-changes.outputs.devices != '' && (needs.warm-caches.result == 'success' || needs.warm-caches.result == 'skipped') }}
     permissions:
       contents: read
