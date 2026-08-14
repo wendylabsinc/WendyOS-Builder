@@ -67,6 +67,9 @@ jobs:
       warm-devices: ${{ steps.set.outputs.warm-devices }}
       version: ${{ steps.version.outputs.version }}
       is-release: ${{ steps.version.outputs.is-release }}
+      agent-version: ${{ steps.agent.outputs.version }}
+      agent-sha-arm64: ${{ steps.agent.outputs.sha-arm64 }}
+      agent-sha-amd64: ${{ steps.agent.outputs.sha-amd64 }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -141,6 +144,38 @@ jobs:
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Build version: $VERSION"
+
+      # Resolved once for the whole run: a release landing mid-run would
+      # otherwise pin different agent versions to different devices.
+      - id: agent
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          release_json="$(curl -sSfL --retry 3 --retry-all-errors --retry-delay 5 \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/wendylabsinc/WendyOS/releases/latest")"
+          # Shape-checked because the consuming steps interpolate these.
+          version="$(jq -r '.tag_name' <<<"$release_json")"
+          if [[ ! "$version" =~ ^[A-Za-z0-9._-]+$ || "$version" == "null" ]]; then
+            echo "unusable agent tag: '$version'" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          # A missing arch stays empty rather than fatal, so only the jobs
+          # that need that arch fail.
+          for arch in arm64 amd64; do
+            sha="$(jq -r --arg a "$arch" '.assets[]
+              | select(.name | test("^wendy-agent-linux-\($a)-.*\\.tar\\.gz$"))
+              | .digest' <<<"$release_json" | sed 's/^sha256://')"
+            [[ "$sha" =~ ^[0-9a-f]{64}$ ]] || {
+              echo "::warning::no $arch digest for wendyos-agent $version"
+              sha=""
+            }
+            echo "sha-$arch=$sha" >> "$GITHUB_OUTPUT"
+          done
+          echo "Resolved wendyos-agent $version for the whole run"
 
       - id: set
         env:
@@ -553,34 +588,22 @@ jobs:
       # passing the arm64 sha to an amd64 build fails do_fetch on checksum.
       - name: Resolve latest wendyos-agent version
         env:
-          GH_TOKEN: ${{ github.token }}
           DEVICE: ${{ matrix.device }}
+          VERSION: ${{ needs.detect-changes.outputs.agent-version }}
+          SHA_ARM64: ${{ needs.detect-changes.outputs.agent-sha-arm64 }}
+          SHA_AMD64: ${{ needs.detect-changes.outputs.agent-sha-amd64 }}
         run: |
           set -euo pipefail
           case "$DEVICE" in
-            generic-x86-64) ARCH=amd64 ;;
-            *)              ARCH=arm64 ;;
+            generic-x86-64) ARCH=amd64; SHA="$SHA_AMD64" ;;
+            *)              ARCH=arm64; SHA="$SHA_ARM64" ;;
           esac
-
-          release_json="$(curl -sSfL \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/wendylabsinc/WendyOS/releases/latest")"
-
-          version="$(jq -r '.tag_name' <<<"$release_json")"
-          sha="$(jq -r --arg arch "$ARCH" '.assets[]
-            | select(.name | test("^wendy-agent-linux-\($arch)-.*\\.tar\\.gz$"))
-            | .digest' <<<"$release_json" | sed 's/^sha256://')"
-
-          if [[ -z "$version" || "$version" == "null" || -z "$sha" || "$sha" == "null" ]]; then
-            echo "Failed to resolve wendyos-agent version/sha for arch '$ARCH' (version='$version' sha='$sha')" >&2
-            exit 1
-          fi
-
-          echo "Resolved wendyos-agent $version for $ARCH (sha256=$sha)"
+          [[ -n "$VERSION" && -n "$SHA" ]] \
+            || { echo "no wendyos-agent $ARCH asset resolved for this run" >&2; exit 1; }
+          echo "Resolved wendyos-agent $VERSION for $ARCH (sha256=$SHA)"
           {
-            echo "WENDYOS_AGENT_VERSION=$version"
-            echo "WENDYOS_AGENT_SHA256=$sha"
+            echo "WENDYOS_AGENT_VERSION=$VERSION"
+            echo "WENDYOS_AGENT_SHA256=$SHA"
           } >> "$GITHUB_ENV"
 
       # The paths filter only knows that a file under a heavy directory changed.
@@ -1006,34 +1029,22 @@ jobs:
       # passing the arm64 sha to an amd64 build fails do_fetch on checksum.
       - name: Resolve latest wendyos-agent version
         env:
-          GH_TOKEN: ${{ github.token }}
           DEVICE: ${{ matrix.device }}
+          VERSION: ${{ needs.detect-changes.outputs.agent-version }}
+          SHA_ARM64: ${{ needs.detect-changes.outputs.agent-sha-arm64 }}
+          SHA_AMD64: ${{ needs.detect-changes.outputs.agent-sha-amd64 }}
         run: |
           set -euo pipefail
           case "$DEVICE" in
-            generic-x86-64) ARCH=amd64 ;;
-            *)              ARCH=arm64 ;;
+            generic-x86-64) ARCH=amd64; SHA="$SHA_AMD64" ;;
+            *)              ARCH=arm64; SHA="$SHA_ARM64" ;;
           esac
-
-          release_json="$(curl -sSfL \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/wendylabsinc/WendyOS/releases/latest")"
-
-          version="$(jq -r '.tag_name' <<<"$release_json")"
-          sha="$(jq -r --arg arch "$ARCH" '.assets[]
-            | select(.name | test("^wendy-agent-linux-\($arch)-.*\\.tar\\.gz$"))
-            | .digest' <<<"$release_json" | sed 's/^sha256://')"
-
-          if [[ -z "$version" || "$version" == "null" || -z "$sha" || "$sha" == "null" ]]; then
-            echo "Failed to resolve wendyos-agent version/sha for arch '$ARCH' (version='$version' sha='$sha')" >&2
-            exit 1
-          fi
-
-          echo "Resolved wendyos-agent $version for $ARCH (sha256=$sha)"
+          [[ -n "$VERSION" && -n "$SHA" ]] \
+            || { echo "no wendyos-agent $ARCH asset resolved for this run" >&2; exit 1; }
+          echo "Resolved wendyos-agent $VERSION for $ARCH (sha256=$SHA)"
           {
-            echo "WENDYOS_AGENT_VERSION=$version"
-            echo "WENDYOS_AGENT_SHA256=$sha"
+            echo "WENDYOS_AGENT_VERSION=$VERSION"
+            echo "WENDYOS_AGENT_SHA256=$SHA"
           } >> "$GITHUB_ENV"
 
       # Build every storage variant of this device, one after another, in the
