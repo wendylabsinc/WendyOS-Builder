@@ -2,17 +2,19 @@
 
 DL_DIR = "${TOPDIR}/../downloads"
 
-# RPi kernel source mirror. The self-hosted runner image bakes a bitbake mirror
-# tarball of the 5+ GB raspberrypi/linux kernel tree at /opt/source-mirror
-# (wendylabsinc/ci, seed-kernel-source-mirror.sh). Without this, the
-# linux-raspberrypi do_fetch cold-clones that tree from GitHub at job time,
-# which intermittently stalls / exits 128 and fails the RPi builds. Point
-# PREMIRRORS at the baked tarball so the fetch is a local extract instead.
+# RPi kernel source mirror. The self-hosted runner image bakes bitbake mirror
+# tarballs at /opt/source-mirror (wendylabsinc/ci, seed-kernel-source-mirror.sh).
+# Without these, linux-raspberrypi's do_fetch cold-clones at job time, which
+# intermittently stalls / exits 128 and fails the RPi builds. Point PREMIRRORS at
+# the baked tarballs so the fetch is a local extract instead.
 #
 # Guarded on the directory existing, so local and dev builds (no mirror) are
-# unaffected; if the tarball is ever absent, this is a PREMIRRORS (not
+# unaffected; if a tarball is ever absent, this is a PREMIRRORS (not
 # BB_FETCH_PREMIRRORONLY), so bitbake still falls back to the upstream SRC_URI.
 PREMIRRORS:prepend = "${@'git://github.com/raspberrypi/linux.* file:///opt/source-mirror/ \n' if os.path.isdir('/opt/source-mirror') else ''}"
+# The kernel recipe fetches a second git source, the kmeta, which the pattern
+# above does not match.
+PREMIRRORS:prepend = "${@'git://git.yoctoproject.org/yocto-kernel-cache.* file:///opt/source-mirror/ \n' if os.path.isdir('/opt/source-mirror') else ''}"
 # sstate-cache is partitioned per layer tree so cross-series builds (e.g.
 # scarthgap Orin and wrynose Thor on the same workspace) don't share
 # signatures or accidentally collide. Downloads stay shared — source
