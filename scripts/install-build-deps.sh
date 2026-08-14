@@ -82,8 +82,13 @@ tmp_s5=$(mktemp -d)
 wget -qO "${tmp_s5}/s5cmd.tar.gz" \
     "https://github.com/peak/s5cmd/releases/download/v${S5CMD_VERSION}/s5cmd_${S5CMD_VERSION}_Linux-${s5cmd_arch}.tar.gz"
 # Verify the download against the release's published checksums (finding H9).
+# NOTE: the checksums asset itself is NOT version-prefixed (unlike every other
+# release asset) — it's published as the literal name "s5cmd_checksums.txt"
+# regardless of release version (verified against the v2.2.2 release's actual
+# asset list via the GitHub releases API). The per-file entries *inside* it
+# still are version-prefixed, which is what the awk lookup below matches on.
 wget -qO "${tmp_s5}/checksums.txt" \
-    "https://github.com/peak/s5cmd/releases/download/v${S5CMD_VERSION}/s5cmd_${S5CMD_VERSION}_checksums.txt"
+    "https://github.com/peak/s5cmd/releases/download/v${S5CMD_VERSION}/s5cmd_checksums.txt"
 s5cmd_sha="$(awk -v f="s5cmd_${S5CMD_VERSION}_Linux-${s5cmd_arch}.tar.gz" '$2 == f {print $1}' "${tmp_s5}/checksums.txt")"
 [[ -n "${s5cmd_sha}" ]] || { echo "no checksum for s5cmd_${S5CMD_VERSION}_Linux-${s5cmd_arch}.tar.gz" >&2; exit 1; }
 echo "${s5cmd_sha}  ${tmp_s5}/s5cmd.tar.gz" | sha256sum -c -
