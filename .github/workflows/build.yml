@@ -978,6 +978,19 @@ jobs:
               ARGS+=(--sbom "$SBOM_FILE")
             fi
 
+            # Present only where WENDYOS_DRIVER_EXTENSIONS is on. The filename
+            # carries uname -r, the key add-ons and the device check both use.
+            DEVKIT_FILE=$(find "$DEPLOY_DIR" -maxdepth 1 -name 'wendyos-kernel-devkit-*.tar.zst' -print -quit 2>/dev/null || true)
+            if [[ -n "$DEVKIT_FILE" && -f "$DEVKIT_FILE" ]]; then
+              DEVKIT_BASE=$(basename "$DEVKIT_FILE" .tar.zst)
+              DEVKIT_KVER=${DEVKIT_BASE##*-${MACHINE}-}
+              if [[ "$DEVKIT_KVER" == "$DEVKIT_BASE" ]]; then
+                echo "::error::devkit $DEVKIT_BASE does not carry machine $MACHINE; refusing to publish it"
+                exit 1
+              fi
+              ARGS+=(--devkit-file "$DEVKIT_FILE" --devkit-kernel "$DEVKIT_KVER" --devkit-machine "$MACHINE")
+            fi
+
             # No retry loop: uploads go to unique per-version paths (no shared
             # state to race on) and the publisher's storage client already
             # retries transient errors internally.
@@ -1304,3 +1317,24 @@ jobs:
             VERSION=$(jq -r .version <<<"$row")
             "$RUNNER_TEMP/publisher" --device "$DEVICE" --version "$VERSION" --pr "$PR_NUMBER" --master-manifest-only --nightly --access-token "$TOKEN" </dev/null
           done
+
+  # ---------------------------------------------------------------------------
+  # drivers: rebuild every add-on against the devkit this run published. A kernel
+  # change moves uname -r, invalidating every published .raw, so rebuilding here
+  # keeps (driver, kernel) coverage complete. No devkit published means no work.
+  # ---------------------------------------------------------------------------
+  drivers:
+    name: Driver add-ons
+    needs: [detect-changes, publish, publish-pr]
+    # No devices check: a driver-only PR skips the matrix and is exactly the
+    # case this job has to cover.
+    if: ${{ !cancelled() }}
+    # A called workflow cannot widen these, and id-token is not granted by
+    # default, so the add-on publish could not mint an OIDC token without it.
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/drivers.yml
+    with:
+      version: ${{ needs.detect-changes.outputs.version }}
+    secrets: inherit
