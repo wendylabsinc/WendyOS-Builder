@@ -53,9 +53,9 @@ jobs:
   # ---------------------------------------------------------------------------
   # detect-changes: compute the build matrix.
   # On main / workflow_dispatch we always build every device (nightly).
-  # On pull_request we also always build every device: PR images back
-  # `wendy os install --pr`, which needs an image for the user's target
-  # regardless of which paths changed in the PR.
+  # On pull_request we build every device so `wendy os install --pr` has an
+  # image for the user's target — except a driver-only PR, which changes no OS
+  # and is covered by drivers.yml instead.
   # ---------------------------------------------------------------------------
   detect-changes:
     name: Detect affected devices
@@ -70,6 +70,23 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ inputs.version }}
+
+      # No OS rebuild can change an add-on built against a published devkit.
+      # 'os' is '**' minus the driver paths, so a PR touching both still builds.
+      - id: filter
+        if: github.event_name == 'pull_request'
+        uses: dorny/paths-filter@v4
+        with:
+          filters: |
+            drivers:
+              - 'drivers/**'
+              - 'scripts/build-driver.sh'
+              - 'scripts/pack-sysext.sh'
+            os:
+              - '**'
+              - '!drivers/**'
+              - '!scripts/build-driver.sh'
+              - '!scripts/pack-sysext.sh'
 
       - id: version
         env:
@@ -107,6 +124,8 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           INPUT_DEVICE: ${{ inputs.device }}
+          FILTER_DRIVERS: ${{ steps.filter.outputs.drivers }}
+          FILTER_OS: ${{ steps.filter.outputs.os }}
         run: |
           set -euo pipefail
 
@@ -177,8 +196,16 @@ jobs:
             exit 0
           fi
 
-          # PR builds force-build every device so `wendy os install --pr` always
-          # has an image for the user's target, regardless of which paths changed.
+          # A driver-only PR builds no OS image: drivers.yml covers it against the
+          # already-published devkit, in minutes rather than hours.
+          if [[ "${FILTER_DRIVERS:-}" == "true" && "${FILTER_OS:-}" != "true" ]]; then
+            echo "Trigger=pull_request: driver-only change, skipping the device matrix."
+            echo 'matrix={"include":[]}' >> "$GITHUB_OUTPUT"
+            echo "devices=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Any other PR builds every device, so --pr installs resolve.
           echo "Trigger=pull_request: force-building all devices for --pr installs."
           emit_all
           exit 0
