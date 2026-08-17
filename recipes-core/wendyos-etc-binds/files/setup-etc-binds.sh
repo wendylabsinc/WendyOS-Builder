@@ -39,18 +39,9 @@ then
     chmod 755 "${DATA_ETC}/wendyos"
 fi
 
-# Seed device-type to /data on first boot only. Hardware identity is
-# immutable for the life of the unit, so this copy runs once and the
-# /data copy persists across every subsequent boot and OTA.
-if [ -f /etc/wendyos/device-type ] && [ ! -f "${DATA_ETC}/wendyos/device-type" ]
-then
-    log_info "Seeding device-type to ${DATA_ETC}/wendyos/"
-    cp -p /etc/wendyos/device-type "${DATA_ETC}/wendyos/device-type"
-fi
-
-# Bind-mount entire /etc/wendyos/ directory
-# This persists device-uuid, device-name, device-type, and any other
-# identity files
+# Bind-mount entire /etc/wendyos/ so runtime identity (device-uuid, device-name)
+# persists across OTA. Image-derived files (version.txt, commit, device-type) are
+# refreshed from the rootfs below.
 if ! mountpoint -q /etc/wendyos
 then
     log_info "Bind-mounting ${DATA_ETC}/wendyos → /etc/wendyos"
@@ -83,6 +74,13 @@ if mountpoint -q /etc/wendyos && [ -f /usr/lib/wendyos/commit ]
 then
     log_info "Refreshing /etc/wendyos/commit from /usr/lib/wendyos/"
     cp -p /usr/lib/wendyos/commit /etc/wendyos/commit
+fi
+
+# Same OTA-freshness refresh for device-type (image-derived; see version.txt above).
+if mountpoint -q /etc/wendyos && [ -f /usr/lib/wendyos/device-type ]
+then
+    log_info "Refreshing /etc/wendyos/device-type from /usr/lib/wendyos/"
+    cp -p /usr/lib/wendyos/device-type /etc/wendyos/device-type
 fi
 
 # [Note]
