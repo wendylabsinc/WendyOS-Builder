@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"cloud.google.com/go/storage"
 	"github.com/sirupsen/logrus"
@@ -40,6 +41,16 @@ const (
 	// flushes; 32 MiB keeps the socket busier. This is a per-part in-flight
 	// buffer, not the whole part, so memory stays bounded.
 	partChunkSize = 32 << 20 // 32 MiB
+
+	// Per-file upload timeout parameters for uploadTimeoutFor. The floor
+	// throughput is deliberately far below the ~113 MB/s a healthy runner
+	// link sustains: it is the worst degradation we tolerate before giving
+	// up, sized so that concurrent big files sharing a saturated link still
+	// fit their individual budgets (the 0.18.1 release saw ~4-7 MB/s per
+	// file and blew the old shared 30-minute context).
+	uploadTimeoutFloor     = 10 * time.Minute
+	uploadTimeoutHeadroom  = 5 * time.Minute
+	uploadFloorBytesPerSec = 2 << 20 // 2 MiB/s
 )
 
 // crc32cTable is the Castagnoli table GCS uses for its CRC32C object checksums.
@@ -55,6 +66,19 @@ var (
 	// which is only the case in tests that never set it.
 	uploadSem chan struct{}
 )
+
+// uploadTimeoutFor returns the deadline budget for uploading one file of the
+// given size: transfer time at the floor throughput plus fixed headroom for
+// compose/finalize round-trips, never less than the floor. Each file gets its
+// own budget so one slow multi-GB upload cannot starve the others of a shared
+// deadline.
+func uploadTimeoutFor(size int64) time.Duration {
+	timeout := time.Duration(size/uploadFloorBytesPerSec)*time.Second + uploadTimeoutHeadroom
+	if timeout < uploadTimeoutFloor {
+		return uploadTimeoutFloor
+	}
+	return timeout
+}
 
 // acquireUploadSlot blocks until a slot on the global upload semaphore is free
 // or ctx is cancelled. A nil semaphore (tests) never blocks.

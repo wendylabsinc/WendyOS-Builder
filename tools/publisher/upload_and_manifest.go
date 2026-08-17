@@ -1294,9 +1294,11 @@ func main() {
 		}
 	}
 
-	// Create context with timeout and storage client
-	// 30 minute timeout should be sufficient for most uploads
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	// Whole-run safety net so a wedged run cannot hang CI until the job-level
+	// timeout. Individual file uploads carry their own tighter, size-scaled
+	// deadlines (uploadTimeoutFor), so this must stay comfortably above the
+	// budget of the largest artifact we publish (~7 GB -> ~65 minutes).
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
 	defer cancel()
 
 	client, err := createStorageClientWithAuth(ctx, *accessToken)
@@ -1943,6 +1945,15 @@ func uploadFile(ctx context.Context, bucket *storage.BucketHandle, prefix, local
 	if err != nil {
 		return "", fmt.Errorf("failed to stat local file: %w", err)
 	}
+
+	// Each file gets its own size-scaled deadline. The parent context is only
+	// a coarse whole-run safety net; without a per-file budget, several multi-GB
+	// artifacts uploading concurrently on a degraded link drain the shared
+	// deadline and the last one to finish dies (0.18.1 orin-nano release).
+	timeout := uploadTimeoutFor(localInfo.Size())
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
 	obj := bucket.Object(destinationPath)
 	if existingAttrs, err := obj.Attrs(ctx); err == nil && existingAttrs.Size == localInfo.Size() {
 		log.WithField("path", destinationPath).Info("File already in GCS with matching size, skipping upload")
@@ -1958,6 +1969,9 @@ func uploadFile(ctx context.Context, bucket *storage.BucketHandle, prefix, local
 	if len(plan) > 1 {
 		logComposePlan(destinationPath, localInfo.Size(), plan)
 		if err := uploadFileComposite(ctx, bucketComposer{bucket: bucket}, uploadSem, localPath, destinationPath, contentType, localInfo.Size(), plan, partChunkSize); err != nil {
+			if ctx.Err() == context.DeadlineExceeded {
+				err = fmt.Errorf("upload of %s (%d bytes) exceeded its %v budget: %w", filename, localInfo.Size(), timeout, err)
+			}
 			log.WithError(err).Error("Composite upload failed")
 			return "", err
 		}
