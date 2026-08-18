@@ -29,10 +29,6 @@ PACKAGECONFIG:append = " pam"
 # Debug packages are not deployed to the target image, so this has no runtime impact.
 INHIBIT_PACKAGE_DEBUG_SPLIT = "1"
 
-# systemd-sysext is off by default in oe-core and is what merges driver add-ons onto /usr.
-# Keyed on the feature rather than a machine family, since nothing about it is board-specific.
-PACKAGECONFIG:append = "${@' sysext' if d.getVar('WENDYOS_DRIVER_EXTENSIONS') == '1' else ''}"
-
 # RPi5-specific systemd extensions — isolated so Tegra/QEMU builds are unaffected
 require ${@'rpi-systemd.inc' if 'rpi' in d.getVar('MACHINEOVERRIDES').split(':') else ''}
 

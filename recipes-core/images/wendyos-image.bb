@@ -169,27 +169,6 @@ IMAGE_INSTALL:append = " \
     ${@oe.utils.ifelse(d.getVar('WENDYOS_CONTAINER_RUNTIME') == '1', ' packagegroup-wendyos-container', '')} \
     "
 
-# Driver add-ons: the boot-time service that merges .raw add-ons from /data onto /usr.
-IMAGE_INSTALL:append = " \
-    ${@oe.utils.ifelse(d.getVar('WENDYOS_DRIVER_EXTENSIONS') == '1', ' wendyos-sysext-apply', '')} \
-    "
-
-# Build and deploy the devkit alongside the image; it is not installed in the rootfs.
-# :do_deploy is explicit because a bare entry maps to do_populate_sysroot, which never
-# reaches the devkit's deploy task and leaves DEPLOY_DIR_IMAGE without the tarball.
-EXTRA_IMAGEDEPENDS += "${@oe.utils.ifelse(d.getVar('WENDYOS_DRIVER_EXTENSIONS') == '1', 'wendyos-kernel-devkit:do_deploy', '')}"
-
-# The squashfs/overlay kernel fragments are wired only into the rpi kernel bbappend, so
-# enabling this elsewhere yields an image whose merge service cannot work. SkipRecipe
-# rather than bb.fatal, which would abort the whole cooker parse including unrelated
-# targets.
-python __anonymous() {
-    if d.getVar('WENDYOS_DRIVER_EXTENSIONS') == '1' and \
-       'rpi' not in (d.getVar('MACHINEOVERRIDES') or '').split(':'):
-        raise bb.parse.SkipRecipe("WENDYOS_DRIVER_EXTENSIONS is RPi-only: this machine "
-                                  "has no squashfs/overlay kernel support for the merge")
-}
-
 # Note: gadget-network-config (standalone dnsmasq) removed.
 # USB gadget IPv4 mode is controlled by WENDYOS_USB_NET_MODE (see wendyos.conf).
 
