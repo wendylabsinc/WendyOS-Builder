@@ -275,3 +275,43 @@ jobs:
           fi
 
           "$RUNNER_TEMP/publisher" "${ARGS[@]}"
+
+      - name: Verify what was published
+        env:
+          DRIVER: ${{ matrix.driver }}
+          DEVICE: ${{ matrix.device }}
+          KERNEL: ${{ matrix.kernel }}
+          OS_VERSION: ${{ matrix.os_version }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          PREFIX=""
+          if [[ "${GITHUB_EVENT_NAME:-}" == "pull_request" ]]; then
+            PREFIX="pr/${PR_NUMBER}/"
+          fi
+
+          # The manifest is what the CLI resolves an add-on through, so assert the
+          # contract it states: the bytes served must be the bytes we just built.
+          manifest=$(curl -sSfL --retry 3 --retry-all-errors \
+            "${PUBLIC_BASE}/${PREFIX}manifests/${DEVICE}.json")
+          entry=$(jq -c --arg v "$OS_VERSION" --arg n "$DRIVER" --arg k "$KERNEL" \
+            '.versions[$v].extensions[]? | select(.name == $n and .kernel_version == $k)' \
+            <<<"$manifest")
+          if [[ -z "$entry" ]]; then
+            echo "::error::no manifest entry for $DRIVER ($KERNEL) under $OS_VERSION"
+            exit 1
+          fi
+
+          # An add-on republishes to a path it already used, so a public-cache hit
+          # would check a stale copy rather than what GCS now holds.
+          curl -sSfL --retry 3 --retry-all-errors -o /tmp/published.raw \
+            "${PUBLIC_BASE}/$(jq -r .path <<<"$entry")?cachebust=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+
+          want=$(jq -r .sha256 <<<"$entry")
+          served=$(sha256sum /tmp/published.raw | cut -d' ' -f1)
+          built=$(sha256sum "$GITHUB_WORKSPACE/$DRIVER.raw" | cut -d' ' -f1)
+          if [[ "$served" != "$want" ]] || [[ "$served" != "$built" ]]; then
+            echo "::error::served $served, manifest $want, built $built"
+            exit 1
+          fi
+          echo "verified ${DRIVER} for ${KERNEL}: ${served}" | tee -a "$GITHUB_STEP_SUMMARY"

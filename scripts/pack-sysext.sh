@@ -143,7 +143,14 @@ WENDYOS_KERNEL=$KVER
 EOF
 
 # --- image ---------------------------------------------------------------------------
-"$MKSQUASHFS" "$STAGE" "$TMP_OUT" -comp xz -noappend -no-progress -all-root -quiet
+# Deterministic output: mksquashfs otherwise stamps the build time into the superblock
+# and the file mtimes, so an unchanged driver republishes under a new checksum. Both
+# flags are needed since staging is rebuilt each run, and SOURCE_DATE_EPOCH is folded
+# into them because mksquashfs refuses the variable and the flags together.
+PACK_TIME=${SOURCE_DATE_EPOCH:-0}
+unset SOURCE_DATE_EPOCH
+"$MKSQUASHFS" "$STAGE" "$TMP_OUT" -comp xz -noappend -no-progress -all-root -quiet \
+    -mkfs-time "$PACK_TIME" -all-time "$PACK_TIME"
 mv -f "$TMP_OUT" "$OUT"
 
 echo "add-on:  $NAME"

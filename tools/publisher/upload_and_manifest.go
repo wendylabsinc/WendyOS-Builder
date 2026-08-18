@@ -2120,18 +2120,18 @@ func uploadFile(ctx context.Context, bucket *storage.BucketHandle, prefix, local
 	filename := filepath.Base(localPath)
 	destinationPath := imageObjectPath(prefix, deviceType, version, filename)
 
-	// Skip re-upload if the object already exists in GCS with the same size.
-	// This makes outer-retry loops (used to survive 412 manifest races when
-	// multiple storage variants write the same device manifest concurrently)
-	// fast — they skip the multi-minute image upload and go straight to the
-	// manifest update, dramatically shrinking the contention window.
+	// Skip the re-upload when GCS already holds these exact bytes, so re-running
+	// a job goes straight to the manifest update. Identity is the CRC32C, never
+	// the size: an add-on republished into an existing version reuses its object
+	// path, and squashfs pads to 4 KiB, so changed content routinely keeps the
+	// same length — which would publish a checksum for bytes GCS never received.
 	localInfo, err := os.Stat(localPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to stat local file: %w", err)
 	}
 	obj := bucket.Object(destinationPath)
-	if existingAttrs, err := obj.Attrs(ctx); err == nil && existingAttrs.Size == localInfo.Size() {
-		log.WithField("path", destinationPath).Info("File already in GCS with matching size, skipping upload")
+	if existingAttrs, err := obj.Attrs(ctx); err == nil && objectIsCurrent(existingAttrs, localPath, localInfo.Size()) {
+		log.WithField("path", destinationPath).Info("File already in GCS with matching content, skipping upload")
 		return destinationPath, nil
 	}
 
@@ -2174,6 +2174,12 @@ func uploadFile(ctx context.Context, bucket *storage.BucketHandle, prefix, local
 	// Create the destination object writer
 	w := obj.NewWriter(ctx)
 	w.ContentType = contentType
+	// Have GCS reject a corrupted upload server-side. The composite path already
+	// verifies CRC32C after compose; this stream verified nothing.
+	if sum, crcErr := crc32cFile(localPath); crcErr == nil {
+		w.CRC32C = sum
+		w.SendCRC32C = true
+	}
 
 	// Stream the content (efficient for large files)
 	if _, err := io.Copy(w, file); err != nil {
