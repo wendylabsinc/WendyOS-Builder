@@ -1,10 +1,22 @@
-# Driver add-ons: the kernel side. Required from linux-raspberrypi_%.bbappend when
-# WENDYOS_DRIVER_EXTENSIONS == "1", so nothing here needs its own gate. The .cfg files
-# resolve through the FILESEXTRAPATHS the bbappend already prepends.
+# Driver add-ons: the kernel side. Required from a board's kernel bbappend when
+# WENDYOS_DRIVER_EXTENSIONS == "1", so nothing here needs its own gate — and no
+# machine override either, since only a board that requires this file gets it.
+#
+# Board-neutral on purpose: the fragments below name no arch and no machine, and
+# the signing prefunc only touches kbuild's own CONFIG_MODULE_SIG_KEY. Wiring a
+# new board is the one gated require in its kernel bbappend, nothing here.
+
+# Bring the fragments along, so a board's bbappend does not have to know where they
+# live. ${THISDIR} is this file's directory during its own parse, not the including
+# bbappend's, so the path stays right however it is required.
+FILESEXTRAPATHS:prepend := "${THISDIR}/driver-extensions:"
 
 # The filesystems the merge path needs, plus module signing. Both are one-time kernel
 # changes; adding a driver never comes back here.
-SRC_URI:append:rpi = " file://sysext.cfg file://module-sign.cfg"
+SRC_URI += " \
+    file://sysext.cfg \
+    file://module-sign.cfg \
+    "
 
 # Module signing key. Unset (dev): the kernel mints a throwaway key per build, so an
 # externally-signed .ko won't verify — harmless while MODULE_SIG_FORCE is off. Set (CI):
