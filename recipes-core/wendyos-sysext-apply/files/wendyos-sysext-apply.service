@@ -1,12 +1,9 @@
 [Unit]
 Description=WendyOS: merge driver add-ons from /data (sysext + depmod)
 Documentation=man:systemd-sysext(8)
-# Ordered on data.mount alone, deliberately not on grow-data-fs-online.service: /data is
-# safe to read and write during an online resize, which can take minutes on a large card,
-# so waiting for it would only delay every driver.
-After=data.mount
-Wants=data.mount
-ConditionPathExists=/data
+# The add-on store lives on /data. RequiresMountsFor ensures the mount is available
+# before this unit runs and fails the unit if /data cannot be mounted.
+RequiresMountsFor=/data
 
 [Service]
 Type=oneshot
