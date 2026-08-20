@@ -8,10 +8,8 @@
 # pattern. Drop both fragments, or re-derive, only if a future kernel
 # upgrade breaks the gadget runtime.
 #
-# Note: the jammy bbappend (5.15) only references usb-gadget.cfg even
-# though the dir ships usb-gadget-builtin.cfg too — that asymmetry is
-# intentional in 5.15. For 6.8 we ship both; the builtin fragment may
-# be redundant on 6.8 but doesn't hurt.
+# Note: both usb-gadget.cfg and usb-gadget-builtin.cfg are shipped for 6.8.
+# The builtin one may be redundant here, but it does no harm.
 FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 
 SRC_URI += " \

@@ -13,14 +13,13 @@ LIC_FILES_CHKSUM = "file://src/${GO_IMPORT}/LICENSE;md5=32329fcd0da888dcffa77ba6
 
 GO_IMPORT = "github.com/wendylabsinc/wendyos-update"
 
-# go.bbclass defines GO_SRCURI_DESTSUFFIX on wrynose/blacksail (newer oe-core),
-# but scarthgap's go.bbclass does NOT — there go_do_unpack auto-computes the
-# destsuffix only when the recipe leaves it unset. Our SRC_URI references
-# ${GO_SRCURI_DESTSUFFIX} explicitly, so on scarthgap it expands empty and the
-# git clone lands in WORKDIR and fails ("destination path already exists").
-# Provide a fallback with the SAME value both code paths compute, so this recipe
-# builds on every tree (RPi=scarthgap, Thor=wrynose, Orin=blacksail). ?= defers
-# to go.bbclass where it already sets this.
+# go.bbclass defines GO_SRCURI_DESTSUFFIX on wrynose and blacksail, but older
+# oe-core did not — there go_do_unpack auto-computed the destsuffix only when the
+# recipe left it unset. Our SRC_URI references ${GO_SRCURI_DESTSUFFIX}
+# explicitly, so where the class does not set it the variable expands empty and
+# the git clone lands in WORKDIR and fails ("destination path already exists").
+# This fallback carries the SAME value go.bbclass computes, so the recipe builds
+# on any tree. ?= defers to go.bbclass where it already sets this.
 GO_SRCURI_DESTSUFFIX ?= "${@os.path.join(os.path.basename(d.getVar('S')), 'src', d.getVar('GO_IMPORT')) + '/'}"
 
 SRC_URI = "git://${GO_IMPORT};protocol=https;branch=main;destsuffix=${GO_SRCURI_DESTSUFFIX}"
