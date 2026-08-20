@@ -23,9 +23,8 @@ python do_unpack:append() {
     import glob
     import os
 
-    # The outer deb is unpacked into UNPACKDIR (whinlatter+) / WORKDIR
-    # (scarthgap pre-UNPACKDIR-split). Inner debs we extract are scratch,
-    # kept under WORKDIR.
+    # The outer deb is unpacked into UNPACKDIR. Inner debs we extract are
+    # scratch, kept under WORKDIR.
     unpackdir = d.getVar('UNPACKDIR')
     workdir = d.getVar('WORKDIR')
 

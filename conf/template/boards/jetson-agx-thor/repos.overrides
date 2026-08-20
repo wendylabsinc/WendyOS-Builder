@@ -3,85 +3,15 @@
 # Sourced by bootstrap.sh after the default URL_*/SRCREV_* values are set
 # (from scripts/upstream-repos.env), but before the repos[] array is built.
 #
-# === BLACKSAIL / JetPack 7.2 / L4T R39.2.0 EXPERIMENT (feature/jp7.2-support) ===
-# Thor is the canary for unifying all three Jetson boards onto JetPack 7.2.
-# The JP7.2 line is the first to support both the Orin family AND Thor
-# simultaneously (per meta-tegra's
-# docs/release-notes/JetPack-7.2-L4T-R39.2.0-Notes.md), and it declares
-# LAYERSERIES_COMPAT = "blacksail" — the in-development Yocto series after
-# wrynose (6.0). So the whole stack moves to blacksail-era pins.
+# Thor was the canary for moving every Jetson board onto JetPack 7.2 / L4T
+# R39.2.0. That line is the first to support Thor and the Orin family at once
+# (see meta-tegra's docs/release-notes/JetPack-7.2-L4T-R39.2.0-Notes.md) and the
+# first to declare LAYERSERIES_COMPAT = "blacksail", the in-development series
+# after wrynose (6.0). The rest of the fleet followed, so every pin now comes
+# from the shared blacksail set in scripts/upstream-repos.env and nothing here
+# needs to differ.
 #
-# That work arrived on the wip-l4t-r39.2.0 branch, which OE4T has since
-# rebased into master and deleted. master now carries both the R39.2 release
-# notes and LAYERSERIES_COMPAT_tegra = "blacksail", so the meta-tegra* pins
-# below track master. There is no r39.2 release branch yet; OE4T cuts those as
-# master-l4t-rXX.Y.x, so move to master-l4t-r39.2.x when it appears.
-# scripts/ext/check-jp7.2-upstream.sh watches for both.
-#
-# This is an EXPERIMENT to find what breaks: blacksail is a moving dev target
-# and several layers (meta-openembedded, meta-virtualization) have NOT yet
-# declared blacksail compatibility upstream. We bridge that with gated
-# LAYERSERIES_COMPAT:append overrides in
-# conf/template/include/local/blacksail-compat.inc (required from local.conf).
-#
-# Isolation: WENDYOS_LAYER_TREE="blacksail" makes bootstrap.sh clone every
-# upstream repo under repos/blacksail/ — parallel to repos/wrynose/ (the
-# validated r38.4/JP7.1 Thor fallback on main) and repos/scarthgap/ (Orin/
-# RPi/QEMU). The validated trees are never touched; revert = git checkout main.
-#
-# All SRCREVs below were re-resolved from upstream HEADs on 2026-08-04
-# (git ls-remote); the previous set dated from 2026-06-15. Pinned for
-# reproducibility since blacksail/master move.
-#
-# Why the whole set moved at once: oe-core gained an SPDX license-expression
-# parser on 2026-07-15, and both OE4T layers converted their recipes from the
-# old "&" syntax to SPDX "AND" a week later. Against the 2026-06-15 oe-core
-# those recipes fail to parse — "LICENSE value ... has an invalid format".
-# So meta-tegra could not move on its own; and moving oe-core on its own would
-# have left meta-openembedded and meta-virtualization seven weeks behind the
-# core classes they build against, trading one skew for another. No upstream
-# layer has cut a blacksail release branch yet, so master HEAD is still the
-# only target available.
+# WENDYOS_LAYER_TREE="blacksail" makes bootstrap.sh clone every upstream repo
+# under repos/blacksail/, parallel to repos/wrynose/ — the validated r38.4 /
+# JP7.1 Thor fallback tree. Switching trees never touches the other one.
 WENDYOS_LAYER_TREE="blacksail"
-
-# Split-poky composition on blacksail. oe-core master declares
-# LAYERSERIES_CORENAMES = "wrynose blacksail" and LAYERSERIES_COMPAT_core =
-# "blacksail"; meta-yocto master + bitbake master (2.19.0, >= oe-core's
-# BB_MIN_VERSION 2.18.0) match it.
-SRCREV_BITBAKE="c870f5bd96ad02efc02c58133c27bdae3a300e3e"
-SRCREV_OECORE="2faf8e366df74aded7898904b72317521a08e2f6"
-SRCREV_METAYOCTO="9c6cf36c3511b94957aba04002d98bec665e9f1e"
-
-# meta-openembedded master HEAD. NOTE: master still declares
-# LAYERSERIES_COMPAT = "whinlatter wrynose" (NOT blacksail) as of 2026-08-04
-# — bridged via blacksail-compat.inc. Re-pin to an upstream commit that
-# declares blacksail once meta-oe bumps, then drop the override.
-SRCREV_OE="0a60011ec174b91104a110c353cbf18748951270"
-
-# meta-virtualization master HEAD. Same situation: master declares
-# LAYERSERIES_COMPAT = "wrynose" only — bridged via blacksail-compat.inc.
-SRCREV_VIRT="526c97254fe43e0924df034aaa825f33ec30407c"
-
-# meta-tegra master (JetPack 7.2 / L4T R39.2.0, Thor + Orin family).
-# conf/layer.conf declares LAYERSERIES_COMPAT_tegra = "blacksail".
-#
-# Re-pinned 2026-08-04 from d0b2f4d81dc3, which lived on the deleted
-# wip-l4t-r39.2.0 branch. A commit that no upstream ref can reach breaks the
-# Thor CI build: bootstrap.sh's bulk `git fetch origin` cannot deliver it, so
-# a warm repo cache fails outright, and a cold clone survives only through the
-# fetch-by-SHA fallback for as long as GitHub still serves the dangling
-# object. Nearest master-side equivalent of the old pin is ceb73c72 — keep it
-# as the fallback if master HEAD misbehaves on Thor. It is reachable from
-# master, so unlike d0b2f4d81dc3 it stays a durable pin.
-SRCREV_TEGRA="de0a5a233d4e5aff0ed64da39aeec9310ce693c9"
-
-# meta-tegra-community master; conf/layer.conf declares
-# LAYERSERIES_COMPAT_tegra-community = "blacksail". LAYERDEPENDS pulls in
-# openembedded-layer + meta-python, which is why those must be made
-# blacksail-compatible (see blacksail-compat.inc).
-#
-# Re-pinned 2026-08-04 from 931db8c0f56e for the same reason. Fallback: 98d9e63.
-SRCREV_TEGRA_COMM="f0beedf81977fe6cd28f39912c53139290f5a6f4"
-
-# OTA-related SRCREVs are left at their upstream defaults — Thor uses the
-# wendyos-update OTA stack (WENDYOS_OTA = "wendy").

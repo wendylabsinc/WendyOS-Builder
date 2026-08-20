@@ -9,6 +9,11 @@
 #   REPOS_EXTRA=(...)    append extra clones that coexist with defaults,
 #                        each entry "enabled|url|folder|commit"
 
+# WENDYOS_LAYER_TREE="blacksail" makes bootstrap clone every upstream repo under
+# repos/blacksail/, the shared tree used by the whole fleet. Set explicitly (not
+# left to the default in scripts/upstream-repos.env) to document the intent.
+WENDYOS_LAYER_TREE="blacksail"
+
 #SRCREV_BITBAKE="<commit-hash>"
 #SRCREV_OECORE="<commit-hash>"
 #SRCREV_METAYOCTO="<commit-hash>"

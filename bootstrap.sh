@@ -57,7 +57,6 @@ META_LAYER_DIR="${HOME_DIR}"
 DOCKER_WORK_DIR="/home/${USER_NAME}/${IMAGE_NAME}"
 
 
-YOCTO_BRANCH="scarthgap"
 YOCTO_BUILD_DIR="build"
 
 cleanup() {
@@ -624,7 +623,6 @@ declare -a repos=(
     "1|${URL_VIRT}||${SRCREV_VIRT}"
     "1|${URL_RPI}||${SRCREV_RPI}"
     "1|${URL_SECURITY}||${SRCREV_SECURITY}"
-    "1|${URL_LTS_MIXINS}||${SRCREV_LTS_MIXINS}"
 )
 
 # Append any extras declared by the override file.

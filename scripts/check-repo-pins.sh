@@ -11,12 +11,13 @@
 # SRCREVs, that layer cannot be correct for both at once -- whichever board
 # bootstrapped last wins, and the other would build against the wrong source.
 #
-# Pins are declared in two places (scripts/upstream-repos.env, then overridden by
-# conf/template/boards/<board>/repos.overrides), and the blacksail set is
-# currently restated in ten board files. Nothing in that structure enforces
-# agreement; the board files carry only a "keep in sync" comment. On 2026-08-04 a
-# meta-tegra re-pin was applied to one Jetson board and missed four others, all of
-# which would have failed the same way. This check is what catches that class.
+# Pins are declared in two places: scripts/upstream-repos.env holds the shared
+# blacksail set, and conf/template/boards/<board>/repos.overrides may override
+# it. Nothing in that structure enforces agreement. The blacksail set used to be
+# restated in ten board files, and on 2026-08-04 a meta-tegra re-pin was applied
+# to one Jetson board and missed four others, all of which would have failed the
+# same way. Those restatements are gone, but an override can still be added to a
+# single board. This check is what catches that class.
 #
 # It compares pins ONLY between boards that actually layer the repo, because a
 # board that never puts a layer in BBLAYERS cannot be affected by its revision.
@@ -70,7 +71,6 @@ meta-tegra-community:SRCREV_TEGRA_COMM
 meta-virtualization:SRCREV_VIRT
 meta-raspberrypi:SRCREV_RPI
 meta-security:SRCREV_SECURITY
-meta-lts-mixins:SRCREV_LTS_MIXINS
 "
 
 MATRIX="$(mktemp)"
