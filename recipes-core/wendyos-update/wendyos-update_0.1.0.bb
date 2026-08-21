@@ -85,7 +85,18 @@ SRC_URI = "git://${GO_IMPORT};protocol=https;branch=main;destsuffix=${GO_SRCURI_
 # Capsule staging now survives the agent's sync-less hard reboot.
 #
 # 964c0ea: enable capsule-on-disk bootloader updates on Orin (t234)
-SRCREV = "5a89cbd990c3c3d10d4f886c5012284c705533cd"
+#
+# 3ae1762: decode the packed ESRT firmware versions in `status`, so
+# esrt_lowest_supported_version reads 39.2.0 rather than 2556416. That field is
+# the anti-rollback floor a capsule apply ratchets, and it is one-way until a
+# reflash.
+#
+# dc8c82e: stage the capsule via a temp file and rename, so a short write can
+# no longer destroy the capsule already on the ESP; warn before the download
+# when the ESP has no room for one; and add the `check` verb, which reports
+# whether the device could take an install at all (exit 5 when not).
+# `check` fails with exit 5 on a deliberately filled ESP.
+SRCREV = "dc8c82e997b7ea43a8de6c9977f0f215de87103f"
 
 inherit go-mod systemd
 

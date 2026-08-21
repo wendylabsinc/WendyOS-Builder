@@ -36,10 +36,13 @@ ROOTFSPART_SIZE_DEFAULT = "25769803776"
 # (32768 4K-block) multiple so blocks_per_group stays 32768: EDK2 Ext4Pkg
 # (L4TLauncher's ext4 reader) rejects blocks_per_group != 8*blocksize with
 # EFI_UNSUPPORTED and the board boot-loops. 12 GiB is already a 128 MiB
-# multiple, so this is a no-op guard today. Scoped :pn-wendyos-image —
-# machine-wide would round the ESP (tegra-espimage) past its 64 MiB max and
-# fail the build; IMAGE_ROOTFS_ALIGNMENT also feeds TEGRA_BLBLOCKSIZE, pinned
-# to its current 4 KiB so mksparse / the flash helper are unchanged.
+# multiple, so this is a no-op guard today. Scoped :pn-wendyos-image because
+# IMAGE_ROOTFS_ALIGNMENT also feeds TEGRA_BLBLOCKSIZE, pinned to its current
+# 4 KiB so mksparse / the flash helper are unchanged. It used to matter for the
+# ESP too — at the upstream 64 MiB a machine-wide alignment rounded
+# tegra-espimage past its IMAGE_ROOTFS_MAXSIZE and failed the build — but that
+# no longer applies now the machine conf sets WENDYOS_ESP_SIZE to 524288, which
+# is already a multiple of 131072.
 IMAGE_ROOTFS_ALIGNMENT:pn-wendyos-image = "131072"
 TEGRA_BLBLOCKSIZE:pn-wendyos-image = "4096"
 
