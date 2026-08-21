@@ -1,0 +1,14 @@
+[Unit]
+Description=WendyOS: merge driver add-ons from /data (sysext + depmod)
+Documentation=man:systemd-sysext(8)
+# The add-on store lives on /data. RequiresMountsFor ensures the mount is available
+# before this unit runs and fails the unit if /data cannot be mounted.
+RequiresMountsFor=/data
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/wendyos-sysext-apply.sh
+
+[Install]
+WantedBy=multi-user.target

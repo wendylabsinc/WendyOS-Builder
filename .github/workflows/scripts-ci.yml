@@ -11,6 +11,10 @@ on:
       - 'scripts/make-jetson-disk-img.py'
       - 'scripts/make_jetson_disk_img_test.py'
       - 'recipes-core/wendyos-agent/files/*.sh'
+      - 'scripts/build-driver.sh'
+      - 'scripts/pack-sysext.sh'
+      - 'recipes-core/wendyos-sysext-apply/files/*.sh'
+      - 'recipes-kernel/wendyos-kernel-devkit/files/*.sh'
       - '.github/device-artifacts.json'
       - '.github/workflows/scripts-ci.yml'
   push:
@@ -22,6 +26,10 @@ on:
       - 'scripts/make-jetson-disk-img.py'
       - 'scripts/make_jetson_disk_img_test.py'
       - 'recipes-core/wendyos-agent/files/*.sh'
+      - 'scripts/build-driver.sh'
+      - 'scripts/pack-sysext.sh'
+      - 'recipes-core/wendyos-sysext-apply/files/*.sh'
+      - 'recipes-kernel/wendyos-kernel-devkit/files/*.sh'
       - '.github/device-artifacts.json'
       - '.github/workflows/scripts-ci.yml'
 
@@ -41,6 +49,11 @@ jobs:
           shellcheck recipes-core/wendyos-agent/files/wendyos-agent-updater.sh \
                      recipes-core/wendyos-agent/files/wendyos-agent-updater.test.sh \
                      recipes-core/wendyos-agent/files/download-wendyos-agent.sh
+          # These run on the device or outside the build system, where a typo surfaces as
+          # a failed boot or an unusable devkit rather than a build error.
+          shellcheck scripts/build-driver.sh scripts/pack-sysext.sh \
+                     recipes-core/wendyos-sysext-apply/files/wendyos-sysext-apply.sh \
+                     recipes-kernel/wendyos-kernel-devkit/files/setup.sh
 
       - name: Run resolver tests
         run: bash scripts/resolve-artifacts.test.sh

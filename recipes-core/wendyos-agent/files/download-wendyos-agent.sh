@@ -37,7 +37,9 @@ normalize_arch() {
 ARCH="$(normalize_arch "${WENDYOS_AGENT_ARCH:-$(uname -m)}")"
 
 # Paths
-INSTALL_DIR="/usr/local/bin"
+# Outside the /usr hierarchy wendyos-sysext-apply overlays: with a driver add-on
+# merged, an update written under /usr lives on tmpfs and is lost on reboot.
+INSTALL_DIR="/opt/wendyos/bin"
 BACKUP_DIR="/opt/wendy/bin"
 BINARY_NAME="wendy-agent"
 TEMP_DIR="/tmp/wendy-agent-download-$$"

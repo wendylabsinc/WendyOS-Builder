@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -23,6 +24,15 @@ func validEntry() ManifestEntry {
 		SBOMPath:          "images/jetson-agx-orin/0.15.1-nightly/wendyos-image.spdx.tar.zst",
 		SBOMSize:          14829056,
 		SBOMChecksum:      "9f2c1e6c0b7a4d3e8f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e",
+		Extensions: []ExtensionMetadata{{
+			Name:          "nvidia-drivers",
+			Version:       "1.0.0",
+			KernelVersion: "5.15.0-tegra",
+			Path:          "images/jetson-agx-orin/0.15.1-nightly/nvidia-drivers.raw",
+			SHA256:        "aa11bb22cc33dd44ee55ff66aa11bb22cc33dd44ee55ff66aa11bb22cc33dd44",
+			SizeBytes:     4194304,
+			ModulesLoad:   []string{"nvidia", "nvidia_modeset"},
+		}},
 	}
 }
 
@@ -37,7 +47,7 @@ func TestManifestEntryRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("readManifestEntry: %v", err)
 	}
-	if got != want {
+	if !reflect.DeepEqual(got, want) {
 		t.Errorf("round-trip mismatch:\n got %+v\nwant %+v", got, want)
 	}
 }
@@ -58,13 +68,21 @@ func TestManifestEntryValidate(t *testing.T) {
 		{"empty stability ok", func(e *ManifestEntry) { e.Stability = "" }, ""},
 		{"no files", func(e *ManifestEntry) {
 			e.FilePath, e.OTAUpdatePath, e.RecoveryPath = "", "", ""
+			e.Extensions = nil
 		}, "no files"},
 		{"sbom alone is not a flashable file", func(e *ManifestEntry) {
 			// An SBOM is an audit artifact, never the sole payload of an entry;
 			// at least one flashable file (image/OTA/recovery) is still required.
 			e.FilePath, e.OTAUpdatePath, e.RecoveryPath = "", "", ""
+			e.Extensions = nil
 			e.SBOMPath = "images/d/v/wendyos-image.spdx.tar.zst"
 		}, "no files"},
+		{"driver add-on alone is publishable", func(e *ManifestEntry) {
+			// A driver add-on attaches to a version an earlier build created, so
+			// it is the one payload that legitimately arrives without an image.
+			e.FilePath, e.OTAUpdatePath, e.RecoveryPath = "", "", ""
+			e.SBOMPath = ""
+		}, ""},
 		{"recovery only ok", func(e *ManifestEntry) {
 			e.FilePath, e.OTAUpdatePath = "", ""
 			e.RecoveryPath = "images/d/v/recovery.tar.gz"
@@ -131,5 +149,85 @@ func TestManifestEntryPRRoundTrip(t *testing.T) {
 	}
 	if out.PR != 123 {
 		t.Fatalf("PR = %d, want 123", out.PR)
+	}
+}
+
+func TestMergeExtensions(t *testing.T) {
+	a := ExtensionMetadata{Name: "hello", KernelVersion: "6.12", SHA256: "aaa"}
+	b := ExtensionMetadata{Name: "npu", KernelVersion: "6.12", SHA256: "bbb"}
+	a2 := ExtensionMetadata{Name: "hello", KernelVersion: "6.12", SHA256: "ccc"}
+	aOther := ExtensionMetadata{Name: "hello", KernelVersion: "6.6", SHA256: "ddd"}
+
+	// Second driver must not wipe the first.
+	got := mergeExtensions([]ExtensionMetadata{a}, []ExtensionMetadata{b})
+	if len(got) != 2 {
+		t.Fatalf("adding a sibling: got %d entries, want 2", len(got))
+	}
+	// Re-publishing the same (name, kernel) replaces in place.
+	got = mergeExtensions(got, []ExtensionMetadata{a2})
+	if len(got) != 2 || got[0].SHA256 != "ccc" {
+		t.Fatalf("upsert same key: got %+v", got)
+	}
+	// Same name for a different kernel is a distinct entry.
+	got = mergeExtensions(got, []ExtensionMetadata{aOther})
+	if len(got) != 3 {
+		t.Fatalf("same name new kernel: got %d entries, want 3", len(got))
+	}
+	// Nil existing behaves.
+	if got := mergeExtensions(nil, []ExtensionMetadata{a}); len(got) != 1 {
+		t.Fatalf("nil existing: got %d, want 1", len(got))
+	}
+}
+
+// Dropping the devkit leaves drivers.yml unable to resolve a kernel, and
+// nothing else would fail — so pin the round trip.
+func TestManifestEntryDevkitRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "entry.json")
+
+	in := validEntry()
+	in.Devkit = &DevkitMetadata{
+		Machine:       "raspberrypi5-wendyos",
+		KernelVersion: "6.18.33-v8-16k",
+		Path:          "devkits/wendyos-kernel-devkit-raspberrypi5-wendyos-6.18.33-v8-16k.tar.zst",
+		SHA256:        "abc123",
+		SizeBytes:     98 * 1024 * 1024,
+	}
+	if err := writeManifestEntry(path, in); err != nil {
+		t.Fatal(err)
+	}
+	out, err := readManifestEntry(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Devkit == nil {
+		t.Fatal("devkit dropped in round trip")
+	}
+	if out.Devkit.KernelVersion != in.Devkit.KernelVersion {
+		t.Errorf("kernel = %q, want %q", out.Devkit.KernelVersion, in.Devkit.KernelVersion)
+	}
+	if out.Devkit.Machine != in.Devkit.Machine {
+		t.Errorf("machine = %q, want %q", out.Devkit.Machine, in.Devkit.Machine)
+	}
+	if out.Devkit.SizeBytes != in.Devkit.SizeBytes {
+		t.Errorf("size = %d, want %d", out.Devkit.SizeBytes, in.Devkit.SizeBytes)
+	}
+}
+
+// An entry with no devkit must stay absent from the JSON rather than serialise
+// as null, so a device manifest is unchanged for builds that produce none.
+func TestManifestEntryDevkitOmitted(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "entry.json")
+
+	if err := writeManifestEntry(path, validEntry()); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "devkit") {
+		t.Errorf("devkit key present for an entry without one: %s", raw)
 	}
 }

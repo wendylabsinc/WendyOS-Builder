@@ -53,9 +53,9 @@ jobs:
   # ---------------------------------------------------------------------------
   # detect-changes: compute the build matrix.
   # On main / workflow_dispatch we always build every device (nightly).
-  # On pull_request we also always build every device: PR images back
-  # `wendy os install --pr`, which needs an image for the user's target
-  # regardless of which paths changed in the PR.
+  # On pull_request we build every device so `wendy os install --pr` has an
+  # image for the user's target — except a driver-only PR, which changes no OS
+  # and is covered by drivers.yml instead.
   # ---------------------------------------------------------------------------
   detect-changes:
     name: Detect affected devices
@@ -70,6 +70,23 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ inputs.version }}
+
+      # No OS rebuild can change an add-on built against a published devkit.
+      # 'os' is '**' minus the driver paths, so a PR touching both still builds.
+      - id: filter
+        if: github.event_name == 'pull_request'
+        uses: dorny/paths-filter@v4
+        with:
+          filters: |
+            drivers:
+              - 'drivers/**'
+              - 'scripts/build-driver.sh'
+              - 'scripts/pack-sysext.sh'
+            os:
+              - '**'
+              - '!drivers/**'
+              - '!scripts/build-driver.sh'
+              - '!scripts/pack-sysext.sh'
 
       - id: version
         env:
@@ -107,6 +124,8 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           INPUT_DEVICE: ${{ inputs.device }}
+          FILTER_DRIVERS: ${{ steps.filter.outputs.drivers }}
+          FILTER_OS: ${{ steps.filter.outputs.os }}
         run: |
           set -euo pipefail
 
@@ -177,8 +196,16 @@ jobs:
             exit 0
           fi
 
-          # PR builds force-build every device so `wendy os install --pr` always
-          # has an image for the user's target, regardless of which paths changed.
+          # A driver-only PR builds no OS image: drivers.yml covers it against the
+          # already-published devkit, in minutes rather than hours.
+          if [[ "${FILTER_DRIVERS:-}" == "true" && "${FILTER_OS:-}" != "true" ]]; then
+            echo "Trigger=pull_request: driver-only change, skipping the device matrix."
+            echo 'matrix={"include":[]}' >> "$GITHUB_OUTPUT"
+            echo "devices=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Any other PR builds every device, so --pr installs resolve.
           echo "Trigger=pull_request: force-building all devices for --pr installs."
           emit_all
           exit 0
@@ -978,6 +1005,19 @@ jobs:
               ARGS+=(--sbom "$SBOM_FILE")
             fi
 
+            # Present only where WENDYOS_DRIVER_EXTENSIONS is on. The filename
+            # carries uname -r, the key add-ons and the device check both use.
+            DEVKIT_FILE=$(find "$DEPLOY_DIR" -maxdepth 1 -name 'wendyos-kernel-devkit-*.tar.zst' -print -quit 2>/dev/null || true)
+            if [[ -n "$DEVKIT_FILE" && -f "$DEVKIT_FILE" ]]; then
+              DEVKIT_BASE=$(basename "$DEVKIT_FILE" .tar.zst)
+              DEVKIT_KVER=${DEVKIT_BASE##*-${MACHINE}-}
+              if [[ "$DEVKIT_KVER" == "$DEVKIT_BASE" ]]; then
+                echo "::error::devkit $DEVKIT_BASE does not carry machine $MACHINE; refusing to publish it"
+                exit 1
+              fi
+              ARGS+=(--devkit-file "$DEVKIT_FILE" --devkit-kernel "$DEVKIT_KVER" --devkit-machine "$MACHINE")
+            fi
+
             # No retry loop: uploads go to unique per-version paths (no shared
             # state to race on) and the publisher's storage client already
             # retries transient errors internally.
@@ -1304,3 +1344,24 @@ jobs:
             VERSION=$(jq -r .version <<<"$row")
             "$RUNNER_TEMP/publisher" --device "$DEVICE" --version "$VERSION" --pr "$PR_NUMBER" --master-manifest-only --nightly --access-token "$TOKEN" </dev/null
           done
+
+  # ---------------------------------------------------------------------------
+  # drivers: rebuild every add-on against the devkit this run published. A kernel
+  # change moves uname -r, invalidating every published .raw, so rebuilding here
+  # keeps (driver, kernel) coverage complete. No devkit published means no work.
+  # ---------------------------------------------------------------------------
+  drivers:
+    name: Driver add-ons
+    needs: [detect-changes, publish, publish-pr]
+    # No devices check: a driver-only PR skips the matrix and is exactly the
+    # case this job has to cover.
+    if: ${{ !cancelled() }}
+    # A called workflow cannot widen these, and id-token is not granted by
+    # default, so the add-on publish could not mint an OIDC token without it.
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/drivers.yml
+    with:
+      version: ${{ needs.detect-changes.outputs.version }}
+    secrets: inherit

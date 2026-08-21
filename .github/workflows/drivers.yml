@@ -1,0 +1,317 @@
+name: Build driver add-ons
+
+# A driver's only inputs are its own directory and the devkit for the kernel it
+# targets, so this needs no Yocto tree and never touches the self-hosted pool.
+# Called by build.yml rather than triggered directly: a PR that touches both a
+# driver and an OS file would otherwise run this twice at once, with both copies
+# writing the same manifest.
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: OS version whose devkits to build against; blank = each device's latest
+        type: string
+        required: false
+  workflow_dispatch:
+    inputs:
+      device:
+        description: Limit to one device (blank = every device that publishes a devkit)
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+env:
+  # setup.sh rewrites PT_INTERP in place, so the new loader path cannot be longer
+  # than the original — $GITHUB_WORKSPACE overflows it.
+  DEVKIT_DIR: /tmp/dk
+  PUBLIC_BASE: https://storage.googleapis.com/wendyos-images-public
+
+jobs:
+  discover:
+    name: Discover drivers and devkits
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set.outputs.matrix }}
+      any: ${{ steps.set.outputs.any }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: set
+        env:
+          WANT_VERSION: ${{ inputs.version }}
+          ONLY_DEVICE: ${{ inputs.device }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+
+          # Both reach a URL below, so shape-check them rather than trusting a
+          # dispatch input.
+          for v in "${ONLY_DEVICE:-}" "${WANT_VERSION:-}"; do
+            if [[ -n "$v" && ! "$v" =~ ^[A-Za-z0-9._-]+$ ]]; then
+              echo "::error::rejecting input '$v'"
+              exit 1
+            fi
+          done
+
+          # A PR publishes into pr/<N>/, so that is where its devkit is. Without
+          # this a PR resolves the last public devkit, or nothing at all.
+          PREFIX=""
+          if [[ -n "${PR_NUMBER:-}" ]]; then
+            [[ "$PR_NUMBER" =~ ^[0-9]+$ ]] || { echo "::error::bad PR number"; exit 1; }
+            PREFIX="pr/${PR_NUMBER}/"
+          fi
+
+          # device-artifacts.json is the single source of truth for the device
+          # list; its keys are device/storage, so collapse to unique devices.
+          mapfile -t DEVICES < <(jq -r 'keys[] | split("/")[0]' \
+            .github/device-artifacts.json | sort -u)
+          if [[ -n "${ONLY_DEVICE:-}" ]]; then
+            DEVICES=("$ONLY_DEVICE")
+          fi
+          # mapfile cannot fail the step, so an unreadable inventory would leave
+          # DEVICES empty and this job green having checked nothing.
+          if [[ "${#DEVICES[@]}" -eq 0 ]]; then
+            echo "::error::no devices resolved from .github/device-artifacts.json"
+            exit 1
+          fi
+
+          mapfile -t DRIVERS < <(find drivers -mindepth 2 -maxdepth 2 \
+            -name driver.json -printf '%h\n' | sed 's#^drivers/##' | sort)
+          if [[ "${#DRIVERS[@]}" -eq 0 ]]; then
+            echo "::warning::no drivers/*/driver.json found"
+            echo 'matrix={"include":[]}' >> "$GITHUB_OUTPUT"
+            echo "any=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # A device only enters the matrix once it publishes a devkit, so
+          # enabling a board is a build-side change and needs nothing here.
+          ENTRIES='[]'
+          for dev in "${DEVICES[@]}"; do
+            url="${PUBLIC_BASE}/${PREFIX}manifests/${dev}.json"
+            if ! manifest=$(curl -sSfL --retry 3 --retry-all-errors "$url" 2>/dev/null); then
+              echo "no manifest for ${dev}; skipping"
+              continue
+            fi
+            # Prefer the requested version, else the newest version that has a
+            # devkit at all — a device that has never published one is skipped.
+            sel=$(jq -c --arg want "${WANT_VERSION:-}" '
+              [ .versions // {} | to_entries[]
+                | select(.value.devkit != null)
+                | {version: .key, devkit: .value.devkit,
+                   nightly: (.value.is_nightly // false)} ]
+              | (map(select(.version == $want)) | .[0]) // (sort_by(.version) | last)
+              // empty' <<<"$manifest")
+            if [[ -z "$sel" || "$sel" == "null" ]]; then
+              echo "no devkit published for ${dev}; skipping"
+              continue
+            fi
+            echo "${dev}: devkit $(jq -r .devkit.kernel_version <<<"$sel") from $(jq -r .version <<<"$sel")" \
+              | tee -a "$GITHUB_STEP_SUMMARY"
+            for drv in "${DRIVERS[@]}"; do
+              ENTRIES=$(jq -c --arg d "$dev" --arg drv "$drv" --argjson s "$sel" \
+                '. + [{device: $d, driver: $drv, os_version: $s.version,
+                       kernel: $s.devkit.kernel_version, devkit_path: $s.devkit.path,
+                       devkit_sha256: $s.devkit.sha256, nightly: $s.nightly}]' <<<"$ENTRIES")
+            done
+          done
+
+          n=$(jq 'length' <<<"$ENTRIES")
+          echo "matrix={\"include\":${ENTRIES}}" >> "$GITHUB_OUTPUT"
+          echo "any=$([[ "$n" -gt 0 ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          echo "${n} driver build(s) to run" | tee -a "$GITHUB_STEP_SUMMARY"
+
+          # There are drivers to build and no kernel to build them against, so
+          # this run verified nothing. Reporting success would make an empty
+          # check indistinguishable from a passing one.
+          if [[ "$n" -eq 0 ]]; then
+            echo "::error::${#DRIVERS[@]} driver(s) present but no devkit published under '${PREFIX:-<public>}'"
+            exit 1
+          fi
+
+  build:
+    name: ${{ matrix.driver }} on ${{ matrix.device }}
+    needs: discover
+    if: needs.discover.outputs.any == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.discover.outputs.matrix) }}
+    # Every cell read-modify-writes one device manifest, so cells for the same
+    # device must not overlap; different devices touch different objects.
+    concurrency:
+      group: driver-publish-${{ matrix.device }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install host tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          # The devkit ships its own toolchain, mksquashfs and modpost; only the
+          # tools needed to unpack and fetch it come from the runner.
+          sudo apt-get install -y --no-install-recommends zstd
+
+      - name: Fetch and relocate the devkit
+        env:
+          DEVKIT_PATH: ${{ matrix.devkit_path }}
+          DEVKIT_SHA256: ${{ matrix.devkit_sha256 }}
+        run: |
+          set -euo pipefail
+          url="${PUBLIC_BASE}/${DEVKIT_PATH}"
+          echo "Fetching ${url}"
+          curl -sSfL --retry 3 --retry-all-errors -o /tmp/devkit.tar.zst "$url"
+
+          # The manifest checksum is the contract with the build that produced it;
+          # a mismatch means the object was replaced under a published version.
+          actual=$(sha256sum /tmp/devkit.tar.zst | cut -d' ' -f1)
+          if [[ "$actual" != "$DEVKIT_SHA256" ]]; then
+            echo "::error::devkit sha256 mismatch: manifest says $DEVKIT_SHA256, got $actual"
+            exit 1
+          fi
+
+          mkdir -p "$DEVKIT_DIR"
+          tar --zstd -xf /tmp/devkit.tar.zst -C "$DEVKIT_DIR" --strip-components=1
+          # setup.sh relocates the toolchain and self-checks that gcc, modpost and
+          # mksquashfs actually run, so a broken devkit fails here and not mid-build.
+          "$DEVKIT_DIR/setup.sh"
+
+      - name: Build the module
+        env:
+          DRIVER: ${{ matrix.driver }}
+        run: |
+          set -euo pipefail
+          scripts/build-driver.sh --devkit "$DEVKIT_DIR" --driver "drivers/$DRIVER"
+
+      - name: Pack the add-on image
+        env:
+          DRIVER: ${{ matrix.driver }}
+        run: |
+          set -euo pipefail
+          scripts/pack-sysext.sh --devkit "$DEVKIT_DIR" --driver "drivers/$DRIVER" \
+            --modules "drivers/$DRIVER/build/modules" --out "$GITHUB_WORKSPACE/$DRIVER.raw"
+          ls -l "$GITHUB_WORKSPACE/$DRIVER.raw"
+
+      - name: Check the devkit matches the manifest
+        env:
+          KERNEL: ${{ matrix.kernel }}
+        run: |
+          set -euo pipefail
+          # build-driver.sh checks the module against the devkit; this checks the
+          # devkit against the manifest that selected it.
+          actual=$(jq -r .kernel_version "$DEVKIT_DIR/devkit.json")
+          if [[ "$actual" != "$KERNEL" ]]; then
+            echo "::error::manifest says kernel $KERNEL, devkit.json says $actual"
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: driver-${{ matrix.device }}-${{ matrix.driver }}
+          path: ${{ matrix.driver }}.raw
+          # fail-fast is off, so re-running a single failed leg is normal; without
+          # this the upload 409s on the existing artifact.
+          overwrite: true
+          if-no-files-found: error
+          retention-days: 14
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: tools/publisher/go.mod
+          cache-dependency-path: tools/publisher/go.sum
+
+      - name: Publish the add-on
+        env:
+          DRIVER: ${{ matrix.driver }}
+          DEVICE: ${{ matrix.device }}
+          KERNEL: ${{ matrix.kernel }}
+          OS_VERSION: ${{ matrix.os_version }}
+          IS_NIGHTLY: ${{ matrix.nightly }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          cd tools/publisher && go build -o "$RUNNER_TEMP/publisher" . && cd -
+
+          # modules_load is baked into the image, but the manifest carries it too
+          # so the CLI can describe a driver without downloading it.
+          modules=$(jq -r '(.modules_load // []) | join(",")' "drivers/$DRIVER/driver.json")
+          version=$(jq -r '.version // ""' "drivers/$DRIVER/driver.json")
+
+          ARGS=(
+            --device "$DEVICE"
+            --version "$OS_VERSION"
+            --access-token "$(gcloud auth print-access-token)"
+            --extension-file "$GITHUB_WORKSPACE/$DRIVER.raw"
+            --extension-name "$DRIVER"
+            --extension-kernel "$KERNEL"
+            # An add-on never decides which OS version a device should run, so
+            # it must not rewrite master.json's latest pointer.
+            --skip-master-manifest
+          )
+          # The publisher refuses to change an existing version's build type, so
+          # this has to match what the OS build recorded.
+          [[ "$IS_NIGHTLY" == "true" ]] && ARGS+=(--nightly)
+          [[ -n "$version" ]] && ARGS+=(--extension-version "$version")
+          [[ -n "$modules" ]] && ARGS+=(--extension-modules "$modules")
+
+          # PRs publish into pr/<N>/ so a driver can be installed for review
+          # without touching the shared release tree.
+          if [[ "${GITHUB_EVENT_NAME:-}" == "pull_request" ]]; then
+            ARGS+=(--pr "$PR_NUMBER")
+          fi
+
+          "$RUNNER_TEMP/publisher" "${ARGS[@]}"
+
+      - name: Verify what was published
+        env:
+          DRIVER: ${{ matrix.driver }}
+          DEVICE: ${{ matrix.device }}
+          KERNEL: ${{ matrix.kernel }}
+          OS_VERSION: ${{ matrix.os_version }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          PREFIX=""
+          if [[ "${GITHUB_EVENT_NAME:-}" == "pull_request" ]]; then
+            PREFIX="pr/${PR_NUMBER}/"
+          fi
+
+          # The manifest is what the CLI resolves an add-on through, so assert the
+          # contract it states: the bytes served must be the bytes we just built.
+          manifest=$(curl -sSfL --retry 3 --retry-all-errors \
+            "${PUBLIC_BASE}/${PREFIX}manifests/${DEVICE}.json")
+          entry=$(jq -c --arg v "$OS_VERSION" --arg n "$DRIVER" --arg k "$KERNEL" \
+            '.versions[$v].extensions[]? | select(.name == $n and .kernel_version == $k)' \
+            <<<"$manifest")
+          if [[ -z "$entry" ]]; then
+            echo "::error::no manifest entry for $DRIVER ($KERNEL) under $OS_VERSION"
+            exit 1
+          fi
+
+          # An add-on republishes to a path it already used, so a public-cache hit
+          # would check a stale copy rather than what GCS now holds.
+          curl -sSfL --retry 3 --retry-all-errors -o /tmp/published.raw \
+            "${PUBLIC_BASE}/$(jq -r .path <<<"$entry")?cachebust=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+
+          want=$(jq -r .sha256 <<<"$entry")
+          served=$(sha256sum /tmp/published.raw | cut -d' ' -f1)
+          built=$(sha256sum "$GITHUB_WORKSPACE/$DRIVER.raw" | cut -d' ' -f1)
+          if [[ "$served" != "$want" ]] || [[ "$served" != "$built" ]]; then
+            echo "::error::served $served, manifest $want, built $built"
+            exit 1
+          fi
+          echo "verified ${DRIVER} for ${KERNEL}: ${served}" | tee -a "$GITHUB_STEP_SUMMARY"
