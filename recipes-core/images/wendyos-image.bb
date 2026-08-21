@@ -17,9 +17,9 @@ IMAGE_VERSION_SUFFIX ?= "${DISTRO_VERSION}"
 
 # Development-time conveniences applied when WENDYOS_DEBUG = "1": postinst
 # logging. Formerly this bundle also carried empty-root-password,
-# allow-empty-password and allow-root-login (scarthgap's legacy `debug-tweaks`
-# alias, expanded into individual features because wrynose oe-core removed the
-# alias from IMAGE_FEATURES[validitems]). Those root/empty-password features
+# allow-empty-password and allow-root-login (the individual features behind the
+# legacy `debug-tweaks` alias, which wrynose oe-core removed from
+# IMAGE_FEATURES[validitems]). Those root/empty-password features
 # were deliberately dropped: direct root login is now disabled on every image,
 # debug included. With empty-root-password gone, OE-core's
 # zap_empty_root_password rewrites the empty root entry to `root:*:` (a locked
