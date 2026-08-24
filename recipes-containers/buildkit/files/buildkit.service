@@ -1,0 +1,28 @@
+[Unit]
+Description=BuildKit daemon
+Documentation=https://github.com/moby/buildkit
+# Ordered after /data is available: the state directory set in buildkitd.toml
+# lives there, and a daemon that starts first would create it on the root
+# filesystem instead -- the exact failure this configuration exists to avoid.
+After=network-online.target local-fs.target
+Wants=network-online.target
+RequiresMountsFor=/data
+
+[Service]
+Type=simple
+# Config path is buildkitd's own default (/etc/buildkit/buildkitd.toml), so the
+# state directory comes from the file rather than from flags. Anyone reading
+# `ps` sees no --root and might assume the default; the config is the one place
+# it is written down.
+ExecStart=/opt/buildkit/bin/buildkitd --addr unix:///run/buildkit/buildkitd.sock
+Restart=always
+RestartSec=2
+# BuildKit's runc executor manages its own cgroup subtree for build steps.
+Delegate=yes
+KillMode=process
+# A build is best-effort work on a device whose real job is running apps. Prefer
+# killing a build over the agent or an app if the device runs out of memory.
+OOMScoreAdjust=500
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,30 @@
+# BuildKit state directory and cache policy for a WendyOS build host.
+#
+# WHY root IS SET HERE
+#
+# buildkitd's default --root is /var/lib/buildkit, which on WendyOS is the A/B
+# root filesystem. Measured on a Jetson AGX Thor: 12 GB with 4.6 GB free, beside
+# a /data partition with 862 GB. A build cache grows by design, and an edge image
+# that compiles a TensorRT engine writes gigabytes -- so the default does not
+# produce a failed build, it fills the partition the device boots from.
+#
+# /data is also the partition that survives an OS update, so a cache here is not
+# thrown away every time the device is updated.
+root = "/data/buildkit"
+
+[worker.oci]
+  enabled = true
+  # Bound the cache regardless of where it lives. Unbounded growth is harmless on
+  # a 900 GB partition and fatal on a 12 GB one, and this file is the only thing
+  # standing between the two if root is ever changed.
+  gc = true
+  [[worker.oci.gcpolicy]]
+    keepBytes = "40GB"
+    keepDuration = "336h"
+
+[worker.containerd]
+  # Off deliberately. containerd on this device belongs to the agent, which runs
+  # the apps: a second client sharing its content store and namespaces means two
+  # writers to state the agent believes it owns. The OCI worker above is
+  # self-contained.
+  enabled = false
