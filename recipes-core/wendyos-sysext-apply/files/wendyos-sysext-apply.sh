@@ -10,6 +10,10 @@
 # as root. /data must be a trusted store.
 set -u
 
+# Optional: the add-on this run is for. The exit status then reports only that one,
+# so a broken add-on already on the device cannot fail an unrelated install.
+SUBJECT="${1:-}"
+
 STORE=/data/extensions
 ENABLED="$STORE/enabled"
 RUNDIR=/run/extensions
@@ -18,19 +22,30 @@ KVER="$(uname -r)"
 MODLOADDIR="/usr/lib/modules-load.d"
 RELDIR="/usr/lib/extension-release.d"
 
+# The boot unit and an agent-driven install rewrite the same merge, so only one
+# runs at a time. The guard variable stops the re-exec from recursing.
+if [ -z "${WENDYOS_SYSEXT_APPLY_LOCKED:-}" ] && command -v flock >/dev/null 2>&1; then
+    export WENDYOS_SYSEXT_APPLY_LOCKED=1
+    exec flock /run/wendyos-sysext-apply.lock "$0" "$@"
+fi
+
 # Restrict to /usr. The default set also covers /opt, where an ephemeral layer would
 # discard runtime writes to /opt/wendy and /opt/containerd on unmerge.
 SYSTEMD_SYSEXT_HIERARCHIES=/usr
 export SYSTEMD_SYSEXT_HIERARCHIES
 
-has_enabled() {
-    for f in "$ENABLED"/*.raw; do
+# Buckets, in precedence order: this kernel, then add-ons pinning none, then the
+# pre-keyed flat layout (this script runs long before the agent that migrates it).
+# Keying by kernel is what lets a rebuild be staged before the OTA that needs it,
+# and lets a rollback still find the copy built for the slot it returns to.
+has_images() {
+    for f in "$ENABLED/$KVER"/*.raw "$ENABLED/any"/*.raw "$ENABLED"/*.raw; do
         [ -e "$f" ] && return 0
     done
     return 1
 }
 
-has_stale_links() {
+has_links() {
     for l in "$RUNDIR"/*; do
         [ -L "$l" ] && return 0
     done
@@ -40,11 +55,11 @@ has_stale_links() {
 # Exit early only on a device that has never had add-ons. Any leftover state means a
 # previous run merged something, so removing the last add-on still unmerges it here rather
 # than leaving /usr merged until the next boot.
-if ! has_enabled && ! has_stale_links && ! mountpoint -q /usr; then
+if ! has_images && ! has_links && ! mountpoint -q /usr; then
     exit 0
 fi
 
-mkdir -p "$ENABLED" "$STORE/modules-load.d" "$RUNDIR"
+mkdir -p "$ENABLED/$KVER" "$ENABLED/any" "$STORE/modules-load.d" "$RUNDIR"
 # Obsolete state from an earlier layout, one directory per kernel version.
 rm -rf "$STORE/modules-overlay"
 
@@ -53,14 +68,16 @@ rm -rf "$STORE/modules-overlay"
 for link in "$RUNDIR"/*; do
     [ -L "$link" ] && rm -f "$link"
 done
-for raw in "$ENABLED"/*.raw; do
+for raw in "$ENABLED/$KVER"/*.raw "$ENABLED/any"/*.raw "$ENABLED"/*.raw; do
     [ -e "$raw" ] || continue
-    ln -sf "$raw" "$RUNDIR/$(basename "$raw")"
+    # First wins: -sf would let a later bucket override the kernel-specific copy.
+    link="$RUNDIR/$(basename "$raw")"
+    [ -e "$link" ] || ln -s "$raw" "$link"
 done
 
 # Nothing left to merge: unmerge outright, since a refresh would leave an empty mutable
 # layer stacked on /usr.
-if ! has_enabled; then
+if ! has_links; then
     if ! systemd-sysext unmerge; then
         echo "wendyos-sysext-apply: systemd-sysext unmerge failed" >&2
         exit 1
@@ -97,13 +114,14 @@ resolves() {
 
 # Load each add-on's modules, one name per line with '#' comments allowed. A /data override
 # wins over the list baked into the image. A failure is reported but does not stop the rest.
+# Driven by the links, so each add-on is handled once at the precedence set above.
 rc=0
-for raw in "$ENABLED"/*.raw; do
-    [ -e "$raw" ] || continue
-    name=$(basename "$raw" .raw)
+for link in "$RUNDIR"/*.raw; do
+    [ -e "$link" ] || continue
+    name=$(basename "$link" .raw)
 
-    # systemd has no kernel criterion, so an add-on built for an older kernel still merges
-    # after an OTA. Skip it: failing the unit could roll back an A/B trial boot.
+    # Backstop for the flat layout, whose entries are not sorted by kernel. Skipped
+    # rather than failed: failing the unit could roll back an A/B trial boot.
     rel="$RELDIR/extension-release.$name"
     if [ -f "$rel" ]; then
         want=$(sed -n 's/^WENDYOS_KERNEL=//p' "$rel")
@@ -113,9 +131,17 @@ for raw in "$ENABLED"/*.raw; do
         fi
     fi
 
-    conf="$STORE/modules-load.d/$name.conf"
+    conf="$STORE/modules-load.d/$KVER/$name.conf"
+    [ -f "$conf" ] || conf="$STORE/modules-load.d/any/$name.conf"
+    [ -f "$conf" ] || conf="$STORE/modules-load.d/$name.conf"
     [ -f "$conf" ] || conf="$MODLOADDIR/$name.conf"
     [ -f "$conf" ] || continue
+
+    # Every add-on is still loaded and every failure logged; fail decides whose
+    # problem reaches the exit status.
+    fail=1
+    [ -n "$SUBJECT" ] && [ "$SUBJECT" != "$name" ] && fail=0
+
     while IFS= read -r mod || [ -n "$mod" ]; do
         # Trim only leading and trailing blanks: removing inner whitespace would turn a
         # malformed 'snd usb' into a plausible 'sndusb' and defeat the check below.
@@ -123,10 +149,10 @@ for raw in "$ENABLED"/*.raw; do
         case "$mod" in
             ''|\#*) continue ;;
             *[!A-Za-z0-9_.-]*)
-                echo "wendyos-sysext-apply: bad module name '$mod'" >&2; rc=1; continue ;;
+                echo "wendyos-sysext-apply: bad module name '$mod'" >&2; rc=$((rc|fail)); continue ;;
         esac
-        resolves "$mod" || { echo "wendyos-sysext-apply: $mod not in the module index" >&2; rc=1; continue; }
-        modprobe -- "$mod" || { echo "wendyos-sysext-apply: modprobe $mod failed" >&2; rc=1; }
+        resolves "$mod" || { echo "wendyos-sysext-apply: $mod not in the module index" >&2; rc=$((rc|fail)); continue; }
+        modprobe -- "$mod" || { echo "wendyos-sysext-apply: modprobe $mod failed" >&2; rc=$((rc|fail)); }
     done < "$conf"
 done
 
