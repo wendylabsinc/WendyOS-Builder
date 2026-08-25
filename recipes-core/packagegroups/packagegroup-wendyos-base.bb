@@ -32,7 +32,6 @@ RDEPENDS:${PN} = " \
     containerd-config \
     xdg-dbus-proxy \
     usb-power-config \
-    uplink-mtu-tuning \
     "
 
 # Recipes that bind-mount or otherwise depend on the /data partition the
