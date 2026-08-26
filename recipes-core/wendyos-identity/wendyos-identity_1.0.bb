@@ -75,20 +75,23 @@ do_install() {
 
 do_install:append() {
     # Stable board identity for the wendy agent. Sourced as shell.
-    # BOARD is set in conf/machine/<machine>.conf; MACHINE is the yocto machine
-    # name; STORAGE ("nvme"/"emmc"/"sd") is set in the board template local.conf.
+    # BOARD is set in conf/machine/<machine>.conf; MACHINE is the yocto machine name.
+    # device-type is image-derived: bake on the read-only rootfs and symlink /etc to
+    # it (like version.txt/commit) so setup-etc-binds.sh refreshes the bind copy each boot.
     install -d ${D}${sysconfdir}/wendyos
-    printf 'BOARD=%s\n'   "${WENDYOS_BOARD_ID}" >  ${D}${sysconfdir}/wendyos/device-type
-    printf 'MACHINE=%s\n' "${MACHINE}"          >> ${D}${sysconfdir}/wendyos/device-type
+    install -d ${D}${nonarch_libdir}/wendyos
+    printf 'BOARD=%s\n'   "${WENDYOS_BOARD_ID}" >  ${D}${nonarch_libdir}/wendyos/device-type
+    printf 'MACHINE=%s\n' "${MACHINE}"          >> ${D}${nonarch_libdir}/wendyos/device-type
     # STORAGE lets the OTA client pick the storage-specific artifact directly
     # (e.g. jetson-agx-orin publishes both an NVMe and an eMMC image under one
     # manifest key). Without it the agent must infer the medium from the MACHINE
     # name, which fails for legacy/plain-string identities and can serve the
     # wrong image. Only emitted when the board declares a medium.
     if [ -n "${STORAGE}" ]; then
-        printf 'STORAGE=%s\n' "${STORAGE}"      >> ${D}${sysconfdir}/wendyos/device-type
+        printf 'STORAGE=%s\n' "${STORAGE}"      >> ${D}${nonarch_libdir}/wendyos/device-type
     fi
-    chmod 0644 ${D}${sysconfdir}/wendyos/device-type
+    chmod 0644 ${D}${nonarch_libdir}/wendyos/device-type
+    ln -sf ../../usr/lib/wendyos/device-type ${D}${sysconfdir}/wendyos/device-type
 }
 
 FILES:${PN} += "${bindir}/generate-uuid.sh"
@@ -101,12 +104,11 @@ FILES:${PN} += "${systemd_system_unitdir}/wendyos-device-name-generate.service"
 FILES:${PN} += "${systemd_system_unitdir}/wendyos-identity.service"
 FILES:${PN} += "${sysconfdir}/wendyos"
 FILES:${PN} += "${sysconfdir}/wendyos/device-type"
+FILES:${PN} += "${nonarch_libdir}/wendyos/device-type"
 FILES:${PN} += "${sysconfdir}/wendyos/version.txt"
 FILES:${PN} += "${nonarch_libdir}/wendyos/version.txt"
 FILES:${PN} += "${sysconfdir}/wendyos/commit"
 FILES:${PN} += "${nonarch_libdir}/wendyos/commit"
 FILES:${PN} += "${sysconfdir}/wendyos-build-id"
-
-CONFFILES:${PN} += "${sysconfdir}/wendyos/device-type"
 
 RDEPENDS:${PN} = "bash util-linux-uuidgen avahi-daemon coreutils iproute2"
