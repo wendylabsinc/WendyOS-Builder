@@ -291,13 +291,13 @@ sym, /usr/lib/aarch64-linux-gnu/gbm/tegra_gbm.so
 # map them here; the NOTE on that packagegroup explains why a wayland package
 # ships on a distro that drops the wayland DISTRO_FEATURE.
 #
-# The versioned filename tracks egl-wayland's PV (1.1.20 at meta-tegra
-# d0b2f4d8), because meson names the file from project_version() and only the
-# .so.1 soname link is stable. A CSV line whose host path does not exist is
-# dropped by `nvidia-ctk cdi generate` with a warning, so a PV bump will not
-# break the build -- it will quietly put clients back on llvmpipe. If accelerated
-# browser rendering regresses, check this line before anything else:
-#   ls /usr/lib/libnvidia-egl-wayland.so.1*
-lib, /usr/lib/libnvidia-egl-wayland.so.1.1.20
+# The real library is version-globbed, NOT pinned. meson names the file from
+# egl-wayland's project_version() (so.1.1.20 at meta-tegra d0b2f4d8, so.1.1.22+git
+# on the tree the encryption branch pulls in) and only the .so.1 soname link is
+# stable. A hardcoded version would silently drop off `nvidia-ctk cdi generate`
+# on the next PV bump -- no build failure, just clients back on llvmpipe -- so we
+# match whatever ships instead. nvidia-ctk globs every CSV entry (see the
+# /dev/dri/card* lines), so `so.1.*` resolves the one installed versioned file.
+lib, /usr/lib/libnvidia-egl-wayland.so.1.*
 sym, /usr/lib/libnvidia-egl-wayland.so.1
 lib, /usr/share/egl/egl_external_platform.d/10_nvidia_wayland.json

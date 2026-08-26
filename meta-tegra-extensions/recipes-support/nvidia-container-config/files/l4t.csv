@@ -297,16 +297,16 @@ sym, /usr/lib/aarch64-linux-gnu/gbm/tegra_gbm.so
 # the NOTE on that packagegroup explains why a wayland package ships on a distro
 # that drops the wayland DISTRO_FEATURE.
 #
-# TWO versioned filenames, deliberately. meson names the library from
-# project_version() and only the .so.1 soname link is stable, and egl-wayland's
-# PV differs across the trees this file serves: 1.1.13 on the scarthgap/JP6 pin
-# (meta-tegra 447c2146, the bootstrap default) and 1.1.20 on wrynose. Whichever
-# is absent is dropped by `nvidia-ctk cdi generate` with a warning, which is the
-# same no-op this file already relies on above -- listing both beats guessing,
-# and guessing wrong here does not fail loudly, it just puts clients back on
-# llvmpipe. Note that every board template currently pins blacksail, so in
-# practice l4t-blacksail.csv is the file that ships; this one is the fallback.
-lib, /usr/lib/libnvidia-egl-wayland.so.1.1.13
-lib, /usr/lib/libnvidia-egl-wayland.so.1.1.20
+# The real library is version-globbed, NOT pinned. meson names the library from
+# egl-wayland's project_version() and only the .so.1 soname link is stable, and
+# the PV differs across the trees this file serves (1.1.13 on the scarthgap/JP6
+# pin at meta-tegra 447c2146, 1.1.20 on wrynose, 1.1.22+git once the encryption
+# branch lands). A hardcoded version drops off `nvidia-ctk cdi generate` on any
+# bump -- no build failure, just clients back on llvmpipe -- so we match whatever
+# ships. nvidia-ctk globs every CSV entry (see the /dev/dri/card* lines), so
+# `so.1.*` resolves the one installed versioned file regardless of tree.
+# Note that every board template currently pins blacksail, so in practice
+# l4t-blacksail.csv is the file that ships; this one is the fallback.
+lib, /usr/lib/libnvidia-egl-wayland.so.1.*
 sym, /usr/lib/libnvidia-egl-wayland.so.1
 lib, /usr/share/egl/egl_external_platform.d/10_nvidia_wayland.json
