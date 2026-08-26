@@ -66,6 +66,29 @@ do_install() {
         ln -sf ../nvidia ${D}${libdir}/aarch64-linux-gnu/nvidia
     fi
 
+    # Multiarch compatibility symlinks for the NVIDIA GBM backends.
+    #
+    # LOAD-BEARING - do not drop these as "unused on the host". Nothing on the
+    # WendyOS host reads them; they exist only so that `nvidia-ctk cdi generate`
+    # can mirror them into containers via the `sym,` lines in l4t.csv.
+    #
+    # meta-tegra installs the backends as ${libdir}/gbm/{nvidia-drm,tegra-udrm,
+    # tegra}_gbm.so (Yocto layout), and drivers.csv maps that path. Container
+    # images are Debian/Ubuntu multiarch, where libgbm.so.1 is built with
+    # gbm-backends-path=/usr/lib/aarch64-linux-gnu/gbm and therefore never finds
+    # them. gbm_create_device() on the Tegra DRM node then falls back to Mesa's
+    # dri_gbm.so and a Wayland compositor (cage/weston/sway) silently ends up on
+    # the software rasterizer ("MESA-LOADER: failed to retrieve device
+    # information", "ZINK: vkCreateInstance failed").
+    #
+    # Target matches meta-tegra's own ${libdir}/gbm links; nvidia-ctk resolves
+    # the link fully, so the container gets an absolute link to
+    # /usr/lib/libnvidia-allocator.so.1 (mapped by meta-tegra's drivers.csv).
+    install -d ${D}${libdir}/aarch64-linux-gnu/gbm
+    ln -sf ../../libnvidia-allocator.so ${D}${libdir}/aarch64-linux-gnu/gbm/nvidia-drm_gbm.so
+    ln -sf ../../libnvidia-allocator.so ${D}${libdir}/aarch64-linux-gnu/gbm/tegra-udrm_gbm.so
+    ln -sf ../../libnvidia-allocator.so ${D}${libdir}/aarch64-linux-gnu/gbm/tegra_gbm.so
+
     # Install WendyOS device/sysfs mappings (supplements meta-tegra's devices.csv)
     install -m 0644 ${UNPACKDIR}/devices-wendyos.csv ${D}${sysconfdir}/nvidia-container-runtime/host-files-for-container.d/
 
@@ -97,6 +120,16 @@ FILES:${PN} += "${bindir}/fix-cdi-gstreamer-paths.sh"
 FILES:${PN} += "${systemd_system_unitdir}/wendyos-cdi-generate.service"
 FILES:${PN} += "${systemd_system_unitdir}/wendyos-cuda-detect.service"
 FILES:${PN} += "${sysconfdir}/udev/rules.d/99-z-nvidia-tegra.rules"
+
+# GBM backend multiarch compat symlinks (always installed - see do_install).
+FILES:${PN} += "${libdir}/aarch64-linux-gnu/gbm"
+
+# These are deliberately bare *.so symlinks in a runtime package: they are GBM
+# backend module names (dlopen'd by libgbm as "<drm-driver>_gbm.so"), not
+# development links, and they intentionally dangle at package time because their
+# target ships in meta-tegra's tegra-libraries-* packages. Both facts trip the
+# default QA checks, so exempt just this package.
+INSANE_SKIP:${PN} += "dev-so"
 
 # Multiarch compatibility symlinks (only when DeepStream is enabled)
 FILES:${PN} += "${@bb.utils.contains('WENDYOS_DEEPSTREAM', '1', '${libdir}/aarch64-linux-gnu/gstreamer-1.0/deepstream', '', d)}"

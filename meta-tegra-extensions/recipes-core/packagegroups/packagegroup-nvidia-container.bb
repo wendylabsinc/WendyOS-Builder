@@ -76,12 +76,34 @@ RDEPENDS:${PN} = " \
     tegra-libraries-camera \
     tegra-libraries-eglcore \
     tegra-libraries-glescore \
+    egl-wayland \
     cudnn \
     cusparselt \
     tensorrt-core \
     tensorrt-plugins \
     libcufile \
     "
+
+# NOTE: egl-wayland is in that list for containers only, and it will look like a
+# mistake to anyone who greps DISTRO_FEATURES -- conf/distro/wendyos.conf removes
+# `wayland`, and nothing on the WendyOS host runs a compositor. It is here for the
+# same reason as everything else in this packagegroup: l4t.csv names
+# libnvidia-egl-wayland.so.1 and
+# /usr/share/egl/egl_external_platform.d/10_nvidia_wayland.json, and a CSV line
+# whose host path does not exist is silently dropped at CDI generation.
+#
+# What it buys: libEGL_nvidia.so.0 gains EGL_PLATFORM_WAYLAND_EXT, which is what
+# Wayland *clients* inside a container (GTK4, Qt, GPU-composited browsers) ask
+# for. Without it those clients fall through libglvnd to Mesa, which has no DRI
+# driver for the NVIDIA node, and land on llvmpipe -- a fully working picture
+# rendered on the CPU, so it reads as "the UI is laggy" rather than as an error.
+# The GBM entries in the same CSV only ever fixed the *compositor* side of this.
+#
+# The recipe (meta-tegra recipes-graphics/wayland/egl-wayland_git.bb) gates only
+# on REQUIRED_DISTRO_FEATURES = "opengl", which wendyos.conf adds for TensorRT.
+# Its wayland / wayland-protocols DEPENDS carry no REQUIRED_DISTRO_FEATURES of
+# their own and ship the -native variants it needs, so dropping the wayland
+# distro feature does not block this build.
 
 # DeepStream-specific packages (only when WENDYOS_DEEPSTREAM=1)
 # These provide libraries needed by DeepStream GStreamer plugins
