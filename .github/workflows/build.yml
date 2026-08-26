@@ -1151,42 +1151,6 @@ jobs:
             echo "::endgroup::"
           done
 
-      - name: Update master manifest
-        run: |
-          set -euo pipefail
-          shopt -s nullglob
-          entries=("$GITHUB_WORKSPACE"/manifest-entries/*.json)
-          if [[ ${#entries[@]} -eq 0 ]]; then
-            echo "No manifest entries; skipping master manifest update."
-            exit 0
-          fi
-          TOKEN=$(gcloud auth print-access-token)
-          cd "$GITHUB_WORKSPACE/wendyos/tools/publisher"
-          # Reuse the binary from the previous step; rebuild only if missing
-          # (e.g. this step re-run in isolation).
-          [[ -x "$RUNNER_TEMP/publisher" ]] || go build -o "$RUNNER_TEMP/publisher" .
-          # One master-manifest write per device that actually published
-          # (storage variants of a device share one device manifest, hence
-          # unique_by). Devices whose builds failed keep their previous
-          # latest pointers instead of being bumped to a version they
-          # never produced.
-          readarray -t rows < <(jq -sc '[.[] | {device, version, nightly}] | unique_by(.device) | .[]' "${entries[@]}")
-          for row in "${rows[@]}"; do
-            DEVICE=$(jq -r .device <<<"$row")
-            VERSION=$(jq -r .version <<<"$row")
-            NIGHTLY=$(jq -r .nightly <<<"$row")
-            ARGS=(
-              --device "$DEVICE"
-              --version "$VERSION"
-              --master-manifest-only
-              --access-token "$TOKEN"
-            )
-            if [[ "$NIGHTLY" == "true" ]]; then
-              ARGS+=(--nightly)
-            fi
-            "$RUNNER_TEMP/publisher" "${ARGS[@]}" </dev/null
-          done
-
       - name: Tag nightly pre-release on GitHub
         # Nightly builds only: release tags already exist (created by promote.yml).
         # Skipped when zero entries were published (every build failed) - never
@@ -1365,3 +1329,115 @@ jobs:
     with:
       version: ${{ needs.detect-changes.outputs.version }}
     secrets: inherit
+
+  # Advancing "latest" is what actually offers a version to a device, so it runs
+  # only once the add-ons for that version are published. Until then the build is
+  # uploaded and its manifest entry written — drivers.yml needs both to find the
+  # devkit — but no device resolves it through auto-detect.
+  promote:
+    name: Promote to latest
+    needs: [detect-changes, publish, drivers]
+    # publish must have succeeded: a version whose device manifest was never
+    # written would become a latest pointer devices cannot resolve. A failed
+    # drivers job still runs through, where the per-device guard below catches it.
+    if: ${{ !cancelled() && needs.publish.result == 'success' && github.event_name != 'pull_request' }}
+    concurrency:
+      group: update-master-manifest
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    runs-on: ubuntu-latest
+    env:
+      PUBLIC_BASE: https://storage.googleapis.com/wendyos-images-public
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          path: wendyos
+          ref: ${{ inputs.version }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: wendyos/tools/publisher/go.mod
+          cache-dependency-path: wendyos/tools/publisher/go.sum
+
+      - name: Download manifest entries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: manifest-entry-*
+          path: manifest-entries
+          merge-multiple: true
+
+      - name: Update master manifest
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          entries=("$GITHUB_WORKSPACE"/manifest-entries/*.json)
+          if [[ ${#entries[@]} -eq 0 ]]; then
+            echo "No manifest entries; skipping master manifest update."
+            exit 0
+          fi
+          TOKEN=$(gcloud auth print-access-token)
+          if ! MASTER=$(curl -sfL "${PUBLIC_BASE}/manifests/master.json"); then
+            echo "::warning::master manifest unreadable, promoting without the add-on check"
+            MASTER='{}'
+          fi
+          failed=0
+          cd "$GITHUB_WORKSPACE/wendyos/tools/publisher"
+          go build -o "$RUNNER_TEMP/publisher" .
+          # One master-manifest write per device that actually published
+          # (storage variants of a device share one device manifest, hence
+          # unique_by). Devices whose builds failed keep their previous
+          # latest pointers instead of being bumped to a version they
+          # never produced.
+          readarray -t rows < <(jq -sc '[.[] | {device, version, nightly}] | unique_by(.device) | .[]' "${entries[@]}")
+          for row in "${rows[@]}"; do
+            DEVICE=$(jq -r .device <<<"$row")
+            VERSION=$(jq -r .version <<<"$row")
+            NIGHTLY=$(jq -r .nightly <<<"$row")
+            # A device that shipped add-ons for its previous latest must not be
+            # advanced to a version that has none: drivers.yml either has not
+            # written them yet or its build failed, and a device offered that
+            # version would update straight past its drivers. Compared against the
+            # channel being moved, so a channel that never shipped add-ons is never
+            # held back.
+            if ! DEV_MANIFEST=$(curl -sfL "${PUBLIC_BASE}/manifests/${DEVICE}.json"); then
+              echo "::warning::${DEVICE}: device manifest unreadable, promoting without the add-on check"
+              DEV_MANIFEST='{}'
+            fi
+            if [[ "$NIGHTLY" == "true" ]]; then
+              PREV=$(jq -r --arg d "$DEVICE" '.devices[$d].latest_nightly // ""' <<<"$MASTER")
+            else
+              PREV=$(jq -r --arg d "$DEVICE" '.devices[$d].latest // ""' <<<"$MASTER")
+            fi
+            PREV_EXTS=$(jq --arg v "$PREV" '(.versions[$v].extensions // []) | length' <<<"$DEV_MANIFEST")
+            NEW_EXTS=$(jq --arg v "$VERSION" '(.versions[$v].extensions // []) | length' <<<"$DEV_MANIFEST")
+            if [[ -n "$PREV" && "$PREV_EXTS" -gt 0 && "$NEW_EXTS" -eq 0 ]]; then
+              echo "::error::${DEVICE}: ${PREV} publishes driver add-ons but ${VERSION} has none;" \
+                   "leaving latest on ${PREV} so no device is offered a build without its drivers"
+              failed=1
+              continue
+            fi
+            ARGS=(
+              --device "$DEVICE"
+              --version "$VERSION"
+              --master-manifest-only
+              --access-token "$TOKEN"
+            )
+            if [[ "$NIGHTLY" == "true" ]]; then
+              ARGS+=(--nightly)
+            fi
+            "$RUNNER_TEMP/publisher" "${ARGS[@]}" </dev/null
+          done
+          exit "$failed"
