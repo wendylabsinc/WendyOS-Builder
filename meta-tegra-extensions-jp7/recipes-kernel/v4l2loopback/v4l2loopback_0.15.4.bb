@@ -23,8 +23,6 @@ inherit module
 # generated from this exact pinned rev's v4l2loopback.h, not an older one.
 SRC_URI = " \
     git://github.com/v4l2loopback/v4l2loopback.git;branch=main;protocol=https \
-    file://v4l2loopback.conf \
-    file://v4l2loopback-options.conf \
     "
 SRCREV = "0f9ee86760b7f2bea174b7e3e7a1d38845da0ab4"
 
@@ -65,22 +63,29 @@ MAKE_TARGETS = "v4l2loopback.ko"
 # module_do_install passes).
 MODULES_INSTALL_TARGET = "install"
 
-# modules-load.d forces the module to load at boot (so the control device
-# exists for the agent); modprobe.d pins its options (control-device-only,
-# exclusive caps). See the payload files themselves for the full rationale.
-do_install:append() {
-    install -d ${D}${sysconfdir}/modules-load.d
-    install -m 0644 ${UNPACKDIR}/v4l2loopback.conf ${D}${sysconfdir}/modules-load.d/v4l2loopback.conf
+# Have kernel-module-split.bbclass generate the autoload and modprobe files in
+# the same split package as v4l2loopback.ko. devices=0 loads only the control
+# device; WendyAgent creates the numbered video devices through its ioctl API.
+# exclusive_caps is intentionally absent: that module parameter is consulted
+# only for devices created during module initialization, of which there are
+# none. WendyAgent requests exclusive capabilities per device by setting
+# announce_all_caps=0 in V4L2LOOPBACK_CTL_ADD.
+KERNEL_MODULE_AUTOLOAD += "v4l2loopback"
+KERNEL_MODULE_PROBECONF += "v4l2loopback"
+module_conf_v4l2loopback = "options v4l2loopback devices=0"
 
-    install -d ${D}${sysconfdir}/modprobe.d
-    install -m 0644 ${UNPACKDIR}/v4l2loopback-options.conf ${D}${sysconfdir}/modprobe.d/v4l2loopback-options.conf
+# Fail with the missing kernel contract instead of a later, opaque module link
+# error. Keep this check on the module recipe so changing it does not invalidate
+# the shared Tegra kernel's sstate.
+do_configure:append() {
+    config="${STAGING_KERNEL_BUILDDIR}/.config"
+    [ -f "$config" ] || bbfatal "v4l2loopback: effective kernel config not found at $config"
+
+    for symbol in CONFIG_VIDEO_DEV CONFIG_VIDEOBUF2_VMALLOC; do
+        if ! grep -Eq "^$symbol=(y|m)$" "$config"; then
+            found="$(grep -E "^(# )?$symbol(=| is not set)" "$config" || true)"
+            [ -n "$found" ] || found="not present"
+            bbfatal "v4l2loopback: $symbol is neither built-in nor modular (found: $found)"
+        fi
+    done
 }
-
-# The module class packages the .ko into kernel-module-* packages. The
-# modules-load.d/modprobe.d conf files ride in the recipe's own package.
-FILES:${PN} += " \
-    ${sysconfdir}/modules-load.d/v4l2loopback.conf \
-    ${sysconfdir}/modprobe.d/v4l2loopback-options.conf \
-    "
-
-RPROVIDES:${PN} += "kernel-module-v4l2loopback"

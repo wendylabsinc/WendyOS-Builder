@@ -74,24 +74,16 @@ rm -rf "${tmp_aws}"
 # Pinned to a specific release so the build is reproducible.
 S5CMD_VERSION="2.2.2"
 case "${arch}" in
-    amd64) s5cmd_arch="64bit" ;;
-    arm64) s5cmd_arch="arm64" ;;
+    amd64) s5cmd_arch="64bit"; s5cmd_sha256="a15f83d2a6dc091e43b2a120f29f8f6c86d146c381766c0197ec75d7985af2b6" ;;
+    arm64) s5cmd_arch="arm64"; s5cmd_sha256="eabf18082398c332d33c692d383a889be204b1e7716f820e014bf11474ad345b" ;;
     *)     echo "Unsupported arch for s5cmd: ${arch}" >&2; exit 1 ;;
 esac
 tmp_s5=$(mktemp -d)
 wget -qO "${tmp_s5}/s5cmd.tar.gz" \
     "https://github.com/peak/s5cmd/releases/download/v${S5CMD_VERSION}/s5cmd_${S5CMD_VERSION}_Linux-${s5cmd_arch}.tar.gz"
-# Verify the download against the release's published checksums (finding H9).
-# NOTE: the checksums asset itself is NOT version-prefixed (unlike every other
-# release asset) — it's published as the literal name "s5cmd_checksums.txt"
-# regardless of release version (verified against the v2.2.2 release's actual
-# asset list via the GitHub releases API). The per-file entries *inside* it
-# still are version-prefixed, which is what the awk lookup below matches on.
-wget -qO "${tmp_s5}/checksums.txt" \
-    "https://github.com/peak/s5cmd/releases/download/v${S5CMD_VERSION}/s5cmd_checksums.txt"
-s5cmd_sha="$(awk -v f="s5cmd_${S5CMD_VERSION}_Linux-${s5cmd_arch}.tar.gz" '$2 == f {print $1}' "${tmp_s5}/checksums.txt")"
-[[ -n "${s5cmd_sha}" ]] || { echo "no checksum for s5cmd_${S5CMD_VERSION}_Linux-${s5cmd_arch}.tar.gz" >&2; exit 1; }
-echo "${s5cmd_sha}  ${tmp_s5}/s5cmd.tar.gz" | sha256sum -c -
+# Pin the release hashes in-repo instead of trusting a checksum downloaded from
+# the same origin as the archive. Update both values when S5CMD_VERSION changes.
+echo "${s5cmd_sha256}  ${tmp_s5}/s5cmd.tar.gz" | sha256sum -c -
 tar -xzf "${tmp_s5}/s5cmd.tar.gz" -C "${tmp_s5}" s5cmd
 install -m 0755 "${tmp_s5}/s5cmd" /usr/local/bin/s5cmd
 rm -rf "${tmp_s5}"

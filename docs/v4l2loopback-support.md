@@ -16,18 +16,22 @@ virtual `/dev/video<nr>` capture node instead of a real one.
   `SRCREV = "0f9ee86760b7f2bea174b7e3e7a1d38845da0ab4"` (the v0.15.4 tag) —
   not a floating branch head — because, as covered below, the module's
   public ioctl ABI is a contract the agent code depends on.
-- **Autoload**: a `modules-load.d/v4l2loopback.conf` payload force-loads the
-  module at boot, so its control device exists before the agent starts
-  adding per-camera nodes.
-- **Options**: a `modprobe.d/v4l2loopback-options.conf` payload pins
-  `devices=0 exclusive_caps=1`:
+- **Autoload**: `KERNEL_MODULE_AUTOLOAD` has
+  `kernel-module-split.bbclass` generate a `modules-load.d/v4l2loopback.conf`
+  file in the module package, so its control device exists before the agent
+  starts adding per-camera nodes.
+- **Options**: `KERNEL_MODULE_PROBECONF` similarly generates a
+  `modprobe.d/v4l2loopback.conf` file that pins `devices=0`:
   - `devices=0` boots the module with only the control device
     (`/dev/v4l2loopback`) and no stray `/dev/video0` — the agent creates
     every capture node itself via ioctl, and a phantom device 0 would
     collide with real camera enumeration.
-  - `exclusive_caps=1` makes every device the agent creates announce
-    OUTPUT xor CAPTURE capabilities (never both), which is what consumers
-    like GStreamer and ffmpeg expect from a loopback device.
+  - The module-level `exclusive_caps` parameter applies only to devices
+    created while the module initializes, so it has no effect when
+    `devices=0`. The agent instead sets `announce_all_caps=0` in each
+    `V4L2LOOPBACK_CTL_ADD` request, making that device announce OUTPUT xor
+    CAPTURE capabilities (never both), as consumers such as GStreamer and
+    ffmpeg expect.
 - Unconditionally RDEPENDS'd onto every Tegra image via
   `packagegroup-wendyos-tegra.bb` — the recipe only exists in the
   blacksail (JP7.2) layer tree, but every current Tegra board builds
@@ -47,22 +51,22 @@ What *can* happen is a future kernel bump or config change silently
 dropping one of those symbols, which would otherwise surface only as an
 obscure module build/link failure deep inside the image build, with
 nothing pointing at the actual missing Kconfig option. To fail fast
-instead, `meta-tegra-extensions-jp7/recipes-kernel/linux/wendy-v4l2loopback.inc`
-(`require`d from the `linux-noble-nvidia-tegra_%.bbappend`) adds a
-`do_configure:append()` that reads the effective `${B}/.config` right
-after Kconfig has resolved every BSP fragment and dependency, and
-`bbfatal`s with a named symbol if either is missing:
+instead, the `v4l2loopback_0.15.4.bb` module recipe adds a
+`do_configure:append()` that reads the effective
+`${STAGING_KERNEL_BUILDDIR}/.config` after Kconfig has resolved every BSP
+fragment and dependency, and `bbfatal`s with a named symbol if either is
+missing:
 
 ```sh
 for symbol in CONFIG_VIDEO_DEV CONFIG_VIDEOBUF2_VMALLOC; do
-    grep -Eq "^${symbol}=(y|m)$" "${B}/.config" || bbfatal "..."
+    grep -Eq "^${symbol}=(y|m)$" "${STAGING_KERNEL_BUILDDIR}/.config" || bbfatal "..."
 done
 ```
 
-This is a tripwire, not an enabler — the include carries no `SRC_URI`
-kernel-config fragment. It's also the first kernel-contract include on
-main; an unmerged branch establishes the same do_configure-assertion
-pattern for Bluetooth, so the shapes should stay aligned if both land.
+This is a tripwire, not an enabler — the recipe carries no `SRC_URI`
+kernel-config fragment. Keeping the assertion in the module recipe also
+means changes to the check do not invalidate the shared Tegra kernel's
+sstate across every machine.
 
 ## The consumer
 
@@ -96,4 +100,4 @@ v4l2-ctl --list-devices
 (`conf/distro/include/tegra-image.inc`), so no extra package install is
 needed on-device. `v4l2-ctl --list-devices` should list the loopback
 device(s) the agent created, each showing its exclusive OUTPUT or CAPTURE
-capability per `exclusive_caps=1`.
+capability per the add request's `announce_all_caps=0` setting.

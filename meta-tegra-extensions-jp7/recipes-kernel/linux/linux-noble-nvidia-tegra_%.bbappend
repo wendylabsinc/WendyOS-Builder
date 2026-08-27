@@ -14,9 +14,6 @@
 # be redundant on 6.8 but doesn't hurt.
 FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 
-# v4l2loopback kernel-config contract (CONFIG_VIDEO_DEV, CONFIG_VIDEOBUF2_VMALLOC)
-require wendy-v4l2loopback.inc
-
 SRC_URI += " \
     file://usb-gadget.cfg \
     file://usb-gadget-builtin.cfg \
