@@ -20,7 +20,7 @@
 # These appends assert "trust me, this layer parses on blacksail" — the
 # standard escape hatch for bleeding-edge bring-up. They are GATED on
 # WENDYOS_LAYER_TREE == "blacksail" so they are completely inert on the
-# validated wrynose/scarthgap trees (and on main). The real fix is upstream
+# validated wrynose tree (and on main). The real fix is upstream
 # bumping these layers' LAYERSERIES_COMPAT; when that lands, re-pin the
 # SRCREVs in repos.overrides and delete this file + its require line.
 #

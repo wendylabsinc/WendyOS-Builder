@@ -11,8 +11,8 @@
 # Result: the wendyos-image dependency chain
 # wireplumber -> pipewire -> libcamera -> virtual/libgl is unbuildable.
 #
-# The older wrynose/scarthgap libcamera had no opengl PACKAGECONFIG, so this
-# is purely a 0.7.1 regression for us. We don't use libcamera's CPU/GPU
+# The older wrynose libcamera had no opengl PACKAGECONFIG, so this is purely a
+# 0.7.x regression for us. We don't use libcamera's CPU/GPU
 # softISP (Jetson cameras go through NVIDIA's hardware ISP), so drop the
 # option. Gated to blacksail; inert elsewhere (older libcamera lacks it).
 PACKAGECONFIG:remove = "${@'opengl' if d.getVar('WENDYOS_LAYER_TREE') == 'blacksail' else ''}"
