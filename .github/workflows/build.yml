@@ -218,7 +218,7 @@ jobs:
       # GitHub mints the OIDC token (not the runner), so GCP Workload Identity
       # Federation still works on the self-hosted platform.
       id-token: write
-    runs-on: [self-hosted, linux, x64, wendyos-builder]
+    runs-on: [self-hosted, linux, x64, wendy-linux, wendyos-builder]
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.detect-changes.outputs.matrix) }}
