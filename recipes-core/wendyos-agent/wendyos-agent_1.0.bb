@@ -59,19 +59,25 @@ SYSTEMD_SERVICE:${PN} = "wendyos-agent.service wendyos-agent-updater.service wen
 SYSTEMD_AUTO_ENABLE:${PN} = "enable"
 
 do_install() {
-    # Install the pre-built binary (fetched + checksum-verified by do_fetch)
-    # into /usr/local/bin so it lives alongside runtime updates written by
-    # wendyos-agent-updater.sh. The tarball unpacks to
-    # wendy-agent-linux-<arch>/wendy-agent; find it rather than hard-coding the
-    # inner directory so a future asset layout change fails loudly here instead
-    # of silently shipping nothing.
+    # Install the pre-built binary (fetched + checksum-verified by do_fetch) into
+    # /opt/wendyos/bin, outside the hierarchy wendyos-sysext-apply overlays: a
+    # merged driver add-on turns /usr into an ephemeral overlay, so an agent
+    # update written under it is discarded on the next reboot.
+    #
+    # The tarball unpacks to wendy-agent-linux-<arch>/wendy-agent; find it rather
+    # than hard-coding the inner directory so a future asset layout change fails
+    # loudly here instead of silently shipping nothing.
     BINARY=$(find ${S} -type f -name wendy-agent ! -path "*/wendy-cli*" | head -1)
     if [ -z "${BINARY}" ]; then
         bbfatal "wendy-agent binary not found in unpacked release archive"
     fi
 
+    install -d ${D}/opt/wendyos/bin
+    install -m 0755 "${BINARY}" ${D}/opt/wendyos/bin/wendy-agent
+
+    # The binary moved; the path everything already invokes did not.
     install -d ${D}/usr/local/bin
-    install -m 0755 "${BINARY}" ${D}/usr/local/bin/wendy-agent
+    ln -sf /opt/wendyos/bin/wendy-agent ${D}/usr/local/bin/wendy-agent
 
     # Install systemd services
     install -d ${D}${systemd_system_unitdir}
@@ -80,7 +86,6 @@ do_install() {
     install -m 0644 ${UNPACKDIR}/wendyos-agent-updater.timer ${D}${systemd_system_unitdir}/
 
     # Install updater and download scripts
-    install -d ${D}/opt/wendyos/bin
     install -m 0755 ${UNPACKDIR}/wendyos-agent-updater.sh ${D}/opt/wendyos/bin/
     install -m 0755 ${UNPACKDIR}/download-wendyos-agent.sh ${D}/opt/wendyos/bin/
 

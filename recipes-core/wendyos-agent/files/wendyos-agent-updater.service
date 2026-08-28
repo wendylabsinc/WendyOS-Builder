@@ -16,7 +16,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=strict
-ReadWritePaths=/usr/local/bin /opt/wendyos/bin /opt/wendy /var/lib/wendy-agent /tmp
+ReadWritePaths=/opt/wendyos/bin /opt/wendy /var/lib/wendy-agent /tmp
 
 # Environment
 EnvironmentFile=-/etc/default/wendy-agent

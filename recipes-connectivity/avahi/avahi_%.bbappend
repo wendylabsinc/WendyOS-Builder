@@ -13,7 +13,7 @@ SRC_URI += " \
 # Use :append, NOT += : the recipe sets PACKAGECONFIG with a weak default
 # (??=), and += is an immediate assignment that DISCARDS that default
 # entirely (??= only applies if the var is otherwise unset). On avahi 0.8
-# (scarthgap/wrynose) the default was just "dbus", so += was harmless. But
+# (wrynose) the default was just "dbus", so += was harmless. But
 # avahi 0.9 (blacksail) added "systemd" to the default AND gates installing
 # avahi-daemon.service on PACKAGECONFIG[systemd]; += "dbus" wiped systemd,
 # so the unit was never installed while SYSTEMD_SERVICE still referenced it

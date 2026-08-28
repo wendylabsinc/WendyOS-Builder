@@ -57,7 +57,6 @@ META_LAYER_DIR="${HOME_DIR}"
 DOCKER_WORK_DIR="/home/${USER_NAME}/${IMAGE_NAME}"
 
 
-YOCTO_BRANCH="scarthgap"
 YOCTO_BUILD_DIR="build"
 
 cleanup() {
@@ -74,6 +73,11 @@ trap cleanup EXIT
 # REPOS_EXTRA) before repos[] is built below.
 # shellcheck source=scripts/upstream-repos.env
 source "${HOME_DIR}/scripts/upstream-repos.env"
+
+# Derivation of which layers a board needs. Shared with
+# scripts/check-repo-pins.sh so the lint and the clone logic cannot disagree.
+# shellcheck source=scripts/repo-pins.lib.sh
+source "${HOME_DIR}/scripts/repo-pins.lib.sh"
 
 
 ##
@@ -228,6 +232,11 @@ resolve_ref() {
 ###
 # clone_repos must be called from inside repos/${WENDYOS_LAYER_TREE}/.
 # Each entry's <folder> is a sibling under that tree directory.
+#
+# Repos this board does not layer are skipped: every board used to clone every
+# upstream repo into the shared tree, so switching between board families
+# re-checked-out layers the build never reads (meta-tegra on an RPi build, and
+# so on).
 function clone_repos() {
     for repo in "${repos[@]}"
     do
@@ -246,6 +255,14 @@ function clone_repos() {
         [[ -z "${folder}" ]] && {
             folder=$(basename "${url%.git}")
         }
+
+        # Skip layers this board does not put in BBLAYERS. Any leftover
+        # checkout is left alone rather than deleted.
+        if ! printf '%s\n' "${REQUIRED_REPO_FOLDERS}" | grep -qxF "${folder}"
+        then
+            printf "[skip] '%s' (not in this board's bblayers)\n" "${folder}"
+            continue
+        fi
 
         srcrev=$(echo "${repo}" | cut -d'|'  -f 4)
         [[ -z "${srcrev}" ]] && {
@@ -268,6 +285,7 @@ function clone_repos() {
             current_url=$(git remote get-url origin 2>/dev/null || true)
             if [[ "${current_url}" != "${url}" ]]; then
                 printf "[reurl] '%s' %s -> %s\n" "${folder}" "${current_url:-<none>}" "${url}"
+
                 # set-url only rewrites an existing remote; when origin is
                 # absent (current_url empty) it must be added instead.
                 if [[ -z "${current_url}" ]]; then
@@ -333,21 +351,83 @@ function clone_repos() {
             cd "${folder}"
         fi
 
-        # we need to checkout (either new clone or update)
-        if ! git checkout "${srcrev}" >> "${LOG_FILE}" 2>&1; then
-            # The SRCREV may not be reachable from any current branch tip — e.g.
-            # the upstream branch it lived on was deleted or force-pushed (as
-            # happened with meta-tegra's wip-l4t-r39.2.0 branch). A plain clone /
-            # `git fetch origin` only retrieves current refs, so the pinned
-            # commit is absent locally even though the object still exists on the
-            # server. Fetch it directly by SHA, then retry the checkout.
-            printf "[refetch] '%s': %s not reachable via refs; fetching by SHA\n" "${folder}" "${srcrev}"
-            if ! { git fetch origin "${srcrev}" >> "${LOG_FILE}" 2>&1 && \
-                   git checkout "${srcrev}" >> "${LOG_FILE}" 2>&1; }; then
-                printf "[error] Failed to checkout %s in '%s'\n" "${srcrev}" "${folder}"
-                cd ..
-                return 1
+        # Clone/fetch brought in every ref and everything reachable from them, so
+        # a pin that is reachable checks out here. Failure therefore means the pin
+        # is reachable from no branch or tag: upstream deleted or rebased what it
+        # lived on.
+        #
+        # There used to be a fallback that fetched the commit directly by SHA.
+        # That only ever helps for an UNREACHABLE commit -- anything reachable
+        # arrives with the clone -- so it was the dangling-pin workaround, not a
+        # robustness measure, and it did more harm than good: a cold clone was
+        # silently rescued while a warm cache failed earlier in the bulk fetch, so
+        # the same broken pin behaved differently per machine and neither
+        # explained the real problem. Worse, it kept working only until the server
+        # garbage-collected the object, moving the real failure to a later and
+        # less convenient moment. Fail here instead, where the cause is exact and
+        # the fix is obvious.
+        if ! git checkout "${srcrev}" >> "${LOG_FILE}" 2>&1
+        then
+            printf "[error] '%s': cannot check out pin %s\n" "${folder}" "${srcrev}"
+            # Distinguish the two reasons, because they need opposite fixes and
+            # guessing wrong sends the reader down the wrong path. If the object
+            # is here, the pin is fine and something about the working tree
+            # blocked the switch; if it is absent after a successful fetch, no ref
+            # reaches it.
+            if git rev-parse -q --verify "${srcrev}^{commit}" >/dev/null 2>&1
+            then
+                printf "        The commit IS present locally, so the pin is fine -- the working\n"
+                printf "        tree blocked the switch (local modifications, or a lock from a\n"
+                printf "        concurrent bootstrap against repos/%s/).\n" "${WENDYOS_LAYER_TREE}"
+                printf "        Inspect repos/%s/%s, then re-run.\n" "${WENDYOS_LAYER_TREE}" "${folder}"
+            else
+                printf "        The commit is absent after fetching, so no branch or tag on\n"
+                printf "        %s reaches it -- upstream most likely deleted or\n" "${url}"
+                printf "        rebased the branch it was on. Re-pin to a reachable commit\n"
+                printf "        (docs/plans/bootstrap-tree-pins.md covers verifying reachability).\n"
             fi
+            cd ..
+            return 1
+        fi
+
+        # Assert the checkout actually landed on the pin. git checkout reports
+        # success in cases that leave HEAD elsewhere -- a concurrent bootstrap
+        # against the same shared tree being the realistic one, since every board
+        # on a series shares repos/${WENDYOS_LAYER_TREE}/. Without this, a raced
+        # or partial checkout builds against the wrong revision silently, which
+        # is the one failure mode here that produces a bad image rather than a
+        # loud error.
+        local landed
+        local want
+        landed=$(git rev-parse HEAD 2>/dev/null || true)
+        want=$(resolve_ref "${srcrev}")
+        if [[ "${landed}" != "${want}" ]]
+        then
+            printf "[error] '%s' is at %s but the pin is %s (%s)\n" \
+                "${folder}" "${landed:-<unknown>}" "${want}" "${srcrev}"
+            printf "        Refusing to continue: the build would not match the pin.\n"
+            printf "        If another bootstrap is running against repos/%s/, wait for it.\n" \
+                "${WENDYOS_LAYER_TREE}"
+            cd ..
+            return 1
+        fi
+
+        # The checkout above fails outright for an unreachable pin, so reaching
+        # here normally means the pin is fine. The exception is a tree that
+        # already held the object locally -- e.g. fetched by SHA before that
+        # fallback was removed -- which checks out happily while no upstream ref
+        # reaches it. That still builds today but only until the server prunes the
+        # object, so warn and let the re-pin be scheduled rather than forced.
+        #
+        # Tags count as well as branches: a pin on a tagged commit that sits on no
+        # branch is perfectly durable and must not be reported.
+        if [[ -z "$(git for-each-ref --contains "${want}" --format='%(refname)' \
+                        refs/remotes refs/tags 2>/dev/null | grep -v '/HEAD$' || true)" ]]
+        then
+            printf "[warn]  '%s' pin %s is reachable from no remote branch or tag.\n" \
+                "${folder}" "${srcrev}"
+            printf "        It builds now only because the object is already local, and\n"
+            printf "        will stop working once upstream prunes it. Re-pin it.\n"
         fi
 
         cd ..
@@ -368,12 +448,19 @@ function report_tree() {
     do
         enable=$(echo "${repo}" | cut -d'|' -f 1)
         [ "${enable}" -ne 1 ] && continue
+
         url=$(echo "${repo}" | cut -d'|' -f 2)
         folder=$(echo "${repo}" | cut -d'|' -f 3)
         [[ -z "${folder}" ]] && folder=$(basename "${url%.git}")
+
+        # Report only what this board layers, so a leftover checkout from an
+        # earlier run is not presented as part of this build.
+        printf '%s\n' "${REQUIRED_REPO_FOLDERS}" | grep -qxF "${folder}" || continue
+
         [[ -d "./${folder}" ]] || continue
         cd "${folder}"
         short=$(git rev-parse --short HEAD 2>/dev/null || echo '?')
+
         # Prefer the remote branch whose tip == HEAD (we pin branch tips);
         # else any branch that contains the commit, preferring a real branch
         # over a contrib/ mirror; drop the origin/HEAD symref either way.
@@ -386,10 +473,12 @@ function report_tree() {
             branch=$(printf '%s\n' "${contains}" | grep -v 'contrib/' | head -n1 || true)
             [[ -z "${branch}" ]] && branch=$(printf '%s\n' "${contains}" | head -n1 || true)
         fi
+
         [[ -z "${branch}" ]] && branch='(detached)'
         printf "  %-20s %-12s %s\n" "${folder}" "${short}" "${branch}"
         cd ..
     done
+
     printf "\n"
 }
 
@@ -462,6 +551,22 @@ then
     source "${BOARD_DIR}/repos.overrides"
 fi
 
+# Which upstream layers this board actually puts in BBLAYERS. Resolved here,
+# before the cache seed and the clones, so every step downstream agrees on one
+# list. REPOS_EXTRA entries are already board-scoped by construction, so they
+# are exempt: declaring an extra clone IS the request for it.
+REQUIRED_REPO_FOLDERS="$(required_repo_folders "${BOARD_DIR}" "${TEMPLATE_DIR}")"
+
+if [[ -n "${REPOS_EXTRA+x}" ]]
+then
+    for repo in "${REPOS_EXTRA[@]}"
+    do
+        extra_folder=$(echo "${repo}" | cut -d'|' -f 3)
+        [[ -n "${extra_folder}" ]] || extra_folder=$(basename "$(echo "${repo}" | cut -d'|' -f 2)" .git)
+        REQUIRED_REPO_FOLDERS="${REQUIRED_REPO_FOLDERS}"$'\n'"${extra_folder}"
+    done
+fi
+
 # Announce the resolved tree up front (after the board override) so it is
 # obvious which Yocto series this bootstrap targets before any cloning.
 printf "Board '%s' -> Yocto layer tree '%s' (clones under repos/%s/)\n" \
@@ -492,6 +597,12 @@ then
     do
         [[ -d "${cached}" ]] || continue
         folder=$(basename "${cached}")
+
+        # Seed only what this board layers, for the same reason clone_repos
+        # gates: copying the rest just re-materialises layers the build never
+        # reads.
+        printf '%s\n' "${REQUIRED_REPO_FOLDERS}" | grep -qxF "${folder}" || continue
+
         if [[ ! -d "./${folder}" ]]
         then
             cp -r "${cached}" "./${folder}"
@@ -511,7 +622,7 @@ declare -a repos=(
     "1|${URL_TEGRA_COMM}||${SRCREV_TEGRA_COMM}"
     "1|${URL_VIRT}||${SRCREV_VIRT}"
     "1|${URL_RPI}||${SRCREV_RPI}"
-    "1|${URL_LTS_MIXINS}||${SRCREV_LTS_MIXINS}"
+    "1|${URL_SECURITY}||${SRCREV_SECURITY}"
 )
 
 # Append any extras declared by the override file.
@@ -520,9 +631,45 @@ then
     repos+=("${REPOS_EXTRA[@]}")
 fi
 
+# A layer named in bblayers with no repos[] entry can never be cloned, so the
+# build would abort later on a missing layer. Fail here instead, where the cause
+# is still obvious.
+repo_folders=""
+for repo in "${repos[@]}"
+do
+    f=$(echo "${repo}" | cut -d'|' -f 3)
+    [[ -n "${f}" ]] || f=$(basename "$(echo "${repo}" | cut -d'|' -f 2)" .git)
+    repo_folders="${repo_folders}${f}"$'\n'
+done
+
+missing=""
+while read -r want
+do
+    [[ -n "${want}" ]] || continue
+    printf '%s\n' "${repo_folders}" | grep -qxF "${want}" || missing="${missing} ${want}"
+done < <(printf '%s\n' "${REQUIRED_REPO_FOLDERS}")
+
+if [[ -n "${missing}" ]]
+then
+    printf "ERROR: board '%s' layers these repos, but bootstrap has no entry to clone them:%s\n" \
+        "${BOARD}" "${missing}" >&2
+    printf "       Add them to repos[] (or REPOS_EXTRA in the board's repos.overrides).\n" >&2
+    exit 1
+fi
+
 printf "Clone repos...\n"
 clone_repos || {
     printf "Yocto setup failed!\n"
+    # Every git command above sends both streams to LOG_FILE, so the reason
+    # for the failure never reaches the console. Nothing collects that file on
+    # CI, which reduces a broken build to one unexplained "[error]" line. Echo
+    # the tail so the actual git error lands in the job output.
+    if [[ -s "${LOG_FILE}" ]]
+    then
+        printf "\n--- last 30 lines of %s ---\n" "${LOG_FILE}"
+        tail -n 30 "${LOG_FILE}"
+        printf -- "--- end of log ---\n"
+    fi
     cd "${WORK_DIR}"
     exit 1
 }

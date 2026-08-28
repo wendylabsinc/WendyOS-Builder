@@ -1,0 +1,30 @@
+# Variant of var-lib-tee.mount for TPM /data-encryption builds
+# (WENDYOS_ENABLE_TPM=1), installed AS var-lib-tee.mount by the recipe.
+#
+# The default unit binds /var/lib/tee from /data/tee so OP-TEE secure storage
+# survives A/B OTA updates. With the fTPM encrypting /data that is circular: the
+# fTPM's own NV lives in OP-TEE secure storage, which would then sit inside the
+# very volume the fTPM must unlock (and the unit ordering deadlocks:
+# data.mount -> systemd-cryptsetup@data -> /dev/tpmrm0 -> tee-ftpm-modprobe ->
+# tee-supplicant -> var-lib-tee.mount -> data.mount). So back it with /config
+# instead: mounted early from a plain partition, independent of /data, and it
+# also survives A/B OTA updates. The REE-FS content is encrypted and integrity-
+# protected by OP-TEE itself (keys derived from the hardware unique key), so a
+# plaintext vfat partition is an acceptable home. Validated on Thor: first-boot
+# enroll, reboot auto-unlock and fTPM state persistence all work with this unit.
+[Unit]
+Description=Bind mount /var/lib/tee (OP-TEE secure storage) from /config
+Documentation=man:systemd.mount(5)
+RequiresMountsFor=/config
+Before=tee-supplicant.service nv-tee-supplicant.service
+DefaultDependencies=no
+
+[Mount]
+What=/config/tee
+Where=/var/lib/tee
+Type=none
+Options=bind,nosuid,nodev,x-systemd.mkdir
+
+[Install]
+WantedBy=local-fs.target
+

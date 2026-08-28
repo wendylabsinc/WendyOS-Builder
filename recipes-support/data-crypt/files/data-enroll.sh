@@ -1,0 +1,188 @@
+#!/bin/sh
+# First-boot LUKS2 + TPM enrollment for the x86 /data partition.
+#
+# Runs once, ordered before the boot-time unlock (systemd-cryptsetup@data, via the
+# 10-enroll.conf drop-in). It grows the data partition to fill the disk, formats it
+# LUKS2, seals a keyslot to the TPM (PCR policy per /etc/data-crypt.conf: a PCR
+# list on x86, SRK-only on Jetson), enrols a recovery key, drops the throwaway
+# bootstrap slot, and makes the ext4 filesystem. Every later boot it is a fast
+# no-op (the partition is already LUKS).
+#
+# DEFERRED (docs/plans/x86-security.md §13): the no-TPM fallback (D1) is a stub.
+# The recovery key is printed to the journal + console as the INTERIM escrow
+# mechanism -- accepted with the default-ON decision; revisit under D3.
+set -u
+
+DATA=/dev/disk/by-partlabel/data
+BK=/run/data-bootstrap.key
+INIT_MAP=data_init
+
+# PCR policy for the TPM keyslot. Default PCR 7 (x86 legacy: Secure Boot state).
+# /etc/data-crypt.conf (shipped by this recipe) may set TPM_PCRS: a PCR list, or
+# empty for SRK-only (no PCR binding) -- Jetson uses empty until secure boot lands.
+TPM_PCRS="7"
+[ -r /etc/data-crypt.conf ] && . /etc/data-crypt.conf
+PCR_ARG=""
+[ -n "$TPM_PCRS" ] && PCR_ARG="--tpm2-pcrs=$TPM_PCRS"
+
+# Emit to the journal (stdout) and, when present, the console + serial UART.
+announce() {
+    echo "$*"
+    for con in /dev/console /dev/ttyS0; do
+        if [ -w "$con" ]; then
+            echo "$*" > "$con" 2>/dev/null || true
+        fi
+    done
+}
+
+fail() {
+    announce "data-enroll ERROR: $*"
+    rm -f "$BK" 2>/dev/null || true
+    exit 1
+}
+
+# Trailing slack (~4 MiB) tolerated as "fills the disk", mirroring grow-data-part.
+END_SLACK=8192
+
+sysblk() { cat "/sys/class/block/$1/$2" 2>/dev/null; }
+
+# True when the kernel sees the /data PARTITION reaching the disk end within slack.
+# Reads the globals data_base/disk_base resolved right after the device check.
+data_fills_disk() {
+    disk_sz=$(sysblk "$disk_base" size); disk_sz=${disk_sz:-0}
+    d_start=$(sysblk "$data_base" start); d_start=${d_start:-0}
+    d_sz=$(sysblk "$data_base" size); d_sz=${d_sz:-0}
+    [ "$disk_sz" -gt 0 ] && [ $((d_start + d_sz)) -ge $((disk_sz - END_SLACK)) ]
+}
+
+[ -b "$DATA" ] || fail "$DATA not present"
+
+# Resolve the partition/disk early: the idempotence check below needs
+# data_fills_disk, not just isLuks.
+data_base=$(basename "$(readlink -f "$DATA")")
+disk_base=$(basename "$(readlink -f "/sys/class/block/$data_base/..")")
+DISK="/dev/$disk_base"
+PARTNUM=$(cat "/sys/class/block/$data_base/partition" 2>/dev/null)
+[ -n "$PARTNUM" ] || fail "cannot read partition number of $DATA"
+
+# Idempotent -- but "is LUKS" alone is not enough. A reflash recreates the data
+# partition at its small stock size WITHOUT zeroing its contents, so the LUKS
+# header of the PREVIOUS installation is still at the partition start while its
+# key material is gone (TEE/TPM state wiped with the install). An enrolled /data
+# always fills the disk (we grow before formatting and fail hard otherwise), so:
+# LUKS + fills-disk = done; LUKS + small partition = stale header, re-initialize.
+if cryptsetup isLuks "$DATA" 2>/dev/null; then
+    if data_fills_disk; then
+        echo "data-enroll: $DATA already LUKS2; nothing to do."
+        exit 0
+    fi
+    announce "data-enroll: stale LUKS header from a previous install (partition does not fill the disk); re-initializing"
+    # Wipe the stale header NOW: a power loss between the grow below and
+    # luksFormat would otherwise leave isLuks + fills-disk, which the
+    # idempotence check above mistakes for a completed enrollment. Wiped,
+    # an interrupted re-init just retries cleanly next boot.
+    wipefs -a "$DATA" || fail "wipefs of the stale LUKS header failed"
+fi
+
+# Migration guard: a non-LUKS /data that has both been grown to fill the disk
+# and carries a filesystem is a provisioned installation from a TPM-off build
+# (every install path grows /data only on its first boot, right before
+# formatting it). Encrypting it here would luksFormat over live user data, so
+# refuse loudly and leave the partition untouched -- the TPM-off -> TPM-on
+# migration story is an open topic. /data stays unmounted this boot (the LUKS
+# mount path expects /dev/mapper/data), but the data survives on disk.
+# Fresh installs are unaffected: their stock /data is small (tegra flashes it
+# empty, the x86 wic ships a 512M empty ext4), so fills-disk is false and
+# enrollment proceeds.
+# Fail CLOSED: without lsblk the command substitution below would be silently
+# empty and the guard would wave a provisioned /data through to luksFormat.
+command -v lsblk >/dev/null 2>&1 || fail "lsblk missing -- cannot run the migration guard"
+if data_fills_disk && [ -n "$(lsblk -no FSTYPE "$DATA" 2>/dev/null | head -1)" ]; then
+    announce "data-enroll REFUSING to encrypt: $DATA holds a grown filesystem from a previous (TPM-off) installation -- formatting would destroy its data. Leaving it untouched; /data will NOT mount until the device is migrated or re-flashed."
+    exit 0
+fi
+
+# No TPM -> DEFERRED fallback D1. This hardware has a confirmed TPM; if one is ever
+# absent, do not brick first boot -- leave /data unformatted and warn. Proper
+# fallback (passphrase-only vs plaintext) is still to be decided.
+if [ ! -e /dev/tpmrm0 ] && [ ! -e /dev/tpm0 ]; then
+    announce "data-enroll WARNING: no TPM found -- leaving /data UNENCRYPTED (D1 TBD)."
+    exit 0
+fi
+
+announce "data-enroll: first-boot LUKS2 + TPM enrollment of $DATA"
+
+# The guard passed, so /data is known fresh (small stock partition, or already
+# wiped). Drop any stock filesystem signature (the x86 wic ships /data as an
+# empty 512M ext4) BEFORE growing: a power loss between the grow and luksFormat
+# would otherwise leave fills-disk + ext4, which the migration guard above
+# refuses forever. Failing here retries cleanly next boot (nothing changed yet).
+wipefs -a "$DATA" || fail "wipefs of the stock signature failed"
+
+# 1) Grow the data partition to fill the disk BEFORE formatting, so the LUKS
+#    container and its ext4 span the whole partition and never need an online
+#    resize. GPT only; mirrors grow-data-part.sh.
+
+if data_fills_disk; then
+    announce "data-enroll: /data partition already fills $DISK; no grow needed"
+else
+    # Relocate the GPT backup header to the real disk end (stranded at the wic's
+    # end after flashing to a larger disk), else parted resizepart 100% fails.
+    announce "data-enroll: relocating GPT backup header to end of $DISK"
+    sgdisk -e "$DISK" || announce "data-enroll WARN: sgdisk -e failed"
+    partprobe "$DISK" 2>/dev/null || true
+    udevadm settle -t 10 2>/dev/null || true
+
+    announce "data-enroll: growing partition #$PARTNUM on $DISK to fill the disk"
+    parted -s "$DISK" resizepart "$PARTNUM" 100% || announce "data-enroll WARN: resizepart failed"
+    partprobe "$DISK" 2>/dev/null || true
+    udevadm settle -t 10 2>/dev/null || true
+
+    # Guard: refuse to format a partition that did not actually grow (e.g. the
+    # kernel did not pick up the new table), so we never luksFormat/mkfs a
+    # too-small /data. Failing here retries cleanly next boot: still not LUKS,
+    # and the signature wipe above keeps the migration guard from misfiring.
+    data_fills_disk || fail "grew /data but the kernel did not pick up the new size (retry next boot)"
+fi
+
+# 2) Throwaway bootstrap key (tmpfs, 0600) to author the volume.
+(umask 077; head -c 64 /dev/urandom > "$BK") || fail "cannot create bootstrap key"
+
+# 3) Format LUKS2 with the bootstrap key.
+cryptsetup luksFormat --type luks2 --batch-mode --key-file="$BK" "$DATA" \
+    || fail "luksFormat failed"
+
+# 4) Make the ext4 filesystem inside (open via bootstrap key, mkfs, close).
+cryptsetup open --key-file="$BK" "$DATA" "$INIT_MAP" || fail "open (bootstrap) failed"
+mkfs.ext4 -q -L data "/dev/mapper/$INIT_MAP" || { cryptsetup close "$INIT_MAP"; fail "mkfs.ext4 failed"; }
+cryptsetup close "$INIT_MAP" || true
+
+# 5) Seal a keyslot to the TPM. PCR binding per $PCR_ARG (set at top from
+#    /etc/data-crypt.conf): a PCR list on x86 (Secure Boot state), SRK-only (no
+#    --tpm2-pcrs) on Jetson until secure boot lands.
+systemd-cryptenroll --unlock-key-file="$BK" --tpm2-device=auto $PCR_ARG "$DATA" \
+    || fail "TPM enrollment failed"
+
+# 6) Enrol a recovery key and surface it. INTERIM: journal + console only, escrow
+#    is undecided (D3). This is the safety net if the TPM ever cannot unseal.
+REC="$(systemd-cryptenroll --unlock-key-file="$BK" --recovery-key "$DATA" 2>/dev/null)"
+if [ -n "$REC" ]; then
+    announce "=================== /data RECOVERY KEY ==================="
+    announce "SAVE THIS -- shown once. Unlocks /data if the TPM cannot."
+    announce "  $REC"
+    announce "INTERIM bring-up only (journal + console). Escrow TBD (D3)."
+    announce "========================================================="
+else
+    announce "data-enroll WARNING: recovery-key enrollment produced no key"
+fi
+
+# 7) Drop the bootstrap slot -- only the TPM and recovery keyslots remain (the
+#    recovery key is the fallback). --wipe-slot=password spares the recovery slot
+#    (type recovery) and the TPM slot (type tpm2).
+systemd-cryptenroll --unlock-key-file="$BK" --wipe-slot=password "$DATA" \
+    || announce "data-enroll WARN: could not wipe bootstrap slot"
+rm -f "$BK" 2>/dev/null || true
+
+POLICY="SRK-only"
+[ -n "$TPM_PCRS" ] && POLICY="PCR $TPM_PCRS"
+announce "data-enroll: done. /data is LUKS2 (TPM $POLICY + recovery key)."

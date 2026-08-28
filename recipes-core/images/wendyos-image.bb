@@ -17,9 +17,9 @@ IMAGE_VERSION_SUFFIX ?= "${DISTRO_VERSION}"
 
 # Development-time conveniences applied when WENDYOS_DEBUG = "1": postinst
 # logging. Formerly this bundle also carried empty-root-password,
-# allow-empty-password and allow-root-login (scarthgap's legacy `debug-tweaks`
-# alias, expanded into individual features because wrynose oe-core removed the
-# alias from IMAGE_FEATURES[validitems]). Those root/empty-password features
+# allow-empty-password and allow-root-login (the individual features behind the
+# legacy `debug-tweaks` alias, which wrynose oe-core removed from
+# IMAGE_FEATURES[validitems]). Those root/empty-password features
 # were deliberately dropped: direct root login is now disabled on every image,
 # debug included. With empty-root-password gone, OE-core's
 # zap_empty_root_password rewrites the empty root entry to `root:*:` (a locked
@@ -208,3 +208,18 @@ require ${@'conf/distro/include/qemu-image.inc' if 'qemuall' in d.getVar('MACHIN
 require ${@'conf/distro/include/tegra-image.inc' if 'tegra' in d.getVar('MACHINEOVERRIDES').split(':') else ''}
 require ${@'conf/distro/include/rpi-image.inc' if 'rpi' in d.getVar('MACHINEOVERRIDES').split(':') else ''}
 require ${@'conf/distro/include/x86-image.inc' if 'x86-wendyos' in d.getVar('MACHINEOVERRIDES').split(':') else ''}
+
+# Config sanity check. Encrypting /data needs a TPM at runtime -- data-enroll seals
+# the LUKS2 keyslot to it -- so WENDYOS_DATA_ENCRYPTED turns WENDYOS_ENABLE_TPM on
+# in the per-board local includes. Writing the two to contradictory values by hand
+# would build an image whose first-boot enroll can never succeed, and the failure
+# would only show up on the device. Catch it at parse time instead.
+# Boards that set neither variable (RPi) leave both unset and are unaffected.
+python () {
+    if d.getVar('WENDYOS_DATA_ENCRYPTED') == '1' and d.getVar('WENDYOS_ENABLE_TPM') != '1':
+        bb.fatal('WENDYOS_DATA_ENCRYPTED = "1" requires WENDYOS_ENABLE_TPM = "1": '
+                 '/data encryption seals the LUKS2 keyslot to the TPM. Either drop '
+                 'the explicit WENDYOS_ENABLE_TPM = "0" from local.conf (the '
+                 'per-board include turns it on automatically), or set '
+                 'WENDYOS_DATA_ENCRYPTED = "0" for a plain-ext4 /data.')
+}

@@ -1,0 +1,8 @@
+{
+  "name": "wendyos-hello",
+  "version": "1.0.0",
+  "summary": "Driver add-on pipeline self-test module",
+  "license": "GPL-2.0-only",
+  "source": { "local": "." },
+  "modules_load": ["wendyos_hello"]
+}

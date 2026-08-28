@@ -8,6 +8,5 @@
 # (packaged, via OE's debian renaming, as 'libyaml-cpp').
 #
 # This bbappend lives in meta-tegra-extensions-jp7, which is only in the
-# blacksail/JP7 bblayers, so it is inherently scoped to that tree (scarthgap
-# uses yaml-cpp-070 for DeepStream 7.1 and never sees this).
+# blacksail/JP7 bblayers, so it is inherently scoped to that tree.
 EXTRA_OECMAKE = "-DYAML_CPP_BUILD_TESTS=OFF -DYAML_BUILD_SHARED_LIBS=ON -DYAML_CPP_BUILD_TOOLS=OFF"

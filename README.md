@@ -309,7 +309,7 @@ make build MACHINE=genericx86-64-wendyos
    ```
 
    `build/.wendyos-env` is written by `bootstrap.sh` and exports
-   `WENDYOS_LAYER_TREE` (default `scarthgap`), the per-series namespace
+   `WENDYOS_LAYER_TREE` (default `blacksail`), the per-series namespace
    under `repos/<tree>/` populated for the active board. The Yocto core
    (`bitbake`, `openembedded-core`, `meta-yocto`) is composed from upstream
    split repos rather than the legacy bundled `poky.git` monolith — see
@@ -916,7 +916,6 @@ rm -rf mender-server
 You can modify these variables in `bootstrap.sh` before running:
 - `IMAGE_NAME` - Base name for the OS (default: "wendyos")
 - `USER_NAME` - Docker container username (default: "dev")
-- `YOCTO_BRANCH` - Yocto release branch (default: "scarthgap")
 
 ### Build Configuration Variables
 
@@ -971,10 +970,11 @@ copy — both always current.
 
 ### Per-Board Repo Overrides
 
-The default upstream layer pinning (commit hashes for `poky`, `meta-tegra`,
-`meta-raspberrypi`, etc.) lives in `bootstrap.sh` as `SRCREV_*` variables.
-A single default is shared by every board and is fine for today's targets —
-all machines build against the same layer commits.
+The default upstream layer pinning (commit hashes for `bitbake`,
+`openembedded-core`, `meta-tegra`, `meta-raspberrypi`, etc.) lives in
+`scripts/upstream-repos.env` as `SRCREV_*` variables. That set is the
+blacksail pin set: every board builds on blacksail against the same layer
+commits, so no board needs to override it today.
 
 Each board directory contains an optional `repos.overrides` file
 (`conf/template/boards/<board-id>/repos.overrides`). When present, it is
@@ -1004,11 +1004,13 @@ Three override shapes are supported:
   The board's `bblayers.conf` then points at `${TOPDIR}/../repos/meta-tegra-thor`
   (via an appropriate include fragment) instead of the default `repos/meta-tegra`.
 
-A `repos.overrides` file with every line commented out is equivalent to no
-overrides — today's shipped placeholders are exactly that. The shared
-`repos/` directory holds at most one clone per folder name, so two boards
-that override the same folder to different commits will cause a re-checkout
-when switching. Use `REPOS_EXTRA` with a different folder name to avoid that.
+A `repos.overrides` file that sets no `SRCREV_*` is equivalent to no pin
+overrides. The shared `repos/<tree>/` directory holds at most one clone per
+folder name, so two boards that pin the same folder to different commits
+cannot both be right — bootstrapping one drags the tree away from the other.
+Run `scripts/check-repo-pins.sh` to catch that; it is a manual lint, not part
+of CI, so run it after touching any pin. Use `REPOS_EXTRA` with a different
+folder name when a board genuinely needs its own copy.
 
 ## Generic x86_64 PCs
 
@@ -1237,12 +1239,12 @@ To check the current state:
 
 ## Architecture Notes
 
-- **Yocto Version**: `Scarthgap` (Jetson AGX Thor builds against a newer L4T r38 / `wrynose` core)
+- **Yocto Version**: `blacksail` (every board; `wrynose` stays in the layers' compat set as the fallback series)
 - **BSP Layers**: `meta-tegra` (NVIDIA Jetson) and `meta-raspberrypi` (Raspberry Pi)
 - **Init System**: `systemd`
 - **Package Manager**: `RPM`
 - **Boot Method**: UEFI with extlinux (Jetson); U-Boot (Raspberry Pi)
-- **OTA System**: Mender v5.0.x (Orin/AGX Orin and Raspberry Pi); AGX Thor OTA arrives later via `wendyos-update`
+- **OTA System**: `wendyos-update` A/B on every hardware board (Jetson, Raspberry Pi, x86-64); none on QEMU
 - **Display Features**: Removed (headless embedded system)
 
 ## Building on macOS
