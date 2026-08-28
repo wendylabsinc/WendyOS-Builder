@@ -31,3 +31,10 @@ RDEPENDS:${PN} += " \
         '' \
         )} \
     "
+
+# v4l2loopback (recipe: meta-tegra-extensions-jp7/recipes-kernel/v4l2loopback)
+# provides the virtual V4L2 capture devices the WendyAgent device agent uses
+# for IP-camera container parity (WDY-2430). It only exists in the blacksail
+# (JP7.2) layer tree, but every current Tegra board builds blacksail, so an
+# unconditional RDEPENDS here is safe.
+RDEPENDS:${PN} += "v4l2loopback"
