@@ -24,7 +24,8 @@ This repository provides the meta-layer and build flow to build **WendyOS** — 
 | Raspberry Pi 5 | Broadcom BCM2712 | 8GB | `rpi5-sd` | `raspberrypi5-wendyos` | SD | Mender |
 | Raspberry Pi 5 | Broadcom BCM2712 | 8GB | `rpi5-nvme` | `raspberrypi5-nvme-wendyos` | NVMe | Mender |
 | QEMU ARM64 | virtual | configurable | `qemu-arm64` | `qemuarm64-wendyos` | virtio | none |
-| Generic x86_64 PC | Intel/AMD x86_64 | varies | `generic-x86-64` | `genericx86-64-wendyos` | USB / disk (.wic) | none |
+| Generic x86_64 PC | Intel/AMD x86_64 | varies | `generic-x86-64` | `genericx86-64-wendyos` | USB / disk (.wic) | wendyos-update |
+| Virtual machine (x86_64) | virtual | configurable | `vm-x86-64` | `vm-x86-64-wendyos` | virtio (.wic) | wendyos-update |
 
 ## TL;DR
 
@@ -69,6 +70,10 @@ make flash-to-external  # Flash to external NVMe/USB drive
 - [Generic x86_64 PCs](#generic-x86_64-pcs)
   - [Build](#x86-build)
   - [Flash the Image](#x86-flash-the-image)
+- [Virtual Machine (x86_64)](#virtual-machine-x86_64)
+  - [Build](#vm-build)
+  - [Run](#vm-run)
+  - [Several VMs at once](#several-vms-at-once)
 - [QEMU (ARM64)](#qemu-arm64)
   - [Prerequisites](#qemu-prerequisites)
   - [Build](#qemu-build)
@@ -201,6 +206,10 @@ make build
 # Generic x86_64 PC (experimental)
 make setup BOARD=generic-x86-64
 make build MACHINE=genericx86-64-wendyos
+
+# Virtual machine, x86_64 host (device simulation, no hardware)
+make setup BOARD=vm-x86-64
+make build MACHINE=vm-x86-64-wendyos
 ```
 
 > `BOARD` must be set to a board id matching a directory
@@ -252,6 +261,7 @@ make build MACHINE=genericx86-64-wendyos
    BOARD=rpi5-nvme             ./meta-wendyos/bootstrap.sh
    BOARD=qemu-arm64            ./meta-wendyos/bootstrap.sh
    BOARD=generic-x86-64        ./meta-wendyos/bootstrap.sh
+   BOARD=vm-x86-64             ./meta-wendyos/bootstrap.sh
    ```
 
    `MACHINE=<board-id>` remains supported as a deprecated alias (prints a
@@ -285,6 +295,7 @@ make build MACHINE=genericx86-64-wendyos
      - `rpi5-nvme`               → `raspberrypi5-nvme-wendyos`
      - `qemu-arm64`              → `qemuarm64-wendyos`
      - `generic-x86-64`          → `genericx86-64-wendyos`
+     - `vm-x86-64`               → `vm-x86-64-wendyos`
    - `WENDYOS_FLASH_IMAGE_SIZE` - Flash image size: "64GB"):
      - `"4GB"` - 3.2GB Mender storage (~1.3GB per rootfs partition)
      - `"8GB"` - 6.4GB Mender storage (~2.9GB per rootfs partition)
@@ -1154,6 +1165,108 @@ builds (RPi5 only), connect the NVMe drive via a PCIe adapter. The board EEPROM 
 generically by the `rpi-eeprom-config` package (included on every RPi5 image) to boot either
 SD or NVMe — it sets `BOOT_ORDER=0xf461` (SD then NVMe), `PCIE_PROBE=1`, and `PSU_MAX_CURRENT`
 — so the same board boots whichever medium is present regardless of which image flashed it.
+
+## Virtual Machine (x86_64)
+
+A WendyOS image that behaves like a real device without hardware: the same
+agent, the same app deployment flow, and the same A/B OTA stack. Input comes
+from network-attached sensors (IP cameras and similar), so there is no GPU
+acceleration and no peripheral passthrough.
+
+Unlike the QEMU ARM64 target below — which boots a kernel and rootfs directly as
+a development loop — this boots the real UEFI/GPT disk image through OVMF and
+the A/B GRUB chain. The guest takes the same boot path a physical device does,
+so an OTA installed in the VM exercises the code that runs on hardware.
+
+<a name="vm-build"></a>
+### Build
+
+```bash
+make setup BOARD=vm-x86-64
+make build MACHINE=vm-x86-64-wendyos
+```
+
+The build produces a bootable UEFI disk image (about 6.9 GiB, sparse):
+
+```
+build/tmp/deploy/images/vm-x86-64-wendyos/wendyos-image-vm-x86-64-wendyos.rootfs-<ts>.wic
+build/tmp/deploy/images/vm-x86-64-wendyos/wendyos-image-vm-x86-64-wendyos.rootfs-<ts>.wendy
+```
+
+The `.wic` is the disk. The `.wendy` is the OTA payload, the same artifact format
+the hardware boards use.
+
+<a name="vm-run"></a>
+### Run
+
+From the **host**, not inside the Docker container:
+
+```bash
+./scripts/run-vm.sh
+```
+
+That handles the parts that are easy to get wrong: it picks the newest build,
+creates a copy-on-write overlay so the built image stays pristine, grows the
+virtual disk so `/data` has room to expand on first boot, finds the host's OVMF
+firmware, and selects a CPU model the image can actually run on.
+
+```bash
+./scripts/run-vm.sh --dry-run --verbose    # print the qemu command, run nothing
+./scripts/run-vm.sh --memory 8192 --cpus 8 # a bigger guest
+./scripts/run-vm.sh --recreate             # wipe back to a first boot
+./scripts/run-vm.sh --help                 # all options
+```
+
+Log in on the serial console, or over SSH on the forwarded port the script
+prints (2222 by default):
+
+```bash
+ssh -p 2222 wendy@localhost
+```
+
+**To shut down cleanly**, run `poweroff` in the guest, or press **Ctrl-A** then
+**C** for the QEMU monitor and type `system_powerdown`. Do not use Ctrl-A X —
+that kills the VM instantly and can leave an in-progress A/B update half
+applied.
+
+The guest reaches services on the host at **10.0.2.2** (QEMU user networking).
+That address is virtual and will not appear in `ip addr` on the host. It is the
+simplest way to serve an OTA payload to the VM:
+
+```bash
+# host, in the deploy directory
+python3 -m http.server 8000
+
+# guest
+wendyos-update install http://10.0.2.2:8000/<image>.wendy
+reboot
+```
+
+> **Requirements:** a host CPU with x86-64-v3 (Haswell/Excavator or newer), plus
+> `qemu-system-x86_64`, `qemu-img` and OVMF firmware — on Debian/Ubuntu that is
+> `sudo apt install qemu-system-x86 qemu-utils ovmf`. KVM is used when `/dev/kvm`
+> is readable (add yourself to the `kvm` group); the script falls back to software
+> emulation otherwise, which works but is slow.
+
+<a name="several-vms-at-once"></a>
+### Several VMs at once
+
+Each instance is a named copy-on-write overlay on one shared base image, so a
+clone costs a few hundred KB rather than a full disk copy:
+
+```bash
+./scripts/run-vm.sh --name train-01
+./scripts/run-vm.sh --name train-02
+```
+
+Instances are independent — separate disks, separate UEFI variables, separate
+device identities — and each gets its own forwarded SSH port. State lives in
+`<workspace>/vm/<name>/`. Delete that directory, or use `--recreate`, to reset
+one to a first boot.
+
+After a rebuild, existing instances stay bound to the image they were created
+from. `run-vm.sh` warns when it notices this and `--recreate` moves an instance
+to the newest build.
 
 ## QEMU (ARM64)
 
