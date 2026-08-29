@@ -46,3 +46,6 @@ require ${@'rpi-base-files.inc' if 'rpi' in d.getVar('MACHINEOVERRIDES').split('
 
 # x86 A/B fstab — isolated so other boards are unaffected
 require ${@'x86-base-files.inc' if 'x86-wendyos' in d.getVar('MACHINEOVERRIDES').split(':') else ''}
+
+# VM A/B fstab — isolated so other boards are unaffected
+require ${@'vm-base-files.inc' if 'vm-wendyos' in d.getVar('MACHINEOVERRIDES').split(':') else ''}

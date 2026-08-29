@@ -208,6 +208,7 @@ require ${@'conf/distro/include/qemu-image.inc' if 'qemuall' in d.getVar('MACHIN
 require ${@'conf/distro/include/tegra-image.inc' if 'tegra' in d.getVar('MACHINEOVERRIDES').split(':') else ''}
 require ${@'conf/distro/include/rpi-image.inc' if 'rpi' in d.getVar('MACHINEOVERRIDES').split(':') else ''}
 require ${@'conf/distro/include/x86-image.inc' if 'x86-wendyos' in d.getVar('MACHINEOVERRIDES').split(':') else ''}
+require ${@'conf/distro/include/vm-image.inc' if 'vm-wendyos' in d.getVar('MACHINEOVERRIDES').split(':') else ''}
 
 # Config sanity check. Encrypting /data needs a TPM at runtime -- data-enroll seals
 # the LUKS2 keyslot to it -- so WENDYOS_DATA_ENCRYPTED turns WENDYOS_ENABLE_TPM on
