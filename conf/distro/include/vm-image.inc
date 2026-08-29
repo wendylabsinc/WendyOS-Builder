@@ -21,7 +21,7 @@
 # floor==ceiling, so an OTA image can never outgrow its fixed on-device slot. The
 # VM machine overrides WENDYOS_ROOTFS_SIZE_KB:vm-wendyos from its own
 # WENDYOS_VM_ROOTFS_SIZE_KB knob. The matching --fixed-size rootfsA/rootfsB slots
-# are in meta-vm-extensions/files/wic/vm-ab.wks, which reads the same variable
+# are in meta-vm-extensions/files/wic/vm-ab{,-aa64}.wks, which read the same variable
 # (exported to wic via WICVARS in this include). On the OTA path wendyos-update.inc
 # requires this same file, so requiring it here too is idempotent.
 require conf/distro/include/wendyos-rootfs-size.inc
@@ -29,8 +29,9 @@ require conf/distro/include/wendyos-rootfs-size.inc
 # sshd on: a VM is a developer target and there is no serial cable to fall back on.
 WENDYOS_SSHD:vm-wendyos ?= "1"
 
-# kernel-image puts /boot/${KERNEL_IMAGETYPE} (bzImage) INSIDE the rootfs so GRUB
-# can load the kernel from the selected A/B slot's own /boot (vm-grubAB-x64.cfg),
+# kernel-image puts /boot/${KERNEL_IMAGETYPE} (bzImage on x86_64, Image on arm64)
+# INSIDE the rootfs so GRUB can load the kernel from the selected A/B slot's own
+# /boot (vm-grubAB-x64.cfg / vm-grubAB-aa64.cfg),
 # keeping each slot self-contained. The ESP carries only GRUB + grubenv
 # (install-kernel-into-boot-dir=false in the wks), never the kernel.
 # grub-editenv edits the A/B grubenv (EFI/BOOT/grubenv) from Linux — needed by the
@@ -75,7 +76,8 @@ IMAGE_INSTALL:append = "${@' ' + d.getVar('WENDYOS_VM_OTA_INSTALL') if d.getVar(
 #    first-boot grow. Mirrors x86-image.inc / rpi-image.inc.
 IMAGE_INSTALL:remove = "${@'wendyos-data-setup' if d.getVar('WENDYOS_OTA') == 'wendy' else ''}"
 
-# /config and /data mount points. Both are real partitions in vm-ab.wks mounted by
+# /config and /data mount points. Both are real partitions in the VM wks files,
+# mounted by
 # LABEL from vm-wendy-fstab, so the rootfs must carry empty mount-point
 # directories for the mounts to land on. install -d is idempotent.
 create_wendyos_vm_dirs() {
@@ -85,7 +87,9 @@ create_wendyos_vm_dirs() {
 
 ROOTFS_POSTPROCESS_COMMAND:append:vm-wendyos = " create_wendyos_vm_dirs;"
 
-# /lib64 -> lib compatibility symlink. x86-image.inc has the same helper but gates
+# /lib64 -> lib compatibility symlink (x86_64 only in effect: the aarch64 ELF
+# interpreter is /lib/ld-linux-aarch64.so.1, which usrmerge already resolves, so
+# this is a harmless no-op there). x86-image.inc has the same helper but gates
 # it on the NVIDIA stack, describing it as a fix for NVIDIA's prebuilt binaries.
 # That undersells it: the wendy AGENT needs it too, so this copy is ungated.
 #

@@ -6,7 +6,8 @@
 #
 # Deliberately NO "/" entry: the rootfs slot is A/B and is mounted by the kernel
 # from the root= that GRUB sets per slot (root=PARTLABEL=rootfsA|rootfsB, see
-# vm-grubAB-x64.cfg), so a fixed root device here would be wrong on the other slot.
+# vm-grubAB-{x64,aa64}.cfg), so a fixed root device here would be wrong on the
+# other slot.
 # GRUB mounts "/" read-write via `rw` in the kernel cmdline.
 #
 # /var/volatile tmpfs: shipped by stock oe-core base-files (our custom fstab

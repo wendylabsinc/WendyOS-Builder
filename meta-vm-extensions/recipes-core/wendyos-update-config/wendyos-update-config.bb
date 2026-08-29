@@ -10,7 +10,10 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda
 SRC_URI = "file://config.json"
 S = "${UNPACKDIR}"
 
-COMPATIBLE_MACHINE = "vm-x86-64-wendyos"
+# Both VM machines: the connector is the bootloader interface, and both boot the
+# same GRUB-EFI + grubenv A/B chain. re.search'd against MACHINE, so an
+# alternation covers the pair without matching anything else.
+COMPATIBLE_MACHINE = "vm-x86-64-wendyos|vm-arm64-wendyos"
 
 do_install() {
     install -d ${D}${sysconfdir}/wendyos-update

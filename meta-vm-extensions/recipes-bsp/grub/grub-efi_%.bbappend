@@ -1,6 +1,7 @@
 # Origin: meta-x86-extensions/recipes-bsp/grub/grub-efi_%.bbappend.
 #
-# The A/B grub.cfg (files/wic/vm-grubAB-x64.cfg) resolves the rootfs slot by
+# The A/B grub.cfgs (files/wic/vm-grubAB-x64.cfg and vm-grubAB-aa64.cfg) resolve
+# the rootfs slot by
 # PARTITION NUMBER on the boot disk, deriving the disk from $root with `regexp`.
 # Stock GRUB_BUILDIN does not ship the regexp module, so add it.
 #
@@ -15,5 +16,12 @@
 # the bootcount logic re-runs and falls back to the other slot. Otherwise GRUB HANGS
 # at the interactive menu on a headless guest; `||` is not supported in GRUB script,
 # and reboot/sleep are separate modules not in `normal`.
-GRUB_BUILDIN:append = " regexp reboot sleep"
+# echo: oe-core's GRUB_BUILDIN default has no `echo`, and grub-2.14 builds it as
+# its own module (Makefile.core.def: name = echo, common = commands/echo.c), not
+# part of the kernel or `normal`. wic copies only the built EFI binary to the
+# ESP, so there is no .mod to load at runtime -- without this every diagnostic
+# line in the A/B configs printed "error: unknown command 'echo'" instead. Those
+# messages are the fallback path's only observability, and on arm64 the serial
+# line is the only output channel at all.
+GRUB_BUILDIN:append = " regexp reboot sleep echo"
 

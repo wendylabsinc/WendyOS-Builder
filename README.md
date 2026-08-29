@@ -26,6 +26,7 @@ This repository provides the meta-layer and build flow to build **WendyOS** — 
 | QEMU ARM64 | virtual | configurable | `qemu-arm64` | `qemuarm64-wendyos` | virtio | none |
 | Generic x86_64 PC | Intel/AMD x86_64 | varies | `generic-x86-64` | `genericx86-64-wendyos` | USB / disk (.wic) | wendyos-update |
 | Virtual machine (x86_64) | virtual | configurable | `vm-x86-64` | `vm-x86-64-wendyos` | virtio (.wic) | wendyos-update |
+| Virtual machine (arm64) | virtual | configurable | `vm-arm64` | `vm-arm64-wendyos` | virtio (.wic) | wendyos-update |
 
 ## TL;DR
 
@@ -70,10 +71,11 @@ make flash-to-external  # Flash to external NVMe/USB drive
 - [Generic x86_64 PCs](#generic-x86_64-pcs)
   - [Build](#x86-build)
   - [Flash the Image](#x86-flash-the-image)
-- [Virtual Machine (x86_64)](#virtual-machine-x86_64)
+- [Virtual Machines](#virtual-machines)
   - [Build](#vm-build)
   - [Run](#vm-run)
   - [Several VMs at once](#several-vms-at-once)
+  - [arm64 guests](#arm64-guests)
 - [QEMU (ARM64)](#qemu-arm64)
   - [Prerequisites](#qemu-prerequisites)
   - [Build](#qemu-build)
@@ -210,6 +212,10 @@ make build MACHINE=genericx86-64-wendyos
 # Virtual machine, x86_64 host (device simulation, no hardware)
 make setup BOARD=vm-x86-64
 make build MACHINE=vm-x86-64-wendyos
+
+# Virtual machine, arm64 host (Apple Silicon via UTM, or arm64 Linux)
+make setup BOARD=vm-arm64
+make build MACHINE=vm-arm64-wendyos
 ```
 
 > `BOARD` must be set to a board id matching a directory
@@ -262,6 +268,7 @@ make build MACHINE=vm-x86-64-wendyos
    BOARD=qemu-arm64            ./meta-wendyos/bootstrap.sh
    BOARD=generic-x86-64        ./meta-wendyos/bootstrap.sh
    BOARD=vm-x86-64             ./meta-wendyos/bootstrap.sh
+   BOARD=vm-arm64              ./meta-wendyos/bootstrap.sh
    ```
 
    `MACHINE=<board-id>` remains supported as a deprecated alias (prints a
@@ -296,6 +303,7 @@ make build MACHINE=vm-x86-64-wendyos
      - `qemu-arm64`              → `qemuarm64-wendyos`
      - `generic-x86-64`          → `genericx86-64-wendyos`
      - `vm-x86-64`               → `vm-x86-64-wendyos`
+     - `vm-arm64`                → `vm-arm64-wendyos`
    - `WENDYOS_FLASH_IMAGE_SIZE` - Flash image size: "64GB"):
      - `"4GB"` - 3.2GB Mender storage (~1.3GB per rootfs partition)
      - `"8GB"` - 6.4GB Mender storage (~2.9GB per rootfs partition)
@@ -1166,7 +1174,7 @@ generically by the `rpi-eeprom-config` package (included on every RPi5 image) to
 SD or NVMe — it sets `BOOT_ORDER=0xf461` (SD then NVMe), `PCIE_PROBE=1`, and `PSU_MAX_CURRENT`
 — so the same board boots whichever medium is present regardless of which image flashed it.
 
-## Virtual Machine (x86_64)
+## Virtual Machines
 
 A WendyOS image that behaves like a real device without hardware: the same
 agent, the same app deployment flow, and the same A/B OTA stack. Input comes
@@ -1174,9 +1182,14 @@ from network-attached sensors (IP cameras and similar), so there is no GPU
 acceleration and no peripheral passthrough.
 
 Unlike the QEMU ARM64 target below — which boots a kernel and rootfs directly as
-a development loop — this boots the real UEFI/GPT disk image through OVMF and
-the A/B GRUB chain. The guest takes the same boot path a physical device does,
-so an OTA installed in the VM exercises the code that runs on hardware.
+a development loop — these boot the real UEFI/GPT disk image through UEFI
+firmware and the A/B GRUB chain. The guest takes the same boot path a physical
+device does, so an OTA installed in the VM exercises the code that runs on
+hardware.
+
+Two machines, one layout: `vm-x86-64` for x86_64 hosts and `vm-arm64` for arm64
+hosts (Apple Silicon via UTM, or arm64 Linux). The sections below cover x86_64;
+see [arm64 guests](#arm64-guests) for the differences.
 
 <a name="vm-build"></a>
 ### Build
@@ -1267,6 +1280,34 @@ one to a first boot.
 After a rebuild, existing instances stay bound to the image they were created
 from. `run-vm.sh` warns when it notices this and `--recreate` moves an instance
 to the newest build.
+
+<a name="arm64-guests"></a>
+### arm64 guests
+
+```bash
+make setup BOARD=vm-arm64
+make build MACHINE=vm-arm64-wendyos
+```
+
+Same partition layout, same A/B OTA, same 3 GiB slots and ~6.9 GiB `.wic` as the
+x86_64 machine. The differences are the kernel (`Image` rather than `bzImage`),
+the console, and the firmware in front of GRUB.
+
+The image boots on either UTM backend on an Apple Silicon Mac, and on bare QEMU
+with `-machine virt`. It carries a getty on both `ttyAMA0` (the PL011 on a QEMU
+`virt` guest) and `hvc0` (the virtio console under Apple's Virtualization
+framework), so a login prompt appears whichever one the host provides. For bare
+QEMU the build also deploys `u-boot-vm-arm64-wendyos-*.bin`, usable as `-bios`,
+so no host firmware package is needed; UTM supplies its own UEFI.
+
+`scripts/run-vm.sh` is x86_64-only — an arm64 host path has not been written
+yet. To boot the arm64 image on a Mac, follow
+`docs/howto/vm-arm64-utm-test.md`, which walks through UTM setup step by step.
+
+> **Status:** this machine builds and its artifacts are verified, but it has not
+> yet been booted. The howto above doubles as the first-boot test protocol and
+> names the two things still unproven — whether GRUB's menu reaches the serial
+> console, and whether the firmware publishes the device tree the kernel needs.
 
 ## QEMU (ARM64)
 
