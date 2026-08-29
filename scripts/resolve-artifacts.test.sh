@@ -254,6 +254,7 @@ test_matrix_coverage() {
     raspberry-pi-4/sd
     raspberry-pi-3/sd
     generic-x86-64/disk
+    qemu-arm64/disk
   )
   local c
   for c in "${combos[@]}"; do

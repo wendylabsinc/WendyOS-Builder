@@ -24,6 +24,7 @@ on:
           - jetson-orin-nano
           - jetson-agx-thor
           - generic-x86-64
+          - qemu-arm64
       version:
         description: "Git ref (commit SHA, tag, or branch) to build. Empty = latest main."
         type: string
@@ -157,6 +158,7 @@ jobs:
             {"device":"jetson-agx-orin","storages":"nvme emmc"},
             {"device":"jetson-orin-nano","storages":"nvme sd"},
             {"device":"generic-x86-64","storages":"disk"},
+            {"device":"qemu-arm64","storages":"disk"},
             {"device":"raspberry-pi-5","storages":"nvme sd"},
             {"device":"raspberry-pi-4","storages":"sd"},
             {"device":"raspberry-pi-3","storages":"sd"}
@@ -167,7 +169,7 @@ jobs:
 
           emit_all() {
             echo "matrix={\"include\":${ALL_MATRIX}}" >> "$GITHUB_OUTPUT"
-            echo "devices=jetson-agx-thor jetson-agx-orin jetson-orin-nano generic-x86-64 raspberry-pi-5 raspberry-pi-4 raspberry-pi-3" >> "$GITHUB_OUTPUT"
+            echo "devices=jetson-agx-thor jetson-agx-orin jetson-orin-nano generic-x86-64 qemu-arm64 raspberry-pi-5 raspberry-pi-4 raspberry-pi-3" >> "$GITHUB_OUTPUT"
           }
 
           emit_one() {
@@ -276,6 +278,7 @@ jobs:
               jetson-orin-nano:sd)   BOARD=jetson-orin-nano-sd;   MACHINE=jetson-orin-nano-devkit-wendyos ;;
               jetson-agx-thor:nvme) BOARD=jetson-agx-thor;       MACHINE=jetson-agx-thor-devkit-nvme-wendyos ;;
               generic-x86-64:disk)  BOARD=generic-x86-64;       MACHINE=genericx86-64-wendyos ;;
+              qemu-arm64:disk)      BOARD=qemu-arm64;           MACHINE=qemuarm64-wendyos ;;
               *) echo "Unknown device/storage: $DEVICE/$STORAGE"; exit 1 ;;
             esac
             MAP="$MAP $STORAGE|$BOARD|$MACHINE"
@@ -588,8 +591,12 @@ jobs:
         run: |
           set -euo pipefail
           EXPECTED_KB=12582912  # 12 GiB, Jetson + generic-x86-64
+          HAS_OTA=true
           case "$DEVICE" in
             raspberry-pi-*) EXPECTED_KB=8388608 ;;  # 8 GiB, RPi
+            # The VM pins its rootfs the same way, but WENDYOS_OTA is "none" for
+            # it, so there is no .wendy payload to cross-check against.
+            qemu-arm64)     EXPECTED_KB=6291456; HAS_OTA=false ;;  # 6 GiB, VM
           esac
           EXPECTED=$((EXPECTED_KB * 1024))
 
@@ -605,14 +612,16 @@ jobs:
               exit 1
             fi
 
-            WENDY=$(find "$DEPLOY_DIR" -maxdepth 1 -name 'wendyos-image-*.wendy' ! -type l -print -quit)
-            [[ -n "$WENDY" ]] || { echo "::error::no .wendy OTA artifact found in $DEPLOY_DIR"; exit 1; }
-            PAYLOAD=$(tar -xOf "$WENDY" manifest.json | python3 -c 'import json,sys; print(json.load(sys.stdin)["payload"]["size"])')
-            if [[ "$PAYLOAD" != "$EXPECTED" ]]; then
-              echo "::error::.wendy payload.size is $PAYLOAD bytes; the pinned size for $DEVICE is $EXPECTED"
-              exit 1
+            if [[ "$HAS_OTA" == "true" ]]; then
+              WENDY=$(find "$DEPLOY_DIR" -maxdepth 1 -name 'wendyos-image-*.wendy' ! -type l -print -quit)
+              [[ -n "$WENDY" ]] || { echo "::error::no .wendy OTA artifact found in $DEPLOY_DIR"; exit 1; }
+              PAYLOAD=$(tar -xOf "$WENDY" manifest.json | python3 -c 'import json,sys; print(json.load(sys.stdin)["payload"]["size"])')
+              if [[ "$PAYLOAD" != "$EXPECTED" ]]; then
+                echo "::error::.wendy payload.size is $PAYLOAD bytes; the pinned size for $DEVICE is $EXPECTED"
+                exit 1
+              fi
             fi
-            echo "rootfs size OK for $machine: ext4 and .wendy payload are exactly $EXPECTED bytes ($((EXPECTED_KB / 1048576)) GiB)"
+            echo "rootfs size OK for $machine: exactly $EXPECTED bytes ($((EXPECTED_KB / 1048576)) GiB)"
             echo "::endgroup::"
           done
 
