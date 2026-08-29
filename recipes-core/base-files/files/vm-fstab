@@ -1,0 +1,16 @@
+# WendyOS ARM64 VM fstab. Replaces the stock oe-core file, so the /var/volatile
+# line has to be carried over here or churny /var data lands on disk.
+#
+# No "/" entry: vm-grub.cfg already passes root=PARTLABEL=rootfsA rw, and a
+# second device name here would go stale the moment the layout changes.
+#
+# Mounts by LABEL because every VM gets the same image, with no per-build UUID to
+# substitute. nofail so the direct-kernel path, which has no partition table,
+# still reaches a login prompt.
+#
+# /boot is read-only: nothing edits the ESP without A/B OTA, and powering off a
+# VM is a QEMU quit -- an unclean tear-down for a journal-less FAT.
+tmpfs                   /var/volatile  tmpfs  defaults                 0 0
+LABEL=boot              /boot    vfat  ro,nofail                0 0
+LABEL=config            /config  vfat  defaults,nofail          0 0
+LABEL=data              /data    ext4  defaults,noatime,nofail  0 2

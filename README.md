@@ -23,7 +23,7 @@ This repository provides the meta-layer and build flow to build **WendyOS** — 
 | Raspberry Pi 4 | Broadcom BCM2711 | 1–8GB | `rpi4-sd` | `raspberrypi4-64-wendyos` | SD | Mender |
 | Raspberry Pi 5 | Broadcom BCM2712 | 8GB | `rpi5-sd` | `raspberrypi5-wendyos` | SD | Mender |
 | Raspberry Pi 5 | Broadcom BCM2712 | 8GB | `rpi5-nvme` | `raspberrypi5-nvme-wendyos` | NVMe | Mender |
-| QEMU ARM64 | virtual | configurable | `qemu-arm64` | `qemuarm64-wendyos` | virtio | none |
+| QEMU ARM64 | virtual | configurable | `qemu-arm64` | `qemuarm64-wendyos` | virtio (UEFI `.wic`) | none |
 | Generic x86_64 PC | Intel/AMD x86_64 | varies | `generic-x86-64` | `genericx86-64-wendyos` | USB / disk (.wic) | none |
 
 ## TL;DR
@@ -1175,6 +1175,28 @@ sudo dnf install qemu-system-aarch64
 # Arch
 sudo pacman -S qemu-system-aarch64
 ```
+
+### Booting the .wic
+
+The build emits a self-contained UEFI disk image; boot it with no build tree and
+no external kernel. Needs the host's ARM64 UEFI firmware (`qemu-efi-aarch64` on
+Debian/Ubuntu, `brew install qemu` on macOS):
+
+```bash
+truncate -s 64M vars.fd
+qemu-system-aarch64 -machine virt -cpu cortex-a57 -smp 4 -m 4096 \
+  -drive if=pflash,format=raw,readonly=on,file=/usr/share/AAVMF/AAVMF_CODE.fd \
+  -drive if=pflash,format=raw,file=vars.fd \
+  -drive file=build/tmp/deploy/images/qemuarm64-wendyos/wendyos-image-qemuarm64-wendyos.rootfs.wic,if=none,format=raw,id=hd0 \
+  -device virtio-blk-pci,drive=hd0 -nographic \
+  -netdev user,id=net0,hostfwd=tcp:127.0.0.1:50051-:50051 \
+  -device virtio-net-pci,netdev=net0
+```
+
+The firmware must be the pflash-padded 64 MiB image (`AAVMF_CODE.fd`), not the
+2 MiB `QEMU_EFI.fd` the same package also ships.
+
+Or let the CLI do it: `wendy vm create dev --image <path>.wic && wendy vm start dev`.
 
 ### QEMU Build
 

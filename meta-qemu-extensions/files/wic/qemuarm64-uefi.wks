@@ -1,0 +1,27 @@
+# WendyOS ARM64 virtual-machine disk layout: UEFI boot, one rootfs, growable /data.
+#
+# Single-slot on purpose: wendyos.conf sets WENDYOS_OTA = "none" for any qemuall
+# machine, so there is no update agent to flip slots.
+#
+# Partition order is load-bearing: /data is LAST so it can be grown into a
+# user-enlarged disk image on first boot. The rootfs keeps the "rootfsA" label
+# every other board's boot chain uses, even without a B slot.
+bootloader --ptable gpt --configfile="vm-grub.cfg" --timeout=3
+
+# --part-type is the EFI System Partition type GUID, which wic never sets on its
+# own. Without it the partition is typed "Microsoft basic data": firmware is not
+# obliged to find the loader there, and systemd's ESP detection rejects it.
+#
+# install-kernel-into-boot-dir=false keeps the kernel out of the ESP; GRUB loads
+# it from the rootfs, so the ESP survives a rootfs change untouched.
+#
+# --label doubles as the GPT partition name, which is what makes
+# root=PARTLABEL=rootfsA resolve. Adding --part-name would override it, and
+# vm-grub.cfg would have to follow.
+part /boot --source bootimg_efi --sourceparams="loader=grub-efi,install-kernel-into-boot-dir=false" --ondisk vda --fstype=vfat --label boot --active --align 1024 --size 128M --part-type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B
+part --ondisk vda --fstype=vfat --label config --align 1024 --size 256M
+# --fixed-size, not --size: wic consults bitbake's ROOTFS_SIZE only when no size
+# is given, and otherwise inflates the partition by its own overhead factor.
+# Same constant and same reason as genericx86-ab.wks.
+part --source rootfs --ondisk vda --fstype=ext4 --label rootfsA --align 1024 --fixed-size ${WENDYOS_ROOTFS_SIZE_KB}K
+part --ondisk vda --fstype=ext4 --label data --align 1024 --size 512M
