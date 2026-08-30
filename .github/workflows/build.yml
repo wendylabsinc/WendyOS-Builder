@@ -1328,6 +1328,9 @@ jobs:
     uses: ./.github/workflows/drivers.yml
     with:
       version: ${{ needs.detect-changes.outputs.version }}
+      # Passed explicitly: an input the call omits resolves to this run's own
+      # dispatch value, not to blank.
+      device: ${{ inputs.device }}
     secrets: inherit
 
   # Advancing "latest" is what actually offers a version to a device, so it runs

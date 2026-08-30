@@ -8,14 +8,26 @@ name: Build driver add-ons
 on:
   workflow_call:
     inputs:
+      # Defaulted here, not just at the call site: an input the caller omits
+      # otherwise resolves to that run's own dispatch value.
       version:
         description: OS version whose devkits to build against; blank = each device's latest
         type: string
         required: false
+        default: ""
+      device:
+        description: Limit to one device ('' or 'all' = every device that publishes a devkit)
+        type: string
+        required: false
+        default: ""
   workflow_dispatch:
     inputs:
       device:
-        description: Limit to one device (blank = every device that publishes a devkit)
+        description: Limit to one device ('' or 'all' = every device that publishes a devkit)
+        type: string
+        required: false
+      version:
+        description: OS version whose devkits to build against; blank = each device's latest
         type: string
         required: false
 
@@ -67,7 +79,9 @@ jobs:
           # list; its keys are device/storage, so collapse to unique devices.
           mapfile -t DEVICES < <(jq -r 'keys[] | split("/")[0]' \
             .github/device-artifacts.json | sort -u)
-          if [[ -n "${ONLY_DEVICE:-}" ]]; then
+          # 'all' is build.yml's every-device sentinel, and its dispatch inputs
+          # reach this called workflow even though the call does not pass them.
+          if [[ -n "${ONLY_DEVICE:-}" && "$ONLY_DEVICE" != "all" ]]; then
             DEVICES=("$ONLY_DEVICE")
           fi
           # mapfile cannot fail the step, so an unreadable inventory would leave
@@ -127,7 +141,8 @@ jobs:
           # this run verified nothing. Reporting success would make an empty
           # check indistinguishable from a passing one.
           if [[ "$n" -eq 0 ]]; then
-            echo "::error::${#DRIVERS[@]} driver(s) present but no devkit published under '${PREFIX:-<public>}'"
+            echo "::error::${#DRIVERS[@]} driver(s) present but no devkit published" \
+                 "under '${PREFIX:-<public>}' for: ${DEVICES[*]}"
             exit 1
           fi
 
