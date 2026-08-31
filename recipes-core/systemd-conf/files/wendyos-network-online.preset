@@ -1,0 +1,6 @@
+# WendyOS: network-online.target provider policy (NetworkManager mode).
+#
+# NetworkManager-wait-online is the sole provider on these images. Keep the
+# systemd-networkd waiter disabled; the image postprocess also removes the
+# explicit enablement symlink created by systemd's package integration.
+disable systemd-networkd-wait-online.service
