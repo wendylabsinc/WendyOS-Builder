@@ -94,17 +94,6 @@ ROOTFS_POSTPROCESS_COMMAND += "${@oe.utils.ifelse(d.getVar('WENDYOS_ENABLE_VT_LO
 ROOTFS_POSTPROCESS_COMMAND += "${@oe.utils.ifelse(d.getVar('WENDYOS_ENABLE_UART_LOGIN') == '1', '', 'disable_uart_login;')}"
 ROOTFS_POSTPROCESS_COMMAND += "${@oe.utils.ifelse(d.getVar('WENDYOS_CONSOLE_GETTY_KNOB') == '1', '', 'disable_console_getty;')}"
 
-# systemd's package integration creates this enablement link after applying
-# presets, so the NetworkManager-mode disable preset cannot remove it reliably.
-# Do the same final-rootfs cleanup used for gettys: no mask is present while
-# preset-all runs, and only NetworkManager's bounded waiter is pulled in at boot.
-disable_inactive_network_waiter() {
-    if [ "${VIRTUAL-RUNTIME_net_manager}" = "networkmanager" ]; then
-        rm -f ${IMAGE_ROOTFS}${sysconfdir}/systemd/system/network-online.target.wants/systemd-networkd-wait-online.service
-    fi
-}
-ROOTFS_POSTPROCESS_COMMAND += "disable_inactive_network_waiter;"
-
 # Stamp build provenance onto the console boot screen (base-files' /etc/issue,
 # shown under the WendyOS logo before the login prompt). The build tag/ID is
 # shown on every build; the builder commit is added only on PR builds, keyed on
