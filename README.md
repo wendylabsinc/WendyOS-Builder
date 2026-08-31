@@ -1257,8 +1257,9 @@ reboot
 
 > **Requirements:** a host CPU with x86-64-v3 (Haswell/Excavator or newer), plus
 > `qemu-system-x86_64`, `qemu-img` and OVMF firmware — on Debian/Ubuntu that is
-> `sudo apt install qemu-system-x86 qemu-utils ovmf`. KVM is used when `/dev/kvm`
-> is readable (add yourself to the `kvm` group); the script falls back to software
+> `sudo apt install qemu-system-x86 qemu-utils ovmf`, on macOS `brew install qemu`.
+> Acceleration is KVM on Linux (when `/dev/kvm` is readable — add yourself to the
+> `kvm` group) and Hypervisor.framework on macOS; the script falls back to software
 > emulation otherwise, which works but is slow.
 
 <a name="several-vms-at-once"></a>
@@ -1274,8 +1275,9 @@ clone costs a few hundred KB rather than a full disk copy:
 
 Instances are independent — separate disks, separate UEFI variables, separate
 device identities — and each gets its own forwarded SSH port. State lives in
-`<workspace>/vm/<name>/`. Delete that directory, or use `--recreate`, to reset
-one to a first boot.
+`<workspace>/vm/<machine>/<name>/`, namespaced by machine so the same instance
+name can be used for each without collision. Delete that directory, or use
+`--recreate`, to reset one to a first boot.
 
 After a rebuild, existing instances stay bound to the image they were created
 from. `run-vm.sh` warns when it notices this and `--recreate` moves an instance
@@ -1296,18 +1298,28 @@ the console, and the firmware in front of GRUB.
 The image boots on either UTM backend on an Apple Silicon Mac, and on bare QEMU
 with `-machine virt`. It carries a getty on both `ttyAMA0` (the PL011 on a QEMU
 `virt` guest) and `hvc0` (the virtio console under Apple's Virtualization
-framework), so a login prompt appears whichever one the host provides. For bare
-QEMU the build also deploys `u-boot-vm-arm64-wendyos-*.bin`, usable as `-bios`,
-so no host firmware package is needed; UTM supplies its own UEFI.
+framework), so a login prompt appears whichever one the host provides. Bare QEMU
+needs a UEFI implementation on the host (AAVMF); UTM supplies its own.
 
-`scripts/run-vm.sh` is x86_64-only — an arm64 host path has not been written
-yet. To boot the arm64 image on a Mac, follow
-`docs/howto/vm-arm64-utm-test.md`, which walks through UTM setup step by step.
+`scripts/run-vm.sh` runs it too — pass `-m vm-arm64-wendyos`. On an arm64 host
+that is hardware-accelerated (KVM on Linux, Hypervisor.framework on macOS); on an
+x86_64 host it falls back to TCG emulation, which is slow but exercises the same
+boot chain, so the arm64 image can be tested without arm64 hardware. Firmware is
+autodetected (`sudo apt install qemu-efi-aarch64 qemu-system-arm`, or
+`brew install qemu`).
 
-> **Status:** this machine builds and its artifacts are verified, but it has not
-> yet been booted. The howto above doubles as the first-boot test protocol and
-> names the two things still unproven — whether GRUB's menu reaches the serial
-> console, and whether the firmware publishes the device tree the kernel needs.
+The script is written to run on macOS as well as Linux, but the macOS path has
+not yet been exercised on a Mac — the Homebrew firmware locations and the `hvf`
+accelerator are marked UNVERIFIED in the script and are the two things to check
+first if it misbehaves there. `docs/howto/vm-arm64-utm-test.md` covers the UTM
+route, which needs no command line at all.
+
+> **Status:** validated on Linux under emulation — boot, GRUB menu on the serial
+> console, and a full A/B OTA install/switch/commit cycle. Not yet run on UTM,
+> which is what the howto above covers. U-Boot was evaluated as the guest
+> firmware and rejected: it loads our boot chain correctly but hands the kernel a
+> device tree with no disk buses, so root never appears. A real UEFI
+> implementation (AAVMF, or UTM's own) is the supported path.
 
 ## QEMU (ARM64)
 
