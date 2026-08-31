@@ -247,6 +247,17 @@ jobs:
             ln -sfn "$base/$d" "$GITHUB_WORKSPACE/$d"
             echo "linked $GITHUB_WORKSPACE/$d -> $base/$d"
           done
+          # The cache pool is shared and pruned on a timer we do not control, so
+          # validate it before trusting it. A fetch is gated purely on its .done
+          # stamp, so a stamp outliving its payload makes bitbake skip the
+          # download and then fail on the missing file, permanently.
+          # -e, not -f: git2/*.done stamps guard bare clone directories.
+          if [ -d "$base/downloads" ]; then
+            find "$base/downloads" -name '*.done' -type f | while IFS= read -r s; do
+              p="${s%.done}"
+              [ -e "$p" ] || { echo "repair: dropping orphaned stamp $s"; rm -f "$s"; }
+            done
+          fi
 
       # ---------- Build ----------
 
