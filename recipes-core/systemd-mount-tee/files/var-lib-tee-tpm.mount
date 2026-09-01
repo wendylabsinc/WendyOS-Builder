@@ -1,5 +1,5 @@
-# Variant of var-lib-tee.mount for TPM /data-encryption builds
-# (WENDYOS_ENABLE_TPM=1), installed AS var-lib-tee.mount by the recipe.
+# Variant of var-lib-tee.mount for /data-encryption builds
+# (WENDYOS_DATA_ENCRYPTED=1), installed AS var-lib-tee.mount by the recipe.
 #
 # The default unit binds /var/lib/tee from /data/tee so OP-TEE secure storage
 # survives A/B OTA updates. With the fTPM encrypting /data that is circular: the
