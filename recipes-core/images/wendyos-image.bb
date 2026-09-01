@@ -169,6 +169,18 @@ IMAGE_INSTALL:append = " \
     ${@oe.utils.ifelse(d.getVar('WENDYOS_CONTAINER_RUNTIME') == '1', ' packagegroup-wendyos-container', '')} \
     "
 
+# Build host support (BuildKit). Off unless a machine opts in with
+# WENDYOS_BUILD_HOST = "1" -- see wendyos.conf for why it is not the default.
+#
+# Shipping it in the image is the point: installed by hand it lands on the A/B
+# root filesystem, so the next OS update boots a slot without it and the device
+# silently stops being a build host. The agent still reports the role as enabled
+# (its marker lives on /data), which is a state nobody can explain from the
+# outside.
+IMAGE_INSTALL:append = " \
+    ${@oe.utils.ifelse(d.getVar('WENDYOS_BUILD_HOST') == '1', ' buildkit', '')} \
+    "
+
 # Note: gadget-network-config (standalone dnsmasq) removed.
 # USB gadget IPv4 mode is controlled by WENDYOS_USB_NET_MODE (see wendyos.conf).
 
