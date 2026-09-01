@@ -178,6 +178,29 @@ test_x86_wic_disk() {
   rm -rf "$d"
 }
 
+# The VM machines share the x86 wic-disk kind. Covered separately because they
+# are the only arm64 device on that kind, so a resolver that quietly assumed
+# x86 would still pass the test above.
+test_vm_wic_disk() {
+  local d M dev token
+  for token in vm-arm64:vm-arm64-wendyos vm-x86-64:vm-x86-64-wendyos; do
+    IFS=':' read -r dev M <<<"$token"
+    d=$(newdir)
+    : >"$d/wendyos-image-$M.rootfs.wic"
+    local out; out=$(run_resolver "$dev" disk "$M" "$d"); local rc=$?
+    assert_eq "$dev wic-disk: exits 0" 0 "$rc"
+    assert_eq "$dev wic-disk: kind"         wic-disk "$(field IMAGE_KIND <<<"$out")"
+    assert_eq "$dev wic-disk: image"        "$d/wendyos-image-$M.rootfs.wic" "$(field IMAGE_FILE <<<"$out")"
+    assert_eq "$dev wic-disk: no bundle"    "" "$(field TEGRAFLASH_BUNDLE <<<"$out")"
+    assert_eq "$dev wic-disk: recovery"     false "$(field RECOVERY_EXPECTED <<<"$out")"
+    assert_eq "$dev wic-disk: bmap"         true  "$(field BMAP_REQUIRED <<<"$out")"
+    assert_eq "$dev wic-disk: flashpack"    false "$(field FLASHPACK_REQUIRED <<<"$out")"
+    assert_eq "$dev wic-disk: pass_storage" false "$(field PASS_STORAGE <<<"$out")"
+    assert_eq "$dev wic-disk: no gzip"      false "$(field RPI_NEEDS_GZIP <<<"$out")"
+    rm -rf "$d"
+  done
+}
+
 # ---------------------------------------------------------------------------
 # (b) Missing expected artifact exits non-zero with an informative error
 # ---------------------------------------------------------------------------
@@ -254,6 +277,8 @@ test_matrix_coverage() {
     raspberry-pi-4/sd
     raspberry-pi-3/sd
     generic-x86-64/disk
+    vm-arm64/disk
+    vm-x86-64/disk
   )
   local c
   for c in "${combos[@]}"; do
@@ -282,6 +307,7 @@ test_rpi_sdimg
 test_rpi_wic
 test_rpi5_pass_storage
 test_x86_wic_disk
+test_vm_wic_disk
 test_missing_bundle_fatal
 test_missing_rpi_fatal
 test_missing_x86_fatal
