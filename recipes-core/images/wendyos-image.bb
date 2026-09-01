@@ -140,6 +140,7 @@ IMAGE_INSTALL:append = " \
     gstreamer1.0-plugins-bad \
     gstreamer1.0-plugins-ugly \
     gstreamer1.0-libav \
+    frei0r-plugins \
     "
 
 # python3-pip-jetson-config lives in meta-tegra-extensions, so it's Tegra-only.
