@@ -5,6 +5,13 @@
 #   - System libs: /usr/lib/ (not /usr/lib/aarch64-linux-gnu/)
 
 # =============================================================================
+# VULKAN DRIVER ENTRY POINT
+# =============================================================================
+# NVIDIA's upstream drivers.csv uses the Debian multiarch path for this file.
+# meta-tegra installs it in /usr/lib on WendyOS, so map the Yocto path too.
+lib, /usr/lib/libGLX_nvidia.so.0
+
+# =============================================================================
 # DEVICE NODES
 # =============================================================================
 dev, /dev/nvidiactl
