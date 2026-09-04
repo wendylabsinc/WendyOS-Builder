@@ -15,6 +15,8 @@ on:
       - 'scripts/pack-sysext.sh'
       - 'recipes-core/wendyos-sysext-apply/files/*.sh'
       - 'recipes-kernel/wendyos-kernel-devkit/files/*.sh'
+      - 'recipes-core/wendyos-identity/files/*.sh'
+      - 'recipes-connectivity/avahi/files/*.sh'
       - '.github/device-artifacts.json'
       - '.github/workflows/scripts-ci.yml'
   push:
@@ -30,6 +32,8 @@ on:
       - 'scripts/pack-sysext.sh'
       - 'recipes-core/wendyos-sysext-apply/files/*.sh'
       - 'recipes-kernel/wendyos-kernel-devkit/files/*.sh'
+      - 'recipes-core/wendyos-identity/files/*.sh'
+      - 'recipes-connectivity/avahi/files/*.sh'
       - '.github/device-artifacts.json'
       - '.github/workflows/scripts-ci.yml'
 
@@ -54,6 +58,10 @@ jobs:
           shellcheck scripts/build-driver.sh scripts/pack-sysext.sh \
                      recipes-core/wendyos-sysext-apply/files/wendyos-sysext-apply.sh \
                      recipes-kernel/wendyos-kernel-devkit/files/setup.sh
+          shellcheck recipes-core/wendyos-identity/files/wendyos-identity-lib.sh \
+                     recipes-core/wendyos-identity/files/update-mdns-uuid.sh \
+                     recipes-core/wendyos-identity/files/update-mdns-uuid.test.sh \
+                     recipes-connectivity/avahi/files/generate-hostname.sh
 
       - name: Run resolver tests
         run: bash scripts/resolve-artifacts.test.sh
@@ -69,6 +77,13 @@ jobs:
         run: |
           docker run --rm -v "$PWD:/w" -w /w alpine:3 sh -c \
             'apk add -q bash && bash recipes-core/wendyos-agent/files/wendyos-agent-updater.test.sh'
+
+      # The mDNS publisher decides what 'wendy device list' shows for every
+      # device; a precedence bug there silently reverts an operator's rename on
+      # the next reboot with nothing in the logs.
+      - name: Run mDNS identity publisher tests
+        run: bash recipes-core/wendyos-identity/files/update-mdns-uuid.test.sh
+
 
       - name: Run T234 flashpack manifest tests
         run: python3 -m unittest scripts/t234_flashpack_manifest_test.py

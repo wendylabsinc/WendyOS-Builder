@@ -1,29 +1,30 @@
 #!/bin/bash
-# WendyOS mDNS identity publisher.
-#
-# Sets the id/name/displayname TXT records in the Avahi service file to the
-# current device identity by replacing each record's VALUE in place — NOT by
-# one-shot placeholder substitution, and NOT by rewriting the whole file.
-#
-# Why value-replacement:
-#   - Idempotent + self-correcting: a value left by an earlier run (the original
-#     WENDY_DEVICE_NAME placeholder, or a stale/`unknown-device` name) is matched
-#     and replaced, instead of being permanently stuck once the placeholder was
-#     consumed. That stuck-placeholder bug is what left mDNS advertising
-#     name=unknown-device on a clean first boot.
-#   - Preserves records the wendy-agent manages at RUNTIME — the service port,
-#     the tls=true/false record (UpdateAvahiForProvisioning), and fqdn
-#     (updateAvahiDeviceName). A from-scratch rewrite here would revert the
-#     provisioned advertisement on the next reboot.
+# WendyOS mDNS identity publisher. Replaces each TXT record's VALUE in place, so
+# a placeholder or stale value from an earlier run is still overwritten and the
+# records the agent owns at runtime (port, tls) survive untouched.
 set -u
 
-UUID_FILE="/etc/wendyos/device-uuid"
-DEVICE_NAME_FILE="/etc/wendyos/device-name"
-SERVICE_FILE="/etc/avahi/services/wendyos-mdns.service"
+# Overridable so the test can run against a temp tree; the unit passes no
+# environment on a device, so these take the defaults.
+UUID_FILE="${UUID_FILE:-/etc/wendyos/device-uuid}"
+DEVICE_NAME_FILE="${DEVICE_NAME_FILE:-/etc/wendyos/device-name}"
+# Literal hostname from 'wendy device rename'. Outranks the generated
+# device-name (as in generate-hostname.sh) so a rename survives a reboot.
+EXPLICIT_HOSTNAME_FILE="${EXPLICIT_HOSTNAME_FILE:-/etc/wendy-agent/hostname}"
+SERVICE_FILE="${SERVICE_FILE:-/etc/avahi/services/wendyos-mdns.service}"
+GENERATE_DEVICE_NAME_SH="${GENERATE_DEVICE_NAME_SH:-/usr/bin/generate-device-name.sh}"
+GENERATE_HOSTNAME_SH="${GENERATE_HOSTNAME_SH:-/usr/sbin/generate-hostname.sh}"
+AVAHI_RELOAD_CMD="${AVAHI_RELOAD_CMD:-systemctl}"
+IDENTITY_WAIT_SECS="${IDENTITY_WAIT_SECS:-10}"
+
+# Shared identity helpers, one source of truth with generate-hostname.sh.
+IDENTITY_LIB="${IDENTITY_LIB:-/usr/share/wendyos/identity-lib.sh}"
+# shellcheck source=/dev/null
+. "$IDENTITY_LIB" || { echo "Cannot source identity helpers: $IDENTITY_LIB" >&2; exit 1; }
 
 # Wait briefly for the identity files (the generators are ordered before us, but
 # stay defensive against a slow /data bind).
-for i in {1..10}; do
+for _ in $(seq "$IDENTITY_WAIT_SECS"); do
     [ -f "$UUID_FILE" ] && [ -f "$DEVICE_NAME_FILE" ] && break
     sleep 1
 done
@@ -43,51 +44,84 @@ if [ ! -f "$UUID_FILE" ]; then
 fi
 UUID=$(tr -d '[:space:]' < "$UUID_FILE")
 
-# Replace a TXT record's value in place: <txt-record>KEY=...</txt-record>.
-# [^<]* matches the current value up to the closing tag, so it overwrites a
-# placeholder, a stale name, or a real name alike. Other records are untouched.
-# The "display" prefix means the name= pattern never matches displayname=.
+# Replace a TXT record's value in place. [^<]* stops at the closing tag, so a
+# placeholder or stale value is overwritten; the leading "display" keeps a name=
+# match from also hitting displayname=.
 set_txt() {
     sed -i -E "s|(<txt-record>$1=)[^<]*|\1$2|g" "$SERVICE_FILE"
 }
 
+# "brave-dolphin" -> "Brave Dolphin". Keeps empty segments from consecutive
+# hyphens so it matches the agent's avahiDisplayName (else avahi keeps restarting).
+display_name() {
+    local -a words
+    IFS='-' read -r -a words <<< "$1"
+    local i
+    for i in "${!words[@]}"; do words[i]="${words[i]^}"; done
+    local IFS=' '
+    printf '%s' "${words[*]}"
+}
+
 set_txt id "$UUID"
 
-# Self-heal a missing device name before publishing: the generator's queued
-# job is lost when a failed first-boot /data mount collapses its Requires=
-# chain (WDY-1888), and this publisher is the last identity step that still
-# runs. generate-device-name.sh is idempotent and writes through the (by now
-# retried and bound) /etc/wendyos, so this is a real name, not a junk
-# fallback. Re-derive the hostname from it so the device does not keep the
-# machine-id fallback hostname until the next reboot (avahi starts after us
-# and picks the new hostname up).
-if [ ! -s "$DEVICE_NAME_FILE" ] && [ -x /usr/bin/generate-device-name.sh ]; then
+# Self-heal a missing device-name (last identity step to run): a failed
+# first-boot /data mount can drop the generator's job. Re-derive the hostname too.
+if [ ! -s "$DEVICE_NAME_FILE" ] && [ -x "$GENERATE_DEVICE_NAME_SH" ]; then
     echo "Warning: $DEVICE_NAME_FILE missing; generating it (self-heal)"
-    /usr/bin/generate-device-name.sh || true
-    if [ -s "$DEVICE_NAME_FILE" ] && [ -x /usr/sbin/generate-hostname.sh ]; then
-        /usr/sbin/generate-hostname.sh || true
+    "$GENERATE_DEVICE_NAME_SH" || true
+    if [ -s "$DEVICE_NAME_FILE" ] && [ -x "$GENERATE_HOSTNAME_SH" ]; then
+        "$GENERATE_HOSTNAME_SH" || true
     fi
 fi
 
-# Only set name/displayname when we actually have a device name; otherwise leave
+# Pick the advertised name: an explicit 'wendy device rename' wins, else the
+# generated device-name. Validate each before use — the value goes into a sed
+# replacement and into XML, where '&', '|' or '<' would corrupt the file.
+ADVERTISED_NAME=""
+NAME_SOURCE=""
+if [ -s "$EXPLICIT_HOSTNAME_FILE" ]; then
+    # No bind mount means /data did not mount and this is the rootfs copy
+    # setup-etc-binds.sh leaves behind — still authoritative, so note it.
+    EXPLICIT_HOSTNAME_DIR=$(dirname "$EXPLICIT_HOSTNAME_FILE")
+    if command -v mountpoint >/dev/null 2>&1 && ! mountpoint -q "$EXPLICIT_HOSTNAME_DIR"; then
+        echo "Note: $EXPLICIT_HOSTNAME_DIR is not a bind mount; using the rootfs copy"
+    fi
+    EXPLICIT_NAME=$(read_name_file "$EXPLICIT_HOSTNAME_FILE")
+    if is_valid_hostname "$EXPLICIT_NAME"; then
+        ADVERTISED_NAME="$EXPLICIT_NAME"
+        NAME_SOURCE="explicit hostname"
+    else
+        echo "Warning: $EXPLICIT_HOSTNAME_FILE is not a valid hostname label; ignoring it"
+    fi
+fi
+if [ -z "$ADVERTISED_NAME" ] && [ -s "$DEVICE_NAME_FILE" ]; then
+    DEVICE_NAME=$(read_name_file "$DEVICE_NAME_FILE")
+    if is_valid_hostname "$DEVICE_NAME"; then
+        ADVERTISED_NAME="$DEVICE_NAME"
+        NAME_SOURCE="device name"
+    else
+        echo "Warning: device-name '$DEVICE_NAME' is not a valid hostname label; ignoring it"
+    fi
+fi
+
+# Only set the name records when we actually have a name; otherwise leave
 # whatever is there (placeholder or a prior good value) for a later run — never
 # burn a junk fallback into the advertisement.
-DEVICE_NAME=""
-if [ -s "$DEVICE_NAME_FILE" ]; then
-    DEVICE_NAME=$(tr -d '[:space:]' < "$DEVICE_NAME_FILE")
-    DISPLAY_NAME=$(echo "$DEVICE_NAME" | sed 's/-/ /g' | awk '{for(i=1;i<=NF;i++) $i=toupper(substr($i,1,1)) tolower(substr($i,2));}1')
-    set_txt name "$DEVICE_NAME"
+if [ -n "$ADVERTISED_NAME" ]; then
+    DISPLAY_NAME=$(display_name "$ADVERTISED_NAME")
+    set_txt name "$ADVERTISED_NAME"
     set_txt displayname "$DISPLAY_NAME"
-    echo "Published mDNS identity: id=$UUID name=$DEVICE_NAME ($DISPLAY_NAME)"
+    echo "Published mDNS identity: id=$UUID name=$ADVERTISED_NAME ($DISPLAY_NAME) [from $NAME_SOURCE]"
 else
-    echo "Warning: $DEVICE_NAME_FILE missing; left name/displayname for a later run"
+    echo "Warning: no device name available; left name/displayname for a later run"
 fi
-logger -t wendyos-identity "Published mDNS identity: id=$UUID name=${DEVICE_NAME:-<unset>}"
+logger -t wendyos-identity \
+    "Published mDNS identity: id=$UUID name=${ADVERTISED_NAME:-<unset>} source=${NAME_SOURCE:-none}" \
+    2>/dev/null || true
 
 # Pick up the change if Avahi is already running. We are ordered Before=
 # avahi-daemon, so it usually isn't up yet and reads the file on its own start;
 # this covers the already-running case.
-systemctl try-reload-or-restart avahi-daemon 2>/dev/null || true
+"$AVAHI_RELOAD_CMD" try-reload-or-restart avahi-daemon 2>/dev/null || true
 
 exit 0
-

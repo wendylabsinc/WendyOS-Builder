@@ -15,6 +15,7 @@ SRC_URI = " \
     file://generate-uuid.sh \
     file://generate-device-name.sh \
     file://update-mdns-uuid.sh \
+    file://wendyos-identity-lib.sh \
     file://wendyos-uuid-generate.service \
     file://wendyos-device-name-generate.service \
     file://wendyos-identity.service \
@@ -38,6 +39,9 @@ do_install() {
     install -d ${D}${datadir}/wendyos
     install -m 0644 ${UNPACKDIR}/adjectives.txt ${D}${datadir}/wendyos/
     install -m 0644 ${UNPACKDIR}/nouns.txt ${D}${datadir}/wendyos/
+
+    # Shared identity helpers sourced by update-mdns-uuid.sh and generate-hostname.sh.
+    install -m 0644 ${UNPACKDIR}/wendyos-identity-lib.sh ${D}${datadir}/wendyos/
 
     # Install systemd services
     install -d ${D}${systemd_system_unitdir}
@@ -96,6 +100,7 @@ FILES:${PN} += "${bindir}/generate-device-name.sh"
 FILES:${PN} += "${bindir}/update-mdns-uuid.sh"
 FILES:${PN} += "${datadir}/wendyos/adjectives.txt"
 FILES:${PN} += "${datadir}/wendyos/nouns.txt"
+FILES:${PN} += "${datadir}/wendyos/wendyos-identity-lib.sh"
 FILES:${PN} += "${systemd_system_unitdir}/wendyos-uuid-generate.service"
 FILES:${PN} += "${systemd_system_unitdir}/wendyos-device-name-generate.service"
 FILES:${PN} += "${systemd_system_unitdir}/wendyos-identity.service"
