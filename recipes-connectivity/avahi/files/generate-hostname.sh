@@ -22,19 +22,17 @@ log() {
     logger -t wendyos-hostname "$*" || true
 }
 
+# Shared identity helpers, one source of truth with update-mdns-uuid.sh.
+IDENTITY_LIB="${IDENTITY_LIB:-/usr/share/wendyos/identity-lib.sh}"
+# shellcheck source=/dev/null
+. "$IDENTITY_LIB" || { echo "Cannot source identity helpers: $IDENTITY_LIB" >&2; exit 1; }
+
 # Validate UUID (accepts with/without dashes, case-insensitive)
 is_valid_uuid() {
     local v="${1,,}"
     [[ "$v" =~ ^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$ ]]
 }
 
-# Validate a literal hostname as a single DNS label: starts with a lowercase
-# letter, then lowercase letters/digits/hyphens, not ending in a hyphen, 1-63
-# characters. Mirrors validHostname in the wendy-agent (services/hostname.go).
-is_valid_hostname() {
-    local v="$1"
-    [[ "$v" =~ ^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$ ]]
-}
 
 # Primary source: device UUID
 get_device_uuid() {
@@ -75,7 +73,7 @@ generate_hostname() {
     # An explicit hostname set via 'wendy device rename' wins and is used
     # verbatim, with no "wendyos-" prefix.
     if [ -f "$EXPLICIT_HOSTNAME_FILE" ]; then
-        explicit=$(cat "$EXPLICIT_HOSTNAME_FILE" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
+        explicit=$(read_name_file "$EXPLICIT_HOSTNAME_FILE")
         if [ -n "$explicit" ] && is_valid_hostname "$explicit"; then
             echo "$explicit"
             return
@@ -84,7 +82,7 @@ generate_hostname() {
 
     # Try to use the human-readable device name first
     if [ -f "$DEVICE_NAME_FILE" ]; then
-        device_name=$(cat "$DEVICE_NAME_FILE" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
+        device_name=$(read_name_file "$DEVICE_NAME_FILE")
         if [ -n "$device_name" ]; then
             echo "${PREFIX}-${device_name}"
             return
