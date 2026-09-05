@@ -24,7 +24,7 @@ jobs:
           ./wendyos/bootstrap.sh
           cat >> build/conf/auto.conf <<CONF
           MACHINE = "jetson-agx-thor-devkit-nvme-wendyos"
-          TMPDIR = "/wendy/gs-usb-${GITHUB_RUN_ID}"
+          TMPDIR = "/wendy/build-tmp/gs-usb-${GITHUB_RUN_ID}"
           BB_NUMBER_THREADS = "4"
           PARALLEL_MAKE = "-j 8"
           CONF
@@ -40,7 +40,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p output
-          root=/wendy/gs-usb-${GITHUB_RUN_ID}
+          root=/wendy/build-tmp/gs-usb-${GITHUB_RUN_ID}
           module=$(find "$root/work" -path '*/gs-usb/*/gs_usb.ko' -print -quit)
           test -s "$module"
           cp "$module" output/
@@ -59,5 +59,5 @@ jobs:
         if: always()
         shell: bash
         run: |
-          target=/wendy/gs-usb-${GITHUB_RUN_ID}
+          target=/wendy/build-tmp/gs-usb-${GITHUB_RUN_ID}
           if [[ -d "$target" ]]; then find "$target" -depth -delete; fi
