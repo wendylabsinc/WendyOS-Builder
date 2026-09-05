@@ -15,7 +15,9 @@ jobs:
           set -euo pipefail
           base=/opt/wendy-cache/wendyos-builder
           ls -ld "$base"/*
-          find "$base/sstate-cache" -maxdepth 3 -type f -name '*linux-noble-nvidia-tegra*' | head -n 60 || true
-          find "$base/repos" -maxdepth 4 -type f -name 'linux-noble-nvidia-tegra.inc' -print 2>/dev/null || true
+          find "$base/sstate-cache" -maxdepth 6 -type f -name '*linux-noble-nvidia-tegra*' | head -n 60 || true
+          find "$base/repos" -maxdepth 8 -type f -name 'linux-noble-nvidia-tegra.inc' -print 2>/dev/null || true
           find "$base/downloads" -maxdepth 2 -iname '*linux-noble*' -print 2>/dev/null || true
+          find "$base/sstate-cache" -maxdepth 6 -type f -name '*linux-noble-nvidia-tegra*populate_sysroot*.tar.zst' | head -n 1 | while read -r f; do tar -I zstd -tf "$f" | head -n 70 || true; done
+          find "$base/repos" -maxdepth 8 -type f -name 'linux-noble-nvidia-tegra.inc' -exec cat {} \; 2>/dev/null || true
           df -h .
