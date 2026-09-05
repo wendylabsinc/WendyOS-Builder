@@ -9,8 +9,11 @@
 # no-op (the partition is already LUKS).
 #
 # DEFERRED (docs/plans/x86-security.md §13): the no-TPM fallback (D1) is a stub.
-# The recovery key is printed to the journal + console as the INTERIM escrow
-# mechanism -- accepted with the default-ON decision; revisit under D3.
+# The recovery key goes to the console and to /run/wendyos/data-recovery-key as
+# the interim escrow mechanism, never to the journal (which is persisted on /data;
+# the rest of this log does go there).
+# To generate a fresh recovery key on a running device, see the "Recovery key
+# retrieval (wendy CLI contract)" block above step 6.
 set -u
 
 DATA=/dev/disk/by-partlabel/data
@@ -25,14 +28,22 @@ TPM_PCRS="7"
 PCR_ARG=""
 [ -n "$TPM_PCRS" ] && PCR_ARG="--tpm2-pcrs=$TPM_PCRS"
 
-# Emit to the journal (stdout) and, when present, the console + serial UART.
-announce() {
-    echo "$*"
+# Emit to the console + serial UART only, when present -- never to stdout. This
+# service has no StandardOutput override, so stdout is the journal, and the
+# journal is persisted on /data (see var-log.mount) and kept for a month. A write
+# straight to the device node does not pass through journald.
+console() {
     for con in /dev/console /dev/ttyS0; do
         if [ -w "$con" ]; then
             echo "$*" > "$con" 2>/dev/null || true
         fi
     done
+}
+
+# Emit to the journal (stdout) and, when present, the console + serial UART.
+announce() {
+    echo "$*"
+    console "$*"
 }
 
 fail() {
@@ -165,18 +176,103 @@ cryptsetup close "$INIT_MAP" || true
 systemd-cryptenroll --unlock-key-file="$BK" --tpm2-device=auto $PCR_ARG "$DATA" \
     || fail "TPM enrollment failed"
 
-# 6) Enrol a recovery key and surface it. INTERIM: journal + console only, escrow
-#    is undecided (D3). This is the safety net if the TPM ever cannot unseal.
-REC="$(systemd-cryptenroll --unlock-key-file="$BK" --recovery-key "$DATA" 2>/dev/null)"
-if [ -n "$REC" ]; then
-    announce "=================== /data RECOVERY KEY ==================="
-    announce "SAVE THIS -- shown once. Unlocks /data if the TPM cannot."
-    announce "  $REC"
-    announce "INTERIM bring-up only (journal + console). Escrow TBD (D3)."
-    announce "========================================================="
-else
-    announce "data-enroll WARNING: recovery-key enrollment produced no key"
+# --- Recovery key retrieval (wendy CLI contract) ---
+# The key printed on the console below, and written to
+# /run/wendyos/data-recovery-key, is lost at reboot by design: /run is tmpfs and
+# it doesn't persist across reboot.
+#
+# A fresh recovery key can be minted at ANY time on a booted device whose /data is
+# unlocked. Run as root:
+#
+#     systemd-cryptenroll --unlock-tpm2-device=auto --recovery-key \
+#         --wipe-slot=recovery /dev/disk/by-partlabel/data
+#
+# The TPM authorises the change, a new recovery key is printed on stdout, and
+# --wipe-slot=recovery removes the PREVIOUS recovery slot. Per
+# systemd-cryptenroll(1) the enrollment completes first and the newly added slot is
+# always excluded from the wipe, so there is no window with zero recovery keys.
+# The new key lands on stdout: do not pipe that command into the journal or a log
+# file, for the same reason this script keeps the key off stdout.
+#
+# This ROTATES: any recovery key issued earlier stops working. That is deliberate,
+# so stale printouts cannot stay valid.
+#
+# The TPM keyslot is untouched -- --wipe-slot=recovery only matches slots unlocked
+# by a recovery key. The slot count stays at 2 (tpm2 + recovery) however often this
+# is run, so it can never exhaust the 32 keyslots of a LUKS2 header.
+#
+# Keyslots live in the LUKS2 header on the partition, NOT in the TPM, so this
+# consumes no fTPM NV.
+#
+# UNVERIFIED ON HARDWARE: that --unlock-tpm2-device=auto succeeds while the volume
+# is mounted and in use. It operates on the block device and unlocks a keyslot
+# independently of the active dm-crypt mapping, so it is expected to work, but it
+# has not been run on a device.
+
+# 6) Enrol a recovery key and surface it. REQUIRED, not best-effort: step 7 drops
+#    the bootstrap slot right after, so without a recovery key the TPM keyslot is
+#    the only way into /data, and any TPM/fTPM state loss makes it permanently
+#    unopenable -- a re-flash, a wiped /config/tee, or a changed PCR policy all
+#    invalidate that slot. So on failure, log the reason and roll back: this
+#    container was luksFormat'ed and mkfs'ed a few lines above and holds no user
+#    data, so wiping it costs nothing and makes the next boot re-run the whole
+#    enrollment cleanly (not LUKS -> the migration guard passes).
+#    INTERIM: the key goes to the console and the /run copy below, never to the
+#    journal.
+REC_ERR=/run/data-enroll.recovery-err
+REC_FILE=/run/wendyos/data-recovery-key
+REC="$(systemd-cryptenroll --unlock-key-file="$BK" --recovery-key "$DATA" 2>"$REC_ERR")"
+rc=$?
+if [ "$rc" -ne 0 ] || [ -z "$REC" ]; then
+    announce "data-enroll: recovery-key enrollment failed (exit status $rc), stderr follows:"
+    # `|| [ -n "$line" ]` also emits a last line that lacks a trailing newline.
+    emitted=0
+    while IFS= read -r line || [ -n "$line" ]; do
+        [ -n "$line" ] || continue
+        announce "    | $line"
+        emitted=1
+    done < "$REC_ERR"
+    [ "$emitted" -eq 1 ] || announce "    | (no stderr output)"
+    rm -f "$REC_ERR" 2>/dev/null || true
+    wipefs -a "$DATA" \
+        || announce "data-enroll WARN: rollback wipefs failed -- wipe $DATA manually before the next boot"
+    fail "no recovery key enrolled -- refusing to leave /data unlockable by the TPM alone; rolled back, retry next boot"
 fi
+rm -f "$REC_ERR" 2>/dev/null || true
+
+# Convenience copy on tmpfs, so a provisioning step can read the key without
+# scraping the console. Best-effort: the keyslot is enrolled either way, so a
+# failure here costs a copy, not access to /data -- record the outcome in
+# rec_saved for the banner below and carry on, never roll back. umask 077 in a
+# subshell keeps the file 0600 from creation, as with the bootstrap key above.
+# luks_uuid tells a reader whether the key still matches the current volume: the
+# stale-header re-init path above builds a NEW volume with a NEW recovery key.
+rec_saved=1
+mkdir -p "${REC_FILE%/*}" 2>/dev/null && (
+    umask 077
+    {
+        echo "# VOLATILE -- /run is tmpfs, so this file is gone at the next reboot."
+        echo "# To mint a fresh key, see \"Recovery key retrieval (wendy CLI contract)\""
+        echo "# in /usr/sbin/data-enroll.sh."
+        echo "# created may be wrong on first boot: the clock is not necessarily set"
+        echo "# yet. luks_uuid is the field that identifies the volume."
+        echo "recovery_key=$REC"
+        echo "luks_uuid=$(cryptsetup luksUUID "$DATA" 2>/dev/null)"
+        echo "created=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+    } > "$REC_FILE"
+) || rec_saved=0
+
+announce "=================== /data RECOVERY KEY ==================="
+announce "SAVE THIS -- shown once. Unlocks /data if the TPM cannot."
+console "  $REC"
+announce "  (console only, never the journal -- read $REC_FILE, or mint a fresh key per the retrieval block above step 6)"
+announce "INTERIM bring-up only (console + /run, not the journal)."
+if [ "$rec_saved" -eq 1 ]; then
+    announce "Also written to $REC_FILE -- VOLATILE, lost at the next reboot."
+else
+    announce "NOT written to $REC_FILE -- the key above is the ONLY copy, save it now."
+fi
+announce "========================================================="
 
 # 7) Drop the bootstrap slot -- only the TPM and recovery keyslots remain (the
 #    recovery key is the fallback). --wipe-slot=password spares the recovery slot
