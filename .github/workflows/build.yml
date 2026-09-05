@@ -47,16 +47,17 @@ jobs:
           shared="$root/work-shared/jetson-agx-thor-devkit-nvme-wendyos"
           cp "$shared/kernel-build-artifacts/.config" output/kernel.config
           cp "$shared/kernel-build-artifacts/Module.symvers" output/
-          modinfo output/gs_usb.ko | tee output/modinfo.txt
+          readelf -p .modinfo output/gs_usb.ko | tee output/modinfo.txt
           diff -u wendyos/thor-running.config output/kernel.config > output/config.diff || true
           sha256sum output/gs_usb.ko > output/SHA256SUMS
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: thor-gs-usb
           path: output/
           if-no-files-found: error
       - name: Cleanup isolated kernel build
-        if: always()
+        if: success()
         shell: bash
         run: |
           target=/wendy/build-tmp/gs-usb-${GITHUB_RUN_ID}
