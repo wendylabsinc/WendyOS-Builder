@@ -6,18 +6,58 @@ permissions:
 jobs:
   module:
     runs-on: [self-hosted, linux, x64, wendyos-builder]
-    timeout-minutes: 30
+    timeout-minutes: 60
+    env:
+      WENDYOS_HOST_BUILD: '1'
+      BOARD: jetson-agx-thor
     steps:
       - uses: actions/checkout@v4
-      - name: Inspect cached kernel build inputs
+        with:
+          path: wendyos
+      - name: Prepare isolated build environment
         shell: bash
         run: |
           set -euo pipefail
           base=/opt/wendy-cache/wendyos-builder
-          ls -ld "$base"/*
-          find "$base/sstate-cache" -maxdepth 6 -type f -name '*linux-noble-nvidia-tegra*' | head -n 60 || true
-          find "$base/repos" -maxdepth 8 -type f -name 'linux-noble-nvidia-tegra.inc' -print 2>/dev/null || true
-          find "$base/downloads" -maxdepth 2 -iname '*linux-noble*' -print 2>/dev/null || true
-          find "$base/sstate-cache" -maxdepth 6 -type f -name '*linux-noble-nvidia-tegra*populate_sysroot*.tar.zst' | head -n 1 | while read -r f; do tar -I zstd -tf "$f" | head -n 70 || true; done
-          find "$base/repos" -maxdepth 8 -type f -name 'linux-noble-nvidia-tegra.inc' -exec cat {} \; 2>/dev/null || true
-          df -h .
+          ln -s "$base/downloads" downloads
+          ln -s "$base/sstate-cache" sstate-cache
+          ./wendyos/bootstrap.sh
+          cat >> build/conf/auto.conf <<CONF
+          MACHINE = "jetson-agx-thor-devkit-nvme-wendyos"
+          TMPDIR = "/wendy/gs-usb-${GITHUB_RUN_ID}"
+          BB_NUMBER_THREADS = "4"
+          PARALLEL_MAKE = "-j 8"
+          CONF
+      - name: Compile matching gs_usb module
+        shell: bash
+        run: |
+          set -eo pipefail
+          source build/.wendyos-env
+          source repos/$WENDYOS_LAYER_TREE/openembedded-core/oe-init-build-env build
+          bitbake gs-usb -c compile
+      - name: Collect module and ABI evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p output
+          root=/wendy/gs-usb-${GITHUB_RUN_ID}
+          module=$(find "$root/work" -path '*/gs-usb/*/gs_usb.ko' -print -quit)
+          test -s "$module"
+          cp "$module" output/
+          shared="$root/work-shared/jetson-agx-thor-devkit-nvme-wendyos"
+          cp "$shared/kernel-build-artifacts/.config" output/kernel.config
+          cp "$shared/kernel-build-artifacts/Module.symvers" output/
+          modinfo output/gs_usb.ko | tee output/modinfo.txt
+          diff -u wendyos/thor-running.config output/kernel.config > output/config.diff || true
+          sha256sum output/gs_usb.ko > output/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: thor-gs-usb
+          path: output/
+          if-no-files-found: error
+      - name: Cleanup isolated kernel build
+        if: always()
+        shell: bash
+        run: |
+          target=/wendy/gs-usb-${GITHUB_RUN_ID}
+          if [[ -d "$target" ]]; then find "$target" -depth -delete; fi
