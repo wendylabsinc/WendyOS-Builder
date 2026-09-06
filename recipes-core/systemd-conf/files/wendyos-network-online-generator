@@ -1,0 +1,8 @@
+#!/bin/sh
+# systemd generator arguments: normal-dir early-dir late-dir. A runtime mask in
+# the early directory wins over the vendor unit and any persistent wants link,
+# but does not exist while Yocto runs preset-all against the image rootfs.
+
+[ "$#" -eq 3 ] || exit 0
+
+ln -sfn /dev/null "$2/systemd-networkd-wait-online.service"
