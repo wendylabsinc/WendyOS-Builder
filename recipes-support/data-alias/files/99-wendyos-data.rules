@@ -1,0 +1,42 @@
+# /etc/udev/rules.d/99-wendyos-data.rules
+#
+# Stable alias /dev/wendyos/data for the persistent /data device.
+#
+# /data is a plain partition on some devices and an unlocked LUKS mapper on
+# others. Once encryption is a runtime decision, the image cannot know which
+# one it will be at build time. A .mount unit's What= is a fixed string, so
+# the device path is what has to vary. The alias is that varying part.
+#
+# It has to be a udev SYMLINK, not a hand-made "ln -s" under /dev. systemd
+# derives a .device unit from every udev symlink, so /dev/wendyos/data becomes
+# dev-wendyos-data.device and a mount unit can wait on it. A plain symlink has
+# no unit behind it, and the mount would hang waiting for a .device unit that
+# never activates.
+#
+# The 99 prefix is load-bearing. These rules match properties that other rules
+# have to import first: 60-persistent-storage.rules runs blkid and sets
+# ID_PART_ENTRY_SCHEME, ID_PART_ENTRY_NAME and ID_FS_TYPE, and the
+# device-mapper rules set DM_NAME. Sorting any earlier would match on values
+# that are not there yet.
+#
+# This file covers the two cases every board can hit:
+#   1. GPT boards, plaintext /data. Matched by the GPT partition name.
+#   2. Any board, encrypted /data. Matched by the device-mapper name.
+#
+# Rule 1 excludes crypto_LUKS so it stops matching the moment the partition is
+# LUKS-formatted. From then on only rule 2 provides the alias. The encrypted
+# case has to be matched by mapper name because luksFormat also destroys the
+# ext4 label, so there is no "data" label left to match.
+#
+# The MBR case cannot be matched by partition name, because MBR has no
+# partition names. It lives in the companion file 99-wendyos-data-mbr.rules,
+# which is installed only on the one board with an MBR layout. See that file
+# for why it is not shipped fleet-wide.
+#
+# As of this change nothing consumes /dev/wendyos/data yet.
+ACTION!="remove", SUBSYSTEM=="block", ENV{ID_PART_ENTRY_SCHEME}=="gpt", \
+    ENV{ID_PART_ENTRY_NAME}=="data", ENV{ID_FS_TYPE}!="crypto_LUKS", \
+    SYMLINK+="wendyos/data"
+
+ACTION!="remove", SUBSYSTEM=="block", KERNEL=="dm-*", ENV{DM_NAME}=="data", \
+    SYMLINK+="wendyos/data"
