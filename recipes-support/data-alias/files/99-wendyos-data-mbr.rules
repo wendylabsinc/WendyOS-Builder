@@ -1,0 +1,35 @@
+# /etc/udev/rules.d/99-wendyos-data-mbr.rules
+#
+# MBR half of the /dev/wendyos/data alias. See 99-wendyos-data.rules for what
+# the alias is for and why it is a udev SYMLINK.
+#
+# Installed only on raspberrypi3-64-wendyos, the only machine whose layout is
+# an MBR table (conf/machine/raspberrypi3-64-wendyos.conf:14,
+# WKS_FILE = "rpi-wendy-ab-mbr.wks"). MBR carries no partition names, so the
+# GPT rule in the companion file can never match there and /data would have no
+# alias at all.
+#
+# It is gated to that one board instead of being shipped everywhere because
+# matching on a filesystem label alone is weaker than matching a GPT partition
+# name. On a GPT board this rule would let an attached MBR drive labelled
+# "data" steal the alias. On rpi3 that exposure exists regardless, since its
+# fstab already mounts /data by LABEL=data.
+#
+# ENV{DEVTYPE}=="partition" excludes device-mapper devices, which are
+# DEVTYPE=disk, and whole-disk "superfloppy" media. Without it this rule
+# matches unlocked LUKS mappers, including the transient "data_init" bootstrap
+# mapper that data-enroll.sh opens and labels "data" before closing it again.
+#
+# ENV{ID_PART_ENTRY_SCHEME}=="dos" is a positive match on a real MBR table.
+# Testing !="gpt" instead would also be true when the property is unset, which
+# is exactly the device-mapper case. "dos" is the string libblkid reports
+# (libblkid/src/partitions/dos.c:382 .name = "dos", reaching PART_ENTRY_SCHEME
+# via partitions.c:777).
+#
+# Known residual: an MBR-partitioned external drive with a partition labelled
+# "data" can still match here on rpi3. That is the same exposure as its
+# existing LABEL=data fstab entry, so it is not a regression.
+ACTION!="remove", SUBSYSTEM=="block", ENV{DEVTYPE}=="partition", \
+    ENV{ID_PART_ENTRY_SCHEME}=="dos", ENV{ID_FS_LABEL}=="data", \
+    ENV{ID_FS_TYPE}!="crypto_LUKS", \
+    SYMLINK+="wendyos/data"
