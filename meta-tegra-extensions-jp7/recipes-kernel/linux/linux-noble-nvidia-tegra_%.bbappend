@@ -58,3 +58,10 @@ KERNEL_LOCALVERSION:append = "-wendy-mesh2"
 
 # Retire the actual failed pending LE connection, including a second queued dial.
 require recipes-kernel/linux/bluetooth-le-pending.inc
+
+# SocketCAN: core, protocols and the USB/SPI adapter drivers. NVIDIA's defconfig
+# already carries the core (CONFIG_CAN=m, CAN_VCAN, CAN_MCP251XFD, plus the
+# flexcan/m_can/rcar platform drivers). What it has is NO USB CAN adapter driver
+# at all -- gs_usb and the rest come only from this fragment.
+require ${@'recipes-kernel/linux/can.inc' if d.getVar('WENDYOS_CAN') == '1' else ''}
+

@@ -1,13 +1,27 @@
 # Generic x86_64 PC distro configuration.
 
-WENDYOS_UPDATE_BOOTLOADER ?= "0"
-WENDYOS_EFI_DEBUG ?= "0"
+# Careful with "?=" in this file. It is immediate and order-dependent (BitBake's
+# DataNode.eval "ques" branch re-reads the current value and keeps it if already
+# set), and BitBake parses local.conf -> machine conf -> distro conf. This file is
+# required from wendyos.conf line 216, so a "?=" here only ever fires for a variable
+# that NOTHING set at local.conf scope, at machine scope, or earlier in
+# wendyos.conf. Today that is WENDYOS_CAN alone.
+#
+# Removed 2026-09-07 because they were dead: WENDYOS_UPDATE_BOOTLOADER and
+# WENDYOS_EFI_DEBUG (genericx86-64-wendyos.conf:30-31), WENDYOS_PERSIST_JOURNAL_LOGS
+# (genericx86-64-wendyos.conf:39) and WENDYOS_MDNS_INTERFACES
+# (conf/template/include/local/x86.inc:9, which keeps Avahi unrestricted because
+# commodity PCs are discovered over LAN rather than direct USB gadget networking).
+#
+# WENDYOS_PERSIST_JOURNAL_LOGS is the one that actually misled: this file said "0",
+# while genericx86-64-wendyos.conf:39 sets "1" at machine scope and wins.
+#
+# WENDYOS_USB_GADGET and WENDYOS_DEEPSTREAM below are also inert on the in-tree
+# machine (local/x86.inc:8 and genericx86-64-wendyos.conf:32-33 get there first).
+# They are kept deliberately, as the family fallback for an out-of-tree x86 machine
+# that sets nothing -- not because they are load-bearing today.
 WENDYOS_USB_GADGET ?= "0"
 WENDYOS_DEEPSTREAM ?= "0"
-WENDYOS_PERSIST_JOURNAL_LOGS ?= "0"
-
-# Commodity PCs are usually discovered over LAN rather than direct USB gadget
-# networking, so do not restrict Avahi to usb0.
-WENDYOS_MDNS_INTERFACES ?= ""
+WENDYOS_CAN ?= "1"
 
 DISTRO_FEATURES:append = " wifi bluetooth"
