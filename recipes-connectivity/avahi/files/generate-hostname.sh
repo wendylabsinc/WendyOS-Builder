@@ -23,7 +23,7 @@ log() {
 }
 
 # Shared identity helpers, one source of truth with update-mdns-uuid.sh.
-IDENTITY_LIB="${IDENTITY_LIB:-/usr/share/wendyos/identity-lib.sh}"
+IDENTITY_LIB="${IDENTITY_LIB:-/usr/share/wendyos/wendyos-identity-lib.sh}"
 # shellcheck source=/dev/null
 . "$IDENTITY_LIB" || { echo "Cannot source identity helpers: $IDENTITY_LIB" >&2; exit 1; }
 
