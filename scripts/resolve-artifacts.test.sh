@@ -262,8 +262,16 @@ test_generated_nvme_bundle_absent() {
 }
 
 # ---------------------------------------------------------------------------
-# (c) Every device+storage combo in build.yml's matrix has a map entry.
-# Hardcoded from build.yml's ALL_MATRIX — keep in sync if the matrix changes.
+# (c) Every publishable device+storage combo in build.yml's matrix has a map
+# entry, and every map entry belongs to one. Hardcoded from build.yml's
+# ALL_MATRIX — keep both lists in sync if the matrix changes.
+#
+# A map entry is what makes build.yml upload a board's flashable artifact (the
+# 'publishable' gate in the build job reads this same file), so a board still
+# being brought up is in the matrix but deliberately absent from the map: it
+# builds and is verified, and is not published. Asserting that absence keeps the
+# guard tight in both directions — adding a map entry for a build-only board
+# fails here until it is promoted out of build_only.
 # ---------------------------------------------------------------------------
 test_matrix_coverage() {
   local combos=(
@@ -280,12 +288,22 @@ test_matrix_coverage() {
     vm-arm64/disk
     vm-x86-64/disk
   )
+  local build_only=(
+    dragonwing-iq-8275/ufs
+  )
   local c
   for c in "${combos[@]}"; do
     if [[ "$(jq -r --arg k "$c" 'has($k)' "$MAP")" == "true" ]]; then
       ok "map covers $c"
     else
       bad "map missing entry for $c"
+    fi
+  done
+  for c in "${build_only[@]}"; do
+    if [[ "$(jq -r --arg k "$c" 'has($k)' "$MAP")" == "false" ]]; then
+      ok "$c is build-only (no map entry, so not published)"
+    else
+      bad "$c has a map entry but is listed build-only; promote it out of build_only"
     fi
   done
   # And no stray map entries beyond the matrix (guards against dead rows).

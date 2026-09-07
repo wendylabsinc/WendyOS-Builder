@@ -24,6 +24,7 @@ on:
           - jetson-orin-nano
           - jetson-agx-thor
           - generic-x86-64
+          - dragonwing-iq-8275
           - vm-arm64
           - vm-x86-64
       version:
@@ -149,7 +150,8 @@ jobs:
           # slowest are dispatched first: jetson-agx-thor is the long pole
           # (~14 min warm vs ~5 min for a Pi; heavier still on release builds,
           # which add tegraflash + flashpack + upload), then the other Jetsons,
-          # then generic-x86-64 (coldest sstate — newest board), then the
+          # then dragonwing-iq-8275 and generic-x86-64 (coldest sstate — newest
+          # boards; dragonwing also compiles mesa and llvm), then the
           # Raspberry Pis. The merged multi-storage jobs (agx-orin, orin-nano,
           # rpi-5) are heavier than a single-variant build of the same device
           # (one full build + a mostly-cached second variant) but lighter than
@@ -158,6 +160,7 @@ jobs:
             {"device":"jetson-agx-thor","storages":"nvme"},
             {"device":"jetson-agx-orin","storages":"nvme emmc"},
             {"device":"jetson-orin-nano","storages":"nvme sd"},
+            {"device":"dragonwing-iq-8275","storages":"ufs"},
             {"device":"generic-x86-64","storages":"disk"},
             {"device":"raspberry-pi-5","storages":"nvme sd"},
             {"device":"raspberry-pi-4","storages":"sd"},
@@ -171,7 +174,7 @@ jobs:
 
           emit_all() {
             echo "matrix={\"include\":${ALL_MATRIX}}" >> "$GITHUB_OUTPUT"
-            echo "devices=jetson-agx-thor jetson-agx-orin jetson-orin-nano generic-x86-64 raspberry-pi-5 raspberry-pi-4 raspberry-pi-3 vm-arm64 vm-x86-64" >> "$GITHUB_OUTPUT"
+            echo "devices=jetson-agx-thor jetson-agx-orin jetson-orin-nano dragonwing-iq-8275 generic-x86-64 raspberry-pi-5 raspberry-pi-4 raspberry-pi-3 vm-arm64 vm-x86-64" >> "$GITHUB_OUTPUT"
           }
 
           emit_one() {
@@ -291,6 +294,7 @@ jobs:
               jetson-orin-nano:sd)   BOARD=jetson-orin-nano-sd;   MACHINE=jetson-orin-nano-devkit-wendyos ;;
               jetson-agx-thor:nvme) BOARD=jetson-agx-thor;       MACHINE=jetson-agx-thor-devkit-nvme-wendyos ;;
               generic-x86-64:disk)  BOARD=generic-x86-64;       MACHINE=genericx86-64-wendyos ;;
+              dragonwing-iq-8275:ufs) BOARD=dragonwing-iq8275;   MACHINE=iq-8275-evk-wendyos ;;
               vm-arm64:disk)        BOARD=vm-arm64;             MACHINE=vm-arm64-wendyos ;;
               vm-x86-64:disk)       BOARD=vm-x86-64;            MACHINE=vm-x86-64-wendyos ;;
               *) echo "Unknown device/storage: $DEVICE/$STORAGE"; exit 1 ;;
@@ -302,6 +306,22 @@ jobs:
           echo "map=$MAP" >> "$GITHUB_OUTPUT"
           echo "first-board=$FIRST_BOARD" >> "$GITHUB_OUTPUT"
           echo "Variants for $DEVICE: $MAP"
+
+          # A device is publishable only once every one of its storage variants has
+          # an entry in .github/device-artifacts.json, which is what tells the
+          # resolver how the flashable artifact is named. A board still being brought
+          # up builds and is verified here but is not uploaded; adding its map entry
+          # is what turns publishing on, so there is no second list to keep in step.
+          PUBLISHABLE=true
+          for token in $MAP; do
+            IFS='|' read -r storage board machine <<< "$token"
+            if ! jq -e --arg k "$DEVICE/$storage" 'has($k)' \
+                 "$GITHUB_WORKSPACE/wendyos/.github/device-artifacts.json" >/dev/null; then
+              echo "$DEVICE/$storage has no artifact-map entry: build-only, not published."
+              PUBLISHABLE=false
+            fi
+          done
+          echo "publishable=$PUBLISHABLE" >> "$GITHUB_OUTPUT"
 
       # Isolate repos/ per job so no two runs can rewrite one another's layer
       # tree. The matrix shares one seed on the NVMe cache and clone_repos does
@@ -865,6 +885,7 @@ jobs:
           done
 
       - name: Upload image and emit manifest entry
+        if: steps.vars.outputs.publishable == 'true'
         env:
           DEVICE: ${{ matrix.device }}
           MAP: ${{ steps.vars.outputs.map }}
@@ -1046,6 +1067,8 @@ jobs:
       - name: Upload manifest entry artifact
         # Runs on PRs too: publish-pr (a separate job) consumes these
         # PR-stamped manifest-entry artifacts to write pr/<N>/ manifests.
+        # Skipped for a build-only board, which emits no entry to upload.
+        if: steps.vars.outputs.publishable == 'true'
         uses: actions/upload-artifact@v4
         with:
           # One artifact per device holding every storage variant's entry JSON.
