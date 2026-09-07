@@ -1,0 +1,17 @@
+[Unit]
+Description=WendyOS config partition (/config)
+# Format on first boot must complete before we mount. Mounting by PARTLABEL --
+# the identifier the formatter waits on -- not by LABEL: the filesystem label
+# does not exist until mkfs has run, so an fstab LABEL= entry races the format
+# and, being nofail, fails silently on exactly the first boot that matters.
+Requires=wendyos-config-init.service
+After=wendyos-config-init.service
+
+[Mount]
+What=/dev/disk/by-partlabel/config
+Where=/config
+Type=vfat
+Options=defaults,nofail
+
+[Install]
+WantedBy=local-fs.target
