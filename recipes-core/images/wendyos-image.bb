@@ -181,26 +181,11 @@ IMAGE_ROOTFS_SIZE ?= "8192"
 # include's :pn- override, hence the gate must live here.
 IMAGE_ROOTFS_EXTRA_SPACE:append = "${@' + 4096' if bb.utils.contains('DISTRO_FEATURES', 'systemd', True, False, d) and not d.getVar('WENDYOS_ROOTFS_SIZE_KB') else ''}"
 
-# A space-separated list of variable names that BitBake prints in the
-# "Build Configuration" banner at the start of a build.
-BUILDCFG_VARS += " \
-    WENDYOS_OTA \
-    WENDYOS_DATA_PART \
-    WENDYOS_DEBUG \
-    WENDYOS_DEBUG_UART \
-    WENDYOS_ENABLE_UART_LOGIN \
-    WENDYOS_ENABLE_VT_LOGIN \
-    WENDYOS_SSHD \
-    WENDYOS_USB_GADGET \
-    WENDYOS_USB_NET_MODE \
-    WENDYOS_MDNS_INTERFACES \
-    WENDYOS_PERSIST_JOURNAL_LOGS \
-    WENDYOS_UPDATE_BOOTLOADER \
-    WENDYOS_DEEPSTREAM \
-    WENDYOS_NVIDIA_DGPU \
-    WENDYOS_BUILD_VERSION \
-    WENDYOS_BUILD_COMMIT \
-    "
+# The "Build Configuration" banner list lives in conf/distro/wendyos.conf, not
+# here. BUILDCFG_VARS is read from the CONFIG datastore by buildcfg_vars() in
+# oe-core classes-global/base.bbclass, called from base_eventhandler on
+# bb.event.BuildStarted, so an append made during a recipe's parse never reaches
+# it. It sat in this file for a long time and printed nothing.
 
 # Include hardware-specific image configuration
 # These files contain IMAGE_INSTALL modifications and other hardware-specific settings

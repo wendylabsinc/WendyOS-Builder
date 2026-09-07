@@ -23,3 +23,9 @@ SRC_URI += " \
     file://0005-crypto-algif_aead-Fix-minimum-RX-size-check-for-decryption.patch \
     file://cve-2026-46333-ptrace.patch \
     "
+
+# SocketCAN: core, protocols and the USB/SPI adapter drivers. NVIDIA's defconfig
+# already carries the core (CONFIG_CAN=m, CAN_VCAN, CAN_MCP251XFD, plus the
+# flexcan/m_can/rcar platform drivers). What it has is NO USB CAN adapter driver
+# at all -- gs_usb and the rest come only from this fragment.
+require ${@'recipes-kernel/linux/can.inc' if d.getVar('WENDYOS_CAN') == '1' else ''}

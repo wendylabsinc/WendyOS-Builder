@@ -13,3 +13,7 @@ SRC_URI += "file://0001-dwc2-force-g_dma-false-for-BCM2712-in-peripheral-mod.pat
 # other board's kernel bbappend enables the same thing with this one line.
 require ${@'recipes-kernel/linux/driver-extensions.inc' if d.getVar('WENDYOS_DRIVER_EXTENSIONS') == '1' else ''}
 
+# SocketCAN: core, protocols and the USB/SPI adapter drivers. bcm2712_defconfig
+# already builds most of these, so here the fragment pins the set rather than
+# introducing it.
+require ${@'recipes-kernel/linux/can.inc' if d.getVar('WENDYOS_CAN') == '1' else ''}

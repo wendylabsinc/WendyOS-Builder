@@ -63,6 +63,16 @@ WENDYOS_EFI_DEBUG = "0"
 # (Was "0" in the wrynose/r38.4 era when no DeepStream recipe existed for Thor.)
 WENDYOS_DEEPSTREAM = "1"
 
+# SocketCAN: kernel drivers plus the module packages. On by default -- Jetson is
+# a robotics target and USB-CAN adapters are standard kit on it. Set = "0" in
+# local.conf to leave them out.
+#
+# This has to be set at config-parse time, not in conf/distro/include/tegra-image.inc:
+# that file is required from wendyos-image.bb (recipe parse), so a value set there
+# is invisible to the kernel bbappend and to packagegroup-wendyos-base, and the
+# feature silently builds nothing while the build banner still prints it.
+WENDYOS_CAN ?= "1"
+
 # LUKS2 encryption of /data, sealed to the fTPM. Default OFF: an image that
 # assumes LUKS leaves an already-provisioned plaintext /data unmounted, and
 # there is no in-place migration yet. Set = "1" in local.conf to build it.

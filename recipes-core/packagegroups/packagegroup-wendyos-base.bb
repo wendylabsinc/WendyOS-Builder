@@ -54,6 +54,15 @@ RDEPENDS:${PN}:append = " \
         )} \
     "
 
+# SocketCAN (kernel modules, plus can-utils in debug images). Gated on
+# WENDYOS_CAN: on for the robotics targets, off for QEMU. The per-family
+# defaults live in conf/distro/include/{rpi,x86,qemu}-distro.inc for those three
+# and in conf/template/include/local/tegra-t{234,264}.inc for Jetson -- Tegra has
+# no *-distro.inc, and tegra-image.inc is parsed too late to gate a recipe.
+RDEPENDS:${PN}:append = " \
+    ${@oe.utils.ifelse(d.getVar('WENDYOS_CAN') == '1', 'packagegroup-wendyos-can', '')} \
+    "
+
 # Include hardware-specific packagegroup configuration
 require ${@'qemu-packagegroup-base.inc'  if 'qemuall' in d.getVar('MACHINEOVERRIDES').split(':') else ''}
 require ${@'tegra-packagegroup-base.inc' if 'tegra'   in d.getVar('MACHINEOVERRIDES').split(':') else ''}
