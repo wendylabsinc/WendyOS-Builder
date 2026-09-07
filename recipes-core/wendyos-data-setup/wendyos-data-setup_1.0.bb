@@ -38,4 +38,7 @@ FILES:${PN} += " \
 SYSTEMD_SERVICE:${PN} = "wendyos-data-init.service data.mount"
 SYSTEMD_AUTO_ENABLE:${PN} = "enable"
 
-RDEPENDS:${PN} = "bash coreutils util-linux parted e2fsprogs-mke2fs gptfdisk"
+# e2fsprogs-dumpe2fs is what makes the "already initialised?" probe work: if
+# dumpe2fs is absent the guard cannot read the superblock, and the script falls
+# through to mkfs.ext4 -F, wiping /data on EVERY boot.
+RDEPENDS:${PN} = "bash coreutils util-linux parted e2fsprogs-mke2fs e2fsprogs-dumpe2fs gptfdisk"
