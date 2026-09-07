@@ -53,23 +53,26 @@ RDEPENDS:${PN} = " \
 # is the only thing keeping the clock sane across a reboot or an OTA swap.
 RDEPENDS:${PN} += " systemd-mount-timesync"
 
-# Qualcomm AI stack, gated on WENDYOS_QCOM_NPU (see the machine conf for why it is
-# off by default). The kernel half already ships: fastrpc is loaded, the cDSP boots
-# from linux-firmware, and qairt-sdk-hexagon-v75 supplies the DSP-side skels. What
-# these add is the host-side runtime plus the board's DSP blobs.
+# Hexagon DSP platform runtime: the DSP-side libc and the fastrpc shell the kernel
+# loads to create a dynamic PD. It stays in the rootfs with the firmware because the
+# signed DSP firmware authorises each Hexagon binary by ELF segment hash, so the two
+# cannot be allowed to drift -- and remoteproc loads the firmware at ~11s, long before
+# any add-on is merged.
 #
-# The -config package is what makes offload work: it drops a conf.d yaml keyed on
-# the DT model ("Qualcomm Technologies, Inc. Monaco EVK") that tells fastrpc's
-# config parser where the skels live, and the -evk-{adsp,cdsp,gdsp} packages are
-# symlinks creating exactly that path. Without it DSP_LIBRARY_PATH is never set and
-# every offload call fails.
-WENDYOS_QCOM_NPU_INSTALL = " \
-    qairt-sdk \
-    hexagon-dsp-binaries-qualcomm-iq8275-evk-config \
+# RDEPENDS, not RRECOMMENDS: upstream expresses that lock as a version-pinned
+# RDEPENDS on linux-firmware, and meta-qcom then reaches these through
+# MACHINE_ESSENTIAL_EXTRA_RRECOMMENDS -- so a skew drops the whole DSP userspace
+# without a word. Naming them here turns the next skew into a build failure.
+# Verify a firmware bump with dsp-binaries' own scripts/checkfw.py.
+#
+# The -config package carries the conf.d yaml keyed on the DT model
+# ("Qualcomm Technologies, Inc. Monaco EVK") that tells fastrpc where the DSP libs
+# live; without it DSP_LIBRARY_PATH is never resolved and every offload call fails.
+RDEPENDS:${PN} += " \
     hexagon-dsp-binaries-qcom-iq8275-evk-adsp \
     hexagon-dsp-binaries-qcom-iq8275-evk-cdsp \
     hexagon-dsp-binaries-qcom-iq8275-evk-gdsp \
+    hexagon-dsp-binaries-qualcomm-iq8275-evk-config \
     "
-RDEPENDS:${PN} += "${@d.getVar('WENDYOS_QCOM_NPU_INSTALL') if d.getVar('WENDYOS_QCOM_NPU') == '1' else ''}"
 
 COMPATIBLE_MACHINE = "iq-8275-evk-wendyos"
