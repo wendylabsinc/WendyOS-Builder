@@ -53,4 +53,23 @@ RDEPENDS:${PN} = " \
 # is the only thing keeping the clock sane across a reboot or an OTA swap.
 RDEPENDS:${PN} += " systemd-mount-timesync"
 
+# Qualcomm AI stack, gated on WENDYOS_QCOM_NPU (see the machine conf for why it is
+# off by default). The kernel half already ships: fastrpc is loaded, the cDSP boots
+# from linux-firmware, and qairt-sdk-hexagon-v75 supplies the DSP-side skels. What
+# these add is the host-side runtime plus the board's DSP blobs.
+#
+# The -config package is what makes offload work: it drops a conf.d yaml keyed on
+# the DT model ("Qualcomm Technologies, Inc. Monaco EVK") that tells fastrpc's
+# config parser where the skels live, and the -evk-{adsp,cdsp,gdsp} packages are
+# symlinks creating exactly that path. Without it DSP_LIBRARY_PATH is never set and
+# every offload call fails.
+WENDYOS_QCOM_NPU_INSTALL = " \
+    qairt-sdk \
+    hexagon-dsp-binaries-qualcomm-iq8275-evk-config \
+    hexagon-dsp-binaries-qcom-iq8275-evk-adsp \
+    hexagon-dsp-binaries-qcom-iq8275-evk-cdsp \
+    hexagon-dsp-binaries-qcom-iq8275-evk-gdsp \
+    "
+RDEPENDS:${PN} += "${@d.getVar('WENDYOS_QCOM_NPU_INSTALL') if d.getVar('WENDYOS_QCOM_NPU') == '1' else ''}"
+
 COMPATIBLE_MACHINE = "iq-8275-evk-wendyos"
