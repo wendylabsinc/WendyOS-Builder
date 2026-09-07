@@ -59,6 +59,31 @@ digest table:
 
 Silence means every binary is authorised.
 
+### Avoiding the firmware bump altogether
+
+Bumping `SRCREV_OECORE` to reach linux-firmware 20260810 is a world rebuild — 164
+oe-core commits, every board revalidated — for a fix only this board needs. There is
+a cheaper route, because `hexagon-dsp-binaries` ships DSP userspace for *seven*
+firmware builds per DSP and `config.txt` merely selects one:
+
+    qcs8300/Qualcomm/QCS8300-RIDE/cdsp-DSP.AT.1.0.1-00201-LEMANS-2   <- our 20260622
+    qcs8300/Qualcomm/QCS8300-RIDE/cdsp-DSP.AT.1.0.1-00204-LEMANS-1   <- upstream's pick
+
+So instead of moving the firmware forward, retarget the userspace backward to the
+build the firmware we already ship authorises. Verified offline: all 15 Hexagon ELFs
+in the `00201-LEMANS-2` set — `fastrpc_shell_unsigned_3` included — match segment
+digests in our own `cdsp0.mbn`, and `checkfw.py` goes silent for qcs8300.
+
+Two things have to move together in a `hexagon-dsp-binaries` bbappend: `config.txt`,
+and the version-pinned `RDEPENDS` on `linux-firmware-qcom-qcs8300-*`, which is
+generated from the recipe's own `PV` and stays unsatisfiable otherwise. Swapping only
+the three `.mbn` blobs does *not* avoid that second step — a package's EVR does not
+change when its file contents do.
+
+The cost is pinning to the older firmware/userspace pair, forgoing whatever changed
+between `00201` and `00204`. Not yet confirmed on hardware: the on-device proof was
+run with the `00204` pair.
+
 ## Building
 
 The add-on is gated on `WENDYOS_QCOM_NPU` (default `1` for this board) and is
