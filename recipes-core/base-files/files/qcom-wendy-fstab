@@ -1,0 +1,24 @@
+# WendyOS Dragonwing A/B fstab (wendyos-update OTA stack).
+#
+# Deliberately NO "/" entry: the rootfs slot is A/B and is mounted by the kernel
+# from the root= that grub.cfg sets per slot (root=PARTLABEL=rootfsA|rootfsB, see
+# meta-qcom-extensions/files/grub/grubAB-qcom.cfg), so a fixed root device here
+# would be wrong on the other slot. GRUB mounts "/" read-write via `rw` on the
+# kernel cmdline, matching the RPi and x86 A/B fstabs.
+#
+# /var/volatile tmpfs: shipped by stock oe-core base-files (our custom fstab
+# replaces that file, so carry it). Keeps churny /var data in RAM.
+#
+# /boot is the shared EFI System Partition (GRUB + grub.cfg + grubenv). It must
+# stay mounted: the wendyos-update grubenv connector edits /boot/EFI/BOOT/grubenv
+# via grub-editenv to flip slots and arm a trial. Referenced by LABEL, not a
+# per-build PARTUUID, since an OTA writes only the rootfs slot and never
+# re-partitions.
+#
+# /data is grown to fill the disk by the FLASH tool, not on first boot: it is the
+# last partition and patch0.xml patches its end LBA from the device's real
+# NUM_DISK_SECTORS. /config is the FAT provisioning partition. All by LABEL, all
+# nofail.
+tmpfs                   /var/volatile  tmpfs  defaults                 0 0
+LABEL=boot              /boot          vfat   defaults,nofail          0 2
+LABEL=config            /config        vfat   defaults,nofail          0 0
