@@ -1,0 +1,22 @@
+[Unit]
+Description=WendyOS /config partition first-boot setup
+DefaultDependencies=no
+# A device dependency, not systemd-udev-settle (deprecated, and After= alone
+# never pulls it in): a condition or bare ordering races udev's coldplug of the
+# UFS disk, and losing that race skips the format -- the same failure the /data
+# initialiser documents.
+Wants=dev-disk-by\x2dpartlabel-config.device
+After=systemd-udevd.service dev-disk-by\x2dpartlabel-config.device
+Before=config.mount local-fs.target shutdown.target
+Conflicts=shutdown.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/wendyos-config-init.sh
+# Never block boot: /config is a provisioning channel, mounted nofail. A failure
+# here must not strand the device.
+SuccessExitStatus=0 1
+
+[Install]
+WantedBy=local-fs.target
