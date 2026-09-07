@@ -2,21 +2,20 @@
 # WENDYOS_DRIVER_EXTENSIONS == "1", so nothing here needs its own gate — and no
 # machine override either, since only a board that requires this file gets it.
 #
-# Board-neutral on purpose: the fragments below name no arch and no machine, and
+# Board-neutral on purpose: the fragment below names no arch and no machine, and
 # the signing prefunc only touches kbuild's own CONFIG_MODULE_SIG_KEY. Wiring a
 # new board is the one gated require in its kernel bbappend, nothing here.
 
-# Bring the fragments along, so a board's bbappend does not have to know where they
-# live. ${THISDIR} is this file's directory during its own parse, not the including
-# bbappend's, so the path stays right however it is required.
+# Module add-ons are merged as sysexts, so they need the merge path too.
+require recipes-kernel/linux/sysext-runtime.inc
+
+# Bring the fragment along, so a board's bbappend does not have to know where it
+# lives. ${THISDIR} is this file's directory during its own parse, not the
+# including bbappend's, so the path stays right however it is required.
 FILESEXTRAPATHS:prepend := "${THISDIR}/driver-extensions:"
 
-# The filesystems the merge path needs, plus module signing. Both are one-time kernel
-# changes; adding a driver never comes back here.
-SRC_URI += " \
-    file://sysext.cfg \
-    file://module-sign.cfg \
-    "
+# Module signing: a one-time kernel change; adding a driver never comes back here.
+SRC_URI += " file://module-sign.cfg"
 
 # Module signing key. Unset (dev): the kernel mints a throwaway key per build, so an
 # externally-signed .ko won't verify — harmless while MODULE_SIG_FORCE is off. Set (CI):

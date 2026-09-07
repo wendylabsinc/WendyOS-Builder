@@ -8,3 +8,8 @@
 FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 
 SRC_URI:append = "${@' file://usb-gadget.cfg' if d.getVar('WENDYOS_USB_GADGET') == '1' else ''}"
+
+# The sysext merge path. meta-qcom's defconfig is not enough: it builds overlayfs as a
+# module and leaves squashfs without a decompressor, so an add-on image would fail to
+# mount. sysext-runtime.inc turns both on.
+require ${@'recipes-kernel/linux/sysext-runtime.inc' if d.getVar('WENDYOS_SYSEXT_ADDONS') == '1' else ''}
