@@ -1,35 +1,43 @@
 #!/usr/bin/env bash
 #
-# Pack a driver add-on's modules into a systemd-sysext image.
+# Pack an add-on's payload into a systemd-sysext image.
 #
-# The payload is built directly rather than by stripping a rootfs: an image recipe would
+# Two kinds of payload. Kernel modules are staged from --modules into the layout depmod
+# expects; a prebuilt /usr tree is taken from --payload as it stands. At least one is
+# required, and both may be given.
+#
+# Modules are staged directly rather than by stripping a rootfs: an image recipe would
 # pull in glibc, bash and base-files through the module package's dependencies, and each
-# of those would shadow the host's own copy once merged onto /usr.
+# of those would shadow the host's own copy once merged onto /usr. A --payload tree is
+# the caller's to get right the same way — only files the add-on owns.
 #
-#   pack-sysext.sh --devkit <dir> --driver <dir> --modules <dir> [--out <file.raw>]
+#   pack-sysext.sh --devkit <dir> --driver <dir>
+#                  [--modules <dir>] [--payload <dir>] [--out <file.raw>]
 #
 set -euo pipefail
 
 err() { echo "pack-sysext: $*" >&2; exit 1; }
 
-DEVKIT="" DRIVER="" MODULES="" OUT=""
+DEVKIT="" DRIVER="" MODULES="" PAYLOAD="" OUT=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --devkit)  DEVKIT=$2; shift 2 ;;
         --driver)  DRIVER=$2; shift 2 ;;
         --modules) MODULES=$2; shift 2 ;;
+        --payload) PAYLOAD=$2; shift 2 ;;
         --out)     OUT=$2; shift 2 ;;
         -h|--help) awk 'NR>1 && /^#/{print} NR>1 && !/^#/{exit}' "$0"; exit 0 ;;
         *)         err "unknown argument: $1" ;;
     esac
 done
 
-[ -n "$DEVKIT" ]  || err "--devkit is required"
-[ -n "$DRIVER" ]  || err "--driver is required"
-[ -n "$MODULES" ] || err "--modules is required"
+[ -n "$DEVKIT" ] || err "--devkit is required"
+[ -n "$DRIVER" ] || err "--driver is required"
+[ -n "$MODULES" ] || [ -n "$PAYLOAD" ] || err "one of --modules or --payload is required"
 DEVKIT=$(cd "$DEVKIT" && pwd)
 DRIVER=$(cd "$DRIVER" && pwd)
-MODULES=$(cd "$MODULES" && pwd)
+[ -n "$MODULES" ] && MODULES=$(cd "$MODULES" && pwd)
+[ -n "$PAYLOAD" ] && PAYLOAD=$(cd "$PAYLOAD" && pwd)
 
 # Assigned then eval'd rather than eval'd inline: `eval "$(cmd)"` reports eval's status,
 # so a failed read would look like success and leave every field empty.
@@ -67,7 +75,7 @@ MKSQUASHFS="$DEVKIT/hosttools/mksquashfs"
 [ -x "$MKSQUASHFS" ] || MKSQUASHFS=$(command -v mksquashfs) || err "no mksquashfs"
 "$MKSQUASHFS" -version >/dev/null 2>&1 || err "$MKSQUASHFS will not run; re-run $DEVKIT/setup.sh"
 
-OUT=${OUT:-$(dirname "$MODULES")/$NAME.raw}
+OUT=${OUT:-$(dirname "${MODULES:-$PAYLOAD}")/$NAME.raw}
 
 # systemd merges an image only when its extension-release is named after the image file,
 # so the two cannot be allowed to drift. Version in the directory, not the filename.
@@ -92,12 +100,24 @@ trap 'rm -rf "$STAGE" "$TMP_OUT"' EXIT
 # --- payload -------------------------------------------------------------------------
 # updates/ is the directory depmod prefers over an in-tree module of the same name. Keying
 # it on $KVER means a running kernel simply does not find an add-on built for another one.
-shopt -s nullglob
-KOS=("$MODULES"/*.ko)
-shopt -u nullglob
-[ "${#KOS[@]}" -gt 0 ] || err "no .ko files in $MODULES"
-install -d "$STAGE/usr/lib/modules/$KVER/updates"
-install -m 0644 "${KOS[@]}" "$STAGE/usr/lib/modules/$KVER/updates/"
+KOS=()
+if [ -n "$MODULES" ]; then
+    shopt -s nullglob
+    KOS=("$MODULES"/*.ko)
+    shopt -u nullglob
+    [ "${#KOS[@]}" -gt 0 ] || err "no .ko files in $MODULES"
+    install -d "$STAGE/usr/lib/modules/$KVER/updates"
+    install -m 0644 "${KOS[@]}" "$STAGE/usr/lib/modules/$KVER/updates/"
+fi
+
+install -d "$STAGE/usr"
+
+# A prebuilt /usr tree, merged as it stands. Copied before the generated files below so
+# a payload cannot overwrite the extension-release that identifies the image.
+if [ -n "$PAYLOAD" ]; then
+    [ -d "$PAYLOAD/usr" ] || err "$PAYLOAD has no usr/ directory to merge"
+    cp -a "$PAYLOAD/usr/." "$STAGE/usr/"
+fi
 
 # Baked in so installing the add-on needs no --module flag. depmod resolves dependencies,
 # so the manifest need only name the driver's top-level modules.
@@ -133,14 +153,19 @@ fi
 #
 # WENDYOS_KERNEL is our own field. systemd ignores unknown keys and has no kernel
 # criterion, so the apply script reads it to skip an add-on built for another kernel.
+# Written only when the add-on actually carries modules: a userspace payload talks to
+# the kernel through stable interfaces and must survive a kernel bump.
 install -d "$STAGE/usr/lib/extension-release.d"
-cat > "$STAGE/usr/lib/extension-release.d/extension-release.$NAME" <<EOF
+REL="$STAGE/usr/lib/extension-release.d/extension-release.$NAME"
+cat > "$REL" <<EOF
 ID=$OS_ID
 SYSEXT_LEVEL=$LEVEL
 ARCHITECTURE=$SD_ARCH
 EXTENSION_RELOAD_MANAGER=1
-WENDYOS_KERNEL=$KVER
 EOF
+if [ "${#KOS[@]}" -gt 0 ]; then
+    echo "WENDYOS_KERNEL=$KVER" >> "$REL"
+fi
 
 # --- image ---------------------------------------------------------------------------
 # Deterministic output: mksquashfs otherwise stamps the build time into the superblock
@@ -156,4 +181,5 @@ mv -f "$TMP_OUT" "$OUT"
 echo "add-on:  $NAME"
 echo "kernel:  $KVER"
 echo "modules: ${#KOS[@]}"
+[ -n "$PAYLOAD" ] && echo "payload: $PAYLOAD"
 echo "image:   $OUT ($(du -h "$OUT" | cut -f1))"
