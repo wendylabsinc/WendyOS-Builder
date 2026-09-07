@@ -61,3 +61,15 @@ prune_wendyos_qcom_shadow_esp() {
     rm -rf ${IMAGE_ROOTFS}/boot/EFI
 }
 ROOTFS_POSTPROCESS_COMMAND:append = " prune_wendyos_qcom_shadow_esp;"
+
+# Qualcomm NPU add-on, gated on WENDYOS_QCOM_NPU. Built and deployed beside the image,
+# never installed into it -- that is the whole point of shipping it as a sysext.
+# :do_image_complete is explicit because a bare entry maps to do_populate_sysroot,
+# which an image recipe never reaches, leaving DEPLOY_DIR_IMAGE without the .raw.
+EXTRA_IMAGEDEPENDS:append = "${@' wendyos-qcom-npu-sysext:do_image_complete' if d.getVar('WENDYOS_QCOM_NPU') == '1' else ''}"
+
+# meta-qcom's machine conf recommends the QNN DSP skels into every rootfs. They belong
+# to the add-on, so drop them here: keeping them would ship the payload twice and let
+# the rootfs copy shadow the add-on's on merge. RRECOMMENDS, so this is enough --
+# the firmware-locked DSP runtime it sits beside is a packagegroup RDEPENDS and stays.
+BAD_RECOMMENDATIONS:append = " qairt-sdk-hexagon-v75"
