@@ -55,6 +55,24 @@ IMAGE_INSTALL:append = " \
 # - GPU device nodes (/dev/nvhost-*) for tegrastats and GPU monitoring
 # - CUDA compilation toolchain (headers, binaries, nvvm) for Triton/JIT
 # - Additional libraries (libnuma) and monitoring paths
+#
+# Scope warning: despite living under conf/distro/include/, this is NOT a distro
+# config. conf/distro/wendyos.conf:214-216 requires only the qemu, RPi and x86
+# *-distro.inc files; there is no tegra-distro.inc. This file is required from
+# exactly one place -- recipes-core/images/wendyos-image.bb -- during the IMAGE
+# RECIPE's parse. A variable set here reaches wendyos-image.bb and nothing else: not
+# kernel bbappends, not packagegroups. Anything a recipe gates on will silently
+# build nothing.
+#
+# The two defaults below are both inert in every shipped configuration, because
+# config scope always gets there first: local/usb-gadget.inc:3 assigns
+# WENDYOS_USB_GADGET hard, and local/tegra-t234.inc:72 / tegra-t264.inc:64 assign
+# WENDYOS_DEEPSTREAM hard, all at local.conf time. They are kept as the fallback
+# for a Tegra local.conf that requires neither.
+#
+# Per-family Jetson defaults that a RECIPE gates on belong at config scope in
+# conf/template/include/local/tegra-t234.inc and tegra-t264.inc. See WENDYOS_CAN
+# there.
 WENDYOS_USB_GADGET ?= "1"
 WENDYOS_DEEPSTREAM ?= "1"
 # The DeepStream package is BSP-specific:
