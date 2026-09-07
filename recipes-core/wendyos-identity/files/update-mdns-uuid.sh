@@ -18,7 +18,7 @@ AVAHI_RELOAD_CMD="${AVAHI_RELOAD_CMD:-systemctl}"
 IDENTITY_WAIT_SECS="${IDENTITY_WAIT_SECS:-10}"
 
 # Shared identity helpers, one source of truth with generate-hostname.sh.
-IDENTITY_LIB="${IDENTITY_LIB:-/usr/share/wendyos/identity-lib.sh}"
+IDENTITY_LIB="${IDENTITY_LIB:-/usr/share/wendyos/wendyos-identity-lib.sh}"
 # shellcheck source=/dev/null
 . "$IDENTITY_LIB" || { echo "Cannot source identity helpers: $IDENTITY_LIB" >&2; exit 1; }
 
