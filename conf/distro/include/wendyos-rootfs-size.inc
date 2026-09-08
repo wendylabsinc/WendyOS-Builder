@@ -39,6 +39,15 @@ WENDYOS_ROOTFS_SIZE_KB:rpi = "8388608"
 # from x86-image.inc.
 WENDYOS_ROOTFS_SIZE_KB:x86-wendyos = "12582912"
 
+# Dragonwing A/B: 12 GiB/slot, same as the base default. Stated explicitly because
+# the slot size is duplicated in meta-qcom-extensions/recipes-bsp/partition/files/
+# partitions.conf (ptool needs a literal, it cannot read bitbake vars), and that
+# recipe's do_compile asserts the two agree — so a change here fails the build
+# loudly instead of producing an image that does not fit its slot. The measured
+# rootfs is ~1.1 GiB, so 12 GiB is generous; two slots plus efi+config leave
+# ~89.6 GiB of the 114.4 GiB UFS LUN 0 for /data.
+WENDYOS_ROOTFS_SIZE_KB:qcom-wendyos = "12582912"
+
 # Expose it to wic so the RPi A/B slots derive their --fixed-size straight from
 # this one constant (rpi-wendy-ab*.wks: `--fixed-size ${WENDYOS_ROOTFS_SIZE_KB}K`
 # — wic reads a K suffix as KiB, so slot == the pinned image size exactly, with

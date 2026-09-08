@@ -24,7 +24,7 @@
 # Output: KEY=VALUE lines on stdout, safe to `eval` in a step or append to
 # $GITHUB_ENV. Diagnostics and errors go to stderr.
 #   IMAGE_KIND         generated-nvme-img | generated-sd-img | tegraflash-bundle |
-#                      sdimg-gz-with-wic-fallback | wic-disk
+#                      qcomflash-bundle | sdimg-gz-with-wic-fallback | wic-disk
 #   IMAGE_FILE         primary artifact path. For generated-*-img this is the
 #                      MACHINE-scoped target path the "Generate flashable image"
 #                      step writes (it does NOT exist at Yocto deploy time, so it
@@ -103,6 +103,18 @@ if [[ "$RECOVERY_EXPECTED" == "true" || "$IMAGE_KIND" == "tegraflash-bundle" ]];
     -print -quit 2>/dev/null || true)
 fi
 
+# Prefer Yocto's stable symlink; fall back to the timestamped name.
+QCOMFLASH_BUNDLE=""
+if [[ "$IMAGE_KIND" == "qcomflash-bundle" ]]; then
+  stable="$DEPLOY_DIR/wendyos-image-${MACHINE}.rootfs.qcomflash.tar.gz"
+  if [[ -e "$stable" ]]; then
+    QCOMFLASH_BUNDLE="$stable"
+  else
+    QCOMFLASH_BUNDLE=$(find "$DEPLOY_DIR" -maxdepth 1 \
+      -name "wendyos-image-${MACHINE}*.qcomflash.tar.gz" -print -quit 2>/dev/null || true)
+  fi
+fi
+
 RPI_NEEDS_GZIP=false
 case "$IMAGE_KIND" in
   tegraflash-bundle)
@@ -112,6 +124,14 @@ case "$IMAGE_KIND" in
       fail "no tegraflash bundle for $KEY ($MACHINE): expected wendyos-image-${MACHINE}.tegraflash-tar or .tegraflash-tar.zst in $DEPLOY_DIR (map entry image_kind=tegraflash-bundle)"
     fi
     IMAGE_FILE="$TEGRAFLASH_BUNDLE"
+    ;;
+  qcomflash-bundle)
+    # EDL flashing produces no disk image: the qcomflash tarball IS the artifact,
+    # carrying the partition images and the rawprogram/patch XML that drives qdl.
+    if [[ -z "$QCOMFLASH_BUNDLE" || ! -e "$QCOMFLASH_BUNDLE" ]]; then
+      fail "no qcomflash bundle for $KEY ($MACHINE): expected wendyos-image-${MACHINE}.rootfs.qcomflash.tar.gz in $DEPLOY_DIR (map entry image_kind=qcomflash-bundle)"
+    fi
+    IMAGE_FILE="$QCOMFLASH_BUNDLE"
     ;;
   generated-nvme-img)
     # The offline NVMe image is produced by build.yml's "Generate flashable

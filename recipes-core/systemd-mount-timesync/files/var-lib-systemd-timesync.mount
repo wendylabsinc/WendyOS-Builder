@@ -1,0 +1,29 @@
+[Unit]
+Description=Bind mount /var/lib/systemd/timesync (last-known-good clock) from data partition
+Documentation=man:systemd.mount(5)
+
+# This board has no usable RTC: the PMIC RTC is read-only (its DT node has no
+# allow-set-time, so RTC_SET_TIME returns ENODEV) and loses everything on power
+# loss, so the only thing keeping time sane across a boot is the timestamp
+# systemd-timesyncd saves here. On the A/B rootfs that file dies at every OTA
+# swap; on /data it survives both reboots and slot switches.
+
+RequiresMountsFor=/data
+After=data.mount
+
+# systemd-timesyncd is DefaultDependencies=no, so it does NOT wait for
+# local-fs.target -- without this edge it can start first, write the clock file
+# to the rootfs, and then have the bind hide it.
+Before=systemd-timesyncd.service
+DefaultDependencies=no
+
+[Mount]
+What=/data/systemd-timesync
+Where=/var/lib/systemd/timesync
+Type=none
+# x-systemd.mkdir creates both ends; timesyncd's StateDirectory=systemd/timesync
+# then chowns through the bind to the systemd-timesync user.
+Options=bind,nosuid,nodev,x-systemd.mkdir
+
+[Install]
+WantedBy=local-fs.target

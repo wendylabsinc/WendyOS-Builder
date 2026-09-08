@@ -93,6 +93,43 @@ test_thor() {
   rm -rf "$d"
 }
 
+# Dragonwing: UFS is flashed over EDL, so the qcomflash tarball is the artifact.
+test_dragonwing_qcomflash() {
+  local d M; d=$(newdir); M=iq-8275-evk-wendyos
+  : >"$d/wendyos-image-$M.rootfs.qcomflash.tar.gz"
+  local out; out=$(run_resolver dragonwing-iq-8275 ufs "$M" "$d"); local rc=$?
+  assert_eq "dragonwing: exits 0" 0 "$rc"
+  assert_eq "dragonwing: kind"         qcomflash-bundle "$(field IMAGE_KIND <<<"$out")"
+  assert_eq "dragonwing: image"        "$d/wendyos-image-$M.rootfs.qcomflash.tar.gz" "$(field IMAGE_FILE <<<"$out")"
+  assert_eq "dragonwing: bmap"         false "$(field BMAP_REQUIRED <<<"$out")"
+  assert_eq "dragonwing: flashpack"    false "$(field FLASHPACK_REQUIRED <<<"$out")"
+  assert_eq "dragonwing: recovery"     false "$(field RECOVERY_EXPECTED <<<"$out")"
+  assert_eq "dragonwing: pass_storage" false "$(field PASS_STORAGE <<<"$out")"
+  rm -rf "$d"
+}
+
+# A build that deployed no stable symlink still resolves via the versioned name.
+test_dragonwing_versioned_fallback() {
+  local d M; d=$(newdir); M=iq-8275-evk-wendyos
+  : >"$d/wendyos-image-$M.rootfs-20260907185415.qcomflash.tar.gz"
+  local out; out=$(run_resolver dragonwing-iq-8275 ufs "$M" "$d"); local rc=$?
+  assert_eq "dragonwing versioned: exits 0" 0 "$rc"
+  assert_eq "dragonwing versioned: image" \
+    "$d/wendyos-image-$M.rootfs-20260907185415.qcomflash.tar.gz" "$(field IMAGE_FILE <<<"$out")"
+  rm -rf "$d"
+}
+
+# A missing bundle must be fatal, not a silent empty upload.
+test_missing_qcomflash_fatal() {
+  local d M; d=$(newdir); M=iq-8275-evk-wendyos
+  local out; out=$(run_resolver dragonwing-iq-8275 ufs "$M" "$d" 2>&1); local rc=$?
+  if [[ "$rc" -ne 0 ]]; then ok "missing qcomflash: non-zero exit"
+  else bad "missing qcomflash: expected non-zero exit"; fi
+  if grep -q "no qcomflash bundle" <<<"$out"; then ok "missing qcomflash: names the artifact"
+  else bad "missing qcomflash: error did not name the artifact"; fi
+  rm -rf "$d"
+}
+
 # tegraflash .zst variant resolves too (JP7 / r38.4.x compressed bundle).
 test_tegraflash_zst() {
   local d M; d=$(newdir); M=jetson-orin-nano-devkit-nvme-wendyos
@@ -262,8 +299,9 @@ test_generated_nvme_bundle_absent() {
 }
 
 # ---------------------------------------------------------------------------
-# (c) Every device+storage combo in build.yml's matrix has a map entry.
-# Hardcoded from build.yml's ALL_MATRIX — keep in sync if the matrix changes.
+# (c) Every device+storage combo in build.yml's matrix has a map entry, and every
+# map entry belongs to one. Hardcoded from build.yml's ALL_MATRIX — keep in sync
+# if the matrix changes.
 # ---------------------------------------------------------------------------
 test_matrix_coverage() {
   local combos=(
@@ -279,6 +317,7 @@ test_matrix_coverage() {
     generic-x86-64/disk
     vm-arm64/disk
     vm-x86-64/disk
+    dragonwing-iq-8275/ufs
   )
   local c
   for c in "${combos[@]}"; do
@@ -302,6 +341,9 @@ test_jetson_nvme
 test_jetson_emmc
 test_thor
 test_tegraflash_zst
+test_dragonwing_qcomflash
+test_dragonwing_versioned_fallback
+test_missing_qcomflash_fatal
 test_jetson_nano_sd
 test_rpi_sdimg
 test_rpi_wic

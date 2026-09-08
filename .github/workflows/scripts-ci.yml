@@ -17,6 +17,10 @@ on:
       - 'recipes-kernel/wendyos-kernel-devkit/files/*.sh'
       - 'recipes-core/wendyos-identity/files/*.sh'
       - 'recipes-connectivity/avahi/files/*.sh'
+      - 'meta-qcom-extensions/files/grub/*'
+      - 'meta-qcom-extensions/recipes-bsp/grub/*'
+      - 'meta-qcom-extensions/recipes-bsp/partition/files/*'
+      - 'meta-qcom-extensions/recipes-core/wendyos-config-setup/files/*'
       - '.github/device-artifacts.json'
       - '.github/workflows/scripts-ci.yml'
   push:
@@ -34,6 +38,10 @@ on:
       - 'recipes-kernel/wendyos-kernel-devkit/files/*.sh'
       - 'recipes-core/wendyos-identity/files/*.sh'
       - 'recipes-connectivity/avahi/files/*.sh'
+      - 'meta-qcom-extensions/files/grub/*'
+      - 'meta-qcom-extensions/recipes-bsp/grub/*'
+      - 'meta-qcom-extensions/recipes-bsp/partition/files/*'
+      - 'meta-qcom-extensions/recipes-core/wendyos-config-setup/files/*'
       - '.github/device-artifacts.json'
       - '.github/workflows/scripts-ci.yml'
 
@@ -57,7 +65,9 @@ jobs:
           # a failed boot or an unusable devkit rather than a build error.
           shellcheck scripts/build-driver.sh scripts/pack-sysext.sh \
                      recipes-core/wendyos-sysext-apply/files/wendyos-sysext-apply.sh \
-                     recipes-kernel/wendyos-kernel-devkit/files/setup.sh
+                     recipes-kernel/wendyos-kernel-devkit/files/setup.sh \
+                     meta-qcom-extensions/files/grub/grubAB-qcom.test.sh \
+                     meta-qcom-extensions/recipes-core/wendyos-config-setup/files/wendyos-config-init.sh
           shellcheck recipes-core/wendyos-identity/files/wendyos-identity-lib.sh \
                      recipes-core/wendyos-identity/files/update-mdns-uuid.sh \
                      recipes-core/wendyos-identity/files/update-mdns-uuid.test.sh \
@@ -84,6 +94,11 @@ jobs:
       - name: Run mDNS identity publisher tests
         run: bash recipes-core/wendyos-identity/files/update-mdns-uuid.test.sh
 
+      # This config runs before any userspace exists, so a mistake in it surfaces
+      # only as a device that will not boot. Asserts its couplings to
+      # partitions.conf, the grub-efi bbappend and the grubenv connector.
+      - name: Run Dragonwing GRUB A/B config checks
+        run: bash meta-qcom-extensions/files/grub/grubAB-qcom.test.sh
 
       - name: Run T234 flashpack manifest tests
         run: python3 -m unittest scripts/t234_flashpack_manifest_test.py
