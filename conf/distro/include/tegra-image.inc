@@ -57,7 +57,7 @@ IMAGE_INSTALL:append = " \
 # - Additional libraries (libnuma) and monitoring paths
 #
 # Scope warning: despite living under conf/distro/include/, this is NOT a distro
-# config. conf/distro/wendyos.conf:214-216 requires only the qemu, RPi and x86
+# config. conf/distro/wendyos.conf requires only the qemu, RPi, x86 and VM
 # *-distro.inc files; there is no tegra-distro.inc. This file is required from
 # exactly one place -- recipes-core/images/wendyos-image.bb -- during the IMAGE
 # RECIPE's parse. A variable set here reaches wendyos-image.bb and nothing else: not
