@@ -5,10 +5,10 @@
 
 # Careful with "?=" in this file. It is immediate and order-dependent (BitBake's
 # DataNode.eval "ques" branch re-reads the current value and keeps it if already
-# set), and BitBake parses local.conf -> machine conf -> distro conf. This file is
-# required from wendyos.conf line 215, so a "?=" here only ever fires for a variable
-# that NOTHING set at local.conf scope, at machine scope, or earlier in
-# wendyos.conf. For every in-tree RPi machine that is true of WENDYOS_CAN alone.
+# set), and BitBake parses local.conf -> machine conf -> distro conf. wendyos.conf
+# declares its base defaults with "??=", a weak default a "?=" here overrides, so
+# a line below fires unless local.conf or a machine conf already set that variable
+# -- and those still win over anything here.
 #
 # Removed 2026-09-07 because they were dead: WENDYOS_UPDATE_BOOTLOADER and
 # WENDYOS_EFI_DEBUG (already set at conf/machine/include/
