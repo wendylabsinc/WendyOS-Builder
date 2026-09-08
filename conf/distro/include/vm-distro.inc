@@ -1,16 +1,27 @@
 # WendyOS VM distro configuration.
 # Required from wendyos.conf when MACHINEOVERRIDES contains "vm-wendyos".
 
-# No firmware-update, USB-gadget or GPU story in a VM.
-# These four are read by nothing on the VM path, but all four are in
-# wendyos-image.bb's BUILDCFG_VARS, so setting them keeps the build banner
-# truthful (the distro otherwise defaults WENDYOS_UPDATE_BOOTLOADER to "1", which
-# would be a lie for a VM). WENDYOS_EFI_DEBUG is deliberately NOT set: it is
-# Tegra-only and is not even in BUILDCFG_VARS, so a value here would be dead text.
+# No firmware-update, USB-gadget, GPU or CAN story in a VM.
+# These are read by nothing on the VM path, but they are in BUILDCFG_VARS, so
+# setting them keeps the build banner truthful. WENDYOS_EFI_DEBUG is deliberately
+# NOT set: it is Tegra-only and not in BUILDCFG_VARS, so a value here would be
+# dead text.
+#
+# BUILDCFG_VARS lives in conf/distro/wendyos.conf, not wendyos-image.bb. It is
+# read from the config datastore at BuildStarted, so a recipe-scope append never
+# reached the banner -- for a long time this list printed nothing at all.
+#
+# These "?=" lines do fire. wendyos.conf declares its base defaults with "??=", a
+# weak default that a later "?=" overrides, so the per-family value set here wins
+# while a machine conf or local.conf still wins over both. That was not always
+# true: while those defaults were "?=" they landed first and made
+# WENDYOS_UPDATE_BOOTLOADER below dead, so the VM resolved to "1" -- the exact
+# thing the comment above says it is here to prevent.
 WENDYOS_UPDATE_BOOTLOADER ?= "0"
 WENDYOS_USB_GADGET ?= "0"
 WENDYOS_DEEPSTREAM ?= "0"
 WENDYOS_NVIDIA_DGPU ?= "0"
+WENDYOS_CAN ?= "0"
 
 # The VM is discovered over the host network, not a direct USB gadget link, so
 # do not restrict Avahi to usb0.
