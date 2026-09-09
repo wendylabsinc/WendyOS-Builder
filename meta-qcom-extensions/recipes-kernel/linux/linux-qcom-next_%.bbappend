@@ -1,10 +1,11 @@
 # WendyOS kernel deltas for the Dragonwing boards.
 #
-# USB configuration and board-scoped networking fixes. Other requirements are
-# already in meta-qcom's defconfig: the container prerequisites (namespaces, cgroups,
-# overlayfs, veth, bridge, netfilter masquerade, seccomp, BPF) are all present,
-# and root-mount critical drivers (SCSI_UFSHCD, SCSI_UFS_QCOM, BLK_DEV_SD,
-# EXT4_FS, EFI_PARTITION) are built in, so no fragment is needed for those.
+# The USB gadget stack, and SocketCAN when it is turned on. Everything else
+# WendyOS needs is already in meta-qcom's defconfig: the container prerequisites
+# (namespaces, cgroups, overlayfs, veth, bridge, netfilter masquerade, seccomp,
+# BPF) are all present, and root-mount critical drivers (SCSI_UFSHCD,
+# SCSI_UFS_QCOM, BLK_DEV_SD, EXT4_FS, EFI_PARTITION) are built in, so no fragment
+# is needed for those.
 FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 
 require ${@'recipes-kernel/linux/game-controller.inc' if d.getVar('WENDYOS_GAME_CONTROLLER') == '1' else ''}
@@ -68,3 +69,8 @@ wendyos_check_sensor_loopback() {
 # The newer callback releases its reference after the unlock label.
 BLUETOOTH_LE_PENDING_PATCH = "0001-bluetooth-clean-up-rejected-pending-le-connection-qcom.patch"
 require recipes-kernel/linux/bluetooth-le-pending.inc
+
+# SocketCAN: core, protocols and the USB/SPI adapter drivers. Board-neutral, and
+# shared with the Tegra, RPi and x86 kernel bbappends. Inert while WENDYOS_CAN is
+# "0", which is what this board sets today -- see the machine conf for why.
+require ${@'recipes-kernel/linux/can.inc' if d.getVar('WENDYOS_CAN') == '1' else ''}
