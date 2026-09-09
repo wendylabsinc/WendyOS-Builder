@@ -74,20 +74,72 @@ GADGET_DIR="/sys/kernel/config/usb_gadget/${GADGET_NAME}"
 
 ### Detect USB controller ###
 
+# The UDC has to exist before the controller can be identified, so wait for it
+# here rather than just before binding. /sys/class/udc is populated when the
+# controller driver probes, which does not depend on the gadget framework.
+UDC=""
+for _ in $(seq 60); do
+    UDC=$(ls /sys/class/udc 2>/dev/null | head -n1) || true
+    if [ -n "$UDC" ]; then
+        break
+    fi
+
+    sleep 1
+done
+
+[ -n "$UDC" ] || {
+    log_error "UDC timeout after 60 s"
+    exit 1
+}
+
+log_info "Found UDC: $UDC"
+
+# Identify the controller from the driver actually bound to the UDC.
+#
+# Do NOT infer it from the UDC's name, and do NOT use lsmod. The UDC is named
+# after its device-tree node (1000480000.usb, a600000.usb, 3550000.xudc) and
+# never after the driver -- udc-core does
+#     dev_set_name(&udc->dev, "%s", kobject_name(&gadget->dev.parent->kobj))
+# -- so a "*dwc3*" style name match can never succeed. And a controller built
+# into the kernel (=y) never shows up in lsmod.
+#
+# Both of the old tests therefore failed on every board except Jetson, where
+# tegra_xudc happens to be a module. On RPi that went unnoticed because dwc2 is
+# a USB 2.0 controller and the fallback default is also 0x0200 -- the wrong code
+# path produced the right answer. On a dwc3 board the same silent failure caps a
+# SuperSpeed gadget at USB 2.0.
+#
+# Driver names are the platform_driver .name strings: "dwc2" (dwc2/platform.c),
+# "dwc3" (dwc3/core.c), "tegra-xudc" (gadget/udc/tegra-xudc.c). The globs also
+# cover a glue driver binding the parent (e.g. dwc3-qcom).
 USB_VERSION="0x0200"
 USB_CONTROLLER="unknown"
-if lsmod | grep -q "^tegra_xudc " || find /sys/class/udc -name "*tegra*" -type l 2>/dev/null | grep -q tegra; then
-    USB_VERSION="0x0320"; USB_CONTROLLER="tegra-xudc"
-    log_info "Detected tegra-xudc — USB 3.2 mode"
-elif lsmod | grep -q "^dwc3 " || find /sys/class/udc -name "*dwc3*" -type l 2>/dev/null | grep -q dwc3; then
-    USB_VERSION="0x0300"; USB_CONTROLLER="dwc3"
-    log_info "Detected dwc3 — USB 3.0 mode"
-elif lsmod | grep -q "^dwc2 " || find /sys/class/udc -name "*dwc2*" -type l 2>/dev/null | grep -q dwc2; then
-    USB_VERSION="0x0200"; USB_CONTROLLER="dwc2"
-    log_info "Detected dwc2 — USB 2.0 mode"
-else
-    log_info "No specific USB controller detected — defaulting to USB 2.0"
+USB_DRIVER=""
+if [ -e "/sys/class/udc/${UDC}/device/driver" ]; then
+    USB_DRIVER=$(basename "$(readlink -f "/sys/class/udc/${UDC}/device/driver")")
 fi
+
+case "$USB_DRIVER" in
+    *xudc*)
+        USB_VERSION="0x0320"
+        USB_CONTROLLER="tegra-xudc"
+        log_info "Detected tegra-xudc — USB 3.2 mode"
+        ;;
+    dwc3*)
+        USB_VERSION="0x0300"
+        USB_CONTROLLER="dwc3"
+        log_info "Detected dwc3 — USB 3.0 mode"
+        ;;
+    dwc2*)
+        USB_VERSION="0x0200"
+        USB_CONTROLLER="dwc2"
+        log_info "Detected dwc2 — USB 2.0 mode"
+        ;;
+    *)
+        log_info "Unrecognised UDC driver '${USB_DRIVER:-none}' on ${UDC} — defaulting to USB 2.0"
+        ;;
+esac
+
 log_info "USB controller: $USB_CONTROLLER, version: $USB_VERSION"
 
 ### Configure USB Gadget ###
@@ -96,13 +148,17 @@ log_info "USB controller: $USB_CONTROLLER, version: $USB_VERSION"
 if [ -d "$GADGET_DIR" ]; then
     echo "" > "$GADGET_DIR/UDC" 2>/dev/null || true
     sleep 0.5  # allow UDC driver to complete async unbind before dismantling
+
     # Unlink function symlinks from configs before removing anything
     find "$GADGET_DIR/configs" -mindepth 2 -maxdepth 2 -type l -exec rm {} \; 2>/dev/null || true
+
     # Remove function directories
     find "$GADGET_DIR/functions" -mindepth 1 -maxdepth 1 -type d -exec rmdir {} \; 2>/dev/null || true
+
     # Remove config string dirs, then config dirs
     find "$GADGET_DIR/configs" -mindepth 2 -maxdepth 2 -type d -exec rmdir {} \; 2>/dev/null || true
     find "$GADGET_DIR/configs" -mindepth 1 -maxdepth 1 -type d -exec rmdir {} \; 2>/dev/null || true
+
     # Remove gadget string dirs, then the gadget itself
     find "$GADGET_DIR/strings" -mindepth 1 -maxdepth 1 -type d -exec rmdir {} \; 2>/dev/null || true
     rmdir "$GADGET_DIR" 2>/dev/null || true
@@ -187,17 +243,7 @@ mkdir -p functions/acm.usb0
 ln -sf functions/acm.usb0 configs/c.1/
 log_info "ACM serial function configured (/dev/ttyGS0)"
 
-# Wait for a UDC to appear (up to 60 s)
-UDC=""
-for i in $(seq 60); do
-    UDC=$(ls /sys/class/udc 2>/dev/null | head -n1) || true
-    if [ -n "$UDC" ]; then
-        break
-    fi
-    sleep 1
-done
-[ -n "$UDC" ] || { log_error "UDC timeout after 60 s"; exit 1; }
-log_info "Found UDC: $UDC"
+# UDC was resolved (and waited for) during controller detection above.
 
 # Clear any previous binding before activating
 if [ -f UDC ] && [ -s UDC ]; then
