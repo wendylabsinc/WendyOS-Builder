@@ -21,6 +21,13 @@ on:
       - 'meta-qcom-extensions/recipes-bsp/grub/*'
       - 'meta-qcom-extensions/recipes-bsp/partition/files/*'
       - 'meta-qcom-extensions/recipes-core/wendyos-config-setup/files/*'
+      - 'meta-qcom-extensions/recipes-core/packagegroups/*'
+      - 'meta-qcom-extensions/recipes-bsp/hexagon-dsp-binaries/*'
+      - 'conf/machine/iq-8275-evk-wendyos.conf'
+      - 'conf/distro/wendyos.conf'
+      - 'conf/distro/include/qcom-distro.inc'
+      - 'scripts/upstream-repos.env'
+      - 'scripts/qcom-npu.test.sh'
       - '.github/device-artifacts.json'
       - '.github/workflows/scripts-ci.yml'
   push:
@@ -42,6 +49,13 @@ on:
       - 'meta-qcom-extensions/recipes-bsp/grub/*'
       - 'meta-qcom-extensions/recipes-bsp/partition/files/*'
       - 'meta-qcom-extensions/recipes-core/wendyos-config-setup/files/*'
+      - 'meta-qcom-extensions/recipes-core/packagegroups/*'
+      - 'meta-qcom-extensions/recipes-bsp/hexagon-dsp-binaries/*'
+      - 'conf/machine/iq-8275-evk-wendyos.conf'
+      - 'conf/distro/wendyos.conf'
+      - 'conf/distro/include/qcom-distro.inc'
+      - 'scripts/upstream-repos.env'
+      - 'scripts/qcom-npu.test.sh'
       - '.github/device-artifacts.json'
       - '.github/workflows/scripts-ci.yml'
 
@@ -67,6 +81,7 @@ jobs:
                      recipes-core/wendyos-sysext-apply/files/wendyos-sysext-apply.sh \
                      recipes-kernel/wendyos-kernel-devkit/files/setup.sh \
                      meta-qcom-extensions/files/grub/grubAB-qcom.test.sh \
+                     scripts/qcom-npu.test.sh \
                      meta-qcom-extensions/recipes-core/wendyos-config-setup/files/wendyos-config-init.sh
           shellcheck recipes-core/wendyos-identity/files/wendyos-identity-lib.sh \
                      recipes-core/wendyos-identity/files/update-mdns-uuid.sh \
@@ -99,6 +114,9 @@ jobs:
       # partitions.conf, the grub-efi bbappend and the grubenv connector.
       - name: Run Dragonwing GRUB A/B config checks
         run: bash meta-qcom-extensions/files/grub/grubAB-qcom.test.sh
+
+      - name: Run Dragonwing NPU stack checks
+        run: bash scripts/qcom-npu.test.sh
 
       - name: Run T234 flashpack manifest tests
         run: python3 -m unittest scripts/t234_flashpack_manifest_test.py
