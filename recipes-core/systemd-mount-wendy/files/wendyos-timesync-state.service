@@ -1,0 +1,37 @@
+[Unit]
+Description=Prepare persistent systemd-timesyncd state directory on the data partition
+Documentation=man:systemd.mount(5)
+
+# Without this the mount still succeeds — x-systemd.mkdir creates the bind source
+# as well as the mount point — but creates it root:root, and timesyncd cannot then
+# write the clock file. It fails silently: the mount reads as active either way.
+#
+# Ownership matches what StateDirectory=systemd/timesync would create. timesyncd
+# chowns the directory itself on start, so the recursive chown is the part that
+# matters: it reaches the clock file inside. Yocto allocates system UIDs
+# dynamically, so systemd-timesync has a different numeric UID in each slot's
+# image, and after an A/B switch the file carries the other slot's UID; timesyncd
+# cannot write it, silently declines to restore the clock, and the device boots at
+# the image epoch exactly as if this mount did not exist. (/data/bluetooth
+# sidesteps all of this by being root-owned, UID 0 being the one that cannot
+# drift.)
+#
+# Not prefixed with '-': a failed chown means the restore silently does not
+# happen, and a failed unit is the only signal.
+ConditionPathExists=/usr/lib/systemd/systemd-timesyncd
+RequiresMountsFor=/data
+After=data.mount
+# systemd-timesync is created by sysusers; without this the -o below can lose the
+# race and fail.
+After=systemd-sysusers.service
+Before=var-lib-systemd-timesync.mount
+DefaultDependencies=no
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/install -d -m 0755 -o systemd-timesync -g systemd-timesync /data/systemd-timesync
+ExecStart=/usr/bin/chown -R systemd-timesync:systemd-timesync /data/systemd-timesync
+
+[Install]
+WantedBy=local-fs.target
