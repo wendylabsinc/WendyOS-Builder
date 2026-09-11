@@ -28,13 +28,8 @@ inherit packagegroup
 #                      the driver does not enable /data encryption --
 #                      WENDYOS_DATA_ENCRYPTED stays 0 -- it just stops the
 #                      hardware being invisible.
-#
-# qcom-refgen-regulator is deliberately absent, though the hardware wants it: it
-# lets 8906000.phy probe, which brings up a400000.usb as a SECOND UDC, and
-# gadget-setup.sh picks its controller with `ls /sys/class/udc | head -n1`. That
-# selects a400000.usb, the gadget binds to a port with no cable, and usb0 goes down
-# -- taking away the board's only host link. Install it once that script selects
-# its UDC explicitly rather than by sort order.
+#  uvcvideo            USB webcams on the host port. The rest of the V4L2 stack
+#                      already ships for the on-SoC camera path.
 RDEPENDS:${PN} = " \
     kernel-module-pwrseq-pcie-m2 \
     kernel-module-at24 \
@@ -47,6 +42,7 @@ RDEPENDS:${PN} = " \
     kernel-module-pinctrl-sm8450-lpass-lpi \
     kernel-module-tpm-tis-core \
     kernel-module-tpm-tis-spi \
+    kernel-module-uvcvideo \
     "
 
 # The PMIC RTC is read-only and volatile, so timesyncd's saved timestamp on /data
