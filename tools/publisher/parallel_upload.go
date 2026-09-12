@@ -45,6 +45,36 @@ const (
 // crc32cTable is the Castagnoli table GCS uses for its CRC32C object checksums.
 var crc32cTable = crc32.MakeTable(crc32.Castagnoli)
 
+// crc32cFile returns the CRC32C of a file's contents — the same checksum GCS
+// reports for every object it stores, whoever uploaded it.
+func crc32cFile(path string) (uint32, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return 0, err
+	}
+	defer f.Close()
+	h := crc32.New(crc32cTable)
+	if _, err := io.Copy(h, f); err != nil {
+		return 0, err
+	}
+	return h.Sum32(), nil
+}
+
+// objectIsCurrent reports whether the object already in GCS holds exactly the
+// bytes of localPath. Size is checked first so a differing file never pays for
+// a full read; equal size alone proves nothing, so the CRC32C decides.
+func objectIsCurrent(attrs *storage.ObjectAttrs, localPath string, localSize int64) bool {
+	if attrs == nil || attrs.Size != localSize {
+		return false
+	}
+	localCRC, err := crc32cFile(localPath)
+	if err != nil {
+		// Unable to prove the bytes match, so upload rather than assume.
+		return false
+	}
+	return localCRC == attrs.CRC32C
+}
+
 // Upload limits, initialised from flags in main() before any upload starts.
 var (
 	// parallelUploadThreshold is the size at or below which the single-stream

@@ -22,6 +22,33 @@ set -euo pipefail
 
 log() { printf '[wendyos-data-init] %s\n' "$*"; }
 
+# Trailing slack (~4 MiB) tolerated as "fills the disk", mirroring data-enroll.sh.
+END_SLACK=8192
+
+# Never fails: a missing attribute yields the empty string, so the callers'
+# assignments cannot trip set -e.
+sysblk() {
+    cat "/sys/class/block/$1/$2" 2>/dev/null || true
+}
+
+# True when the kernel sees the /data PARTITION reaching the disk end within
+# slack. Same predicate as data_fills_disk() in data-enroll.sh and
+# grow-data-part.sh; reads the globals resolved below.
+data_fills_disk() {
+    local disk_base
+    local disk_sz
+    local part_start
+    local part_sz
+    disk_base="$(basename "${PARENT_SYS}")"
+    disk_sz="$(sysblk "${disk_base}" size)"
+    part_start="$(sysblk "${PART_BASENAME}" start)"
+    part_sz="$(sysblk "${PART_BASENAME}" size)"
+    disk_sz="${disk_sz:-0}"
+    part_start="${part_start:-0}"
+    part_sz="${part_sz:-0}"
+    [ "${disk_sz}" -gt 0 ] && [ "$(( part_start + part_sz ))" -ge "$(( disk_sz - END_SLACK ))" ]
+}
+
 BYLABEL="/dev/disk/by-partlabel/data"
 
 # Wait briefly for udev to create the by-partlabel link.
@@ -37,6 +64,38 @@ fi
 
 DEV="$(readlink -f "${BYLABEL}")"
 log "data partition: ${DEV}"
+
+# Resolve parent disk + partition number via sysfs (portable across
+# nvme0n1pN / mmcblk0pN). Resolved here, before the guards below, because
+# the LUKS guard needs data_fills_disk.
+PART_BASENAME="$(basename "${DEV}")"
+PARTNUM="$(cat "/sys/class/block/${PART_BASENAME}/partition")"
+PARENT_SYS="$(readlink -f "/sys/class/block/${PART_BASENAME}/..")"
+DISK="/dev/$(basename "${PARENT_SYS}")"
+log "disk=${DISK} partnum=${PARTNUM}"
+
+# Never touch an encrypted /data. blkid reports "crypto_LUKS" (not "ext4")
+# for a volume created by a TPM-enabled build, so without this guard we fall
+# through and mkfs.ext4 -F over the LUKS container. The dangerous case is
+# automatic: an A/B rollback from a TPM-on slot to an older TPM-off slot,
+# where nobody chooses the wipe. Mirror of the migration guard in
+# data-enroll.sh -- refuse, exit 0, leave the partition untouched.
+#
+# But "is LUKS" alone is not enough. A reflash recreates this partition at its
+# small stock size WITHOUT zeroing the disk, and its start offset is unchanged,
+# so the previous installation's LUKS header is still physically there. An
+# enrolled /data always fills the disk (data-enroll.sh grows before formatting
+# and fails hard otherwise), so: LUKS + fills-disk = live data, refuse;
+# LUKS + small partition = stale header, reinitialise.
+if [ "$(blkid -o value -s TYPE "${DEV}" 2>/dev/null || true)" = "crypto_LUKS" ]; then
+    if data_fills_disk; then
+        log "REFUSING to initialise ${DEV}: it is an ENCRYPTED (LUKS) /data from a TPM-enabled installation -- reformatting it would destroy all user data."
+        log "Leaving the partition untouched; /data will NOT be mounted on this boot. Boot a TPM-enabled image (or re-flash) to use this device."
+        exit 0
+    fi
+    log "LUKS header present but the partition does not fill the disk: stale header from a previous install (a reflash recreated the partition without zeroing it); reinitialising"
+    # fall through to grow + mkfs
+fi
 
 # Already initialised? (slot-safe idempotency — key on the filesystem,
 # not a per-rootfs stamp). But "blkid reports ext4" is not sufficient: a
@@ -77,14 +136,6 @@ if [ "$(blkid -o value -s TYPE "${DEV}" 2>/dev/null || true)" = "ext4" ]; then
     rm -f "${de2fs_err}"
     # fall through to grow + mkfs
 fi
-
-# Resolve parent disk + partition number via sysfs (portable across
-# nvme0n1pN / mmcblk0pN).
-PART_BASENAME="$(basename "${DEV}")"
-PARTNUM="$(cat "/sys/class/block/${PART_BASENAME}/partition")"
-PARENT_SYS="$(readlink -f "/sys/class/block/${PART_BASENAME}/..")"
-DISK="/dev/$(basename "${PARENT_SYS}")"
-log "disk=${DISK} partnum=${PARTNUM}"
 
 # The image is flashed onto a disk much larger than the flash layout, so
 # the GPT backup header sits mid-disk. Move it to the real end so the

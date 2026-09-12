@@ -18,10 +18,11 @@ log() {
     logger -t wendyos-device-name "$*" || true
 }
 
-# Validate device name (lowercase alphanumeric and hyphens only)
+# A device name: letter-led, 3-55 chars, no trailing hyphen, so "wendyos-<name>"
+# stays a valid DNS label. Mirrors validDeviceName in the agent (apply.go).
 is_valid_device_name() {
     local name="$1"
-    [[ "$name" =~ ^[a-z][a-z0-9-]{2,63}$ ]]
+    [[ "$name" =~ ^[a-z][a-z0-9-]{1,53}[a-z0-9]$ ]]
 }
 
 # Generate random device name from word lists

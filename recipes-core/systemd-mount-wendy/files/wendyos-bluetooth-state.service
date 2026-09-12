@@ -1,0 +1,23 @@
+[Unit]
+Description=Prepare persistent Bluetooth state directory on the data partition
+Documentation=man:systemd.mount(5)
+
+# The bind mount needs /data/bluetooth to already exist: x-systemd.mkdir creates
+# the mount point, never the source, so without this var-lib-bluetooth.mount
+# fails outright ("Failed to chase path"). Not optional hardening -- deleting
+# this unit takes Bluetooth down on any device whose /data lacks the directory.
+#
+# 0700 because /var/lib/bluetooth holds link keys: the info files are 0600, but
+# a listable directory still names every paired peripheral.
+RequiresMountsFor=/data
+After=data.mount
+Before=var-lib-bluetooth.mount
+DefaultDependencies=no
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/install -d -m 0700 -o root -g root /data/bluetooth
+
+[Install]
+WantedBy=local-fs.target

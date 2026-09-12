@@ -59,19 +59,25 @@ SYSTEMD_SERVICE:${PN} = "wendyos-agent.service wendyos-agent-updater.service wen
 SYSTEMD_AUTO_ENABLE:${PN} = "enable"
 
 do_install() {
-    # Install the pre-built binary (fetched + checksum-verified by do_fetch)
-    # into /usr/local/bin so it lives alongside runtime updates written by
-    # wendyos-agent-updater.sh. The tarball unpacks to
-    # wendy-agent-linux-<arch>/wendy-agent; find it rather than hard-coding the
-    # inner directory so a future asset layout change fails loudly here instead
-    # of silently shipping nothing.
+    # Install the pre-built binary (fetched + checksum-verified by do_fetch) into
+    # /opt/wendyos/bin, outside the hierarchy wendyos-sysext-apply overlays: a
+    # merged driver add-on turns /usr into an ephemeral overlay, so an agent
+    # update written under it is discarded on the next reboot.
+    #
+    # The tarball unpacks to wendy-agent-linux-<arch>/wendy-agent; find it rather
+    # than hard-coding the inner directory so a future asset layout change fails
+    # loudly here instead of silently shipping nothing.
     BINARY=$(find ${S} -type f -name wendy-agent ! -path "*/wendy-cli*" | head -1)
     if [ -z "${BINARY}" ]; then
         bbfatal "wendy-agent binary not found in unpacked release archive"
     fi
 
+    install -d ${D}/opt/wendyos/bin
+    install -m 0755 "${BINARY}" ${D}/opt/wendyos/bin/wendy-agent
+
+    # The binary moved; the path everything already invokes did not.
     install -d ${D}/usr/local/bin
-    install -m 0755 "${BINARY}" ${D}/usr/local/bin/wendy-agent
+    ln -sf /opt/wendyos/bin/wendy-agent ${D}/usr/local/bin/wendy-agent
 
     # Install systemd services
     install -d ${D}${systemd_system_unitdir}
@@ -80,7 +86,6 @@ do_install() {
     install -m 0644 ${UNPACKDIR}/wendyos-agent-updater.timer ${D}${systemd_system_unitdir}/
 
     # Install updater and download scripts
-    install -d ${D}/opt/wendyos/bin
     install -m 0755 ${UNPACKDIR}/wendyos-agent-updater.sh ${D}/opt/wendyos/bin/
     install -m 0755 ${UNPACKDIR}/download-wendyos-agent.sh ${D}/opt/wendyos/bin/
 
@@ -118,7 +123,19 @@ FILES:${PN} = "/usr/local/bin/wendy-agent \
 #                      debug metadata on-device. Proper fix is upstream
 #                      building the agent with `go build -trimpath`; drop this
 #                      skip once releases ship trimmed binaries.
-INSANE_SKIP:${PN} += "already-stripped buildpaths"
+#   ldflags          - Go's internal linker emits only a SysV .hash table, never
+#                      a .gnu.hash, so the GNU_HASH check fails on any
+#                      dynamically linked Go binary. This started firing with
+#                      release 2026.08.07-174446, where the agent switched from
+#                      a static CGO_ENABLED=0 build to a cgo-enabled dynamic one
+#                      (NEEDED: libc.so.6 libdl.so.2 libpthread.so.0) -- the
+#                      check silently skips static binaries, which is why earlier
+#                      releases passed. GNU_HASH is a symbol-lookup speed
+#                      optimization; the SysV table is functional, the binary
+#                      declares no versioned glibc symbols, and we do not compile
+#                      it, so there are no LDFLAGS of ours to pass. Drop this
+#                      skip if upstream returns to static linking.
+INSANE_SKIP:${PN} += "already-stripped buildpaths ldflags"
 
 # Runtime dependencies
 # curl/wget needed for auto-updater, tar for extraction

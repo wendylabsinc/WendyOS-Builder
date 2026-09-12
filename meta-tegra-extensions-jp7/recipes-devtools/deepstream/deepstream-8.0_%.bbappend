@@ -5,9 +5,6 @@
 # meta-tegra-extensions-jp7/recipes-devtools/deepstream/deepstream-8.0_*.bb;
 # when meta-tegra-community ships an upstream deepstream-8.0, delete that .bb
 # and these fixups keep applying to the upstream recipe with no other changes.
-#
-# Mirrors meta-tegra-extensions-jp6/recipes-devtools/deepstream/deepstream-7.1_%.bbappend
-# (path -> deepstream-8.0).
 
 # Skip X11 dependency for headless/container use — DeepStream ships some
 # X11-linked binaries we do not need, and the prebuilt libs trip OE's

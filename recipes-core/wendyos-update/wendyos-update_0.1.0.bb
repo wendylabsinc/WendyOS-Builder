@@ -13,14 +13,13 @@ LIC_FILES_CHKSUM = "file://src/${GO_IMPORT}/LICENSE;md5=32329fcd0da888dcffa77ba6
 
 GO_IMPORT = "github.com/wendylabsinc/wendyos-update"
 
-# go.bbclass defines GO_SRCURI_DESTSUFFIX on wrynose/blacksail (newer oe-core),
-# but scarthgap's go.bbclass does NOT — there go_do_unpack auto-computes the
-# destsuffix only when the recipe leaves it unset. Our SRC_URI references
-# ${GO_SRCURI_DESTSUFFIX} explicitly, so on scarthgap it expands empty and the
-# git clone lands in WORKDIR and fails ("destination path already exists").
-# Provide a fallback with the SAME value both code paths compute, so this recipe
-# builds on every tree (RPi=scarthgap, Thor=wrynose, Orin=blacksail). ?= defers
-# to go.bbclass where it already sets this.
+# go.bbclass defines GO_SRCURI_DESTSUFFIX on wrynose and blacksail, but older
+# oe-core did not — there go_do_unpack auto-computed the destsuffix only when the
+# recipe left it unset. Our SRC_URI references ${GO_SRCURI_DESTSUFFIX}
+# explicitly, so where the class does not set it the variable expands empty and
+# the git clone lands in WORKDIR and fails ("destination path already exists").
+# This fallback carries the SAME value go.bbclass computes, so the recipe builds
+# on any tree. ?= defers to go.bbclass where it already sets this.
 GO_SRCURI_DESTSUFFIX ?= "${@os.path.join(os.path.basename(d.getVar('S')), 'src', d.getVar('GO_IMPORT')) + '/'}"
 
 SRC_URI = "git://${GO_IMPORT};protocol=https;branch=main;destsuffix=${GO_SRCURI_DESTSUFFIX}"
@@ -85,7 +84,18 @@ SRC_URI = "git://${GO_IMPORT};protocol=https;branch=main;destsuffix=${GO_SRCURI_
 # Capsule staging now survives the agent's sync-less hard reboot.
 #
 # 964c0ea: enable capsule-on-disk bootloader updates on Orin (t234)
-SRCREV = "5a89cbd990c3c3d10d4f886c5012284c705533cd"
+#
+# 3ae1762: decode the packed ESRT firmware versions in `status`, so
+# esrt_lowest_supported_version reads 39.2.0 rather than 2556416. That field is
+# the anti-rollback floor a capsule apply ratchets, and it is one-way until a
+# reflash.
+#
+# dc8c82e: stage the capsule via a temp file and rename, so a short write can
+# no longer destroy the capsule already on the ESP; warn before the download
+# when the ESP has no room for one; and add the `check` verb, which reports
+# whether the device could take an install at all (exit 5 when not).
+# `check` fails with exit 5 on a deliberately filled ESP.
+SRCREV = "dc8c82e997b7ea43a8de6c9977f0f215de87103f"
 
 inherit go-mod systemd
 

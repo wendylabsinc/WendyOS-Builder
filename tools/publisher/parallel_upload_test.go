@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+
+	"cloud.google.com/go/storage"
 )
 
 // --- Part planning ---------------------------------------------------------
@@ -380,5 +382,73 @@ func TestUploadFileCompositePartFailureCleansUploadedParts(t *testing.T) {
 	}
 	if len(fc.deleted) != 2 {
 		t.Errorf("deleted %d parts, want 2 (%v)", len(fc.deleted), fc.deleted)
+	}
+}
+
+// --- Object identity -------------------------------------------------------
+
+func TestCRC32CFile(t *testing.T) {
+	// The standard CRC32C check value for "123456789".
+	const want = uint32(0xE3069283)
+	got, err := crc32cFile(writeTempFile(t, []byte("123456789")))
+	if err != nil {
+		t.Fatalf("crc32cFile: %v", err)
+	}
+	if got != want {
+		t.Errorf("crc32cFile = %08x, want %08x", got, want)
+	}
+	if _, err := crc32cFile(filepath.Join(t.TempDir(), "absent")); err == nil {
+		t.Error("crc32cFile accepted a missing file")
+	}
+}
+
+func TestObjectIsCurrent(t *testing.T) {
+	// A driver add-on republished into an existing version reuses its object
+	// path, and mksquashfs pads to 4 KiB - so changed content keeps the same
+	// length. Skipping on size published a manifest checksum for bytes GCS
+	// never received.
+	padded := func(b byte) []byte {
+		buf := make([]byte, 4096)
+		for i := range buf {
+			buf[i] = b
+		}
+		return buf
+	}
+	oldContent, newContent := padded('a'), padded('b')
+	if len(oldContent) != len(newContent) {
+		t.Fatal("test setup: both payloads must be the same length")
+	}
+	newPath := writeTempFile(t, newContent)
+
+	oldCRC, err := crc32cFile(writeTempFile(t, oldContent))
+	if err != nil {
+		t.Fatal(err)
+	}
+	newCRC, err := crc32cFile(newPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		desc  string
+		attrs *storage.ObjectAttrs
+		want  bool
+	}{
+		{"object absent", nil, false},
+		{"same size, different content", &storage.ObjectAttrs{Size: 4096, CRC32C: oldCRC}, false},
+		{"same size, same content", &storage.ObjectAttrs{Size: 4096, CRC32C: newCRC}, true},
+		{"different size", &storage.ObjectAttrs{Size: 99, CRC32C: newCRC}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.desc, func(t *testing.T) {
+			if got := objectIsCurrent(tt.attrs, newPath, int64(len(newContent))); got != tt.want {
+				t.Errorf("objectIsCurrent() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+
+	// An unreadable local file cannot prove a match, so it must upload.
+	if objectIsCurrent(&storage.ObjectAttrs{Size: 4096, CRC32C: newCRC}, filepath.Join(t.TempDir(), "gone.raw"), 4096) {
+		t.Error("objectIsCurrent skipped an upload it could not verify")
 	}
 }

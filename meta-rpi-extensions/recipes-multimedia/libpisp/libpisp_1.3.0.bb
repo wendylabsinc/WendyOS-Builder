@@ -1,12 +1,13 @@
 # Ported verbatim from meta-raspberrypi master (commit 0e56e2f, "libpisp:
-# Upgrade to 1.3.0 release"). The meta-raspberrypi revision WendyOS pins
-# (SRCREV_RPI in scripts/upstream-repos.env, scarthgap branch) predates
-# upstream PiSP support: libpisp and the libcamera rpi/pisp pipeline only
-# landed on meta-raspberrypi master/whinlatter, not on scarthgap. The
-# Raspberry Pi 5 camera path (BCM2712 + RP1 CFE) requires the PiSP backend,
-# whose libcamera pipeline handler links against libpisp, so we carry the
-# recipe here. Drop this file once SRCREV_RPI is bumped to a rev that ships
-# libpisp under recipes-multimedia/libpisp.
+# Upgrade to 1.3.0 release"), back when the meta-raspberrypi revision WendyOS
+# pinned predated upstream PiSP support. The Raspberry Pi 5 camera path
+# (BCM2712 + RP1 CFE) requires the PiSP backend, whose libcamera pipeline
+# handler links against libpisp, so the recipe was carried here.
+#
+# The pinned meta-raspberrypi now ships its own libpisp_1.3.0.bb (under
+# dynamic-layers/multimedia-layer/recipes-multimedia/libpisp), which this copy
+# shadows because meta-rpi-extensions has the higher layer priority. This file
+# is therefore a candidate for deletion.
 DESCRIPTION = "A helper library to generate run-time configuration for the Raspberry Pi \
 ISP (PiSP), consisting of the Frontend and Backend hardware components."
 HOMEPAGE = "https://github.com/raspberrypi/libpisp"
@@ -15,28 +16,15 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=3417a46e992fdf62e5759fba9baef7a7 \
                     file://LICENSES/GPL-2.0-only.txt;md5=b234ee4d69f5fce4486a80fdaf4a4263 \
                     file://LICENSES/GPL-2.0-or-later.txt;md5=fed54355545ffd980b814dab4a3b312c"
 
-# Pin by SRCREV only. Upstream tags v1.3.0 at exactly this commit, but the
-# scarthgap bitbake fetcher rejects a git url that carries both tag= and an
-# explicit SRCREV ("Conflicting revisions ... please specify one valid value").
-# meta-raspberrypi master keeps tag=v${PV} because its newer bitbake resolves
-# and cross-checks the two; the older bitbake WendyOS pins does not.
+# Pin by SRCREV only. Upstream tags v1.3.0 at exactly this commit; naming only
+# the SRCREV avoids the fetcher having to cross-check tag= against it.
 SRC_URI = "git://github.com/raspberrypi/libpisp.git;protocol=https;branch=main"
 SRCREV = "9ba67e6680f03f31f2b1741a53e8fd549be82cbe"
 
-# Source dir for the git fetch — tree-dependent:
-#   - blacksail+: leave S unset. bitbake.conf defaults it to ${UNPACKDIR}/${BP},
-#     where the newer git fetcher unpacks. Do NOT set S to anything mentioning
-#     WORKDIR — newer oe-core rejects it ("S should be set relative to UNPACKDIR"),
-#     and that check scans the raw S string, so even an unused inline-python
-#     branch containing "${WORKDIR}" trips it.
-#   - scarthgap: older bitbake unpacks git to ${WORKDIR}/git and its default S
-#     doesn't point there, so set it (no such check on scarthgap). Setting it
-#     from anonymous python keeps the WORKDIR token out of any S value on
-#     blacksail (there d.getVar('S') stays the WORKDIR-free default).
-python () {
-    if 'scarthgap' in (d.getVar('LAYERSERIES_CORENAMES') or '').split():
-        d.setVar('S', '${WORKDIR}/git')
-}
+# S is deliberately left unset: bitbake.conf defaults it to ${UNPACKDIR}/${BP},
+# where the git fetcher unpacks. Do NOT set S to anything mentioning WORKDIR —
+# oe-core rejects it ("S should be set relative to UNPACKDIR") and that check
+# scans the raw S string.
 
 DEPENDS = "nlohmann-json"
 

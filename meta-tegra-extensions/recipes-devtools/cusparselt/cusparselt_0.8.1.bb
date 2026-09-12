@@ -1,7 +1,7 @@
 SUMMARY = "NVIDIA cuSPARSELt - Lightweight Sparse Matrix Library"
 DESCRIPTION = "cuSPARSELt is a high-performance CUDA library for sparse matrix-matrix multiplication"
 HOMEPAGE = "https://developer.nvidia.com/cusparselt"
-LICENSE = "Proprietary"
+LICENSE = "LicenseRef-Proprietary"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Proprietary;md5=0557f9d92cf58f2ccdd50f62f8ac0b28"
 
 # Download the local repo installer from NVIDIA
@@ -23,9 +23,8 @@ python do_unpack:append() {
     import glob
     import os
 
-    # The outer deb is unpacked into UNPACKDIR (whinlatter+) / WORKDIR
-    # (scarthgap pre-UNPACKDIR-split). Inner debs we extract are scratch,
-    # kept under WORKDIR.
+    # The outer deb is unpacked into UNPACKDIR. Inner debs we extract are
+    # scratch, kept under WORKDIR.
     unpackdir = d.getVar('UNPACKDIR')
     workdir = d.getVar('WORKDIR')
 

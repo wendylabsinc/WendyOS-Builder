@@ -11,11 +11,9 @@ WENDYOS_PERSIST_JOURNAL_LOGS ?= "0"
 # WiFi support
 DISTRO_FEATURES:append = " wifi"
 # RPi .wks layouts live in meta-rpi-extensions/files/wic/
-# (RPi-specific, with the rest of the RPi support). 
-# That layer's conf/layer.conf adds files/wic to WKS_SEARCH_PATH
-# (scarthgap's default searches <layer>/wic, blacksail's searches
-# <layer>/files/wic and its sanity checker rejects <layer>/wic — files/wic works
-# on both).
+# (RPi-specific, with the rest of the RPi support). That is the location
+# oe-core mandates: its default WKS_SEARCH_PATH searches <layer>/files/wic and
+# its sanity checker rejects the older <layer>/wic.
 
 # PARTUUID defaults (overwritten at parse-time by partuuid.bbclass)
 WENDYOS_BOOT_PARTUUID ?= "00000000-0000-0000-0000-000000000000"

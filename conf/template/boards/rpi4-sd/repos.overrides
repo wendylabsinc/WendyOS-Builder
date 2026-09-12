@@ -1,33 +1,15 @@
 # Per-board repo overrides for rpi4-sd (blacksail tree).
 #
 # RPi4 (SD) on the blacksail OE series (fleet unification with rpi5 + the Jetsons).
-# The legacy scarthgap board is rpi4-sd-scarthgap, kept as a fallback until rpi4
-# is confirmed on blacksail. See docs/plans/wendyos-update-rpi.md.
+# See docs/plans/wendyos-update-rpi.md.
 #
 # WENDYOS_LAYER_TREE="blacksail" makes bootstrap clone every upstream repo under
-# repos/blacksail/ (parallel to repos/scarthgap/). Base-stack SRCREVs mirror the
-# Thor blacksail canary (jetson-agx-thor/repos.overrides), resolved 2026-06-15;
-# identical to rpi5-sd.
+# repos/blacksail/. No SRCREV override: the pins come from the shared blacksail
+# set in scripts/upstream-repos.env. The meta-tegra* pins in that set are
+# irrelevant here — RPi never layers them.
 WENDYOS_LAYER_TREE="blacksail"
-
-# Split-poky on blacksail (oe-core master: LAYERSERIES_CORENAMES="wrynose
-# blacksail", LAYERSERIES_COMPAT_core="blacksail"; meta-yocto + bitbake master).
-SRCREV_BITBAKE="30ccfbb849ec80cddb4383d198a1441af0ea760a"
-SRCREV_OECORE="294409c4bfe392471509d4cb6c1e6fb1063d2b3b"
-SRCREV_METAYOCTO="f49de2f33e37ca971d64215cc1a3669312e1e7c3"
-
-# meta-openembedded + meta-virtualization master still declare wrynose (not
-# blacksail) — bridged via blacksail-compat.inc. Re-pin + drop the bridge once
-# upstream bumps.
-SRCREV_OE="5d90e6543de4d1c39424956c67ff1925a39bf3c8"
-SRCREV_VIRT="022f4356d4a9b389f51472d40a9330aa59f6bb9a"
-
-# meta-raspberrypi: bumped to upstream master (scarthgap-era default is too old
-# for blacksail oe-core). Same pin as rpi5-sd. Pinned for reproducibility.
-SRCREV_RPI="0c76b0feadbe2afa4cec4cd497636e94eca30ec3"
 
 # NOTE: unlike rpi5, rpi4 (BCM2711) gets NO U-Boot override — the rc4 bump + NVMe
 # patch in u-boot_%.bbappend are raspberrypi5-scoped, so rpi4 builds STOCK blacksail
-# U-Boot 2026.04. No meta-lts-mixins (blacksail U-Boot is native), no
-# meta-lts-mixins-go (blacksail Go is 1.26 native).
-
+# U-Boot 2026.04. Go 1.26 is native on blacksail too, so no backport layer is
+# cloned.

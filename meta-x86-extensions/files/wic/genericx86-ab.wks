@@ -28,7 +28,17 @@
 # Do NOT add expand-rootfs: it would grow rootfsA over rootfsB. The /data grow is
 # a separate first-boot step.
 bootloader --ptable gpt --configfile="grubAB.cfg" --timeout=3
-part /boot --source bootimg_efi --sourceparams="loader=grub-efi,install-kernel-into-boot-dir=false" --ondisk sda --fstype=vfat --label boot --active --align 1024 --size 128M
+
+# --part-type gives p1 the EFI System Partition GPT type GUID. wic does NOT set it
+# by itself -- neither the bootimg_efi plugin nor --active does, so without this the
+# partition is typed "Microsoft basic data" and only *looks* like an ESP. Firmware is
+# supposed to locate the boot loader on the partition typed ESP, and systemd's ESP
+# detection (find-esp.c, used by bootctl and anything built on it) rejects a
+# candidate whose type GUID is not this one -- it reported "Couldn't find EFI system
+# partition" on a correctly mounted /boot until this was added. oe-core's own
+# efi-uki-bootdisk.wks.in sets the same value. Deliberately no --part-name: the GPT
+# name stays "boot", and only the FAT label (--label) is what fstab mounts by.
+part /boot --source bootimg_efi --sourceparams="loader=grub-efi,install-kernel-into-boot-dir=false" --ondisk sda --fstype=vfat --label boot --active --align 1024 --size 128M --part-type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B
 part --ondisk sda --fstype=vfat --label config --align 1024 --size 256M
 part --source rootfs --ondisk sda --fstype=ext4 --label rootfsA --align 1024 --fixed-size ${WENDYOS_ROOTFS_SIZE_KB}K
 part --source rootfs --ondisk sda --fstype=ext4 --label rootfsB --align 1024 --fixed-size ${WENDYOS_ROOTFS_SIZE_KB}K

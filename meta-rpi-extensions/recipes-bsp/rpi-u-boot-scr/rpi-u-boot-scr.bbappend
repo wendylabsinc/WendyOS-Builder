@@ -62,6 +62,13 @@ do_compile() {
             -e 's/@@BOOT_MEDIA@@/${BOOT_MEDIA}/' \
             "${UNPACKDIR}/boot.cmd.in" > "${WORKDIR}/boot.cmd"
     fi
-    mkimage -A ${UBOOT_ARCH} -T script -C none -n "Boot script" -d "${WORKDIR}/boot.cmd" boot.scr
+    # oe-core dropped the global UBOOT_ARCH from kernel-arch.bbclass; the mapping
+    # now lives in oe/kernel.py and callers invoke it directly (see u-boot.inc
+    # and kernel-uimage.bbclass). With the old form this expanded to nothing,
+    # mkimage took "-T" as the value of "-A", and the build failed with
+    # "Invalid architecture". meta-raspberrypi made the same change upstream in
+    # a0ebcf56; we carry it here too because this do_compile replaces the
+    # recipe's, so the upstream fix alone would never run for us.
+    mkimage -A ${@oe.kernel.map_uboot_arch(d)} -T script -C none -n "Boot script" -d "${WORKDIR}/boot.cmd" boot.scr
 }
 

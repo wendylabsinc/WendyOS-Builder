@@ -50,7 +50,6 @@ class GameControllerValidationTests(unittest.TestCase):
 class GameControllerLayerWiringTests(unittest.TestCase):
     def test_every_shipping_kernel_includes_shared_contract(self):
         recipes = [
-            "meta-tegra-extensions-jp6/recipes-kernel/linux/linux-jammy-nvidia-tegra_%.bbappend",
             "meta-tegra-extensions-jp7/recipes-kernel/linux/linux-noble-nvidia-tegra_%.bbappend",
             "meta-rpi-extensions/recipes-kernel/linux/linux-raspberrypi_%.bbappend",
             "meta-x86-extensions/recipes-kernel/linux/linux-yocto_%.bbappend",
