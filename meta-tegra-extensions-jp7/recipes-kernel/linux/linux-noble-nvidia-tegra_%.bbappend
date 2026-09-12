@@ -12,7 +12,8 @@
 # The builtin one may be redundant here, but it does no harm.
 FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 
-require recipes-kernel/linux/wendy-game-controller.inc
+# Native game controllers: the shared Kconfig contract (the .inc says what it guarantees).
+require ${@'recipes-kernel/linux/game-controller.inc' if d.getVar('WENDYOS_GAME_CONTROLLER') == '1' else ''}
 
 SRC_URI += " \
     file://usb-gadget.cfg \

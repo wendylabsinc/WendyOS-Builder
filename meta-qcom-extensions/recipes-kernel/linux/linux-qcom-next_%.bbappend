@@ -7,4 +7,7 @@
 # EXT4_FS, EFI_PARTITION) are built in, so no fragment is needed for those.
 FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 
+# Native game controllers: the shared Kconfig contract (the .inc says what it guarantees).
+require ${@'recipes-kernel/linux/game-controller.inc' if d.getVar('WENDYOS_GAME_CONTROLLER') == '1' else ''}
+
 SRC_URI:append = "${@' file://usb-gadget.cfg' if d.getVar('WENDYOS_USB_GADGET') == '1' else ''}"
