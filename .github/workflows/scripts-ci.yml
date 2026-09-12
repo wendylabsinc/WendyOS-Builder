@@ -10,6 +10,11 @@ on:
       - 'scripts/t234_flashpack_manifest*'
       - 'scripts/make-jetson-disk-img.py'
       - 'scripts/make_jetson_disk_img_test.py'
+      - 'scripts/check_game_controller_support*'
+      - 'conf/distro/include/game-controller.inc'
+      - 'recipes-kernel/linux/game-controller*'
+      - 'recipes-core/packagegroups/packagegroup-wendyos-kernel.bb'
+      - 'meta-*/recipes-kernel/linux/linux-*.bbappend'
       - 'recipes-core/wendyos-agent/files/*.sh'
       - 'scripts/build-driver.sh'
       - 'scripts/pack-sysext.sh'
@@ -38,6 +43,11 @@ on:
       - 'scripts/t234_flashpack_manifest*'
       - 'scripts/make-jetson-disk-img.py'
       - 'scripts/make_jetson_disk_img_test.py'
+      - 'scripts/check_game_controller_support*'
+      - 'conf/distro/include/game-controller.inc'
+      - 'recipes-kernel/linux/game-controller*'
+      - 'recipes-core/packagegroups/packagegroup-wendyos-kernel.bb'
+      - 'meta-*/recipes-kernel/linux/linux-*.bbappend'
       - 'recipes-core/wendyos-agent/files/*.sh'
       - 'scripts/build-driver.sh'
       - 'scripts/pack-sysext.sh'
@@ -123,3 +133,6 @@ jobs:
 
       - name: Run Jetson raw disk image tests
         run: python3 -m unittest scripts/make_jetson_disk_img_test.py
+
+      - name: Run game-controller support validator tests
+        run: python3 -m unittest scripts/check_game_controller_support_test.py

@@ -24,3 +24,6 @@ KMACHINE:vm-arm64-wendyos = "genericarm64"
 # usb-mass-storage, efi-ext and kubernetes for vfat/NLS/GPT/ext4. Everything an
 # initramfs-less VM needs to reach root=PARTLABEL= is already built in. Verified
 # against yocto-kernel-cache branch yocto-6.18.
+
+# Native game controllers: the shared Kconfig contract (the .inc says what it guarantees).
+require ${@'recipes-kernel/linux/game-controller.inc' if d.getVar('WENDYOS_GAME_CONTROLLER') == '1' else ''}

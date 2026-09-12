@@ -1,5 +1,8 @@
 FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
 
+# Native game controllers: the shared Kconfig contract (the .inc says what it guarantees).
+require ${@'recipes-kernel/linux/game-controller.inc' if d.getVar('WENDYOS_GAME_CONTROLLER') == '1' else ''}
+
 SRC_URI:append:x86-wendyos = " \
     file://x86-nuc-drivers.cfg \
     file://x86-kernel.cfg \

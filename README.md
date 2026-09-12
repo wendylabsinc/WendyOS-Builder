@@ -952,6 +952,7 @@ In `build/conf/local.conf`:
 - `WENDYOS_SSHD` - Include OpenSSH server (`sshd`) in the image (default: 0; set to `1` to enable sshd)
 - `WENDYOS_USB_GADGET` - Enable USB gadget mode (default: 0)
 - `WENDYOS_PERSIST_JOURNAL_LOGS` - Persist logs to storage (default: 0)
+- `WENDYOS_GAME_CONTROLLER` - Guarantee the native game-controller kernel interfaces (default: 1; see [`docs/game-controller-support.md`](docs/game-controller-support.md))
 
 **Note**: Choose `WENDYOS_FLASH_IMAGE_SIZE` based on your target storage device capacity and expected rootfs size. Larger images provide more space for root filesystems and future updates.
 
