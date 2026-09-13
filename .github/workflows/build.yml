@@ -588,6 +588,32 @@ jobs:
             echo "::endgroup::"
           done
 
+      # The kernel task already refused anything the contract calls built-in; what only a
+      # finished image can answer is whether each modular symbol's package actually shipped.
+      - name: Validate native game-controller support
+        working-directory: ${{ github.workspace }}/wendyos
+        env:
+          MAP: ${{ steps.vars.outputs.map }}
+        run: |
+          set -euo pipefail
+          for token in $MAP; do
+            IFS='|' read -r storage board machine <<< "$token"
+            DEPLOY_DIR="$GITHUB_WORKSPACE/build/tmp/deploy/images/$machine"
+            CONFIG="$DEPLOY_DIR/wendyos-game-controller-$machine.config"
+            if [[ ! -f "$CONFIG" ]]; then
+              echo "::error::$machine deployed no game-controller kernel config — WENDYOS_GAME_CONTROLLER off, or the contract missing from its kernel bbappend?"
+              exit 1
+            fi
+            # The symlink tracks the manifest this build shipped, so a retried build's
+            # leftover timestamped copy cannot be picked by mistake.
+            MANIFEST=$(find "$DEPLOY_DIR" -maxdepth 1 -name "wendyos-image-$machine*.manifest" -type l -print -quit 2>/dev/null || true)
+            if [[ -z "$MANIFEST" ]]; then
+              echo "::error::no image manifest symlink for $machine in $DEPLOY_DIR"
+              exit 1
+            fi
+            python3 scripts/check_game_controller_support.py --config "$CONFIG" --manifest "$MANIFEST"
+          done
+
       # The persistent NVMe cache is written in place by the build (sstate,
       # downloads, repos are symlinked onto it) — no upload/save step needed.
 
