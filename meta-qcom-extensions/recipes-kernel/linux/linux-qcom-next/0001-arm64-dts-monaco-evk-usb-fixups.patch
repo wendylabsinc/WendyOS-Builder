@@ -1,0 +1,49 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Benjamin Kelenyi <benjamin@wendy.sh>
+Date: Thu, 11 Sep 2026 10:00:00 +0300
+Subject: [PATCH] arm64: dts: monaco-evk: hold refgen on, usb_1 dual-role
+
+usb_2_hsphy takes its PLL supply from refgen, and qcom_snps_hsphy_exit()
+disables the PHY's regulators, so the rail goes away every time the PHY is torn
+down. Hold refgen on. monaco-monza-som.dtsi already carries the identical
+override; upstream added it there as the "REFGEN always-on workaround for USB2
+HS PHY" (commit 5238f4e7169f).
+
+usb_1 becomes otg so dwc3 registers a userspace-controllable role switch rather
+than coming up peripheral-only. With no role-switch-default-mode the starting
+role is still peripheral (drivers/usb/dwc3/drd.c), so the PC link is unchanged
+until userspace writes "host" to the switch.
+
+Signed-off-by: Benjamin Kelenyi <benjamin@wendy.sh>
+Upstream-Status: Pending [not yet submitted; the refgen hunk mirrors monaco-monza-som.dtsi]
+---
+ arch/arm64/boot/dts/qcom/monaco-evk-common.dtsi | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+--- a/arch/arm64/boot/dts/qcom/monaco-evk-common.dtsi
++++ b/arch/arm64/boot/dts/qcom/monaco-evk-common.dtsi
+@@ -666,6 +666,13 @@
+ 	status = "okay";
+ };
+ 
++/* HW/FW issue prevents REFGEN hardware voting for the USB2 HS PHY, so the PHY
++ * would drop it on exit once a driver is bound. Hold it on, as the Monza SOM does.
++ */
++&refgen {
++	regulator-always-on;
++};
++
+ &remoteproc_adsp {
+ 	firmware-name = "qcom/qcs8300/adsp.mbn";
+ 
+@@ -867,7 +874,7 @@
+ };
+ 
+ &usb_1 {
+-	dr_mode = "peripheral";
++	dr_mode = "otg";
+ 
+ 	status = "okay";
+ };
+--
+2.43.0

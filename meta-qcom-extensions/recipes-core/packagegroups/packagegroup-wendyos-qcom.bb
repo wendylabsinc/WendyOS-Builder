@@ -28,8 +28,17 @@ inherit packagegroup
 #                      the driver does not enable /data encryption --
 #                      WENDYOS_DATA_ENCRYPTED stays 0 -- it just stops the
 #                      hardware being invisible.
-#  uvcvideo            USB webcams on the host port. The rest of the V4L2 stack
-#                      already ships for the on-SoC camera path.
+#  uvcvideo            USB webcams, for when an OTG cable puts the micro-AB
+#                      socket in host role. The rest of the V4L2 stack already
+#                      ships for the on-SoC camera path.
+#
+# That socket also costs us a gadget: usb_2 (a400000.usb) probes now, and
+# monaco.dtsi gives it usb-role-switch with no dr_mode, so dwc3 starts it in the
+# peripheral role and it registers a UDC of its own. a400000.usb sorts ahead of
+# a600000.usb and gadget-setup.sh picks its controller with
+# `ls /sys/class/udc | head -n1`, so the gadget binds to the micro-USB port
+# instead. Making that selection explicit is a separate PR, in progress; gadget
+# networking on this board needs it to land.
 RDEPENDS:${PN} = " \
     kernel-module-pwrseq-pcie-m2 \
     kernel-module-at24 \
