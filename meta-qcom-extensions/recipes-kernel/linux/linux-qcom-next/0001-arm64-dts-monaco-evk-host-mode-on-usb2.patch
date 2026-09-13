@@ -1,0 +1,72 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Benjamin Kelenyi <benjamin@wendy.sh>
+Date: Thu, 11 Sep 2026 10:00:00 +0300
+Subject: [PATCH] arm64: dts: monaco-evk: USB2 as host, USB1 dual-role
+
+Board switches S19 and S20 route either Type-C socket to usb_1, so only one
+is ever live and EDL needs USB0; usb_2 reaches the micro-AB socket alone.
+Making usb_2 the host therefore leaves both the PC link and EDL undisturbed.
+
+usb_2 needs usb2_vbus held on to source 5V: CONFIG_USB_CONN_GPIO is not set,
+so connector-2 binds no driver and nothing else enables the rail. The 5V is
+then permanent -- do not attach a host to USB2.
+
+usb_1 becomes otg so dwc3 registers a userspace-controllable role switch; an
+unset role-switch-default-mode still boots it as the gadget. Writing "host"
+turns the selected Type-C socket into a SuperSpeed host, at the cost of the
+PC link, and the gadget needs rebinding afterwards.
+
+refgen is held on because hardware voting for the USB2 HS PHY is broken and
+qcom_snps_hsphy_exit() would otherwise drop it; monaco-monza-som.dtsi
+carries the same override. Only reachable now that the driver is built in.
+
+Signed-off-by: Benjamin Kelenyi <benjamin@wendy.sh>
+Upstream-Status: Inappropriate [WendyOS board policy]
+---
+ arch/arm64/boot/dts/qcom/monaco-evk-common.dtsi | 12 +++++++++++-
+ 1 file changed, 11 insertions(+), 1 deletion(-)
+
+--- a/arch/arm64/boot/dts/qcom/monaco-evk-common.dtsi
++++ b/arch/arm64/boot/dts/qcom/monaco-evk-common.dtsi
+@@ -84,6 +84,7 @@
+ 		regulator-min-microvolt = <5000000>;
+ 		regulator-max-microvolt = <5000000>;
+ 		enable-active-high;
++		regulator-always-on;
+ 	};
+ 
+ 	sound {
+@@ -666,6 +667,13 @@
+ 	status = "okay";
+ };
+ 
++/* HW/FW issue prevents REFGEN hardware voting for the USB2 HS PHY, so the PHY
++ * would drop it on exit once a driver is bound. Hold it on, as the Monza SOM does.
++ */
++&refgen {
++	regulator-always-on;
++};
++
+ &remoteproc_adsp {
+ 	firmware-name = "qcom/qcs8300/adsp.mbn";
+ 
+@@ -867,7 +875,7 @@
+ };
+ 
+ &usb_1 {
+-	dr_mode = "peripheral";
++	dr_mode = "otg";
+ 
+ 	status = "okay";
+ };
+@@ -888,6 +896,8 @@
+ };
+ 
+ &usb_2 {
++	dr_mode = "host";
++
+ 	status = "okay";
+ };
+ 
+--
+2.43.0
