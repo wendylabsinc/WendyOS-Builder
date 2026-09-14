@@ -72,6 +72,15 @@ GADGET_FUNC_ORDER="${GADGET_FUNC_ORDER:-ncm ecm}"
 GADGET_NAME="wendyos_device"
 GADGET_DIR="/sys/kernel/config/usb_gadget/${GADGET_NAME}"
 
+# Mount configfs and load modules
+mountpoint -q /sys/kernel/config || mount -t configfs none /sys/kernel/config
+depmod -a || true
+modprobe -q libcomposite || true
+modprobe -q u_ether || true
+modprobe -q usb_f_ncm || true
+modprobe -q usb_f_ecm || true
+modprobe -q usb_f_acm || true
+
 ### Detect USB controller ###
 
 # The UDC has to exist before the controller can be identified, so wait for it
@@ -98,7 +107,8 @@ for _ in $(seq 60); do
 done
 
 [ -n "$UDC" ] || {
-    log_error "UDC timeout after 60 s (requested: ${GADGET_UDC:-any})"
+    udc_present=$(ls /sys/class/udc 2>/dev/null | tr '\n' ' ' || true)
+    log_error "UDC timeout after 60 s (requested: ${GADGET_UDC:-any}; present: ${udc_present:-none})"
     exit 1
 }
 
@@ -113,11 +123,8 @@ log_info "Found UDC: $UDC"
 # -- so a "*dwc3*" style name match can never succeed on a device-tree board.
 # And a controller built into the kernel (=y) never shows up in lsmod.
 #
-# Both of the old tests therefore failed on every board except Jetson, where
-# tegra_xudc happens to be a module. On RPi that went unnoticed because dwc2 is
-# a USB 2.0 controller and the fallback default is also 0x0200 -- the wrong code
-# path produced the right answer. On a dwc3 board the same silent failure caps a
-# SuperSpeed gadget at USB 2.0.
+# The bcdUSB written below is advisory: libcomposite overwrites it from the
+# negotiated gadget speed on every enumeration.
 #
 # Driver names are the platform_driver .name strings: "dwc2" (dwc2/platform.c),
 # "dwc3" (dwc3/core.c), "tegra-xudc" (gadget/udc/tegra-xudc.c). On Qualcomm the
@@ -169,22 +176,13 @@ if [ -d "$GADGET_DIR" ]; then
     find "$GADGET_DIR/functions" -mindepth 1 -maxdepth 1 -type d -exec rmdir {} \; 2>/dev/null || true
 
     # Remove config string dirs, then config dirs
-    find "$GADGET_DIR/configs" -mindepth 2 -maxdepth 2 -type d -exec rmdir {} \; 2>/dev/null || true
+    find "$GADGET_DIR/configs" -mindepth 3 -maxdepth 3 -type d -exec rmdir {} \; 2>/dev/null || true
     find "$GADGET_DIR/configs" -mindepth 1 -maxdepth 1 -type d -exec rmdir {} \; 2>/dev/null || true
 
     # Remove gadget string dirs, then the gadget itself
     find "$GADGET_DIR/strings" -mindepth 1 -maxdepth 1 -type d -exec rmdir {} \; 2>/dev/null || true
     rmdir "$GADGET_DIR" 2>/dev/null || true
 fi
-
-# Mount configfs and load modules
-mountpoint -q /sys/kernel/config || mount -t configfs none /sys/kernel/config
-depmod -a || true
-modprobe -q libcomposite || true
-modprobe -q u_ether || true
-modprobe -q usb_f_ncm || true
-modprobe -q usb_f_ecm || true
-modprobe -q usb_f_acm || true
 
 mkdir -p "$GADGET_DIR"
 cd "$GADGET_DIR" || { log_error "Cannot cd to $GADGET_DIR"; exit 1; }
@@ -267,7 +265,8 @@ if [ -f UDC ] && [ -s UDC ]; then
     echo "" > UDC 2>/dev/null || true
     sleep 1
 fi
-echo "$UDC" > UDC
+[ -e "/sys/class/udc/$UDC" ] || { log_error "UDC $UDC disappeared before bind"; exit 1; }
+echo "$UDC" > UDC || { log_error "Failed to bind gadget to $UDC"; exit 1; }
 log_info "UDC activated: $UDC"
 
 # On tegra-xudc the UDC relies on a usb_phy notifier chain fed by the
