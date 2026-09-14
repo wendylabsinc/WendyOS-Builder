@@ -55,6 +55,7 @@ driver_vars=$(read_json "$DRIVER/driver.json" NAME=name) \
 eval "$driver_vars"
 
 [ -n "$NAME" ]  || err "driver.json has no name"
+[[ "$NAME" =~ ^[A-Za-z0-9_.-]+$ ]] || err "driver.json has an invalid name: $NAME"
 [ -n "$KVER" ]  || err "devkit.json has no kernel_version"
 [ -n "$OS_ID" ] || err "devkit.json has no os_id — rebuild the devkit"
 [ -n "$LEVEL" ] || err "devkit.json has no sysext_level — rebuild the devkit"
@@ -90,39 +91,90 @@ STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE" "$TMP_OUT"' EXIT
 
 # --- payload -------------------------------------------------------------------------
-# updates/ is the directory depmod prefers over an in-tree module of the same name. Keying
-# it on $KVER means a running kernel simply does not find an add-on built for another one.
+# Keep the package inert after the sysext merge. wendyos-sysext-apply exposes an eligible
+# package into the canonical module/firmware/udev paths only after hardware matching and
+# first-wins collision selection. This prevents an installed package for absent hardware
+# from changing depmod's resolution of the base kernel modules.
 shopt -s nullglob
 KOS=("$MODULES"/*.ko)
 shopt -u nullglob
 [ "${#KOS[@]}" -gt 0 ] || err "no .ko files in $MODULES"
-install -d "$STAGE/usr/lib/modules/$KVER/updates"
-install -m 0644 "${KOS[@]}" "$STAGE/usr/lib/modules/$KVER/updates/"
+PAYLOAD="$STAGE/usr/lib/wendyos-driver-payloads/$NAME"
+install -d "$PAYLOAD/modules/$KVER"
+install -m 0644 "${KOS[@]}" "$PAYLOAD/modules/$KVER/"
 
 # Baked in so installing the add-on needs no --module flag. depmod resolves dependencies,
 # so the manifest need only name the driver's top-level modules.
-install -d "$STAGE/usr/lib/modules-load.d"
-CONF="$STAGE/usr/lib/modules-load.d/$NAME.conf"
+CONF="$PAYLOAD/modules-load.conf"
 python3 -c '
 import json, sys
 for m in json.load(open(sys.argv[1])).get("modules_load", []):
     sys.stdout.write(m + "\n")' "$DRIVER/driver.json" > "$CONF"
-# An add-on with nothing to autoload ships neither the file nor its directory.
-[ -s "$CONF" ] || { rm -f "$CONF"; rmdir "$(dirname "$CONF")"; }
+# An add-on with nothing to autoload ships no list.
+[ -s "$CONF" ] || rm -f "$CONF"
+
+# Optional activation metadata lets an add-on replace a base-kernel module stack after
+# the late /data sysext merge. Keep the on-device format deliberately simple: WendyOS
+# does not need a JSON parser in the base image, and every value is validated here.
+#
+#   pci <vendor>:<device>  activate only when any declared PCI ID is present
+#   replace <module>       unload in manifest order before modules_load
+#   reload <module>        unload before modules_load and load again afterwards
+#   restart-service <unit> restart an active service after module insertion
+#   restore-wifi-connection <interface>  restore its active NetworkManager profile
+install -d "$STAGE/usr/lib/wendyos-driver-activation.d"
+ACTIVATION_CONF="$STAGE/usr/lib/wendyos-driver-activation.d/$NAME.conf"
+python3 - "$DRIVER/driver.json" > "$ACTIVATION_CONF" <<'PY'
+import json, re, sys
+
+activation = json.load(open(sys.argv[1])).get("activation", {})
+for device in activation.get("pci_devices", []):
+    if not re.fullmatch(r"[0-9a-fA-F]{4}:[0-9a-fA-F]{4}", device):
+        sys.exit("invalid activation PCI ID: %r" % device)
+    print("pci " + device.lower())
+
+for field, directive in (("modules_replace", "replace"),
+                         ("modules_reload", "reload")):
+    for module in activation.get(field, []):
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+", module):
+            sys.exit("invalid activation module name: %r" % module)
+        print(directive + " " + module)
+
+for unit in activation.get("services_restart", []):
+    if not re.fullmatch(r"[A-Za-z0-9_.@:-]+", unit):
+        sys.exit("invalid activation service unit: %r" % unit)
+    print("restart-service " + unit)
+
+for interface in activation.get("wifi_devices_restore", []):
+    if not re.fullmatch(r"[A-Za-z0-9_.:-]+", interface):
+        sys.exit("invalid activation network interface: %r" % interface)
+    print("restore-wifi-connection " + interface)
+PY
+[ -s "$ACTIVATION_CONF" ] || {
+    rm -f "$ACTIVATION_CONF"
+    rmdir "$(dirname "$ACTIVATION_CONF")"
+}
 
 # Rules ship with the add-on: they create the device nodes with the right ownership, and
 # a driver whose rules were dropped loads but behaves as though the hardware were absent.
 if [ -d "$DRIVER/udev" ]; then
-    install -d "$STAGE/usr/lib/udev/rules.d"
+    install -d "$PAYLOAD/udev"
     for r in "$DRIVER"/udev/*.rules; do
-        [ -e "$r" ] && install -m 0644 "$r" "$STAGE/usr/lib/udev/rules.d/"
+        [ -e "$r" ] && install -m 0644 "$r" "$PAYLOAD/udev/"
     done
 fi
 
 # Firmware the driver requests via request_firmware().
 if [ -d "$DRIVER/firmware" ]; then
-    install -d "$STAGE/usr/lib/firmware"
-    cp -a "$DRIVER/firmware/." "$STAGE/usr/lib/firmware/"
+    install -d "$PAYLOAD/firmware"
+    cp -a "$DRIVER/firmware/." "$PAYLOAD/firmware/"
+fi
+# Firmware fetched and checksum-verified by build-driver.sh lives beside the
+# modules directory. Generated files override a same-named static fixture.
+BUILD_OUTPUT=$(dirname "$MODULES")
+if [ -d "$BUILD_OUTPUT/firmware" ]; then
+    install -d "$PAYLOAD/firmware"
+    cp -a "$BUILD_OUTPUT/firmware/." "$PAYLOAD/firmware/"
 fi
 
 # --- extension-release ---------------------------------------------------------------
