@@ -32,13 +32,10 @@ inherit packagegroup
 #                      socket in host role. The rest of the V4L2 stack already
 #                      ships for the on-SoC camera path.
 #
-# That socket also costs us a gadget: usb_2 (a400000.usb) probes now, and
+# usb_2 (a400000.usb) probes now, and
 # monaco.dtsi gives it usb-role-switch with no dr_mode, so dwc3 starts it in the
-# peripheral role and it registers a UDC of its own. a400000.usb sorts ahead of
-# a600000.usb and gadget-setup.sh picks its controller with
-# `ls /sys/class/udc | head -n1`, so the gadget binds to the micro-USB port
-# instead. Making that selection explicit is a separate PR, in progress; gadget
-# networking on this board needs it to land.
+# peripheral role and registers a UDC of its own. The machine explicitly selects
+# a600000.usb for gadget-setup so networking stays on USB0/USB-C.
 RDEPENDS:${PN} = " \
     kernel-module-pwrseq-pcie-m2 \
     kernel-module-at24 \

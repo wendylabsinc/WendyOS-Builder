@@ -187,16 +187,23 @@ mkdir -p functions/acm.usb0
 ln -sf functions/acm.usb0 configs/c.1/
 log_info "ACM serial function configured (/dev/ttyGS0)"
 
-# Wait for a UDC to appear (up to 60 s)
+# Wait for the board's selected UDC, or any UDC on single-controller boards.
+# Never fall back to another socket when an explicit controller is configured.
 UDC=""
 for i in $(seq 60); do
-    UDC=$(ls /sys/class/udc 2>/dev/null | head -n1) || true
+    if [ -n "${GADGET_UDC:-}" ]; then
+        if [ -e "/sys/class/udc/$GADGET_UDC" ]; then
+            UDC="$GADGET_UDC"
+        fi
+    else
+        UDC=$(ls /sys/class/udc 2>/dev/null | head -n1) || true
+    fi
     if [ -n "$UDC" ]; then
         break
     fi
     sleep 1
 done
-[ -n "$UDC" ] || { log_error "UDC timeout after 60 s"; exit 1; }
+[ -n "$UDC" ] || { log_error "UDC timeout after 60 s (requested: ${GADGET_UDC:-any})"; exit 1; }
 log_info "Found UDC: $UDC"
 
 # Clear any previous binding before activating
