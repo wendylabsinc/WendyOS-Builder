@@ -77,7 +77,8 @@ STRINGS="$TC_BIN/${CROSS}strings"
 # `local` builds the directory in place, `git` clones a pinned revision; anything else is
 # rejected rather than guessed at.
 driver_vars=$(read_json "$MANIFEST" \
-    NAME=name SRC_LOCAL=source.local SRC_GIT=source.git SRC_REV=source.rev) \
+    NAME=name SRC_LOCAL=source.local SRC_GIT=source.git SRC_REV=source.rev \
+    BUILD_KIND=build.kind BUILD_CONFIGURE=build.configure) \
     || err "cannot read $MANIFEST"
 eval "$driver_vars"
 [ -n "$NAME" ] || err "driver.json has no name"
@@ -136,9 +137,30 @@ export ARCH CROSS_COMPILE="$CROSS"
 export PATH="$TC_BIN:$PATH"
 
 echo "building $NAME against $KVER ($ARCH, $CROSS)"
-# Passed on the command line, not exported: a driver Makefile that assigns KERNEL_SRC
-# itself would override the environment but not this, so the devkit always wins.
-make -C "$SRCDIR" KERNEL_SRC="$KBUILD" KERNEL_VERSION="$KVER"
+case "${BUILD_KIND:-kbuild}" in
+    kbuild)
+        # Passed on the command line, not exported: a driver Makefile that assigns
+        # KERNEL_SRC itself would override the environment but not this, so the
+        # devkit always wins.
+        make -C "$SRCDIR" KERNEL_SRC="$KBUILD" KERNEL_VERSION="$KVER"
+        ;;
+    backport-iwlwifi)
+        # Intel's generated backport tree is a complete wireless subsystem, not
+        # a conventional M=<dir> external module. Its public contract names the
+        # prepared target tree KLIB_BUILD and requires a defconfig pass first.
+        [ -n "$BUILD_CONFIGURE" ] \
+            || err "build.kind backport-iwlwifi requires build.configure"
+        case "$BUILD_CONFIGURE" in
+            *[!A-Za-z0-9._-]*) err "unsafe build.configure target: $BUILD_CONFIGURE" ;;
+        esac
+        make -C "$SRCDIR" KLIB_BUILD="$KBUILD" "$BUILD_CONFIGURE"
+        make -C "$SRCDIR" -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)" \
+            KLIB_BUILD="$KBUILD" modules
+        ;;
+    *)
+        err "unsupported build.kind: $BUILD_KIND"
+        ;;
+esac
 
 mapfile -t KOS < <(find "$SRCDIR" -name '*.ko' -print)
 [ "${#KOS[@]}" -gt 0 ] || err "no .ko produced"
