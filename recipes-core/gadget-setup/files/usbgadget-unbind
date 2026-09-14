@@ -4,12 +4,13 @@
 # has actually gone away.
 #
 # The udev rule that triggers this fires on the removal of ANY udc device, and
-# it cannot tell us which one. Boards with a second peripheral-capable socket
-# remove a UDC during normal operation: a dual-role port drops its UDC whenever
-# it switches to host mode (dwc3 calls dwc3_gadget_exit() when leaving the
-# device role), which on the IQ-8275 happens every time an OTG cable goes into
-# the micro-AB socket. Unbinding then would tear down a working gadget on a
-# different controller.
+# it cannot tell us which one. A board with a second peripheral-capable socket
+# can remove a UDC during normal operation: a dual-role port drops its UDC
+# whenever it switches to host mode (dwc3 calls dwc3_gadget_exit() when leaving
+# the device role). On the IQ-8275 usb_2 is pinned to host mode today, so it
+# registers no UDC and that teardown cannot happen yet, but once usb_2 becomes
+# dual-role an OTG cable in the micro-AB socket will drop that port's UDC.
+# Unbinding then would tear down a working gadget on a different controller.
 
 set -eu
 
