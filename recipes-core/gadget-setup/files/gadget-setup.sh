@@ -107,8 +107,8 @@ log_info "Found UDC: $UDC"
 # after its device-tree node (1000480000.usb, a600000.usb, 3550000.xudc) and
 # never after the driver -- udc-core does
 #     dev_set_name(&udc->dev, "%s", kobject_name(&gadget->dev.parent->kobj))
-# -- so a "*dwc3*" style name match can never succeed. And a controller built
-# into the kernel (=y) never shows up in lsmod.
+# -- so a "*dwc3*" style name match can never succeed on a device-tree board.
+# And a controller built into the kernel (=y) never shows up in lsmod.
 #
 # Both of the old tests therefore failed on every board except Jetson, where
 # tegra_xudc happens to be a module. On RPi that went unnoticed because dwc2 is
@@ -117,8 +117,11 @@ log_info "Found UDC: $UDC"
 # SuperSpeed gadget at USB 2.0.
 #
 # Driver names are the platform_driver .name strings: "dwc2" (dwc2/platform.c),
-# "dwc3" (dwc3/core.c), "tegra-xudc" (gadget/udc/tegra-xudc.c). The globs also
-# cover a glue driver binding the parent (e.g. dwc3-qcom).
+# "dwc3" (dwc3/core.c), "tegra-xudc" (gadget/udc/tegra-xudc.c). On Qualcomm the
+# glue driver binds the device itself -- dwc3_qcom_probe() sets qcom->dwc.dev
+# to that same device and calls dwc3_core_probe() on it, so the driver bound to
+# the UDC's parent is named "dwc3-qcom", not "dwc3". Hence the prefix globs
+# rather than exact names.
 USB_VERSION="0x0200"
 USB_CONTROLLER="unknown"
 USB_DRIVER=""
@@ -195,13 +198,17 @@ echo 0x01 > bDeviceProtocol   # Interface Association Descriptor
 
 mkdir -p configs/c.1/strings/0x409
 
-# Power attributes — controller-specific
-if [ "$USB_CONTROLLER" = "dwc2" ]; then
-    echo 0x80 > configs/c.1/bmAttributes  # Bus-powered
-    echo 250  > configs/c.1/MaxPower
-else
-    echo 0xC0 > configs/c.1/bmAttributes  # Self-powered
-fi
+# Power attributes. How a board is powered is a property of the board, not of
+# its USB controller. Every board that runs this gadget (Jetson, RPi4, RPi5,
+# IQ-8275) has its own supply, so the gadget is self-powered on all of them.
+#
+# This used to be keyed on the dwc2 controller, standing in for an OTG board
+# powered from the host. The test never actually fired: dwc2 is built in on RPi
+# (CONFIG_USB_DWC2=y in bcm2711_defconfig and bcm2712_defconfig), so detection
+# fell through and every board got 0xC0 anyway. Now that detection works, that
+# condition would start telling hosts an RPi draws 500 mA from the bus, which is
+# not true of a board on its own PSU.
+echo 0xC0 > configs/c.1/bmAttributes  # Self-powered
 
 mkdir -p strings/0x409
 echo "$USB_SERIAL"  > strings/0x409/serialnumber
