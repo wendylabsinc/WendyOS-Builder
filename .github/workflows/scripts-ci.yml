@@ -13,6 +13,8 @@ on:
       - 'recipes-core/wendyos-agent/files/*.sh'
       - 'scripts/build-driver.sh'
       - 'scripts/pack-sysext.sh'
+      - 'scripts/driver_devkit_test.py'
+      - '.github/workflows/drivers.yml'
       - 'recipes-core/wendyos-sysext-apply/files/*.sh'
       - 'recipes-kernel/wendyos-kernel-devkit/files/*.sh'
       - 'recipes-core/wendyos-identity/files/*.sh'
@@ -41,6 +43,8 @@ on:
       - 'recipes-core/wendyos-agent/files/*.sh'
       - 'scripts/build-driver.sh'
       - 'scripts/pack-sysext.sh'
+      - 'scripts/driver_devkit_test.py'
+      - '.github/workflows/drivers.yml'
       - 'recipes-core/wendyos-sysext-apply/files/*.sh'
       - 'recipes-kernel/wendyos-kernel-devkit/files/*.sh'
       - 'recipes-core/wendyos-identity/files/*.sh'
@@ -123,3 +127,6 @@ jobs:
 
       - name: Run Jetson raw disk image tests
         run: python3 -m unittest scripts/make_jetson_disk_img_test.py
+
+      - name: Run driver devkit selection tests
+        run: python3 -m unittest scripts/driver_devkit_test.py
