@@ -77,6 +77,9 @@ GADGET_DIR="/sys/kernel/config/usb_gadget/${GADGET_NAME}"
 # The UDC has to exist before the controller can be identified, so wait for it
 # here rather than just before binding. /sys/class/udc is populated when the
 # controller driver probes, which does not depend on the gadget framework.
+#
+# Wait for the board's selected UDC, or any UDC on single-controller boards.
+# Never fall back to another socket when an explicit controller is configured.
 UDC=""
 for _ in $(seq 60); do
     if [ -n "${GADGET_UDC:-}" ]; then
