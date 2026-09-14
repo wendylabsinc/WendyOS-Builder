@@ -1,0 +1,82 @@
+From: Wendy Labs <engineering@wendylabs.com>
+Date: Tue, 1 Sep 2026 00:00:00 +1000
+Subject: [PATCH] iwlwifi: disable No Snoop for BE202 behind Thor root port
+
+The NVIDIA Jetson AGX Thor root complex rejects the first BE202 CSR read
+completion as a malformed TLP when No Snoop is enabled on root port 22d8.
+The result is HW_REV=0xffffffff followed by DPC containment, so iwlwifi can
+never probe the endpoint.
+
+Clear No Snoop on only that NVIDIA root port when it directly hosts Intel
+endpoint 272b.  This mirrors the successful pre-probe setpci experiment and
+runs before the driver's first BAR access.  Do not alter AER or DPC policy;
+masking the error does not make the controller accept the completion.
+
+---
+ drivers/net/wireless/intel/iwlwifi/pcie/drv.c | 45 +++++++++++++++++++
+ 1 file changed, 45 insertions(+)
+
+diff --git a/drivers/net/wireless/intel/iwlwifi/pcie/drv.c b/drivers/net/wireless/intel/iwlwifi/pcie/drv.c
+--- a/drivers/net/wireless/intel/iwlwifi/pcie/drv.c
++++ b/drivers/net/wireless/intel/iwlwifi/pcie/drv.c
+@@ -1149,4 +1149,49 @@ EXPORT_SYMBOL_IF_IWLWIFI_KUNIT(iwl_pci_find_dev_info);
+ 
++#define PCI_DEVICE_ID_INTEL_BE202		0x272b
++#define PCI_DEVICE_ID_NVIDIA_THOR_ROOT_PORT	0x22d8
++
++/*
++ * The Thor root complex rejects a BE202 MMIO read completion as MalfTLP when
++ * the root port emits the request with No Snoop set.  The failed first read
++ * returns all ones and DPC then contains the link.  Clear the request
++ * attribute before any BAR access, scoped to the exact endpoint/root-port
++ * pairing observed on the AGX Thor developer kit.
++ */
++static void iwl_pci_disable_nosnoop_on_thor(struct pci_dev *pdev)
++{
++	struct pci_dev *root_port = pdev->bus->self;
++	u16 devctl;
++	int ret;
++
++	if (pdev->device != PCI_DEVICE_ID_INTEL_BE202 || !root_port ||
++	    root_port->vendor != PCI_VENDOR_ID_NVIDIA ||
++	    root_port->device != PCI_DEVICE_ID_NVIDIA_THOR_ROOT_PORT)
++		return;
++
++	ret = pcie_capability_read_word(root_port, PCI_EXP_DEVCTL, &devctl);
++	if (ret) {
++		dev_warn(&pdev->dev,
++			 "failed to read Thor root-port Device Control: %d\n",
++			 ret);
++		return;
++	}
++
++	if (!(devctl & PCI_EXP_DEVCTL_NOSNOOP_EN))
++		return;
++
++	ret = pcie_capability_write_word(root_port, PCI_EXP_DEVCTL,
++					 devctl & ~PCI_EXP_DEVCTL_NOSNOOP_EN);
++	if (ret) {
++		dev_warn(&pdev->dev,
++			 "failed to disable No Snoop on Thor root port: %d\n",
++			 ret);
++		return;
++	}
++
++	dev_info(&pdev->dev,
++		 "disabled No Snoop on Thor root port for PCIe interoperability\n");
++}
++
+ static int iwl_pci_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
+ {
+ 	const struct iwl_mac_cfg *mac_cfg = (void *)ent->driver_data;
+@@ -1162,6 +1207,8 @@ static int iwl_pci_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
+ 			return ret;
+ 	}
+ 
++	iwl_pci_disable_nosnoop_on_thor(pdev);
++
+ 	ret = pcim_enable_device(pdev);
+ 	if (ret)
+ 		return ret;
+-- 
+2.50.1
