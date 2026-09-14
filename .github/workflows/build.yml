@@ -129,6 +129,7 @@ jobs:
           INPUT_DEVICE: ${{ inputs.device }}
           FILTER_DRIVERS: ${{ steps.filter.outputs.drivers }}
           FILTER_OS: ${{ steps.filter.outputs.os }}
+          PR_BASE: ${{ github.base_ref }}
         run: |
           set -euo pipefail
 
@@ -204,7 +205,9 @@ jobs:
 
           # A driver-only PR builds no OS image: drivers.yml covers it against the
           # already-published devkit, in minutes rather than hours.
-          if [[ "${FILTER_DRIVERS:-}" == "true" && "${FILTER_OS:-}" != "true" ]]; then
+          # A stacked PR can inherit unpublished OS prerequisites. Build its
+          # images too until the stack is merged and it targets main directly.
+          if [[ "$PR_BASE" == "main" && "${FILTER_DRIVERS:-}" == "true" && "${FILTER_OS:-}" != "true" ]]; then
             echo "Trigger=pull_request: driver-only change, skipping the device matrix."
             echo 'matrix={"include":[]}' >> "$GITHUB_OUTPUT"
             echo "devices=" >> "$GITHUB_OUTPUT"
@@ -1047,6 +1050,16 @@ jobs:
             # state to race on) and the publisher's storage client already
             # retries transient errors internally.
             "$RUNNER_TEMP/publisher" "${ARGS[@]}"
+            # Some installed images report a storage-specific board identity.
+            # Publish that identity as well, referencing these same uploaded
+            # bytes and this variant's devkit, without uploading another image.
+            alias=$(jq -r --arg key "$DEVICE/$STORAGE" '.[$key].manifest_alias // empty' \
+              "$GITHUB_WORKSPACE/wendyos/.github/device-artifacts.json")
+            if [[ -n "$alias" ]]; then
+              [[ "$alias" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "invalid manifest alias" >&2; exit 1; }
+              jq --arg alias "$alias" '.device = $alias' "$ENTRY_FILE" \
+                > "$GITHUB_WORKSPACE/manifest-entry-${DEVICE}-${STORAGE}-alias.json"
+            fi
             echo "::endgroup::"
           done
 
