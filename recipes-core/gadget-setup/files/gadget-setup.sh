@@ -81,6 +81,11 @@ modprobe -q usb_f_ncm || true
 modprobe -q usb_f_ecm || true
 modprobe -q usb_f_acm || true
 
+# The unit passes this via EnvironmentFile; a hand-run has to read it itself.
+if [ -z "${GADGET_UDC:-}" ] && [ -r /etc/default/gadget-setup ]; then
+    . /etc/default/gadget-setup
+fi
+
 ### Detect USB controller ###
 
 # The UDC has to exist before the controller can be identified, so wait for it
@@ -113,6 +118,10 @@ done
 }
 
 log_info "Found UDC: $UDC"
+
+if [ -z "${GADGET_UDC:-}" ] && [ "$(ls /sys/class/udc 2>/dev/null | wc -l)" -gt 1 ]; then
+    log_warning "Multiple UDCs present and no GADGET_UDC configured; using $UDC"
+fi
 
 # Identify the controller from the driver actually bound to the UDC.
 #
