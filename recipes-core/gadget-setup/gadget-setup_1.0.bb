@@ -18,7 +18,14 @@ S = "${UNPACKDIR}"
 
 inherit systemd
 
+# A board with multiple peripheral-capable sockets must select its gadget UDC.
+WENDYOS_USB_UDC ?= ""
+PACKAGE_ARCH = "${MACHINE_ARCH}"
+
 do_install() {
+    install -d ${D}${sysconfdir}/default
+    printf 'GADGET_UDC="%s"\n' '${WENDYOS_USB_UDC}' > ${D}${sysconfdir}/default/gadget-setup
+
     install -d ${D}${sbindir}
     install -m 0755 ${UNPACKDIR}/gadget-setup.sh ${D}${sbindir}/gadget-setup.sh
 
