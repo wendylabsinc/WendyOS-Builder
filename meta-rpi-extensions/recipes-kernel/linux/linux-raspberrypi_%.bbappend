@@ -1,5 +1,7 @@
 FILESEXTRAPATHS:prepend := "${THISDIR}/linux-raspberrypi:"
 
+require ${@'recipes-kernel/linux/game-controller.inc' if d.getVar('WENDYOS_GAME_CONTROLLER') == '1' else ''}
+
 # Add container support kernel config when WENDYOS_CONTAINER_RUNTIME is enabled
 SRC_URI:append:rpi = "${@' file://container.cfg' if d.getVar('WENDYOS_CONTAINER_RUNTIME') == '1' else ''}"
 

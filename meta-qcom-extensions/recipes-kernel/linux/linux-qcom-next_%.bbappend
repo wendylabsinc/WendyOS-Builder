@@ -8,6 +8,8 @@
 # built in, so no fragment is needed for those.
 FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 
+require ${@'recipes-kernel/linux/game-controller.inc' if d.getVar('WENDYOS_GAME_CONTROLLER') == '1' else ''}
+
 SRC_URI:append = "${@' file://usb-gadget.cfg' if d.getVar('WENDYOS_USB_GADGET') == '1' else ''}"
 
 # The micro-AB socket: its connector driver, the reference regulator the USB2 HS
