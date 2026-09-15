@@ -1,0 +1,31 @@
+#!/bin/sh
+
+# Clear the gadget's UDC binding, but only when the controller it was bound to
+# has actually gone away.
+#
+# The udev rule that triggers this fires on the removal of ANY udc device, and
+# it cannot tell us which one. A board with a second peripheral-capable socket
+# can remove a UDC during normal operation: a dual-role port drops its UDC
+# whenever it switches to host mode (dwc3 calls dwc3_gadget_exit() when leaving
+# the device role). On the IQ-8275 usb_2 is pinned to host mode today, so it
+# registers no UDC and that teardown cannot happen yet, but once usb_2 becomes
+# dual-role an OTG cable in the micro-AB socket will drop that port's UDC.
+# Unbinding then would tear down a working gadget on a different controller.
+
+set -eu
+
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+GADGET=/sys/kernel/config/usb_gadget/wendyos_device
+
+# No gadget configured, or nothing bound: nothing to undo.
+[ -e "$GADGET/UDC" ] || exit 0
+
+UDC=$(tr -d ' \t\n' < "$GADGET/UDC" 2>/dev/null) || exit 0
+[ -n "$UDC" ] || exit 0
+
+# The controller we are bound to is still here, so this removal was someone
+# else's. Leave the binding alone.
+[ -e "/sys/class/udc/$UDC" ] && exit 0
+
+echo "" > "$GADGET/UDC" 2>/dev/null || true
+exit 0

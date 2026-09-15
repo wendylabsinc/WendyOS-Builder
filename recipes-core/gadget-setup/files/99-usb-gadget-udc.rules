@@ -1,3 +1,8 @@
 # /etc/udev/rules.d/99-usb-gadget-udc.rules
+#
+# This fires for the removal of any udc, and does not say which one went away.
+# Boards with two peripheral-capable sockets remove a UDC in normal use, so the
+# service it starts checks whether the bound controller is the one that left
+# before it touches the binding. Do not make that check unconditional again.
 
 SUBSYSTEM=="udc", ACTION=="remove", TAG+="systemd", ENV{SYSTEMD_WANTS}+="wendyos-usbgadget-unbind.service"
