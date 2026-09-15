@@ -51,6 +51,15 @@ RDEPENDS:${PN} = " \
     kernel-module-uvcvideo \
     "
 
+# The Wi-Fi stack for the WCN6855 in the M.2 slot. meta-qcom supplies all three
+# through RRECOMMENDS, which bitbake drops in silence; without regulatory.db
+# cfg80211 also falls back to the world domain and 5 GHz goes passive-only.
+RDEPENDS:${PN} += " \
+    kernel-module-ath11k-pci \
+    linux-firmware-ath11k-wcn6855 \
+    wireless-regdb-static \
+    "
+
 # The PMIC RTC is read-only and volatile, so timesyncd's saved timestamp on /data
 # is the only thing keeping the clock sane across a reboot or an OTA swap.
 RDEPENDS:${PN} += " systemd-mount-timesync"
