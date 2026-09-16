@@ -1,11 +1,10 @@
 # WendyOS kernel deltas for the Dragonwing boards.
 #
-# USB only so far: the gadget stack, and the micro-AB socket further down.
-# Everything else WendyOS needs is already in meta-qcom's defconfig: the
-# container prerequisites (namespaces, cgroups, overlayfs, veth, bridge,
-# netfilter masquerade, seccomp, BPF) are all present, and root-mount critical
-# drivers (SCSI_UFSHCD, SCSI_UFS_QCOM, BLK_DEV_SD, EXT4_FS, EFI_PARTITION) are
-# built in, so no fragment is needed for those.
+# USB configuration and board-scoped networking fixes. Other requirements are
+# already in meta-qcom's defconfig: the container prerequisites (namespaces, cgroups,
+# overlayfs, veth, bridge, netfilter masquerade, seccomp, BPF) are all present,
+# and root-mount critical drivers (SCSI_UFSHCD, SCSI_UFS_QCOM, BLK_DEV_SD,
+# EXT4_FS, EFI_PARTITION) are built in, so no fragment is needed for those.
 FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 
 require ${@'recipes-kernel/linux/game-controller.inc' if d.getVar('WENDYOS_GAME_CONTROLLER') == '1' else ''}
@@ -28,6 +27,10 @@ SRC_URI:append:iq-8275-evk = " \
     file://usb-host.cfg \
     file://0001-arm64-dts-monaco-evk-usb-fixups.patch \
     "
+
+# QCA8081 switches its host interface with copper speed. Expose both serial
+# modes to phylink so autonegotiation includes 10/100/1000 as well as 2500.
+SRC_URI:append:iq-8275-evk = " file://0002-net-stmmac-qcom-ethqos-advertise-serdes-interfaces.patch"
 
 # quilt edits the tracked .dtsi in place and leaves it modified in the shared
 # kernel tree. CONFIG_LOCALVERSION_AUTO is on here (default y, and no fragment

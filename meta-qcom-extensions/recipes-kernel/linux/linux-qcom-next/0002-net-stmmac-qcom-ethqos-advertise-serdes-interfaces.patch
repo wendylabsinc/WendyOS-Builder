@@ -1,0 +1,58 @@
+From: Thomas Karpiniec <tom.karpiniec@outlook.com>
+Subject: [PATCH] net: stmmac: qcom-ethqos: advertise supported SerDes interfaces
+
+With a QCA8081 and phy-mode = "2500base-x", phylink currently validates
+only 2500BASE-X and removes 10/100/1000BASE-T from the PHY's supported
+and advertised modes. A gigabit switch therefore cannot establish link.
+
+The PHY switches its host interface to SGMII for lower copper speeds.
+ethqos_mac_finish_serdes already applies that interface to the SerDes,
+and the Qualcomm SGMII PHY driver supports reconfiguring both modes.
+
+Provide get_interfaces for serial connections, retaining the firmware
+mode and adding SGMII and 2500BASE-X when the SerDes validates them.
+Leave parallel interfaces and configurations without a SerDes unchanged.
+
+Upstream-Status: Pending [IQ-8275 10/100/1000 validated; not submitted]
+Signed-off-by: Thomas Karpiniec <tom.karpiniec@outlook.com>
+---
+diff --git a/drivers/net/ethernet/stmicro/stmmac/dwmac-qcom-ethqos.c b/drivers/net/ethernet/stmicro/stmmac/dwmac-qcom-ethqos.c
+index 59fa877..1c9362e 100644
+--- a/drivers/net/ethernet/stmicro/stmmac/dwmac-qcom-ethqos.c
++++ b/drivers/net/ethernet/stmicro/stmmac/dwmac-qcom-ethqos.c
+@@ -657,6 +657,27 @@ static void ethqos_pcs_set_inband(struct qcom_ethqos *ethqos, bool enable)
+ 	stmmac_pcs_ctrl_ane(priv, enable, 0);
+ }
+ 
++static void ethqos_get_interfaces_serdes(struct stmmac_priv *priv, void *bsp_priv,
++					 unsigned long *interfaces)
++{
++	struct qcom_ethqos *ethqos = bsp_priv;
++
++	__set_bit(priv->plat->phy_interface, interfaces);
++	if (!ethqos->serdes_phy)
++		return;
++
++	/* PHYs such as QCA8081 switch between SGMII and 2500BASE-X with
++	 * the negotiated copper speed. mac_finish reconfigures the SerDes
++	 * accordingly; let phylink validate all modes that path supports.
++	 */
++	if (!phy_validate(ethqos->serdes_phy, PHY_MODE_ETHERNET,
++			  PHY_INTERFACE_MODE_SGMII, NULL))
++		__set_bit(PHY_INTERFACE_MODE_SGMII, interfaces);
++	if (!phy_validate(ethqos->serdes_phy, PHY_MODE_ETHERNET,
++			  PHY_INTERFACE_MODE_2500BASEX, NULL))
++		__set_bit(PHY_INTERFACE_MODE_2500BASEX, interfaces);
++}
++
+ /* On interface toggle MAC registers gets reset.
+  * Configure MAC block for SGMII on ethernet phy link up
+  */
+@@ -856,6 +877,7 @@ static int qcom_ethqos_probe(struct platform_device *pdev)
+ 		break;
+ 	case PHY_INTERFACE_MODE_2500BASEX:
+ 	case PHY_INTERFACE_MODE_SGMII:
++		plat_dat->get_interfaces = ethqos_get_interfaces_serdes;
+ 		plat_dat->fix_mac_speed = ethqos_fix_mac_speed_sgmii;
+ 		plat_dat->mac_finish = ethqos_mac_finish_serdes;
+ 		break;
