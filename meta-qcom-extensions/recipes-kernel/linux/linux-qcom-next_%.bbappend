@@ -32,6 +32,10 @@ SRC_URI:append:iq-8275-evk = " \
 # modes to phylink so autonegotiation includes 10/100/1000 as well as 2500.
 SRC_URI:append:iq-8275-evk = " file://0002-net-stmmac-qcom-ethqos-advertise-serdes-interfaces.patch"
 
+# Let phylink report a SerDes reconfiguration failure and keep carrier down
+# until a later configuration succeeds, rather than silently claiming success.
+SRC_URI:append:iq-8275-evk = " file://0003-net-stmmac-propagate-platform-mac-finish-errors.patch"
+
 # quilt edits the tracked .dtsi in place and leaves it modified in the shared
 # kernel tree. CONFIG_LOCALVERSION_AUTO is on here (default y, and no fragment
 # we merge unsets it), so setlocalversion appends -dirty to the release string
