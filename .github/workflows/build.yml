@@ -1353,12 +1353,8 @@ jobs:
           TOKEN=$(gcloud auth print-access-token)
           cd "$GITHUB_WORKSPACE/wendyos/tools/publisher"
           [[ -x "$RUNNER_TEMP/publisher" ]] || go build -o "$RUNNER_TEMP/publisher" .
-          readarray -t rows < <(jq -sc '[.[] | {device, version}] | unique_by(.device) | .[]' "${entries[@]}")
-          for row in "${rows[@]}"; do
-            DEVICE=$(jq -r .device <<<"$row")
-            VERSION=$(jq -r .version <<<"$row")
-            "$RUNNER_TEMP/publisher" --device "$DEVICE" --version "$VERSION" --pr "$PR_NUMBER" --master-manifest-only --nightly --access-token "$TOKEN" </dev/null
-          done
+          jq -s '[.[] | {device, version, nightly: true, stability}]' "${entries[@]}" > "$RUNNER_TEMP/master-updates.json"
+          "$RUNNER_TEMP/publisher" --master-manifest-batch "$RUNNER_TEMP/master-updates.json" --pr "$PR_NUMBER" --access-token "$TOKEN" </dev/null
 
   # ---------------------------------------------------------------------------
   # drivers: rebuild every add-on against the devkit this run published. A kernel
@@ -1450,12 +1446,13 @@ jobs:
           failed=0
           cd "$GITHUB_WORKSPACE/wendyos/tools/publisher"
           go build -o "$RUNNER_TEMP/publisher" .
-          # One master-manifest write per device that actually published
-          # (storage variants of a device share one device manifest, hence
-          # unique_by). Devices whose builds failed keep their previous
-          # latest pointers instead of being bumped to a version they
-          # never produced.
-          readarray -t rows < <(jq -sc '[.[] | {device, version, nightly}] | unique_by(.device) | .[]' "${entries[@]}")
+          # Collect only devices that published and pass the add-on check.
+          # Failed/held-back devices keep their previous pointers. Identical
+          # storage variants are deduplicated; conflicting rows reach the
+          # publisher's batch validation instead of silently choosing one.
+          jq -sc '[.[] | {device, version, nightly, stability}] | unique | .[]' "${entries[@]}" > "$RUNNER_TEMP/master-candidates.jsonl"
+          readarray -t rows < "$RUNNER_TEMP/master-candidates.jsonl"
+          : > "$RUNNER_TEMP/master-updates.jsonl"
           for row in "${rows[@]}"; do
             DEVICE=$(jq -r .device <<<"$row")
             VERSION=$(jq -r .version <<<"$row")
@@ -1483,15 +1480,8 @@ jobs:
               failed=1
               continue
             fi
-            ARGS=(
-              --device "$DEVICE"
-              --version "$VERSION"
-              --master-manifest-only
-              --access-token "$TOKEN"
-            )
-            if [[ "$NIGHTLY" == "true" ]]; then
-              ARGS+=(--nightly)
-            fi
-            "$RUNNER_TEMP/publisher" "${ARGS[@]}" </dev/null
+            printf '%s\n' "$row" >> "$RUNNER_TEMP/master-updates.jsonl"
           done
+          jq -s '.' "$RUNNER_TEMP/master-updates.jsonl" > "$RUNNER_TEMP/master-updates.json"
+          "$RUNNER_TEMP/publisher" --master-manifest-batch "$RUNNER_TEMP/master-updates.json" --access-token "$TOKEN" </dev/null
           exit "$failed"

@@ -7,11 +7,13 @@ on:
   pull_request:
     paths:
       - 'tools/publisher/**'
+      - '.github/workflows/build.yml'
       - '.github/workflows/publisher-ci.yml'
   push:
     branches: [main]
     paths:
       - 'tools/publisher/**'
+      - '.github/workflows/build.yml'
       - '.github/workflows/publisher-ci.yml'
 
 jobs:
@@ -34,3 +36,6 @@ jobs:
 
       - name: go test
         run: go test ./...
+
+      - name: Publishing workflow tests
+        run: python3 workflow_batch_test.py
