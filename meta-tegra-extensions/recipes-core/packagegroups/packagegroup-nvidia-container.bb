@@ -8,7 +8,8 @@ inherit packagegroup
 
 # This package group is designed for L4T ${L4T_VERSION}
 # CUDA ${CUDA_VERSION}, cuDNN ${CUDNN_VERSION}, TensorRT ${TENSORRT_VERSION}
-# Version pinning is controlled in conf/distro/include/l4t-r36-4-4.conf
+# The versions come from meta-tegra itself on the blacksail tree; only the
+# wrynose fallback pins them, in conf/distro/include/l4t-r38-4-0.conf.
 
 # Based on l4t.csv analysis, these are the required NVIDIA packages:
 #
@@ -87,9 +88,9 @@ RDEPENDS:${PN} = " \
 # These provide libraries needed by DeepStream GStreamer plugins
 WENDYOS_DEEPSTREAM ?= "0"
 # NOTE: yaml-cpp is intentionally NOT listed here. The DeepStream package
-# (deepstream-8.0 on blacksail / deepstream-7.1 on scarthgap, installed via
-# tegra-image.inc when DEEPSTREAM=1) links libyaml-cpp.so.0.x and DEPENDS the
-# matching yaml-cpp recipe, so its automatic shlib RDEPENDS pulls the
+# (deepstream-8.0, installed via tegra-image.inc when DEEPSTREAM=1) links
+# libyaml-cpp.so.0.x and DEPENDS the matching yaml-cpp recipe, so its
+# automatic shlib RDEPENDS pulls the
 # (debian-renamed) libyaml-cpp package into the image. A packagegroup can't
 # RDEPEND that renamed name itself — with no build-time dep here, bitbake
 # fails to resolve it at graph time ("Nothing RPROVIDES libyaml-cpp").

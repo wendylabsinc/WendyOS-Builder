@@ -14,9 +14,9 @@ DL_DIR = "${TOPDIR}/../downloads"
 # BB_FETCH_PREMIRRORONLY), so bitbake still falls back to the upstream SRC_URI.
 PREMIRRORS:prepend = "${@'git://github.com/raspberrypi/linux.* file:///opt/source-mirror/ \n' if os.path.isdir('/opt/source-mirror') else ''}"
 # sstate-cache is partitioned per layer tree so cross-series builds (e.g.
-# scarthgap Orin and wrynose Thor on the same workspace) don't share
-# signatures or accidentally collide. Downloads stay shared — source
-# tarballs are keyed by URL/checksum and reusable across series.
+# blacksail and wrynose on the same workspace) don't share signatures or
+# accidentally collide. Downloads stay shared — source tarballs are keyed by
+# URL/checksum and reusable across series.
 SSTATE_DIR = "${TOPDIR}/../sstate-cache/${WENDYOS_LAYER_TREE}"
 #TMPDIR = "${TOPDIR}/tmp"
 DISTRO = "wendyos"
@@ -34,6 +34,14 @@ BB_DISKMON_DIRS ??= "\
     HALT,${SSTATE_DIR},100M,1K \
     HALT,/tmp,10M,1K"
 
+# Limit BitBake and make parallelism to keep memory usage within the 16 GiB CI job.
+# Keep both values explicit because the build Makefile does not pass them through.
+BB_NUMBER_THREADS ?= "8"
+PARALLEL_MAKE ?= "-j 8"
+
+# Limit zstd compression threads to avoid excessive memory usage in CI.
+ZSTD_THREADS ?= "8"
+
 # Per-recipe parallelism caps for the heavy native C++ compiles. The self-hosted
 # builder runs each job in a container with a hard 16 GiB memory cgroup
 # (MemoryMax=16G / MemoryHigh=14G, see wendylabsinc/ci); uncapped, these natives
@@ -48,7 +56,8 @@ BB_DISKMON_DIRS ??= "\
 # build under cmake/ninja, which honours PARALLEL_MAKE via
 # CMAKE_BUILD_PARALLEL_LEVEL (cmake.bbclass).
 PARALLEL_MAKE:pn-llvm-native = "-j 4"
-PARALLEL_MAKE:pn-grpc-native = "-j 16"
+# 16 would outrank the global pin above: OVERRIDES carries pn-${PN}.
+PARALLEL_MAKE:pn-grpc-native = "-j 4"
 PARALLEL_MAKE:pn-clang-native = "-j 4"
 
 PACKAGECONFIG:append:pn-qemu-system-native = " sdl"

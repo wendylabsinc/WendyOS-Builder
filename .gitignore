@@ -5,3 +5,6 @@ __pycache__/
 *.py[cod]
 
 docs/superpowers
+
+# Go names the output after its directory; CI builds the publisher from source.
+/tools/publisher/publisher

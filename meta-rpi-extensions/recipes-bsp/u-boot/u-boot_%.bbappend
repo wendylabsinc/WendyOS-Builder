@@ -29,16 +29,10 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
 # See docs/docs-ext/rpi5-nvme.md.
 #
 # No gating needed beyond the machine overrides:
-#   - rpi3 / rpi4 are raspberrypi3 / raspberrypi4 machines (U-Boot 2025.04 via
-#     meta-lts-mixins), so the :raspberrypi5* overrides are inert on them, and
-#     the wildcard filename matches their recipe (NO dangling append -- a
-#     version-pinned u-boot_2026.04.bbappend would dangle on those builds).
-#
-# CAVEAT (restored with the fleet-wide rc4): a raspberrypi5 machine on a
-# U-Boot != 2026.04 recipe (the deletable rpi5-*-scarthgap fallback boards,
-# U-Boot 2025.04) would get rc4 forced onto the wrong source. Those boards are
-# NOT in the CI matrix; if one ever needs to build, move these overrides into
-# a blacksail-only include rather than gating here.
+#   - rpi3 / rpi4 are raspberrypi3 / raspberrypi4 machines, so the
+#     :raspberrypi5* overrides are inert on them, and the wildcard filename
+#     matches their recipe (NO dangling append -- a version-pinned
+#     u-boot_2026.04.bbappend would dangle on those builds).
 #
 # Repin rc4 -> v2026.07 stable when it ships (due ~early July 2026), drop the
 # DMA patch once the BCM2712 NVMe fix is upstream, and re-evaluate sd-boot.cfg

@@ -180,6 +180,24 @@ EOF
     fi
 }
 
+# Fetch the L4T kit purely to get tools/gen_uefi_keys_dts.sh, which converts the
+# ESL files above into UefiDefaultSecurityKeys.dts.
+#
+# The L4T version below is STALE (the fleet is r39.2 / JetPack 7.2) but INERT.
+# Nothing in a build reaches this code: the script is run by hand, and the DTS it
+# produces is committed under ../recipes-bsp/uefi/files/, which is what the build
+# consumes. The version does not affect the output either — the DTS is a plain
+# device-tree overlay (PKDefault, KEKDefault, dbDefault), and meta-tegra's
+# tegra-uefi-keys-dtb.bb compiles it with a bare `dtc`, so no BSP version is
+# encoded in it. r39.2 meta-tegra still documents the same generator and the same
+# two filenames, and capsule updates are validated on r39.2 hardware against a DTS
+# this r36 kit generated.
+#
+# So do not treat this as a live bug. It matters only when someone regenerates the
+# DTS, and then the whole helper wants a pass: the version is hardcoded three
+# times, the URL uses the old lowercase form, and the build already downloads this
+# exact tarball (see meta-tegra's tegra-flashtools recipe). Tracked in the
+# backlog under Housekeeping.
 download_bsp_tools() {
     local version="36.4.4"
     local major="${version%%.*}"

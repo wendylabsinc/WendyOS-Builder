@@ -1,9 +1,15 @@
 FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
 
+require ${@'recipes-kernel/linux/game-controller.inc' if d.getVar('WENDYOS_GAME_CONTROLLER') == '1' else ''}
+
 SRC_URI:append:x86-wendyos = " \
     file://x86-nuc-drivers.cfg \
     file://x86-kernel.cfg \
     "
+
+# TPM 2.0 kernel drivers, only when the TPM stack is enabled (WENDYOS_ENABLE_TPM).
+# See conf/template/include/local/x86.inc and docs/plans/x86-security.md.
+SRC_URI:append:x86-wendyos = "${@bb.utils.contains('WENDYOS_ENABLE_TPM', '1', ' file://x86-tpm.cfg', '', d)}"
 
 # Debug-only kernel config fragments, kept out of normal images and added to the
 # kernel build only when WENDYOS_DEBUG=1. netconsole streams the kernel log over

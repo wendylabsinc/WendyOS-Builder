@@ -52,6 +52,12 @@ type ManifestEntry struct {
 	SBOMPath     string `json:"sbom_path,omitempty"`
 	SBOMSize     int64  `json:"sbom_size,omitempty"`
 	SBOMChecksum string `json:"sbom_checksum,omitempty"`
+
+	// Driver add-ons uploaded with this build, carried through verbatim.
+	Extensions []ExtensionMetadata `json:"extensions,omitempty"`
+
+	// Devkit is carried through to the per-version manifest record verbatim.
+	Devkit *DevkitMetadata `json:"devkit,omitempty"`
 }
 
 func (e *ManifestEntry) validate() error {
@@ -69,8 +75,8 @@ func (e *ManifestEntry) validate() error {
 	if e.Storage != "" && e.Storage != "nvme" && e.Storage != "sd" && e.Storage != "emmc" {
 		return fmt.Errorf("invalid storage %q: must be nvme, sd, or emmc", e.Storage)
 	}
-	if e.FilePath == "" && e.OTAUpdatePath == "" && e.RecoveryPath == "" && e.FlashpackPath == "" {
-		return fmt.Errorf("entry contains no files - at least one OS image, OTA update, recovery file, or flashpack is required")
+	if e.FilePath == "" && e.OTAUpdatePath == "" && e.RecoveryPath == "" && e.FlashpackPath == "" && len(e.Extensions) == 0 {
+		return fmt.Errorf("entry contains no files - at least one OS image, OTA update, recovery file, flashpack, or driver add-on is required")
 	}
 	return nil
 }

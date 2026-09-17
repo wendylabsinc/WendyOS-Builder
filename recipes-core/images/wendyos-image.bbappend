@@ -19,8 +19,8 @@ tegraflash_custom_post:append() {
     # Replace placeholders in external-flash.xml.in (NVMe machines only).
     # APPFILE/APPFILE_b must match the actual rootfs filename in the
     # bundle, which is governed by IMAGE_TEGRAFLASH_FS_TYPE (default
-    # "ext4.simg" — sparse). Hardcoding ".ext4" here was a latent bug:
-    # scarthgap's flash.sh auto-handled the mismatch, but r38.4.x's new
+    # "ext4.simg" — sparse). Hardcoding ".ext4" here was a latent bug: the
+    # older flash.sh auto-handled the mismatch, but r38.4.x's new
     # unified-flash flow (create_l4t_bsp_images.py) does a literal
     # shutil.move on the XML-referenced filename and fails ENOENT.
     if [ -f "external-flash.xml.in" ]; then

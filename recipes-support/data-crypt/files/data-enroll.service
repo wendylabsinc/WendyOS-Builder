@@ -1,0 +1,21 @@
+[Unit]
+Description=First-boot LUKS2 + TPM enrollment for /data
+# Runs before the boot-time unlock and is pulled in by it (10-enroll.conf drop-in
+# on systemd-cryptsetup@data.service Requires this unit). DefaultDependencies=no so
+# it can run in the early cryptsetup phase; it only needs the data partition node
+# and udev. Idempotent -- a no-op on every boot after enrollment.
+DefaultDependencies=no
+Conflicts=shutdown.target
+Before=shutdown.target
+After=systemd-udevd.service
+Wants=dev-disk-by\x2dpartlabel-data.device
+After=dev-disk-by\x2dpartlabel-data.device
+Before=systemd-cryptsetup@data.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# First boot does a partition grow + luksFormat + mkfs + two enrollments; bound so a
+# wedged step fails rather than stalling boot.
+TimeoutStartSec=300
+ExecStart=/usr/sbin/data-enroll.sh

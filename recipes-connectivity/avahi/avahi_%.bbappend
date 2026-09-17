@@ -13,7 +13,7 @@ SRC_URI += " \
 # Use :append, NOT += : the recipe sets PACKAGECONFIG with a weak default
 # (??=), and += is an immediate assignment that DISCARDS that default
 # entirely (??= only applies if the var is otherwise unset). On avahi 0.8
-# (scarthgap/wrynose) the default was just "dbus", so += was harmless. But
+# (wrynose) the default was just "dbus", so += was harmless. But
 # avahi 0.9 (blacksail) added "systemd" to the default AND gates installing
 # avahi-daemon.service on PACKAGECONFIG[systemd]; += "dbus" wiped systemd,
 # so the unit was never installed while SYSTEMD_SERVICE still referenced it
@@ -113,6 +113,8 @@ FILES:${PN}-wendyos-hostname = " \
     "
 
 RDEPENDS:${PN}-wendyos-hostname = "bash iproute2 systemd avahi-daemon"
+# generate-hostname.sh sources the shared lib shipped by wendyos-identity.
+RDEPENDS:${PN}-wendyos-hostname += "wendyos-identity"
 SYSTEMD_SERVICE:${PN}-wendyos-hostname = "wendyos-hostname.service"
 SYSTEMD_AUTO_ENABLE:${PN}-wendyos-hostname = "enable"
 

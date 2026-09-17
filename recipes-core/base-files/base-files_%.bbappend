@@ -8,6 +8,7 @@ SRC_URI += " \
     file://issue \
     file://issue.net \
     file://sysctl.d/99-quiet-console.conf \
+    file://sysctl.d/99-tiocsti.conf \
     "
 
 do_install:append() {
@@ -25,6 +26,10 @@ do_install:append() {
     install -d ${D}${sysconfdir}/sysctl.d
     install -m 0644 ${UNPACKDIR}/sysctl.d/99-quiet-console.conf ${D}${sysconfdir}/sysctl.d/
 
+    # Deny the legacy TIOCSTI ioctl to unprivileged callers. Required by
+    # shadow >= 4.20.0 for su(1) to keep a controlling terminal; see the file.
+    install -m 0644 ${UNPACKDIR}/sysctl.d/99-tiocsti.conf ${D}${sysconfdir}/sysctl.d/
+
     # Suppress the upstream Poky /etc/motd disclaimer.
     # Dynamic MOTD comes from update-motd via /etc/profile.d/motd.sh
     # (see recipes-core/wendyos-motd).
@@ -41,3 +46,9 @@ require ${@'rpi-base-files.inc' if 'rpi' in d.getVar('MACHINEOVERRIDES').split('
 
 # x86 A/B fstab — isolated so other boards are unaffected
 require ${@'x86-base-files.inc' if 'x86-wendyos' in d.getVar('MACHINEOVERRIDES').split(':') else ''}
+
+# VM A/B fstab — isolated so other boards are unaffected
+require ${@'vm-base-files.inc' if 'vm-wendyos' in d.getVar('MACHINEOVERRIDES').split(':') else ''}
+
+# Dragonwing A/B fstab — isolated so other boards are unaffected
+require ${@'qcom-base-files.inc' if 'qcom-wendyos' in d.getVar('MACHINEOVERRIDES').split(':') else ''}

@@ -1,0 +1,40 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-FileCopyrightText: Copyright (c) 2025, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+// Jetson device-tree overlay for the fTPM driver (tegra264 / Thor).
+//
+// WendyOS: derived from NVIDIA's t264-public-dts.git overlay/tegra264-ftpm.dts
+// (SRCREV 664a726551f62958a5a57b6538be01b9a62cd178, branch l4t/l4t-r39.2).
+// Two deliberate differences from the NVIDIA original:
+//
+//   1. status "disabled" -> "okay". NVIDIA ships the node disabled. With it
+//      enabled, the in-tree tpm_ftpm_tee driver binds the microsoft,ftpm node
+//      and exposes /dev/tpmrm0. The fTPM Trusted Application is already built
+//      into our OP-TEE (OPTEE_ENABLE_FTPM:tegra264 = "1"), so no firmware
+//      rebuild is needed -- only this Linux-side device-tree node was missing.
+//
+//   2. dropped the "/plugin/;" directive to match the tree's working
+//      boot-priority.dtso. Both this and boot-priority merge by target-path,
+//      not by cross-tree &phandle reference, so /plugin/; (which only enables
+//      label/symbol resolution) is unnecessary. The L4T boot-control overlay
+//      applicator consumes the literal fragment@/target-path form.
+
+/dts-v1/;
+/ {
+    overlay-name = "fTPM driver overlay";
+    compatible = "nvidia,tegra264";
+
+    fragment@0 {
+        target-path = "/";
+        board_config {
+            sw-modules = "kernel";
+        };
+        __overlay__ {
+            firmware {
+                ftpm {
+                    compatible = "microsoft,ftpm";
+                    status = "okay";
+                };
+            };
+        };
+    };
+};
