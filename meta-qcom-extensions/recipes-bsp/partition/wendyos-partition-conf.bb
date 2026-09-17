@@ -14,7 +14,7 @@ DEPENDS = "qcom-ptool-native"
 
 inherit deploy
 
-COMPATIBLE_MACHINE = "iq-8275-evk-wendyos"
+COMPATIBLE_MACHINE = "qcom-wendyos"
 
 # The GPT is machine-specific: slot sizes come from WENDYOS_ROOTFS_SIZE_KB and it
 # deploys under ${MACHINE}. Not allarch, or one machine's layout would be reused

@@ -74,4 +74,4 @@ WENDYOS_QCOM_NPU_INSTALL = " \
     "
 RDEPENDS:${PN} += "${@d.getVar('WENDYOS_QCOM_NPU_INSTALL') if d.getVar('WENDYOS_QCOM_NPU') == '1' else ''}"
 
-COMPATIBLE_MACHINE = "iq-8275-evk-wendyos"
+COMPATIBLE_MACHINE = "qcom-wendyos"

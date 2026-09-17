@@ -86,7 +86,7 @@ printf '%s\n' "$BODY" | grep -qF '/boot/Image'
 check $? "loads /boot/Image from inside the rootfs slot"
 
 ! printf '%s\n' "$BODY" | grep -qF 'ttyS0'
-check $? "no ttyS0 reference (this board's console is ttyMSM0)"
+check $? "no ttyS0 reference (the Dragonwing console is ttyMSM0)"
 
 printf '%s\n' "$BODY" | grep -qF 'ttyMSM0'
 check $? "console is ttyMSM0"
