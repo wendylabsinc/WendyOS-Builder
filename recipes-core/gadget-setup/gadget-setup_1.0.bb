@@ -13,17 +13,26 @@ SRC_URI = " \
     file://90-usb0-up.rules \
     file://99-usb-gadget-udc.rules \
     file://usb0-force-up \
+    file://usbgadget-unbind \
     "
 S = "${UNPACKDIR}"
 
 inherit systemd
 
+# A board with multiple peripheral-capable sockets must select its gadget UDC.
+WENDYOS_USB_UDC ?= ""
+PACKAGE_ARCH = "${MACHINE_ARCH}"
+
 do_install() {
+    install -d ${D}${sysconfdir}/default
+    printf 'GADGET_UDC="%s"\n' '${WENDYOS_USB_UDC}' > ${D}${sysconfdir}/default/gadget-setup
+
     install -d ${D}${sbindir}
     install -m 0755 ${UNPACKDIR}/gadget-setup.sh ${D}${sbindir}/gadget-setup.sh
 
     install -d ${D}${libexecdir}
     install -m 0755 ${UNPACKDIR}/usb0-force-up ${D}${libexecdir}/usb0-force-up
+    install -m 0755 ${UNPACKDIR}/usbgadget-unbind ${D}${libexecdir}/usbgadget-unbind
 
     install -d ${D}${systemd_system_unitdir}
     install -m 0644 ${UNPACKDIR}/gadget-setup.service ${D}${systemd_system_unitdir}/gadget-setup.service
@@ -42,6 +51,7 @@ RDEPENDS:${PN} += "bash udev kmod iproute2 systemd"
 FILES:${PN} += " \
     ${sbindir}/gadget-setup.sh \
     ${libexecdir}/usb0-force-up \
+    ${libexecdir}/usbgadget-unbind \
     ${systemd_system_unitdir}/gadget-setup.service \
     ${systemd_system_unitdir}/wendyos-usbgadget-unbind.service \
     ${sysconfdir}/udev/rules.d/90-usb0-up.rules \

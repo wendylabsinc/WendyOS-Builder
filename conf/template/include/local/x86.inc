@@ -17,12 +17,13 @@ WENDYOS_NVIDIA_DGPU ?= "1"
 # parallelism pin now applied to every board in common.inc. Measured here: a full
 # cold image build peaks ~13 GiB anon under that pin, no OOM.
 
-# LUKS2 encryption of /data, sealed to the TPM. Default ON.
-# Set WENDYOS_DATA_ENCRYPTED = "0" in local.conf for a plain-ext4 /data.
+# LUKS2 encryption of /data, sealed to the TPM. Default OFF: an image that
+# assumes LUKS leaves an already-provisioned plaintext /data unmounted, and
+# there is no in-place migration yet. Set = "1" in local.conf to build it.
 # Gates the TPM/LUKS userspace, the first-boot enroll service (data-crypt),
 # systemd's cryptsetup support, and the fstab/mount rewiring. Jetson has the
 # same knob in local/tegra-t264.inc / tegra-t234.inc.
-WENDYOS_DATA_ENCRYPTED ?= "1"
+WENDYOS_DATA_ENCRYPTED ?= "0"
 
 # Master gate for the TPM 2.0 stack itself: the kernel TPM drivers
 # (x86-tpm.cfg), systemd's tpm2 support, and the tpm2 DISTRO feature below.

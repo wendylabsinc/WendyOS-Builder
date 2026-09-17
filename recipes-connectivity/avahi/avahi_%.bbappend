@@ -113,6 +113,8 @@ FILES:${PN}-wendyos-hostname = " \
     "
 
 RDEPENDS:${PN}-wendyos-hostname = "bash iproute2 systemd avahi-daemon"
+# generate-hostname.sh sources the shared lib shipped by wendyos-identity.
+RDEPENDS:${PN}-wendyos-hostname += "wendyos-identity"
 SYSTEMD_SERVICE:${PN}-wendyos-hostname = "wendyos-hostname.service"
 SYSTEMD_AUTO_ENABLE:${PN}-wendyos-hostname = "enable"
 

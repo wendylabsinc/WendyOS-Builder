@@ -71,6 +71,7 @@ meta-tegra-community:SRCREV_TEGRA_COMM
 meta-virtualization:SRCREV_VIRT
 meta-raspberrypi:SRCREV_RPI
 meta-security:SRCREV_SECURITY
+meta-qcom:SRCREV_QCOM
 "
 
 MATRIX="$(mktemp)"

@@ -1,5 +1,7 @@
 FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
 
+require ${@'recipes-kernel/linux/game-controller.inc' if d.getVar('WENDYOS_GAME_CONTROLLER') == '1' else ''}
+
 SRC_URI:append:x86-wendyos = " \
     file://x86-nuc-drivers.cfg \
     file://x86-kernel.cfg \

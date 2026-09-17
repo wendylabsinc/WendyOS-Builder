@@ -72,42 +72,6 @@ GADGET_FUNC_ORDER="${GADGET_FUNC_ORDER:-ncm ecm}"
 GADGET_NAME="wendyos_device"
 GADGET_DIR="/sys/kernel/config/usb_gadget/${GADGET_NAME}"
 
-### Detect USB controller ###
-
-USB_VERSION="0x0200"
-USB_CONTROLLER="unknown"
-if lsmod | grep -q "^tegra_xudc " || find /sys/class/udc -name "*tegra*" -type l 2>/dev/null | grep -q tegra; then
-    USB_VERSION="0x0320"; USB_CONTROLLER="tegra-xudc"
-    log_info "Detected tegra-xudc — USB 3.2 mode"
-elif lsmod | grep -q "^dwc3 " || find /sys/class/udc -name "*dwc3*" -type l 2>/dev/null | grep -q dwc3; then
-    USB_VERSION="0x0300"; USB_CONTROLLER="dwc3"
-    log_info "Detected dwc3 — USB 3.0 mode"
-elif lsmod | grep -q "^dwc2 " || find /sys/class/udc -name "*dwc2*" -type l 2>/dev/null | grep -q dwc2; then
-    USB_VERSION="0x0200"; USB_CONTROLLER="dwc2"
-    log_info "Detected dwc2 — USB 2.0 mode"
-else
-    log_info "No specific USB controller detected — defaulting to USB 2.0"
-fi
-log_info "USB controller: $USB_CONTROLLER, version: $USB_VERSION"
-
-### Configure USB Gadget ###
-
-# Clean previous gadget if any (configfs requires strict reverse-order teardown)
-if [ -d "$GADGET_DIR" ]; then
-    echo "" > "$GADGET_DIR/UDC" 2>/dev/null || true
-    sleep 0.5  # allow UDC driver to complete async unbind before dismantling
-    # Unlink function symlinks from configs before removing anything
-    find "$GADGET_DIR/configs" -mindepth 2 -maxdepth 2 -type l -exec rm {} \; 2>/dev/null || true
-    # Remove function directories
-    find "$GADGET_DIR/functions" -mindepth 1 -maxdepth 1 -type d -exec rmdir {} \; 2>/dev/null || true
-    # Remove config string dirs, then config dirs
-    find "$GADGET_DIR/configs" -mindepth 2 -maxdepth 2 -type d -exec rmdir {} \; 2>/dev/null || true
-    find "$GADGET_DIR/configs" -mindepth 1 -maxdepth 1 -type d -exec rmdir {} \; 2>/dev/null || true
-    # Remove gadget string dirs, then the gadget itself
-    find "$GADGET_DIR/strings" -mindepth 1 -maxdepth 1 -type d -exec rmdir {} \; 2>/dev/null || true
-    rmdir "$GADGET_DIR" 2>/dev/null || true
-fi
-
 # Mount configfs and load modules
 mountpoint -q /sys/kernel/config || mount -t configfs none /sys/kernel/config
 depmod -a || true
@@ -116,6 +80,118 @@ modprobe -q u_ether || true
 modprobe -q usb_f_ncm || true
 modprobe -q usb_f_ecm || true
 modprobe -q usb_f_acm || true
+
+# The unit passes this via EnvironmentFile; a hand-run has to read it itself.
+if [ -z "${GADGET_UDC:-}" ] && [ -r /etc/default/gadget-setup ]; then
+    . /etc/default/gadget-setup
+fi
+
+### Detect USB controller ###
+
+# The UDC has to exist before the controller can be identified, so wait for it
+# here rather than just before binding. /sys/class/udc is populated when the
+# controller driver probes, which does not depend on the gadget framework.
+#
+# Wait for the board's selected UDC, or any UDC on single-controller boards.
+# Never fall back to another socket when an explicit controller is configured.
+UDC=""
+for _ in $(seq 60); do
+    if [ -n "${GADGET_UDC:-}" ]; then
+        if [ -e "/sys/class/udc/$GADGET_UDC" ]; then
+            UDC="$GADGET_UDC"
+        fi
+    else
+        UDC=$(ls /sys/class/udc 2>/dev/null | head -n1) || true
+    fi
+
+    if [ -n "$UDC" ]; then
+        break
+    fi
+
+    sleep 1
+done
+
+[ -n "$UDC" ] || {
+    udc_present=$(ls /sys/class/udc 2>/dev/null | tr '\n' ' ' || true)
+    log_error "UDC timeout after 60 s (requested: ${GADGET_UDC:-any}; present: ${udc_present:-none})"
+    exit 1
+}
+
+log_info "Found UDC: $UDC"
+
+if [ -z "${GADGET_UDC:-}" ] && [ "$(ls /sys/class/udc 2>/dev/null | wc -l)" -gt 1 ]; then
+    log_warning "Multiple UDCs present and no GADGET_UDC configured; using $UDC"
+fi
+
+# Identify the controller from the driver actually bound to the UDC.
+#
+# Do NOT infer it from the UDC's name, and do NOT use lsmod. The UDC is named
+# after its device-tree node (1000480000.usb, a600000.usb, 3550000.xudc) and
+# never after the driver -- udc-core does
+#     dev_set_name(&udc->dev, "%s", kobject_name(&gadget->dev.parent->kobj))
+# -- so a "*dwc3*" style name match can never succeed on a device-tree board.
+# And a controller built into the kernel (=y) never shows up in lsmod.
+#
+# The bcdUSB written below is advisory: libcomposite overwrites it from the
+# negotiated gadget speed on every enumeration.
+#
+# Driver names are the platform_driver .name strings: "dwc2" (dwc2/platform.c),
+# "dwc3" (dwc3/core.c), "tegra-xudc" (gadget/udc/tegra-xudc.c). On Qualcomm the
+# glue driver binds the device itself -- dwc3_qcom_probe() sets qcom->dwc.dev
+# to that same device and calls dwc3_core_probe() on it, so the driver bound to
+# the UDC's parent is named "dwc3-qcom", not "dwc3". Hence the prefix globs
+# rather than exact names.
+USB_VERSION="0x0200"
+USB_CONTROLLER="unknown"
+USB_DRIVER=""
+if [ -e "/sys/class/udc/${UDC}/device/driver" ]; then
+    USB_DRIVER=$(basename "$(readlink -f "/sys/class/udc/${UDC}/device/driver")")
+fi
+
+case "$USB_DRIVER" in
+    *xudc*)
+        USB_VERSION="0x0320"
+        USB_CONTROLLER="tegra-xudc"
+        log_info "Detected tegra-xudc — USB 3.2 mode"
+        ;;
+    dwc3*)
+        USB_VERSION="0x0300"
+        USB_CONTROLLER="dwc3"
+        log_info "Detected dwc3 — USB 3.0 mode"
+        ;;
+    dwc2*)
+        USB_VERSION="0x0200"
+        USB_CONTROLLER="dwc2"
+        log_info "Detected dwc2 — USB 2.0 mode"
+        ;;
+    *)
+        log_info "Unrecognised UDC driver '${USB_DRIVER:-none}' on ${UDC} — defaulting to USB 2.0"
+        ;;
+esac
+
+log_info "USB controller: $USB_CONTROLLER, version: $USB_VERSION"
+
+### Configure USB Gadget ###
+
+# Clean previous gadget if any (configfs requires strict reverse-order teardown)
+if [ -d "$GADGET_DIR" ]; then
+    echo "" > "$GADGET_DIR/UDC" 2>/dev/null || true
+    sleep 0.5  # allow UDC driver to complete async unbind before dismantling
+
+    # Unlink function symlinks from configs before removing anything
+    find "$GADGET_DIR/configs" -mindepth 2 -maxdepth 2 -type l -exec rm {} \; 2>/dev/null || true
+
+    # Remove function directories
+    find "$GADGET_DIR/functions" -mindepth 1 -maxdepth 1 -type d -exec rmdir {} \; 2>/dev/null || true
+
+    # Remove config string dirs, then config dirs
+    find "$GADGET_DIR/configs" -mindepth 3 -maxdepth 3 -type d -exec rmdir {} \; 2>/dev/null || true
+    find "$GADGET_DIR/configs" -mindepth 1 -maxdepth 1 -type d -exec rmdir {} \; 2>/dev/null || true
+
+    # Remove gadget string dirs, then the gadget itself
+    find "$GADGET_DIR/strings" -mindepth 1 -maxdepth 1 -type d -exec rmdir {} \; 2>/dev/null || true
+    rmdir "$GADGET_DIR" 2>/dev/null || true
+fi
 
 mkdir -p "$GADGET_DIR"
 cd "$GADGET_DIR" || { log_error "Cannot cd to $GADGET_DIR"; exit 1; }
@@ -132,13 +208,17 @@ echo 0x01 > bDeviceProtocol   # Interface Association Descriptor
 
 mkdir -p configs/c.1/strings/0x409
 
-# Power attributes — controller-specific
-if [ "$USB_CONTROLLER" = "dwc2" ]; then
-    echo 0x80 > configs/c.1/bmAttributes  # Bus-powered
-    echo 250  > configs/c.1/MaxPower
-else
-    echo 0xC0 > configs/c.1/bmAttributes  # Self-powered
-fi
+# Power attributes. How a board is powered is a property of the board, not of
+# its USB controller. Every board that runs this gadget (Jetson, RPi4, RPi5,
+# IQ-8275) has its own supply, so the gadget is self-powered on all of them.
+#
+# This used to be keyed on the dwc2 controller, standing in for an OTG board
+# powered from the host. The test never actually fired: dwc2 is built in on RPi
+# (CONFIG_USB_DWC2=y in bcm2711_defconfig and bcm2712_defconfig), so detection
+# fell through and every board got 0xC0 anyway. Now that detection works, that
+# condition would start telling hosts an RPi draws 500 mA from the bus, which is
+# not true of a board on its own PSU.
+echo 0xC0 > configs/c.1/bmAttributes  # Self-powered
 
 mkdir -p strings/0x409
 echo "$USB_SERIAL"  > strings/0x409/serialnumber
@@ -187,24 +267,15 @@ mkdir -p functions/acm.usb0
 ln -sf functions/acm.usb0 configs/c.1/
 log_info "ACM serial function configured (/dev/ttyGS0)"
 
-# Wait for a UDC to appear (up to 60 s)
-UDC=""
-for i in $(seq 60); do
-    UDC=$(ls /sys/class/udc 2>/dev/null | head -n1) || true
-    if [ -n "$UDC" ]; then
-        break
-    fi
-    sleep 1
-done
-[ -n "$UDC" ] || { log_error "UDC timeout after 60 s"; exit 1; }
-log_info "Found UDC: $UDC"
+# UDC was resolved (and waited for) during controller detection above.
 
 # Clear any previous binding before activating
 if [ -f UDC ] && [ -s UDC ]; then
     echo "" > UDC 2>/dev/null || true
     sleep 1
 fi
-echo "$UDC" > UDC
+[ -e "/sys/class/udc/$UDC" ] || { log_error "UDC $UDC disappeared before bind"; exit 1; }
+echo "$UDC" > UDC || { log_error "Failed to bind gadget to $UDC"; exit 1; }
 log_info "UDC activated: $UDC"
 
 # On tegra-xudc the UDC relies on a usb_phy notifier chain fed by the

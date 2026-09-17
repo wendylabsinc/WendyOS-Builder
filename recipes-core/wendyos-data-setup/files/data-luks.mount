@@ -1,5 +1,5 @@
-# Full replacement for data.mount on TPM /data-encryption builds
-# (WENDYOS_ENABLE_TPM=1), installed AS data.mount by the wendyos-data-setup
+# Full replacement for data.mount on /data-encryption builds
+# (WENDYOS_DATA_ENCRYPTED=1), installed AS data.mount by the wendyos-data-setup
 # bbappend. A drop-in cannot be used here: the base unit hard-Requires
 # wendyos-data-init.service, and per systemd.unit(5) "dependencies cannot be
 # reset to an empty list, so dependencies can only be added in drop-ins. If you

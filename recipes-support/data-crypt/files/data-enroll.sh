@@ -55,6 +55,15 @@ data_fills_disk() {
     [ "$disk_sz" -gt 0 ] && [ $((d_start + d_sz)) -ge $((disk_sz - END_SLACK)) ]
 }
 
+# True when /data carries real user data rather than a fresh partition: every
+# install path grows /data on first boot right before formatting it, so
+# "grown AND carries a filesystem" stands in for "live".
+# KNOWN GAP: a live /data that never reached the disk end reads as fresh here,
+# and is then formatted.
+data_holds_live_content() {
+    data_fills_disk && [ -n "$(lsblk -no FSTYPE "$DATA" 2>/dev/null | head -1)" ]
+}
+
 [ -b "$DATA" ] || fail "$DATA not present"
 
 # Resolve the partition/disk early: the idempotence check below needs
@@ -84,20 +93,13 @@ if cryptsetup isLuks "$DATA" 2>/dev/null; then
     wipefs -a "$DATA" || fail "wipefs of the stale LUKS header failed"
 fi
 
-# Migration guard: a non-LUKS /data that has both been grown to fill the disk
-# and carries a filesystem is a provisioned installation from a TPM-off build
-# (every install path grows /data only on its first boot, right before
-# formatting it). Encrypting it here would luksFormat over live user data, so
-# refuse loudly and leave the partition untouched -- the TPM-off -> TPM-on
-# migration story is an open topic. /data stays unmounted this boot (the LUKS
-# mount path expects /dev/mapper/data), but the data survives on disk.
-# Fresh installs are unaffected: their stock /data is small (tegra flashes it
-# empty, the x86 wic ships a 512M empty ext4), so fills-disk is false and
-# enrollment proceeds.
-# Fail CLOSED: without lsblk the command substitution below would be silently
-# empty and the guard would wave a provisioned /data through to luksFormat.
+# Refuse rather than luksFormat over a provisioned TPM-off installation. Fresh
+# installs are unaffected: their stock /data is small, so the predicate is false
+# and enrollment proceeds. /data stays unmounted this boot (the LUKS mount path
+# expects /dev/mapper/data) but the data survives on disk. Fail CLOSED if lsblk
+# is missing: the predicate would read empty and wave a provisioned /data through.
 command -v lsblk >/dev/null 2>&1 || fail "lsblk missing -- cannot run the migration guard"
-if data_fills_disk && [ -n "$(lsblk -no FSTYPE "$DATA" 2>/dev/null | head -1)" ]; then
+if data_holds_live_content; then
     announce "data-enroll REFUSING to encrypt: $DATA holds a grown filesystem from a previous (TPM-off) installation -- formatting would destroy its data. Leaving it untouched; /data will NOT mount until the device is migrated or re-flashed."
     exit 0
 fi

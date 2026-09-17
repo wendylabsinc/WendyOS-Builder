@@ -622,6 +622,7 @@ declare -a repos=(
     "1|${URL_TEGRA_COMM}||${SRCREV_TEGRA_COMM}"
     "1|${URL_VIRT}||${SRCREV_VIRT}"
     "1|${URL_RPI}||${SRCREV_RPI}"
+    "1|${URL_QCOM}||${SRCREV_QCOM}"
     "1|${URL_SECURITY}||${SRCREV_SECURITY}"
 )
 

@@ -6,6 +6,7 @@ Wants=NetworkManager.service
 
 [Service]
 Type=oneshot
+EnvironmentFile=-/etc/default/gadget-setup
 ExecStart=/usr/sbin/gadget-setup.sh
 ExecStartPost=/usr/libexec/usb0-force-up
 RemainAfterExit=yes

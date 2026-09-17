@@ -71,9 +71,10 @@ WENDYOS_EFI_DEBUG = "0"
 # recipe serves Orin (t234) and Thor (t264).
 WENDYOS_DEEPSTREAM = "1"
 
-# LUKS2 encryption of /data, sealed to the fTPM. Default ON.
-# Set WENDYOS_DATA_ENCRYPTED = "0" in local.conf for a plain-ext4 /data.
-WENDYOS_DATA_ENCRYPTED ?= "1"
+# LUKS2 encryption of /data, sealed to the fTPM. Default OFF: an image that
+# assumes LUKS leaves an already-provisioned plaintext /data unmounted, and
+# there is no in-place migration yet. Set = "1" in local.conf to build it.
+WENDYOS_DATA_ENCRYPTED ?= "0"
 
 # Master gate for the TPM 2.0 stack itself (fTPM over OP-TEE). Encrypting
 # /data needs a TPM at runtime, so it turns this on. Nothing turns encryption
