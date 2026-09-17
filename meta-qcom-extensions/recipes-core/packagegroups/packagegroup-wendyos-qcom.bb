@@ -63,15 +63,33 @@ RDEPENDS:${PN} += " systemd-mount-timesync"
 #
 # The -evk-* packages are symlinks onto the -ride-* payload; -evk-config supplies the
 # DT-model to DSP_LIBRARY_PATH mapping that offload needs.
+#
+# One -cdsp/-gdsp package per board regardless of DSP count: dsp-binaries globs
+# cdsp*/gdsp*, so a board with two of each needs no extra entry.
 WENDYOS_QCOM_NPU_INSTALL = " \
-    hexagon-dsp-binaries-qualcomm-iq8275-evk-config \
-    hexagon-dsp-binaries-qcom-iq8275-evk-adsp \
-    hexagon-dsp-binaries-qcom-iq8275-evk-cdsp \
-    hexagon-dsp-binaries-qcom-iq8275-evk-gdsp \
+    hexagon-dsp-binaries-qualcomm-${WENDYOS_QCOM_NPU_BOARD}-config \
+    hexagon-dsp-binaries-qcom-${WENDYOS_QCOM_NPU_BOARD}-adsp \
+    hexagon-dsp-binaries-qcom-${WENDYOS_QCOM_NPU_BOARD}-cdsp \
+    hexagon-dsp-binaries-qcom-${WENDYOS_QCOM_NPU_BOARD}-gdsp \
     qairt-sdk \
-    qairt-sdk-hexagon-v75 \
+    qairt-sdk-hexagon-${WENDYOS_QCOM_NPU_DSP_ARCH} \
     fastrpc-tests \
     "
 RDEPENDS:${PN} += "${@d.getVar('WENDYOS_QCOM_NPU_INSTALL') if d.getVar('WENDYOS_QCOM_NPU') == '1' else ''}"
+
+# Both mistakes are otherwise silent: an unset variable ships a package name
+# containing ${...}, and an unretargeted SoC builds green and refuses offload.
+python () {
+    if d.getVar('WENDYOS_QCOM_NPU') != '1':
+        return
+    for var in ('WENDYOS_QCOM_NPU_BOARD', 'WENDYOS_QCOM_NPU_DSP_ARCH',
+                'WENDYOS_QCOM_NPU_SOC'):
+        if not d.getVar(var):
+            bb.fatal("%s is unset; the machine conf must name it" % var)
+    soc = d.getVar('WENDYOS_QCOM_NPU_SOC')
+    if soc not in (d.getVar('WENDYOS_QCOM_DSP_SOCS') or '').split():
+        bb.fatal("WENDYOS_QCOM_NPU_SOC '%s' is not in WENDYOS_QCOM_DSP_SOCS; the "
+                 "DSP userspace would not be retargeted for it" % soc)
+}
 
 COMPATIBLE_MACHINE = "qcom-wendyos"
