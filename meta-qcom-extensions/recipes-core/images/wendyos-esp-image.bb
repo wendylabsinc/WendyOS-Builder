@@ -29,7 +29,7 @@ require conf/image-uefi.conf
 # Matches the 512 MiB "efi" partition in
 # meta-qcom-extensions/recipes-bsp/partition/files/partitions.conf.
 REQUIRED_MACHINE_FEATURES = "efi"
-COMPATIBLE_MACHINE = "iq-8275-evk-wendyos"
+COMPATIBLE_MACHINE = "qcom-wendyos"
 
 # FAT volume label "boot". Not cosmetic: qcom-wendy-fstab mounts the ESP as
 # LABEL=boot, and the wendyos-update grubenv connector REFUSES to write A/B state
