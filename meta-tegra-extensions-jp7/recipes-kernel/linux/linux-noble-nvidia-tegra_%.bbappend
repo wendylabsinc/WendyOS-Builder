@@ -25,3 +25,8 @@ SRC_URI += " \
     file://0005-crypto-algif_aead-Fix-minimum-RX-size-check-for-decryption.patch \
     file://cve-2026-46333-ptrace.patch \
     "
+
+# Driver add-ons: the board-neutral filesystem/module-signing prerequisites.
+# Kept behind the machine opt-in so other JP7 images retain their vendor kernel
+# configuration and task hashes.
+require ${@'recipes-kernel/linux/driver-extensions.inc' if d.getVar('WENDYOS_DRIVER_EXTENSIONS') == '1' else ''}

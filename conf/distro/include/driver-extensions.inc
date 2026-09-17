@@ -1,6 +1,6 @@
-# Driver add-ons (systemd-sysext). Required from wendyos.conf when
-# WENDYOS_DRIVER_EXTENSIONS == "1" on an RPi machine, so nothing here needs
-# its own gate.
+# Driver add-ons (systemd-sysext). Required from wendyos.conf when an opted-in
+# machine sets WENDYOS_DRIVER_EXTENSIONS == "1", so nothing here needs its own
+# gate.
 #
 # Pulls in the build- and image-side pieces of the merge path:
 #   - systemd's sysext support: what merges an add-on onto /usr.
