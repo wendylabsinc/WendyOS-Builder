@@ -12,7 +12,6 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PG="$ROOT/meta-qcom-extensions/recipes-core/packagegroups/packagegroup-wendyos-qcom.bb"
 BBA="$ROOT/meta-qcom-extensions/recipes-bsp/hexagon-dsp-binaries/hexagon-dsp-binaries_%.bbappend"
-MACH="$ROOT/conf/machine/iq-8275-evk-wendyos.conf"
 DISTRO="$ROOT/conf/distro/include/qcom-distro.inc"
 REPOSENV="$ROOT/scripts/upstream-repos.env"
 OECORE="$ROOT/../repos/blacksail/openembedded-core"
@@ -27,40 +26,69 @@ check() {
     fi
 }
 
-for f in "$PG" "$BBA" "$MACH" "$DISTRO" "$REPOSENV"; do
+for f in "$PG" "$BBA" "$DISTRO" "$REPOSENV"; do
     [ -f "$f" ] || { printf 'missing input: %s\n' "$f" >&2; exit 1; }
 done
 printf 'Checking the Dragonwing NPU stack\n'
 
 # A comment must never satisfy an assertion.
 strip() { grep -vE '^[[:space:]]*#' "$1"; }
-PGBODY="$(strip "$PG")"
-BBABODY="$(strip "$BBA")"
-MACHBODY="$(strip "$MACH")"
-DISTROBODY="$(strip "$DISTRO")"
 
-# --- 1. the stack is complete -----------------------------------------------
-# Read from the recipe: a restated list cannot notice a deletion.
-INSTALL="$(printf '%s\n' "$PGBODY" \
-    | sed -n '/^WENDYOS_QCOM_NPU_INSTALL/,/^[[:space:]]*"/p' \
-    | awk '$1 ~ /^[a-z0-9]/ { print $1 }')"
-n=$(printf '%s\n' "$INSTALL" | grep -c .)
-if [ "$n" -ge 7 ]; then check 0 "the install list parses ($n packages)"
-else check 1 "the install list parses (got $n packages, expected at least 7)"; fi
 
-# Anchored to a whole entry: a substring match would be satisfied by a longer name.
-has() { printf '%s\n' "$INSTALL" | grep -qx "$1"; }
-for p in \
-    qairt-sdk \
-    qairt-sdk-hexagon-v75 \
-    fastrpc-tests \
-    hexagon-dsp-binaries-qualcomm-iq8275-evk-config \
-    hexagon-dsp-binaries-qcom-iq8275-evk-adsp \
-    hexagon-dsp-binaries-qcom-iq8275-evk-cdsp \
-    hexagon-dsp-binaries-qcom-iq8275-evk-gdsp
-do
-    has "$p"
-    check $? "the stack names $p"
+# Every Dragonwing machine must be covered; a renamed conf would otherwise drop
+# out of the glob and leave the loop asserting nothing.
+machines=("$ROOT"/conf/machine/iq-*-evk-wendyos.conf)
+if [ "${#machines[@]}" -lt 2 ] || [ ! -f "${machines[0]}" ]; then
+    printf 'expected at least 2 Dragonwing machine confs, found: %s\n' \
+        "${machines[*]}" >&2
+    exit 1
+fi
+
+for MACH in "${machines[@]}"; do
+    mname="$(basename "$MACH" .conf)"
+    mbody="$(strip "$MACH")"
+    board="$(getv WENDYOS_QCOM_NPU_BOARD "$mbody")"
+    arch="$(getv WENDYOS_QCOM_NPU_DSP_ARCH "$mbody")"
+    soc="$(getv WENDYOS_QCOM_NPU_SOC "$mbody")"
+
+    if [ -n "$board" ] && [ -n "$arch" ] && [ -n "$soc" ]; then rc=0; else rc=1; fi
+    check "$rc" "$mname declares its DSP board, arch and SoC"
+
+    # An unexpanded variable becomes a package name that does not exist, which
+    # do_rootfs reports far from its cause.
+    expanded="$(printf '%s\n' "$TEMPLATE" \
+        | sed -e "s/\${WENDYOS_QCOM_NPU_BOARD}/$board/g" \
+              -e "s/\${WENDYOS_QCOM_NPU_DSP_ARCH}/$arch/g")"
+    # shellcheck disable=SC2016  # the literal '${' is what is being searched for
+    printf '%s\n' "$expanded" | grep -qF '${'
+    check $((1 - $?)) "$mname expands every variable the template uses"
+
+    # Structure alone is not enough: a swapped qualcomm-/qcom- prefix or a
+    # renamed -gdsp suffix passes every check above and surfaces only as an
+    # unresolvable package at do_rootfs.
+    want="$(printf '%s\n' \
+        "hexagon-dsp-binaries-qualcomm-$board-config" \
+        "hexagon-dsp-binaries-qcom-$board-adsp" \
+        "hexagon-dsp-binaries-qcom-$board-cdsp" \
+        "hexagon-dsp-binaries-qcom-$board-gdsp" \
+        "qairt-sdk" \
+        "qairt-sdk-hexagon-$arch" \
+        "fastrpc-tests" | sort)"
+    if [ "$(printf '%s\n' "$expanded" | sort)" = "$want" ]; then rc=0; else rc=1; fi
+    check "$rc" "$mname resolves to exactly the expected DSP package names"
+
+    # A SoC absent from the retarget list ships a userspace the firmware refuses,
+    # at runtime, with a green build.
+    if [ -n "$soc" ] && printf '%s\n' "$SOCS" | tr ' ' '\n' | grep -qx "$soc"; then
+        rc=0
+    else
+        rc=1
+    fi
+    check "$rc" "$mname's SoC (${soc:-unset}) is in WENDYOS_QCOM_DSP_SOCS"
+
+    npu="$(getv WENDYOS_QCOM_NPU "$mbody")"
+    if [ "$npu" = "1" ]; then rc=0; else rc=1; fi
+    check "$rc" "$mname has the NPU on by default"
 done
 
 # --- 2. hard dependencies, not recommendations ------------------------------
@@ -73,8 +101,6 @@ printf '%s\n' "$PGBODY" | grep -qF 'RRECOMMENDS'
 check $((1 - $?)) "and the recipe declares no RRECOMMENDS at all"
 
 # --- 3. it is in the image, not an extension --------------------------------
-printf '%s\n' "$MACHBODY" | grep -qE '^WENDYOS_QCOM_NPU[[:space:]]*\??=[[:space:]]*"1"'
-check $? "the NPU is on by default for this board"
 printf '%s\n' "$PGBODY" | grep -qF "d.getVar('WENDYOS_QCOM_NPU') == '1'"
 check $? "the install list is still gated on the knob"
 
