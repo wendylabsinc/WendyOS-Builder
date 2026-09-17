@@ -34,6 +34,53 @@ printf 'Checking the Dragonwing NPU stack\n'
 # A comment must never satisfy an assertion.
 strip() { grep -vE '^[[:space:]]*#' "$1"; }
 
+# Inline our machine includes where the require sits, so assignments read in the
+# order BitBake applies them.
+expand_conf() {
+    local line inc
+    while IFS= read -r line; do
+        case "$line" in
+        "require conf/machine/include/"*)
+            inc="$ROOT/${line#require }"
+            if [ -f "$inc" ]; then expand_conf "$inc"; else printf '%s\n' "$line"; fi
+            ;;
+        *) printf '%s\n' "$line" ;;
+        esac
+    done <"$1"
+}
+PGBODY="$(strip "$PG")"
+BBABODY="$(strip "$BBA")"
+DISTROBODY="$(strip "$DISTRO")"
+
+# --- 1. the stack is complete, and expands for every Dragonwing machine ------
+# Read the template from the recipe: a restated list cannot notice a deletion.
+TEMPLATE="$(printf '%s\n' "$PGBODY" \
+    | sed -n '/^WENDYOS_QCOM_NPU_INSTALL/,/^[[:space:]]*"/p' \
+    | awk '$1 ~ /^[a-z0-9$]/ { print $1 }')"
+n=$(printf '%s\n' "$TEMPLATE" | grep -c .)
+if [ "$n" -ge 7 ]; then check 0 "the install template parses ($n packages)"
+else check 1 "the install template parses (got $n packages, expected at least 7)"; fi
+
+# The template must be board-agnostic: a literal board name here would silently
+# install the wrong DSP userspace on the other machine.
+printf '%s\n' "$TEMPLATE" | grep -qE 'iq[0-9]+-evk|hexagon-v[0-9]+'
+check $((1 - $?)) "the template names no board or Hexagon version literally"
+
+SOCS="$(printf '%s\n' "$DISTROBODY" \
+    | sed -nE 's/^WENDYOS_QCOM_DSP_SOCS[[:space:]]*\??=[[:space:]]*"([^"]+)".*/\1/p')"
+
+# '?=' is a no-op once the variable has a value, so a last-match read would
+# report a weak default that an assignment above the require already overrode.
+getv() {
+    printf '%s\n' "$2" | awk -v v="$1" '
+        $1 == v && ($2 == "=" || $2 == "?=") {
+            if (match($0, /"[^"]*"/)) {
+                val = substr($0, RSTART + 1, RLENGTH - 2)
+                if ($2 == "=" || !set) { out = val; set = 1 }
+            }
+        }
+        END { print out }'
+}
 
 # Every Dragonwing machine must be covered; a renamed conf would otherwise drop
 # out of the glob and leave the loop asserting nothing.
@@ -46,7 +93,7 @@ fi
 
 for MACH in "${machines[@]}"; do
     mname="$(basename "$MACH" .conf)"
-    mbody="$(strip "$MACH")"
+    mbody="$(expand_conf "$MACH" | grep -vE '^[[:space:]]*#')"
     board="$(getv WENDYOS_QCOM_NPU_BOARD "$mbody")"
     arch="$(getv WENDYOS_QCOM_NPU_DSP_ARCH "$mbody")"
     soc="$(getv WENDYOS_QCOM_NPU_SOC "$mbody")"
