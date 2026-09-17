@@ -9,9 +9,9 @@
 # signatures.
 WENDYOS_QCOM_DSP_BUILD ?= "DSP.AT.1.0.1-00201-LEMANS-2"
 
-# SoC directories to retarget. Only boards this repo builds, so an upstream change to an
-# unused SoC cannot fail the build.
-WENDYOS_QCOM_DSP_SOCS ?= "qcs8300"
+# SoC directories to retarget. Distro-wide because hexagon-dsp-binaries is allarch, so
+# every SoC listed here is retargeted even when only one board is being built.
+WENDYOS_QCOM_DSP_SOCS ?= "qcs8300 sa8775p"
 
 # The linux-firmware version oe-core ships. A bump must fail the build until the DSP
 # build above has been re-checked against it.

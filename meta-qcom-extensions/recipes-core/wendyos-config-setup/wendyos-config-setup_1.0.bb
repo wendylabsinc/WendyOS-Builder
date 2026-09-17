@@ -10,7 +10,7 @@ SRC_URI = "file://wendyos-config-init.sh file://wendyos-config-init.service \
            file://config.mount"
 S = "${UNPACKDIR}"
 
-COMPATIBLE_MACHINE = "iq-8275-evk-wendyos"
+COMPATIBLE_MACHINE = "qcom-wendyos"
 
 inherit systemd
 SYSTEMD_SERVICE:${PN} = "wendyos-config-init.service config.mount"

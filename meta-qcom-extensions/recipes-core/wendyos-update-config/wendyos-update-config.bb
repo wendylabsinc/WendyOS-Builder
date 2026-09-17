@@ -11,7 +11,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda
 SRC_URI = "file://config.json"
 S = "${UNPACKDIR}"
 
-COMPATIBLE_MACHINE = "iq-8275-evk-wendyos"
+COMPATIBLE_MACHINE = "qcom-wendyos"
 
 do_install() {
     install -d ${D}${sysconfdir}/wendyos-update

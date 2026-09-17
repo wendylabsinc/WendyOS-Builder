@@ -94,18 +94,26 @@ test_thor() {
 }
 
 # Dragonwing: UFS is flashed over EDL, so the qcomflash tarball is the artifact.
-test_dragonwing_qcomflash() {
-  local d M; d=$(newdir); M=iq-8275-evk-wendyos
+# One code path serves every board here, so they share one assertion set -- a
+# per-board copy is how one of them ends up with weaker coverage.
+assert_dragonwing_qcomflash() {
+  local device=$1 M=$2 d
+  d=$(newdir)
   : >"$d/wendyos-image-$M.rootfs.qcomflash.tar.gz"
-  local out; out=$(run_resolver dragonwing-iq-8275 ufs "$M" "$d"); local rc=$?
-  assert_eq "dragonwing: exits 0" 0 "$rc"
-  assert_eq "dragonwing: kind"         qcomflash-bundle "$(field IMAGE_KIND <<<"$out")"
-  assert_eq "dragonwing: image"        "$d/wendyos-image-$M.rootfs.qcomflash.tar.gz" "$(field IMAGE_FILE <<<"$out")"
-  assert_eq "dragonwing: bmap"         false "$(field BMAP_REQUIRED <<<"$out")"
-  assert_eq "dragonwing: flashpack"    false "$(field FLASHPACK_REQUIRED <<<"$out")"
-  assert_eq "dragonwing: recovery"     false "$(field RECOVERY_EXPECTED <<<"$out")"
-  assert_eq "dragonwing: pass_storage" false "$(field PASS_STORAGE <<<"$out")"
+  local out; out=$(run_resolver "$device" ufs "$M" "$d"); local rc=$?
+  assert_eq "$device: exits 0" 0 "$rc"
+  assert_eq "$device: kind"         qcomflash-bundle "$(field IMAGE_KIND <<<"$out")"
+  assert_eq "$device: image"        "$d/wendyos-image-$M.rootfs.qcomflash.tar.gz" "$(field IMAGE_FILE <<<"$out")"
+  assert_eq "$device: bmap"         false "$(field BMAP_REQUIRED <<<"$out")"
+  assert_eq "$device: flashpack"    false "$(field FLASHPACK_REQUIRED <<<"$out")"
+  assert_eq "$device: recovery"     false "$(field RECOVERY_EXPECTED <<<"$out")"
+  assert_eq "$device: pass_storage" false "$(field PASS_STORAGE <<<"$out")"
   rm -rf "$d"
+}
+
+test_dragonwing_qcomflash() {
+  assert_dragonwing_qcomflash dragonwing-iq-8275 iq-8275-evk-wendyos
+  assert_dragonwing_qcomflash dragonwing-iq-9075 iq-9075-evk-wendyos
 }
 
 # A build that deployed no stable symlink still resolves via the versioned name.
@@ -318,6 +326,7 @@ test_matrix_coverage() {
     vm-arm64/disk
     vm-x86-64/disk
     dragonwing-iq-8275/ufs
+    dragonwing-iq-9075/ufs
   )
   local c
   for c in "${combos[@]}"; do
