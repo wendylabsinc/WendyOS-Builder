@@ -975,3 +975,137 @@ func TestCompressSeekableZstdRoundTrips(t *testing.T) {
 		t.Error("round-trip mismatch: decompressed bytes differ from original")
 	}
 }
+
+// Leaving the generic image fields empty is what stops a CLI that does not know
+// the device from resolving the bundle and offering to write it to a drive.
+// The helper has to clear a generic image path it inherits, rather than rely on
+// every caller to avoid setting one.
+func TestApplyEDLFlashBundleClearsAnInheritedImagePath(t *testing.T) {
+	meta := VersionMetadata{Path: "stale.img", SizeBytes: 999, Checksum: "stale"}
+	applyEDLFlashBundle(&meta, "dragonwing-iq-9075", "9075.qcomflash.tar.gz", 42, "sha9075")
+	if meta.Path != "" || meta.SizeBytes != 0 || meta.Checksum != "" {
+		t.Errorf("9075 kept a generic image route: path=%q size=%d sum=%q", meta.Path, meta.SizeBytes, meta.Checksum)
+	}
+	if meta.QcomflashPath != "9075.qcomflash.tar.gz" {
+		t.Errorf("QcomflashPath = %q", meta.QcomflashPath)
+	}
+
+	// The 8275 must still publish both, for CLIs that resolve it from the generic fields.
+	meta = VersionMetadata{Path: "stale.img", SizeBytes: 999, Checksum: "stale"}
+	applyEDLFlashBundle(&meta, "dragonwing-iq-8275", "8275.qcomflash.tar.gz", 7, "sha8275")
+	if meta.Path != "8275.qcomflash.tar.gz" || meta.SizeBytes != 7 || meta.Checksum != "sha8275" {
+		t.Errorf("8275 lost its generic image route: path=%q size=%d sum=%q", meta.Path, meta.SizeBytes, meta.Checksum)
+	}
+}
+
+// Promotion copies the generic image when there is one; an EDL version has none
+// and must still be promotable on the strength of its bundle.
+func TestHasPromotableImage(t *testing.T) {
+	for name, tc := range map[string]struct {
+		meta VersionMetadata
+		want bool
+	}{
+		"generic image":       {VersionMetadata{Path: "x.img"}, true},
+		"recovery flashpack":  {VersionMetadata{InstallMode: "recovery"}, true},
+		"edl bundle, no path": {VersionMetadata{InstallMode: "edl", QcomflashPath: "x.tar.gz"}, true},
+		"nothing at all":      {VersionMetadata{}, false},
+		"edl but no bundle":   {VersionMetadata{InstallMode: "edl"}, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := hasPromotableImage(tc.meta); got != tc.want {
+				t.Errorf("hasPromotableImage = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestApplyEDLFlashBundleFailsClosedForANewBoard(t *testing.T) {
+	meta := VersionMetadata{}
+	applyEDLFlashBundle(&meta, "dragonwing-iq-9075", "9075.qcomflash.tar.gz", 42, "sha9075")
+
+	if meta.InstallMode != "edl" {
+		t.Fatalf("install_mode = %q, want \"edl\"", meta.InstallMode)
+	}
+	if meta.QcomflashPath != "9075.qcomflash.tar.gz" || meta.QcomflashChecksum != "sha9075" || meta.QcomflashSizeBytes != 42 {
+		t.Fatalf("bundle not routed to its own fields: %+v", meta)
+	}
+	if meta.Path != "" || meta.Checksum != "" || meta.SizeBytes != 0 {
+		t.Fatalf("bundle published under the generic image route, which an older CLI would write to a disk: %+v", meta)
+	}
+}
+
+// The IQ-8275 shipped before the dedicated fields existed and released CLIs
+// resolve its bundle from the generic route, so it keeps both.
+func TestApplyEDLFlashBundleKeepsTheReleasedBoardResolvable(t *testing.T) {
+	meta := VersionMetadata{}
+	applyEDLFlashBundle(&meta, "dragonwing-iq-8275", "8275.qcomflash.tar.gz", 7, "sha8275")
+
+	if meta.QcomflashPath != "8275.qcomflash.tar.gz" {
+		t.Fatalf("bundle missing from its own fields: %+v", meta)
+	}
+	if meta.Path != "8275.qcomflash.tar.gz" || meta.Checksum != "sha8275" || meta.SizeBytes != 7 {
+		t.Fatalf("generic route dropped, which breaks released CLIs for a board that works today: %+v", meta)
+	}
+}
+
+func TestIsEDLFlashBundleCoversEveryDragonwing(t *testing.T) {
+	for _, d := range []string{"dragonwing-iq-8275", "dragonwing-iq-9075"} {
+		if !isEDLFlashBundle(d) {
+			t.Errorf("isEDLFlashBundle(%q) = false, want true", d)
+		}
+	}
+	for _, d := range []string{"raspberry-pi-5", "jetson-agx-thor", "generic-x86-64"} {
+		if isEDLFlashBundle(d) {
+			t.Errorf("isEDLFlashBundle(%q) = true, want false", d)
+		}
+	}
+}
+
+// The bundle is the only install artifact such a board has, so a promotion that
+// fails to copy it must stop rather than publish an uninstallable version.
+func TestValidateBundlePromotionFailsClosed(t *testing.T) {
+	src := VersionMetadata{InstallMode: "edl", QcomflashPath: "nightly/9075.qcomflash.tar.gz"}
+
+	if err := validateBundlePromotion("dragonwing-iq-9075", src, ""); err == nil {
+		t.Fatal("promotion accepted an uncopied bundle; the stable version would have no artifact")
+	}
+	if err := validateBundlePromotion("dragonwing-iq-9075", src, "stable/9075.qcomflash.tar.gz"); err != nil {
+		t.Fatalf("copied bundle rejected: %v", err)
+	}
+	if err := validateBundlePromotion("dragonwing-iq-9075", VersionMetadata{}, ""); err == nil {
+		t.Fatal("promotion accepted a nightly with no bundle at all")
+	}
+	// The released board pre-dates the dedicated field and still carries its
+	// bundle on the generic route, so its promotion must keep working.
+	if err := validateBundlePromotion("dragonwing-iq-8275", VersionMetadata{Path: "8275.qcomflash.tar.gz"}, ""); err != nil {
+		t.Fatalf("legacy-route promotion rejected: %v", err)
+	}
+	if err := validateBundlePromotion("raspberry-pi-5", VersionMetadata{}, ""); err != nil {
+		t.Fatalf("non-EDL device rejected: %v", err)
+	}
+}
+
+// What protects an already-released CLI is the JSON it receives, not the struct:
+// it resolves the generic path and refuses the version when that is empty.
+func TestEDLBundleManifestJSONGivesOlderCLIsNothingToWrite(t *testing.T) {
+	meta := VersionMetadata{}
+	applyEDLFlashBundle(&meta, "dragonwing-iq-9075", "9075.qcomflash.tar.gz", 42, "sha9075")
+
+	raw, err := json.Marshal(meta)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	for _, k := range []string{"path", "zst_path", "nvme_path", "sd_path", "emmc_path"} {
+		if v, ok := got[k]; ok && v != "" {
+			t.Fatalf("%s = %v; an older CLI resolves this and would write the bundle to a disk", k, v)
+		}
+	}
+	if got["qcomflash_path"] != "9075.qcomflash.tar.gz" || got["install_mode"] != "edl" {
+		t.Fatalf("bundle not discoverable by a CLI that does know the device: %v", got)
+	}
+}
