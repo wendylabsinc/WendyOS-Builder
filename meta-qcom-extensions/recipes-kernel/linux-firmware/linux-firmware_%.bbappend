@@ -8,9 +8,10 @@
 # last fallback -- so the real cause surfaces as the misleading
 # "git binary diffs are not supported".
 #
-# Safe here, not merely expedient: this board's firmware lives in qcom/qcs8300/
-# as real files (cdsp0.mbn, adsp.mbn, MONACO-EVK-tplg.bin) with no cdsp1.mbn and
-# no symlink into sa8775p/, so the patched file is never loaded.
+# Safe, not merely expedient: the pinned DSP userspace is authorised by the
+# UNPATCHED cdsp1.mbn this linux-firmware ships, and lemans really does load
+# qcom/sa8775p/cdsp1.mbn. Re-check with dsp-binaries' scripts/checkfw.py before
+# moving either version.
 #
 # Unconditional because this layer is only in BBLAYERS for the Dragonwing boards
 # (conf/template/include/bblayers/qcom.inc). Delete this file once SRCREV_OECORE
