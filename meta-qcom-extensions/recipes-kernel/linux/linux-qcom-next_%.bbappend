@@ -23,11 +23,15 @@ SRC_URI:append:iq-8275-evk = " \
     file://0001-arm64-dts-monaco-evk-usb-fixups.patch \
     "
 
+# The QCA8081 switches its host interface with copper speed: phylink must offer
+# both serial modes or a sub-2.5G partner never links, and must see a failed
+# SerDes reconfiguration rather than a false link-up.
+SRC_URI:append:qcom-wendyos = " file://0002-net-stmmac-qcom-ethqos-advertise-serdes-interfaces.patch file://0003-net-stmmac-propagate-platform-mac-finish-errors.patch"
+
 # quilt edits the tracked source in place and leaves it modified in the shared
 # kernel tree. CONFIG_LOCALVERSION_AUTO is on here (default y, and no fragment
 # we merge unsets it), so setlocalversion appends -dirty to the release string
 # and to every module package name. It is not quilt's .pc/ directory that does
 # it: setlocalversion checks with `git status -uno`, which ignores untracked
-# files. Scoped to the boards that ship patches, so the devupstream variant
-# keeps the default.
-PATCHTOOL:iq-8275-evk = "git"
+# files. A machine override, so it reaches the devupstream variant as well.
+PATCHTOOL:qcom-wendyos = "git"
