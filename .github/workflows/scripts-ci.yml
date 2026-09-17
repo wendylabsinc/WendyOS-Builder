@@ -19,6 +19,9 @@ on:
       - 'recipes-core/wendyos-agent/files/*.sh'
       - 'scripts/build-driver.sh'
       - 'scripts/pack-sysext.sh'
+      - 'scripts/driver_supports_device.py'
+      - 'scripts/driver_supports_device_test.py'
+      - 'scripts/driver_activation_test.py'
       - 'scripts/driver_devkit_test.py'
       - '.github/workflows/drivers.yml'
       - 'recipes-core/wendyos-sysext-apply/files/*.sh'
@@ -55,6 +58,9 @@ on:
       - 'recipes-core/wendyos-agent/files/*.sh'
       - 'scripts/build-driver.sh'
       - 'scripts/pack-sysext.sh'
+      - 'scripts/driver_supports_device.py'
+      - 'scripts/driver_supports_device_test.py'
+      - 'scripts/driver_activation_test.py'
       - 'scripts/driver_devkit_test.py'
       - '.github/workflows/drivers.yml'
       - 'recipes-core/wendyos-sysext-apply/files/*.sh'
@@ -142,6 +148,12 @@ jobs:
 
       - name: Run game-controller support validator tests
         run: python3 -m unittest scripts/check_game_controller_support_test.py
+
+      - name: Run driver manifest targeting tests
+        run: python3 -m unittest scripts/driver_supports_device_test.py
+
+      - name: Run driver activation tests
+        run: python3 -m unittest scripts/driver_activation_test.py
 
       - name: Run driver devkit selection tests
         run: python3 -m unittest scripts/driver_devkit_test.py

@@ -110,6 +110,48 @@ for m in json.load(open(sys.argv[1])).get("modules_load", []):
 # An add-on with nothing to autoload ships neither the file nor its directory.
 [ -s "$CONF" ] || { rm -f "$CONF"; rmdir "$(dirname "$CONF")"; }
 
+# Optional activation metadata lets an add-on replace a base-kernel module stack after
+# the late /data sysext merge. Keep the on-device format deliberately simple: WendyOS
+# does not need a JSON parser in the base image, and every value is validated here.
+#
+#   pci <vendor>:<device>  activate only when any declared PCI ID is present
+#   replace <module>       unload in manifest order before modules_load
+#   reload <module>        unload before modules_load and load again afterwards
+#   restart-service <unit> restart an active service after module insertion
+#   restore-wifi-connection <interface>  restore its active NetworkManager profile
+install -d "$STAGE/usr/lib/wendyos-driver-activation.d"
+ACTIVATION_CONF="$STAGE/usr/lib/wendyos-driver-activation.d/$NAME.conf"
+python3 - "$DRIVER/driver.json" > "$ACTIVATION_CONF" <<'PY'
+import json, re, sys
+
+activation = json.load(open(sys.argv[1])).get("activation", {})
+for device in activation.get("pci_devices", []):
+    if not re.fullmatch(r"[0-9a-fA-F]{4}:[0-9a-fA-F]{4}", device):
+        sys.exit("invalid activation PCI ID: %r" % device)
+    print("pci " + device.lower())
+
+for field, directive in (("modules_replace", "replace"),
+                         ("modules_reload", "reload")):
+    for module in activation.get(field, []):
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+", module):
+            sys.exit("invalid activation module name: %r" % module)
+        print(directive + " " + module)
+
+for unit in activation.get("services_restart", []):
+    if not re.fullmatch(r"[A-Za-z0-9_.@:-]+", unit):
+        sys.exit("invalid activation service unit: %r" % unit)
+    print("restart-service " + unit)
+
+for interface in activation.get("wifi_devices_restore", []):
+    if not re.fullmatch(r"[A-Za-z0-9_.:-]+", interface):
+        sys.exit("invalid activation network interface: %r" % interface)
+    print("restore-wifi-connection " + interface)
+PY
+[ -s "$ACTIVATION_CONF" ] || {
+    rm -f "$ACTIVATION_CONF"
+    rmdir "$(dirname "$ACTIVATION_CONF")"
+}
+
 # Rules ship with the add-on: they create the device nodes with the right ownership, and
 # a driver whose rules were dropped loads but behaves as though the hardware were absent.
 if [ -d "$DRIVER/udev" ]; then
@@ -123,6 +165,13 @@ fi
 if [ -d "$DRIVER/firmware" ]; then
     install -d "$STAGE/usr/lib/firmware"
     cp -a "$DRIVER/firmware/." "$STAGE/usr/lib/firmware/"
+fi
+# Firmware fetched and checksum-verified by build-driver.sh lives beside the
+# modules directory. Generated files override a same-named static fixture.
+BUILD_OUTPUT=$(dirname "$MODULES")
+if [ -d "$BUILD_OUTPUT/firmware" ]; then
+    install -d "$STAGE/usr/lib/firmware"
+    cp -a "$BUILD_OUTPUT/firmware/." "$STAGE/usr/lib/firmware/"
 fi
 
 # --- extension-release ---------------------------------------------------------------
