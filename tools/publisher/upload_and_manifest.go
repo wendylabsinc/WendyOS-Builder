@@ -1131,6 +1131,7 @@ func main() {
 	updateOnly := flag.Bool("update-only", false, "Only update manifests without uploading")
 	skipMasterManifest := flag.Bool("skip-master-manifest", false, "Skip master manifest update (a separate job will handle it)")
 	masterManifestOnly := flag.Bool("master-manifest-only", false, "Only update the master manifest, skip upload and device manifest")
+	masterManifestBatch := flag.String("master-manifest-batch", "", "JSON array of device/version/nightly/stability updates to publish in one master manifest write; --pr selects the namespace")
 	uploadOnly := flag.Bool("upload-only", false, "Upload files without touching any manifest; requires --metadata-out (a serialised publish job applies the manifest writes later)")
 	metadataOut := flag.String("metadata-out", "", "Path to write the manifest-entry JSON produced by --upload-only")
 	applyMetadata := flag.String("apply-metadata", "", "Path to a manifest-entry JSON (from --upload-only); updates the device manifest from it without uploading")
@@ -1182,8 +1183,39 @@ func main() {
 	uploadSem = make(chan struct{}, *uploadConcurrency)
 	parallelUploadThreshold = *parallelUploadThresholdFlag
 
+	var masterUpdates []MasterManifestUpdate
+	if *masterManifestBatch != "" {
+		// Batch input owns device, version and channel selection. Reject other
+		// operations rather than silently taking precedence over one of them.
+		var incompatible string
+		flag.Visit(func(f *flag.Flag) {
+			switch f.Name {
+			case "master-manifest-batch", "pr", "bucket", "access-token", "debug":
+			default:
+				incompatible = f.Name
+			}
+		})
+		if incompatible != "" {
+			log.Fatalf("--master-manifest-batch cannot be combined with --%s", incompatible)
+		}
+		if *pr < 0 {
+			log.Fatal("--pr must not be negative")
+		}
+		var err error
+		masterUpdates, err = readMasterManifestBatch(*masterManifestBatch)
+		if err != nil {
+			log.WithError(err).Fatal("Invalid master manifest batch")
+		}
+		if len(masterUpdates) == 0 {
+			log.Info("No eligible devices; skipping master manifest update")
+			return
+		}
+	}
+
 	// Validate args
-	if *listImages {
+	if *masterManifestBatch != "" {
+		// The complete batch was validated above, before opening a storage client.
+	} else if *listImages {
 		// No other args needed for listing
 	} else if *notifyOnly {
 		// For notify-only, we need device type and version
@@ -1436,6 +1468,13 @@ func main() {
 			log.WithError(err).Fatal("Failed to send Discord notification")
 		}
 		log.Info("Discord notification sent successfully")
+		return
+	}
+
+	if *masterManifestBatch != "" {
+		if err := updateMasterManifestBatch(ctx, logrus.NewEntry(log), bucket, prefix, masterUpdates, true); err != nil {
+			log.WithError(err).Fatal("Failed to publish master manifest batch")
+		}
 		return
 	}
 
@@ -2910,154 +2949,9 @@ func updateDeviceManifest(ctx context.Context, logger *logrus.Entry, bucket *sto
 }
 
 func updateMasterManifest(ctx context.Context, logger *logrus.Entry, bucket *storage.BucketHandle, prefix, deviceType, version string, isNightly bool, stability string, forceWrite bool) error {
-	masterManifestPath := masterManifestPath(prefix)
-	logger = logger.WithField("manifest_path", masterManifestPath)
-	logger.Info("Processing master manifest")
-
-	obj := bucket.Object(masterManifestPath)
-
-	const maxRetries = 10
-	for attempt := 1; attempt <= maxRetries; attempt++ {
-		// Read existing manifest or create new one
-		var masterManifest MasterManifest
-		var generation int64 // 0 means object doesn't exist yet
-		r, err := obj.NewReader(ctx)
-		if err == nil {
-			logger.Info("Reading existing master manifest")
-
-			// Read content with size limit to prevent DoS
-			limitedReader := io.LimitReader(r, 10*1024*1024) // 10MB limit
-			content, err := io.ReadAll(limitedReader)
-			generation = r.Attrs.Generation
-			r.Close()
-			if err != nil {
-				logger.WithError(err).Error("Failed to read existing master manifest")
-				return fmt.Errorf("failed to read existing master manifest: %w", err)
-			}
-
-			// Unmarshal JSON
-			if err := json.Unmarshal(content, &masterManifest); err != nil {
-				logger.WithError(err).Error("Failed to decode existing master manifest")
-				return fmt.Errorf("failed to decode existing master manifest: %w", err)
-			}
-
-			logger.WithField("device_count", len(masterManifest.Devices)).Info("Read existing master manifest")
-
-			// Idempotent check: skip only for concurrent build jobs (forceWrite=false)
-			// to break livelock. Force-write callers (the serialised publish job) must
-			// always write so that last_updated is refreshed even when the version string
-			// hasn't changed (e.g. repeated nightly builds with the same version tag).
-			if !forceWrite {
-				if existingInfo, ok := masterManifest.Devices[deviceType]; ok {
-					expectedStability := stability
-					if expectedStability == "" {
-						expectedStability = "stable"
-					}
-					correctVersion := (isNightly && existingInfo.LatestNightly == version) ||
-						(!isNightly && existingInfo.Latest == version)
-					expectedPath := deviceManifestPath(prefix, deviceType)
-					if correctVersion && existingInfo.ManifestPath == expectedPath && existingInfo.Stability == expectedStability {
-						logger.Info("Master manifest already up-to-date, skipping write")
-						return nil
-					}
-				}
-			}
-		} else {
-			// Create new manifest if it doesn't exist
-			logger.WithError(err).Info("Creating new master manifest as it doesn't exist")
-			masterManifest = MasterManifest{
-				Devices: make(map[string]DeviceLatestInfo),
-			}
-		}
-
-		// Update master manifest
-		logger.WithFields(logrus.Fields{
-			"device_type": deviceType,
-			"version":     version,
-			"is_nightly":  isNightly,
-			"stability":   stability,
-		}).Info("Updating master manifest")
-
-		masterManifest.LastUpdated = time.Now()
-
-		// Get or create device info
-		deviceInfo, exists := masterManifest.Devices[deviceType]
-		if !exists {
-			deviceInfo = DeviceLatestInfo{}
-		}
-
-		// Always set ManifestPath to ensure consistency
-		deviceInfo.ManifestPath = deviceManifestPath(prefix, deviceType)
-
-		// Set stability (defaults to "stable" if empty)
-		if stability == "" {
-			stability = "stable"
-		}
-		deviceInfo.Stability = stability
-
-		// Update the appropriate latest version
-		if isNightly {
-			deviceInfo.LatestNightly = version
-		} else {
-			deviceInfo.Latest = version
-		}
-
-		masterManifest.Devices[deviceType] = deviceInfo
-
-		logger.Info("Writing master manifest back to bucket")
-		var w *storage.Writer
-		if forceWrite {
-			// Unconditional write: the caller guarantees exclusive access (e.g. publish
-			// job with a concurrency group). Avoids livelock from any mystery concurrent
-			// writer because we are the authoritative publisher.
-			w = obj.NewWriter(ctx)
-			w.CacheControl = manifestCacheControl
-		} else {
-			// Use GenerationMatch so concurrent build jobs don't clobber each other.
-			var masterConds storage.Conditions
-			if generation == 0 {
-				masterConds = storage.Conditions{DoesNotExist: true}
-			} else {
-				masterConds = storage.Conditions{GenerationMatch: generation}
-			}
-			w = obj.If(masterConds).NewWriter(ctx)
-			w.CacheControl = manifestCacheControl
-		}
-
-		// Marshal to JSON with indentation
-		content, err := json.MarshalIndent(masterManifest, "", "  ")
-		if err != nil {
-			logger.WithError(err).Error("Failed to marshal master manifest")
-			return fmt.Errorf("failed to marshal master manifest: %w", err)
-		}
-
-		// Write content
-		if _, err := w.Write(content); err != nil {
-			w.Close() // Close without checking error since write already failed
-			logger.WithError(err).Error("Failed to write master manifest")
-			return fmt.Errorf("failed to write master manifest: %w", err)
-		}
-
-		// Close to commit the write (MUST check error - this is when upload finalizes)
-		if err := w.Close(); err != nil {
-			var gErr *googleapi.Error
-			if errors.As(err, &gErr) && gErr.Code == 412 && attempt < maxRetries {
-				logger.WithField("attempt", attempt).Warn("Master manifest write lost race (412), retrying...")
-				backoff := time.Duration(1<<uint(attempt))*100*time.Millisecond + time.Duration(rand.Intn(200))*time.Millisecond
-				if backoff > 10*time.Second {
-					backoff = 10 * time.Second
-				}
-				time.Sleep(backoff)
-				continue
-			}
-			logger.WithError(err).Error("Failed to finalize master manifest write")
-			return fmt.Errorf("failed to finalize master manifest write: %w", err)
-		}
-
-		logger.Info("Successfully wrote master manifest")
-		return nil
-	}
-	return fmt.Errorf("failed to write master manifest after %d attempts: concurrent writers", maxRetries)
+	return updateMasterManifestBatch(ctx, logger, bucket, prefix, []MasterManifestUpdate{{
+		Device: deviceType, Version: version, Nightly: isNightly, Stability: stability,
+	}}, forceWrite)
 }
 
 // createNewDevice creates a new device type in both manifests

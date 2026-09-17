@@ -59,6 +59,35 @@ The tool automatically triggers `gcloud auth application-default login` if crede
 
 ## Usage
 
+### Publish a batch of master-manifest updates
+
+After device manifests and required driver add-ons are published, pass all
+eligible device pointers to one invocation:
+
+```json
+[
+  {"device": "dragonwing-iq-8275", "version": "nightly-example", "nightly": true},
+  {"device": "raspberry-pi-5", "version": "nightly-example", "nightly": true}
+]
+```
+
+```bash
+./publisher --master-manifest-batch updates.json
+# For a PR's isolated manifests, also pass --pr 270.
+```
+
+The batch is validated before accessing storage. Identical rows from multiple
+storage variants are deduplicated; conflicting updates for one device are
+rejected. An empty array is a no-op. `stability` defaults to `stable` and can
+be specified per row; `nightly: false` updates the stable pointer.
+
+The publisher reads and writes the master manifest once on success, preserving
+other devices, firmware entries and the opposite channel. Conflicts (412),
+rate limits (429), and other transient storage errors retry the entire
+transaction with exponential backoff, up to ten attempts. Each write checks
+the object generation so a retry cannot overwrite an intervening update.
+The existing single-device `--master-manifest-only` command remains supported.
+
 ### Basic Upload
 
 Upload an OS image for a device:
