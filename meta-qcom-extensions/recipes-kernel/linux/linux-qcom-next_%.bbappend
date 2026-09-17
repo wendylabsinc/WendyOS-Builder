@@ -28,6 +28,11 @@ SRC_URI:append:iq-8275-evk = " \
 # SerDes reconfiguration rather than a false link-up.
 SRC_URI:append:qcom-wendyos = " file://0002-net-stmmac-qcom-ethqos-advertise-serdes-interfaces.patch file://0003-net-stmmac-propagate-platform-mac-finish-errors.patch"
 
+# dwc3-qcom over-frees a managed software node when it tears the xHCI down to
+# change role, leaving the controller with neither an xHCI nor a UDC until the
+# next boot. Reproduced on both boards: every role-switching port reaches it.
+SRC_URI:append:qcom-wendyos = " file://0004-Revert-usb-dwc3-qcom-skip-phy-management-swnode.patch"
+
 # quilt edits the tracked source in place and leaves it modified in the shared
 # kernel tree. CONFIG_LOCALVERSION_AUTO is on here (default y, and no fragment
 # we merge unsets it), so setlocalversion appends -dirty to the release string
