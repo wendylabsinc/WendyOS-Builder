@@ -12,6 +12,7 @@ SRC_URI = " \
     file://wendyos-data-init.sh \
     file://wendyos-data-init.service \
     file://data.mount \
+    file://wants-data-consumers.conf \
 "
 
 S = "${UNPACKDIR}"
@@ -25,12 +26,20 @@ do_install() {
     install -d ${D}${systemd_system_unitdir}
     install -m 0644 ${UNPACKDIR}/wendyos-data-init.service ${D}${systemd_system_unitdir}/
     install -m 0644 ${UNPACKDIR}/data.mount ${D}${systemd_system_unitdir}/
+
+    # Pull the /data consumers in whenever data.mount is (re)started, not
+    # just on the boot that first mounted it (WDY-3127). Also effective for
+    # the LUKS variant: the bbappend installs data-luks.mount AS data.mount,
+    # so this drop-in applies under either unit name.
+    install -d ${D}${systemd_system_unitdir}/data.mount.d
+    install -m 0644 ${UNPACKDIR}/wants-data-consumers.conf ${D}${systemd_system_unitdir}/data.mount.d/wants-data-consumers.conf
 }
 
 FILES:${PN} += " \
     ${sbindir}/wendyos-data-init.sh \
     ${systemd_system_unitdir}/wendyos-data-init.service \
     ${systemd_system_unitdir}/data.mount \
+    ${systemd_system_unitdir}/data.mount.d/wants-data-consumers.conf \
 "
 
 # data.mount is enabled via its [Install] WantedBy; the init service is
