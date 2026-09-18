@@ -19,7 +19,8 @@ After=systemd-cryptsetup@data.service
 What=/dev/mapper/data
 Where=/data
 Type=ext4
-Options=defaults,noatime
+Options=defaults,noatime,x-systemd.device-timeout=5min
+TimeoutSec=10min
 
 [Install]
 WantedBy=local-fs.target

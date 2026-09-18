@@ -6,7 +6,11 @@
 # The partition is carved into the flash layout allocated-empty (no
 # <filename> — see tegra_partition_config.bbclass), so on first boot it
 # has no filesystem. This script, run once before data.mount:
-#   1. resolves the partition by GPT label "data",
+#   1. resolves the partition by GPT label "data", waiting up to 300s for
+#      the by-partlabel link to appear (a slow ext4 recovery or a late udev
+#      coldplug can take a while) and exiting 1 -- not the old, silent
+#      exit 0 -- if it never does, so data.mount fails on the real cause
+#      instead of every /data consumer quietly skipping (WDY-3127),
 #   2. if it already holds an ext4 filesystem that fits the partition ->
 #      nothing to do (a stale superblock from a prior larger layout does
 #      not count — see the guard below),
@@ -51,15 +55,24 @@ data_fills_disk() {
 
 BYLABEL="/dev/disk/by-partlabel/data"
 
-# Wait briefly for udev to create the by-partlabel link.
-for _ in $(seq 1 10); do
+# Wait for udev to create the by-partlabel link. Bounded at 300s to match the
+# 5min device-timeout on data.mount's Options= and the 10min TimeoutStartSec
+# on this script's own service: a short, fixed wait gave up before a long ext4
+# recovery (or a late-appearing partition link) finished, silently skipping
+# data.mount along with every other RequiresMountsFor=/data unit -- identity,
+# enrolment, swap, the containerd bind -- and letting containerd start on the
+# OS root slot instead (WDY-3127).
+for i in $(seq 1 300); do
     [ -e "${BYLABEL}" ] && break
     udevadm settle 2>/dev/null || true
     sleep 1
+    if [ "$(( i % 30 ))" -eq 0 ]; then
+        log "still waiting for partition labelled 'data' (${i}s elapsed)"
+    fi
 done
 if [ ! -e "${BYLABEL}" ]; then
-    log "no partition labelled 'data' found; nothing to do"
-    exit 0
+    log "ERROR: no partition labelled 'data' appeared within 300s; refusing to continue so data.mount fails on the real cause (WDY-3127)"
+    exit 1
 fi
 
 DEV="$(readlink -f "${BYLABEL}")"
