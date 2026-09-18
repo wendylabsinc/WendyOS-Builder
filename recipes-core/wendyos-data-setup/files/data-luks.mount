@@ -20,6 +20,7 @@ What=/dev/mapper/data
 Where=/data
 Type=ext4
 Options=defaults,noatime
+TimeoutSec=10min
 
 [Install]
 WantedBy=local-fs.target

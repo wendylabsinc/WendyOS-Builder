@@ -1,0 +1,14 @@
+[Unit]
+Description=Reclaim containerd data left on the OS root slot under the /data bind mount
+DefaultDependencies=no
+After=var-lib-containerd.mount
+Requires=var-lib-containerd.mount
+Before=containerd.service
+ConditionPathIsMountPoint=/var/lib/containerd
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/wendyos-rootfs-shadow-clean.sh
+
+[Install]
+WantedBy=local-fs.target
