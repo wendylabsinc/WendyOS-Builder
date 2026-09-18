@@ -56,12 +56,14 @@ data_fills_disk() {
 BYLABEL="/dev/disk/by-partlabel/data"
 
 # Wait for udev to create the by-partlabel link. Bounded at 300s to match the
-# 5min device-timeout on data.mount's Options= and the 10min TimeoutStartSec
-# on this script's own service: a short, fixed wait gave up before a long ext4
-# recovery (or a late-appearing partition link) finished, silently skipping
-# data.mount along with every other RequiresMountsFor=/data unit -- identity,
-# enrolment, swap, the containerd bind -- and letting containerd start on the
-# OS root slot instead (WDY-3127).
+# 5min JobRunningTimeoutSec on the by-partlabel device unit
+# (dev-disk-by\x2dpartlabel-data.device.d/50-wendyos-device-timeout.conf) and
+# the 10min TimeoutStartSec on this script's own service: a short, fixed wait
+# gave up before a long ext4 recovery (or a late-appearing partition link)
+# finished, silently skipping data.mount along with every other
+# RequiresMountsFor=/data unit -- identity, enrolment, swap, the containerd
+# bind -- and letting containerd start on the OS root slot instead
+# (WDY-3127).
 for i in $(seq 1 300); do
     [ -e "${BYLABEL}" ] && break
     udevadm settle 2>/dev/null || true

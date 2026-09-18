@@ -8,7 +8,7 @@ After=wendyos-data-init.service
 What=/dev/disk/by-partlabel/data
 Where=/data
 Type=ext4
-Options=defaults,noatime,x-systemd.device-timeout=5min
+Options=defaults,noatime
 TimeoutSec=10min
 
 [Install]
