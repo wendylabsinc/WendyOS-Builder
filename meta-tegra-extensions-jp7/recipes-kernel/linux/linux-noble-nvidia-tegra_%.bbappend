@@ -18,6 +18,7 @@ SRC_URI += " \
     file://usb-gadget.cfg \
     file://usb-gadget-builtin.cfg \
     file://usb-serial.cfg \
+    file://wifi.cfg \
     file://0001-crypto-scatterwalk-Backport-memcpy_sglist.patch \
     file://0002-crypto-algif_aead-use-memcpy_sglist-instead-of-null-skcipher.patch \
     file://0003-crypto-algif_aead-Revert-to-operating-out-of-place-CVE-2026-31431.patch \
@@ -25,3 +26,30 @@ SRC_URI += " \
     file://0005-crypto-algif_aead-Fix-minimum-RX-size-check-for-decryption.patch \
     file://cve-2026-46333-ptrace.patch \
     "
+
+# Wi-Fi (wifi.cfg): confirm Kconfig kept the symbols that tegra-image.inc names
+# as hard kernel-module-* dependencies. A fragment is a request, not a result --
+# a symbol whose parent NVIDIA turns off disappears without a word, and the
+# image would then fail one step later with a bare "nothing RPROVIDES".
+WENDYOS_WIFI_MODULES = " \
+    CONFIG_CFG80211 \
+    CONFIG_MAC80211 \
+    CONFIG_IWLWIFI \
+    CONFIG_IWLMVM \
+    CONFIG_RTW88_PCI \
+    CONFIG_RTW88_8822BE \
+    CONFIG_RTW88_8821CE \
+    CONFIG_RTW88_8723DE \
+    CONFIG_BT_HCIBTUSB \
+    CONFIG_BT_INTEL \
+    "
+
+do_configure[postfuncs] += "wendyos_check_wifi_config"
+wendyos_check_wifi_config() {
+    config="${B}/.config"
+    [ -f "$config" ] || bbfatal "wifi.cfg: no resolved kernel config at $config"
+    for symbol in ${WENDYOS_WIFI_MODULES}; do
+        grep -q "^$symbol=m$" "$config" || \
+            bbfatal "wifi.cfg: $symbol did not resolve to =m for ${MACHINE}"
+    done
+}
