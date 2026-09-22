@@ -1076,16 +1076,17 @@ jobs:
             # state to race on) and the publisher's storage client already
             # retries transient errors internally.
             "$RUNNER_TEMP/publisher" "${ARGS[@]}"
-            # Some installed images report a storage-specific board identity.
-            # Publish that identity as well, referencing these same uploaded
-            # bytes and this variant's devkit, without uploading another image.
+            # Keep the canonical identity for board-specific metadata handling.
+            # Aliases receive the computed metadata and this variant's devkit.
             alias=$(jq -r --arg key "$DEVICE/$STORAGE" '.[$key].manifest_alias // empty' \
               "$GITHUB_WORKSPACE/wendyos/.github/device-artifacts.json")
             if [[ -n "$alias" ]]; then
               [[ "$alias" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "invalid manifest alias" >&2; exit 1; }
-              jq --arg alias "$alias" '.device = $alias' "$ENTRY_FILE" \
-                > "$GITHUB_WORKSPACE/manifest-entry-${DEVICE}-${STORAGE}-alias.json"
             fi
+            jq --arg alias "$alias" --arg run "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" \
+              '.aliases = (if $alias == "" then [] else [$alias] end) | .build_run_id = $run | .build_run_attempt = $attempt' \
+              "$ENTRY_FILE" > "$ENTRY_FILE.tmp"
+            mv "$ENTRY_FILE.tmp" "$ENTRY_FILE"
             echo "::endgroup::"
           done
 
@@ -1366,7 +1367,7 @@ jobs:
           TOKEN=$(gcloud auth print-access-token)
           cd "$GITHUB_WORKSPACE/wendyos/tools/publisher"
           [[ -x "$RUNNER_TEMP/publisher" ]] || go build -o "$RUNNER_TEMP/publisher" .
-          jq -s '[.[] | {device, version, nightly: true, stability}]' "${entries[@]}" > "$RUNNER_TEMP/master-updates.json"
+          jq -s '[.[] | . as $entry | (.device, .aliases[]?) as $device | $entry | {device: $device, version, nightly: true, stability}]' "${entries[@]}" > "$RUNNER_TEMP/master-updates.json"
           "$RUNNER_TEMP/publisher" --master-manifest-batch "$RUNNER_TEMP/master-updates.json" --pr "$PR_NUMBER" --access-token "$TOKEN" </dev/null
 
   # ---------------------------------------------------------------------------
@@ -1388,6 +1389,7 @@ jobs:
     uses: ./.github/workflows/drivers.yml
     with:
       version: ${{ needs.detect-changes.outputs.version }}
+      os-devices: ${{ needs.detect-changes.outputs.devices }}
       # Passed explicitly: an input the call omits resolves to this run's own
       # dispatch value, not to blank.
       device: ${{ inputs.device }}
@@ -1463,7 +1465,7 @@ jobs:
           # Failed/held-back devices keep their previous pointers. Identical
           # storage variants are deduplicated; conflicting rows reach the
           # publisher's batch validation instead of silently choosing one.
-          jq -sc '[.[] | {device, version, nightly, stability}] | unique | .[]' "${entries[@]}" > "$RUNNER_TEMP/master-candidates.jsonl"
+          jq -sc '[.[] | . as $entry | (.device, .aliases[]?) as $device | $entry | {device: $device, version, nightly, stability}] | unique | .[]' "${entries[@]}" > "$RUNNER_TEMP/master-candidates.jsonl"
           readarray -t rows < "$RUNNER_TEMP/master-candidates.jsonl"
           : > "$RUNNER_TEMP/master-updates.jsonl"
           for row in "${rows[@]}"; do

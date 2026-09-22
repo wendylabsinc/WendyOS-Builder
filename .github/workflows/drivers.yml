@@ -8,6 +8,11 @@ name: Build driver add-ons
 on:
   workflow_call:
     inputs:
+      os-devices:
+        description: OS devices built in this run; requires their current build artifacts instead of fallback
+        type: string
+        required: false
+        default: ""
       # Defaulted here, not just at the call site: an input the caller omits
       # otherwise resolves to that run's own dispatch value.
       version:
@@ -50,8 +55,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Download current OS build metadata
+        if: inputs.os-devices != ''
+        uses: actions/download-artifact@v4
+        with:
+          pattern: manifest-entry-*
+          path: manifest-entries
+          merge-multiple: true
+
       - id: set
         env:
+          OS_DEVICES: ${{ inputs.os-devices }}
+          BUILT_ENTRIES: ${{ github.workspace }}/manifest-entries
           WANT_VERSION: ${{ inputs.version }}
           ONLY_DEVICE: ${{ inputs.device }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -102,36 +117,17 @@ jobs:
             exit 0
           fi
 
-          # A device only enters the matrix once it publishes a devkit, so
-          # enabling a board is a build-side change and needs nothing here.
+          # OS builds must supply current-run devkits for opted-in inventory
+          # entries. Driver-only runs may use published inputs with provenance.
           ENTRIES='[]'
           for dev in "${DEVICES[@]}"; do
-            urls=("${PUBLIC_BASE}/${PREFIX}manifests/${dev}.json")
-            # A driver-only PR may have no manifest on its first run, or an
-            # extension-only manifest after publication. Both need the public
-            # devkit fallback. Only build inputs fall back; writes stay PR-local.
-            [[ -z "$PREFIX" ]] || urls+=("${PUBLIC_BASE}/manifests/${dev}.json")
-            sel=""
-            for url in "${urls[@]}"; do
-              if ! manifest=$(curl -sSfL --retry 3 --retry-all-errors "$url" 2>/dev/null); then
-                continue
-              fi
-              # Prefer the requested version, else the newest with a devkit.
-              sel=$(jq -c --arg want "${WANT_VERSION:-}" '
-                [ .versions // {} | to_entries[]
-                  | select(.value.devkit != null)
-                  | {version: .key, devkit: .value.devkit,
-                     nightly: (.value.is_nightly // false)} ]
-                | (map(select(.version == $want)) | .[0]) // (sort_by(.version) | last)
-                // empty' <<<"$manifest")
-              [[ -z "$sel" || "$sel" == "null" ]] || break
-            done
-            if [[ -z "$sel" || "$sel" == "null" ]]; then
-              echo "no devkit published for ${dev}; skipping"
-              continue
+            if sel=$(PREFIX="$PREFIX" scripts/select-driver-devkit.sh "$dev"); then
+              :
+            else
+              rc=$?
+              [[ "$rc" -eq 1 ]] && continue
+              exit "$rc"
             fi
-            echo "${dev}: devkit $(jq -r .devkit.kernel_version <<<"$sel") from $(jq -r .version <<<"$sel")" \
-              | tee -a "$GITHUB_STEP_SUMMARY"
             for drv in "${DRIVERS[@]}"; do
               ENTRIES=$(jq -c --arg d "$dev" --arg drv "$drv" --argjson s "$sel" \
                 '. + [{device: $d, driver: $drv, os_version: $s.version,

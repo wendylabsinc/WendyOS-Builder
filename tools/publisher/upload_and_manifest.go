@@ -1511,19 +1511,14 @@ func main() {
 			"storage": entry.Storage,
 			"pr":      entry.PR,
 		}).Info("Applying manifest entry")
-		updateManifests(
-			ctx, bucket, prefix, entry.Device, entry.Version,
-			entry.FilePath, entry.FileSize, entry.FileChecksum,
-			entry.BmapPath,
-			entry.ZstPath, entry.ZstChecksum, entry.ZstSize,
-			entry.OTAUpdatePath, entry.OTAUpdateSize, entry.OTAUpdateChecksum,
-			entry.RecoveryPath, entry.RecoverySize, entry.RecoveryChecksum,
-			entry.FlashpackPath, entry.FlashpackSize, entry.FlashpackChecksum,
-			entry.SBOMPath, entry.SBOMSize, entry.SBOMChecksum,
-			entry.Extensions,
-			entry.Devkit,
-			entry.Storage, entry.Nightly, entry.Stability, *notifyDiscord, true,
-		)
+		if err := applyManifestEntry(ctx, logrus.NewEntry(log), bucket, entry); err != nil {
+			log.WithError(err).Fatal("Failed to apply manifest entry")
+		}
+		if *notifyDiscord {
+			if err := sendDiscordNotification(discordWebhookURL, entry.Device, entry.Version, entry.Nightly, entry.FileSize, entry.OTAUpdateSize, entry.RecoverySize); err != nil {
+				log.WithError(err).Warn("Failed to send Discord notification (update was still successful)")
+			}
+		}
 		return
 	}
 
@@ -2657,91 +2652,9 @@ func validateRecoveryPromotion(deviceType string, source VersionMetadata, paths 
 	return nil
 }
 
-func updateDeviceManifest(ctx context.Context, logger *logrus.Entry, bucket *storage.BucketHandle, prefix, deviceType, version, filePath string, fileSize int64, fileChecksum string, bmapPath string, zstPath, zstChecksum string, zstSize int64, otaUpdatePath string, otaUpdateSize int64, otaUpdateChecksum string, recoveryPath string, recoverySize int64, recoveryChecksum string, flashpackPath string, flashpackSize int64, flashpackChecksum string, sbomPath string, sbomSize int64, sbomChecksum string, extensions []ExtensionMetadata, devkit *DevkitMetadata, storageType string, isNightly bool) error {
-	manifestPath := deviceManifestPath(prefix, deviceType)
-	logger = logger.WithField("manifest_path", manifestPath)
-	logger.Info("Processing device manifest")
-
-	obj := bucket.Object(manifestPath)
-
-	const maxRetries = 10
-	for attempt := 1; attempt <= maxRetries; attempt++ {
-		// Read existing manifest or create new one
-		var manifest DeviceManifest
-		var generation int64 // 0 means object doesn't exist yet
-		r, err := obj.NewReader(ctx)
-		if err == nil {
-			logger.Info("Reading existing device manifest")
-
-			// Read content with size limit to prevent DoS
-			limitedReader := io.LimitReader(r, 10*1024*1024) // 10MB limit
-			content, err := io.ReadAll(limitedReader)
-			generation = r.Attrs.Generation
-			r.Close()
-			if err != nil {
-				logger.WithError(err).Error("Failed to read existing device manifest")
-				return fmt.Errorf("failed to read existing device manifest: %w", err)
-			}
-
-			// Unmarshal JSON
-			if err := json.Unmarshal(content, &manifest); err != nil {
-				logger.WithError(err).Error("Failed to decode existing device manifest")
-				return fmt.Errorf("failed to decode existing device manifest: %w", err)
-			}
-
-			logger.WithField("version_count", len(manifest.Versions)).Info("Read existing manifest")
-		} else {
-			// Create new manifest if it doesn't exist
-			logger.WithError(err).Info("Creating new device manifest as it doesn't exist")
-			manifest = DeviceManifest{
-				DeviceID: deviceType,
-				Versions: make(map[string]VersionMetadata),
-			}
-		}
-
-		// Check if version already exists with a different IsNightly flag
-		if existingVersion, exists := manifest.Versions[version]; exists {
-			if existingVersion.IsNightly != isNightly {
-				logger.WithFields(logrus.Fields{
-					"version":        version,
-					"existing_type":  map[bool]string{true: "nightly", false: "stable"}[existingVersion.IsNightly],
-					"requested_type": map[bool]string{true: "nightly", false: "stable"}[isNightly],
-				}).Fatal("Cannot change build type for existing version - this would corrupt the manifest")
-			}
-			logger.WithField("version", version).Info("Version already exists, updating metadata")
-		}
-
-		// Update version information
-		if isNightly {
-			// For nightly builds, only update nightly versions' IsLatest
-			for k, v := range manifest.Versions {
-				if v.IsNightly {
-					v.IsLatest = false
-					manifest.Versions[k] = v
-				}
-			}
-			logger.WithField("version", version).Info("Setting version as latest nightly")
-		} else {
-			// For stable builds, only update stable versions' IsLatest
-			for k, v := range manifest.Versions {
-				if !v.IsNightly {
-					v.IsLatest = false
-					manifest.Versions[k] = v
-				}
-			}
-			logger.WithField("version", version).Info("Setting version as latest stable")
-		}
-
-		// Add or update this version and mark as latest
-		// Start with existing metadata if version already exists, otherwise create new
-		versionMetadata, exists := manifest.Versions[version]
-		if !exists {
-			versionMetadata = VersionMetadata{}
-			logger.Info("Creating new version entry")
-		} else {
-			logger.Info("Updating existing version entry")
-		}
-
+func updateDeviceManifest(ctx context.Context, logger *logrus.Entry, bucket *storage.BucketHandle, prefix, deviceType, version, filePath string, fileSize int64, fileChecksum string, bmapPath string, zstPath, zstChecksum string, zstSize int64, otaUpdatePath string, otaUpdateSize int64, otaUpdateChecksum string, recoveryPath string, recoverySize int64, recoveryChecksum string, flashpackPath string, flashpackSize int64, flashpackChecksum string, sbomPath string, sbomSize int64, sbomChecksum string, extensions []ExtensionMetadata, devkit *DevkitMetadata, storageType string, isNightly bool, aliases ...string) error {
+	var published VersionMetadata
+	err := updateVersionMetadata(ctx, logger, bucket, prefix, deviceType, version, isNightly, func(versionMetadata VersionMetadata) (VersionMetadata, error) {
 		// Update release date
 		versionMetadata.ReleaseDate = time.Now()
 		versionMetadata.IsLatest = true
@@ -2894,7 +2807,123 @@ func updateDeviceManifest(ctx context.Context, logger *logrus.Entry, bucket *sto
 		// exists, so requiring an OS artifact here would reject it.
 		if filePath == "" && otaUpdatePath == "" && recoveryPath == "" && flashpackPath == "" && len(extensions) == 0 {
 			logger.Error("Cannot create version entry with no files")
-			return fmt.Errorf("cannot create version entry with no files - at least one of OS image, OTA update, recovery file, or driver add-on must be provided")
+			return versionMetadata, fmt.Errorf("cannot create version entry with no files - at least one of OS image, OTA update, recovery file, or driver add-on must be provided")
+		}
+		published = versionMetadata
+		return versionMetadata, nil
+	})
+	if err != nil {
+		return err
+	}
+	for _, alias := range aliases {
+		// Compute board-specific fields only once, using the canonical identity.
+		// Replace stale image routes in the alias, while retaining driver add-ons
+		// independently published there. The devkit belongs to this storage entry.
+		if err := updateVersionMetadata(ctx, logger, bucket, prefix, alias, version, isNightly, func(previous VersionMetadata) (VersionMetadata, error) {
+			metadata := published
+			metadata.Extensions = mergeExtensions(previous.Extensions, published.Extensions)
+			return metadata, nil
+		}); err != nil {
+			return fmt.Errorf("publishing alias %s: %w", alias, err)
+		}
+	}
+	return nil
+}
+
+func updateVersionMetadata(ctx context.Context, logger *logrus.Entry, bucket *storage.BucketHandle, prefix, deviceType, version string, isNightly bool, update func(VersionMetadata) (VersionMetadata, error)) error {
+	manifestPath := deviceManifestPath(prefix, deviceType)
+	logger = logger.WithField("manifest_path", manifestPath)
+	logger.Info("Processing device manifest")
+
+	obj := bucket.Object(manifestPath)
+
+	const maxRetries = 10
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		// Read existing manifest or create new one
+		var manifest DeviceManifest
+		var generation int64 // 0 means object doesn't exist yet
+		r, err := obj.NewReader(ctx)
+		if err == nil {
+			logger.Info("Reading existing device manifest")
+
+			// Read content with size limit to prevent DoS
+			limitedReader := io.LimitReader(r, 10*1024*1024) // 10MB limit
+			content, err := io.ReadAll(limitedReader)
+			generation = r.Attrs.Generation
+			r.Close()
+			if err != nil {
+				logger.WithError(err).Error("Failed to read existing device manifest")
+				return fmt.Errorf("failed to read existing device manifest: %w", err)
+			}
+
+			// Unmarshal JSON
+			if err := json.Unmarshal(content, &manifest); err != nil {
+				logger.WithError(err).Error("Failed to decode existing device manifest")
+				return fmt.Errorf("failed to decode existing device manifest: %w", err)
+			}
+
+			logger.WithField("version_count", len(manifest.Versions)).Info("Read existing manifest")
+		} else if errors.Is(err, storage.ErrObjectNotExist) {
+			// Create new manifest if it doesn't exist
+			logger.WithError(err).Info("Creating new device manifest as it doesn't exist")
+			manifest = DeviceManifest{
+				DeviceID: deviceType,
+				Versions: make(map[string]VersionMetadata),
+			}
+		} else {
+			return fmt.Errorf("reading device manifest: %w", err)
+		}
+		if manifest.Versions == nil {
+			manifest.Versions = make(map[string]VersionMetadata)
+		}
+
+		// Check if version already exists with a different IsNightly flag
+		if existingVersion, exists := manifest.Versions[version]; exists {
+			if existingVersion.IsNightly != isNightly {
+				logger.WithFields(logrus.Fields{
+					"version":        version,
+					"existing_type":  map[bool]string{true: "nightly", false: "stable"}[existingVersion.IsNightly],
+					"requested_type": map[bool]string{true: "nightly", false: "stable"}[isNightly],
+				}).Error("Cannot change build type for existing version")
+				return fmt.Errorf("cannot change build type for existing version %s", version)
+			}
+			logger.WithField("version", version).Info("Version already exists, updating metadata")
+		}
+
+		// Update version information
+		if isNightly {
+			// For nightly builds, only update nightly versions' IsLatest
+			for k, v := range manifest.Versions {
+				if v.IsNightly {
+					v.IsLatest = false
+					manifest.Versions[k] = v
+				}
+			}
+			logger.WithField("version", version).Info("Setting version as latest nightly")
+		} else {
+			// For stable builds, only update stable versions' IsLatest
+			for k, v := range manifest.Versions {
+				if !v.IsNightly {
+					v.IsLatest = false
+					manifest.Versions[k] = v
+				}
+			}
+			logger.WithField("version", version).Info("Setting version as latest stable")
+		}
+
+		// Add or update this version and mark as latest
+		// Start with existing metadata if version already exists, otherwise create new
+		versionMetadata, exists := manifest.Versions[version]
+		if !exists {
+			versionMetadata = VersionMetadata{}
+			logger.Info("Creating new version entry")
+		} else {
+			logger.Info("Updating existing version entry")
+		}
+
+		versionMetadata, err = update(versionMetadata)
+		if err != nil {
+			return err
 		}
 
 		manifest.Versions[version] = versionMetadata
