@@ -151,15 +151,16 @@ FIRMWARE=$(python3 - "$MANIFEST" <<'PY'
 import json, pathlib, re, sys
 for entry in json.load(open(sys.argv[1])).get("firmware", []):
     url, digest, path = (entry.get(k, "") for k in ("url", "sha256", "path"))
+    if any(not isinstance(value, str) or any(ord(c) < 32 or ord(c) == 127 for c in value)
+           for value in (url, digest, path)):
+        sys.exit("firmware fields must be strings without control characters")
     p = pathlib.PurePosixPath(path)
     if not url.startswith("https://"):
         sys.exit("firmware URL must use https: %r" % url)
     if not re.fullmatch(r"[0-9a-f]{64}", digest):
         sys.exit("firmware sha256 must be 64 lowercase hex characters: %r" % digest)
-    if not path or p.is_absolute() or ".." in p.parts or path.endswith("/"):
+    if not p.parts or p.is_absolute() or ".." in p.parts or path != p.as_posix():
         sys.exit("unsafe firmware path: %r" % path)
-    if any("\t" in value or "\n" in value for value in (url, digest, path)):
-        sys.exit("firmware fields must not contain tabs or newlines")
     print("%s\t%s\t%s" % (url, digest, path))
 PY
 ) || err "invalid firmware entries in $MANIFEST"

@@ -36,7 +36,7 @@ class ActivationTests(unittest.TestCase):
                                    "reload btusb\nrestart-service wpa_supplicant.service\n")
         source = APPLY.read_text()
         for prefix in ("/data/extensions", "/run/", "/usr/lib/", "/sys/module/",
-                       "/sys/bus/pci/devices/"):
+                       "/sys/bus/pci/devices/", "/sys/class/net/"):
             source = source.replace(prefix, str(self.root) + prefix)
         self.script = self.root / "apply.sh"
         self.script.write_text(source)
@@ -46,7 +46,38 @@ cmd=${0##*/}
 printf '%s %s\n' "$cmd" "$*" >> "$TEST_LOG"
 case "$cmd" in
     uname) echo test-kernel ;;
+    timeout) shift 2; exec "$@" ;;
+    date)
+        counter="$TEST_LOG.clock"
+        now=100
+        [ ! -f "$counter" ] || now=$(cat "$counter")
+        echo "$((now + ${CLOCK_STEP:-0}))" > "$counter"
+        echo "$now" ;;
+    depmod)
+        counter="$TEST_LOG.depmod-count"
+        n=0
+        [ ! -f "$counter" ] || n=$(cat "$counter")
+        n=$((n+1)); echo "$n" > "$counter"
+        case " ${FAIL_DEPMOD:-} " in *" $n "*) echo "injected depmod failure $n" >&2; exit 1 ;; esac ;;
+    nmcli)
+        shift 2 # --wait seconds
+        case "$*" in
+            '-g GENERAL.CON-UUID device show '* )
+                [ "${FAIL_CAPTURE:-0}" = 0 ] || exit 1
+                printf '%s\\n' "${CONNECTION_UUID-12345678-1234-1234-1234-123456789abc}" ;;
+            '-g GENERAL.STATE device show '* ) echo '100 (connected)' ;;
+            'connection up '* )
+                counter="$TEST_LOG.restore-count"
+                n=0; [ ! -f "$counter" ] || n=$(cat "$counter")
+                n=$((n+1)); echo "$n" > "$counter"
+                case " ${FAIL_RESTORE:-} " in *" $n "*) exit 1 ;; esac ;;
+        esac ;;
+    systemctl) [ "${FAIL_SERVICE:-0}" = 0 ] || exit 1 ;;
     modprobe)
+        if [ "${1:-}" = -- ] && [ "${2:-}" = "${SIGNAL_ON_LOAD:-}" ]; then
+            kill -"${TEST_SIGNAL:-TERM}" "$PPID"
+            exit 1
+        fi
         if [ "${1:-}" = -r ] && [ "${3:-}" = "${FAIL_UNLOAD:-}" ]; then
             exit 1
         fi
@@ -57,7 +88,7 @@ esac
 exit 0
 '''
         for name in ("uname", "systemd-sysext", "depmod", "udevadm", "modprobe",
-                     "systemctl"):
+                     "systemctl", "timeout", "nmcli", "date", "sleep"):
             path = self.root / "bin" / name
             path.write_text(mock)
             path.chmod(0o755)
@@ -76,12 +107,12 @@ exit 0
         operations = [line for line in calls if line.startswith(("modprobe -r", "modprobe -- ", "systemctl"))]
         self.assertEqual(operations, ["modprobe -r -- oldwifi", "modprobe -r -- cfg80211",
                                      "modprobe -- newwifi", "modprobe -- btusb",
-                                     "systemctl try-restart wpa_supplicant.service"])
+                                     "systemctl try-restart -- wpa_supplicant.service"])
 
-    def test_absent_hardware_does_not_touch_modules_or_service(self):
+    def test_explicit_install_fails_on_absent_hardware(self):
         (self.root / "sys/bus/pci/devices/card/device").write_text("0x1234\n")
         result, calls = self.run_apply()
-        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotEqual(result.returncode, 0)
         self.assertFalse(any(line.startswith(("modprobe", "systemctl")) for line in calls))
         self.assertFalse((self.root / "usr/lib/modules/test-kernel/updates/wendyos/card").exists())
 
@@ -183,6 +214,143 @@ exit 0
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("modprobe -- newwifi", calls)
         self.assertTrue((self.root / "usr/lib/modules/test-kernel/updates/wendyos/zeta/newwifi.ko").is_symlink())
+
+    def with_wifi(self):
+        (self.root / "sys/class/net/wlan0").mkdir(parents=True, exist_ok=True)
+        self.activation.write_text(self.activation.read_text() + "restore-wifi-connection wlan0\n")
+
+    def restores(self, calls):
+        return [c for c in calls if c.startswith("nmcli --wait") and " connection up " in c]
+
+    def test_boot_skips_absent_hardware(self):
+        (self.root / "sys/bus/pci/devices/card/device").write_text("0x1234\n")
+        result, calls = self.run_apply("")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(any(c.startswith("modprobe") for c in calls))
+
+    def test_explicit_install_fails_on_collision(self):
+        (self.root / "data/extensions/enabled/test-kernel/zeta.raw").touch()
+        zeta = self.root / "usr/lib/wendyos-driver-payloads/zeta/modules/test-kernel"
+        zeta.mkdir(parents=True)
+        (zeta / "newwifi.ko").touch()
+        result, _ = self.run_apply("zeta")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("zeta conflicts with earlier package card", result.stderr)
+
+    def test_wifi_restored_after_partial_unload_failure(self):
+        self.with_wifi()
+        self.env["FAIL_UNLOAD"] = "cfg80211"
+        result, calls = self.run_apply()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(len(self.restores(calls)), 1)
+        self.assertLess(calls.index("modprobe -- oldwifi"), calls.index(self.restores(calls)[0]))
+        self.assertIn("prior modules restored", result.stderr)
+
+    def test_wifi_restored_after_payload_index_failure(self):
+        self.with_wifi()
+        self.env["FAIL_DEPMOD"] = "2"
+        result, calls = self.run_apply()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(len(self.restores(calls)), 1)
+        self.assertIn("activation rolled back", result.stderr)
+        self.assertFalse((self.root / "usr/lib/modules/test-kernel/updates/wendyos/card/newwifi.ko").exists())
+
+    def test_wifi_restored_after_module_load_failure(self):
+        self.with_wifi()
+        self.env["FAIL_LOAD"] = "btusb"
+        result, calls = self.run_apply()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(len(self.restores(calls)), 1)
+        self.assertLess(calls.index("modprobe -- oldwifi"), calls.index(self.restores(calls)[0]))
+
+    def test_failed_capture_prevents_unload(self):
+        self.with_wifi()
+        self.env["FAIL_CAPTURE"] = "1"
+        result, calls = self.run_apply()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("cannot capture wlan0", result.stderr)
+        self.assertFalse(any(c.startswith("modprobe -r") for c in calls))
+
+    def test_first_install_without_interface_needs_no_capture(self):
+        self.with_wifi()
+        (self.root / "sys/class/net/wlan0").rmdir()
+        self.env["FAIL_CAPTURE"] = "1"
+        result, calls = self.run_apply()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(any(c.startswith("nmcli") for c in calls))
+
+    def test_disconnected_interface_needs_no_restoration(self):
+        self.with_wifi()
+        self.env["CONNECTION_UUID"] = "--"
+        result, calls = self.run_apply()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.restores(calls), [])
+
+    def test_failed_reconnect_rolls_back_and_restores_old_connection(self):
+        self.with_wifi()
+        self.env["FAIL_RESTORE"] = "1"
+        result, calls = self.run_apply()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(len(self.restores(calls)), 2)
+        self.assertIn("modprobe -- oldwifi", calls)
+        self.assertIn("activation rolled back", result.stderr)
+
+    def test_failed_reconnect_during_rollback_reports_incomplete(self):
+        self.with_wifi()
+        self.env.update(FAIL_LOAD="btusb", FAIL_RESTORE="1")
+        result, _ = self.run_apply()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("rollback incomplete", result.stderr)
+        self.assertNotIn("activation rolled back", result.stderr)
+
+    def test_wifi_deadline_exhaustion_is_failure(self):
+        self.with_wifi()
+        self.env["CLOCK_STEP"] = "30"
+        result, calls = self.run_apply()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("could not restore wlan0", result.stderr)
+        self.assertEqual(self.restores(calls), [])
+
+    def test_both_rollback_paths_report_depmod_failure(self):
+        for cause in ("expose", "load"):
+            with self.subTest(cause=cause):
+                counter = self.root / "commands.log.depmod-count"
+                counter.unlink(missing_ok=True)
+                self.env["FAIL_DEPMOD"] = "2 3" if cause == "expose" else "3"
+                self.env["FAIL_LOAD"] = "btusb" if cause == "load" else ""
+                result, calls = self.run_apply()
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("injected depmod failure 3", result.stderr)
+                self.assertIn("could not rebuild module index during rollback", result.stderr)
+                self.assertIn("rollback incomplete", result.stderr)
+                self.assertNotIn("activation rolled back", result.stderr)
+                self.assertIn("modprobe -- oldwifi", calls)
+
+    def test_signals_exit_without_claiming_rollback(self):
+        for signal, status in (("HUP", 129), ("INT", 130), ("TERM", 143)):
+            with self.subTest(signal=signal):
+                self.env.update(SIGNAL_ON_LOAD="btusb", TEST_SIGNAL=signal)
+                result, _ = self.run_apply()
+                self.assertEqual(result.returncode, status, result.stderr)
+                self.assertIn("interrupted", result.stderr)
+                self.assertIn("reboot required", result.stderr)
+                self.assertNotIn("activation rolled back", result.stderr)
+                self.assertEqual(list((self.root / "run").glob("wendyos-driver-plan.*")), [])
+
+    def test_option_shaped_service_is_rejected(self):
+        self.activation.write_text("restart-service --help\n")
+        result, calls = self.run_apply()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("malformed activation metadata", result.stderr)
+        self.assertFalse(any(c.startswith("systemctl") for c in calls))
+
+    def test_service_failure_restores_wifi_during_rollback(self):
+        self.with_wifi()
+        self.env["FAIL_SERVICE"] = "1"
+        result, calls = self.run_apply()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("modprobe -- oldwifi", calls)
+        self.assertEqual(len(self.restores(calls)), 1)
 
 
 if __name__ == "__main__":

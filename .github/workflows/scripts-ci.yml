@@ -22,6 +22,7 @@ on:
       - 'scripts/driver_supports_device.py'
       - 'scripts/driver_supports_device_test.py'
       - 'scripts/driver_activation_test.py'
+      - 'scripts/driver_manifest_test.py'
       - 'scripts/driver_devkit_test.py'
       - 'scripts/select-driver-devkit.sh'
       - '.github/device-artifacts.json'
@@ -63,6 +64,7 @@ on:
       - 'scripts/driver_supports_device.py'
       - 'scripts/driver_supports_device_test.py'
       - 'scripts/driver_activation_test.py'
+      - 'scripts/driver_manifest_test.py'
       - 'scripts/driver_devkit_test.py'
       - 'scripts/select-driver-devkit.sh'
       - '.github/device-artifacts.json'
@@ -155,6 +157,9 @@ jobs:
 
       - name: Run driver manifest targeting tests
         run: python3 -m unittest scripts/driver_supports_device_test.py
+
+      - name: Run driver build and pack validation tests
+        run: python3 -m unittest scripts/driver_manifest_test.py
 
       - name: Run driver activation tests
         run: python3 -m unittest scripts/driver_activation_test.py
