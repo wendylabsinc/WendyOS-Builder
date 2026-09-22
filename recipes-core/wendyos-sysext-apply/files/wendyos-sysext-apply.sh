@@ -99,7 +99,21 @@ if ! systemd-sysext --mutable=ephemeral --always-refresh=yes refresh; then
 fi
 
 PLAN=$(mktemp -d "/run/wendyos-driver-plan.XXXXXX") || exit 1
-trap 'rm -rf "$PLAN"' 0 1 2 15
+# A signal must never erase the journal and then resume activation. A command
+# may have been interrupted mid-mutation, so do not claim a clean rollback.
+trap 'rm -rf "$PLAN"' 0
+# shellcheck disable=SC2329 # Invoked by the signal traps below.
+interrupted() {
+    trap '' 1 2 15
+    echo "wendyos-sysext-apply: interrupted; activation state uncertain, reboot required" >&2
+    exit "$1"
+}
+trap 'interrupted 129' 1
+trap 'interrupted 130' 2
+trap 'interrupted 143' 15
+# Shared across all interfaces, packages and rollback attempts. Leave time for
+# module recovery inside the agent's two-minute apply deadline.
+WIFI_DEADLINE=$(($(date +%s) + 60))
 CLAIMS="$PLAN/claims"
 : > "$CLAIMS"
 
@@ -129,7 +143,7 @@ valid_interface_name() {
 }
 
 valid_service_name() {
-    case "$1" in ''|*[!A-Za-z0-9_.@:-]*) return 1 ;; *) return 0 ;; esac
+    case "$1" in ''|-*|*[!A-Za-z0-9_.@:-]*) return 1 ;; *) return 0 ;; esac
 }
 
 module_sysname() {
@@ -237,7 +251,7 @@ expose_payload() {
 
 hide_payload() {
     exposed=$1
-    [ -f "$exposed" ] || return 0
+    [ -f "$exposed" ] || { echo "wendyos-sysext-apply: missing payload rollback journal" >&2; return 1; }
     index=0
     hide_failed=0
     while IFS= read -r destination; do
@@ -282,6 +296,7 @@ preflight_unload() {
 rollback_modules() {
     modules=$1
     action=$2
+    [ -f "$modules" ] || { echo "wendyos-sysext-apply: missing module rollback journal" >&2; return 1; }
     [ -s "$modules" ] || return 0
     reverse="$modules.reverse"
     awk '{ line[NR]=$0 } END { for (i=NR; i>0; i--) print line[i] }' "$modules" > "$reverse" || return 1
@@ -341,44 +356,87 @@ load_conf() {
     done < "$conf"
 }
 
+# nmcli's --wait bounds activation, while timeout also bounds D-Bus queries.
+# A shared deadline prevents multiple interfaces from multiplying that budget.
+wifi_nmcli() {
+    wifi_wait=$1
+    shift
+    wifi_remaining=$((WIFI_DEADLINE - $(date +%s)))
+    [ "$wifi_remaining" -gt 0 ] || return 124
+    [ "$wifi_wait" -le "$wifi_remaining" ] || wifi_wait=$wifi_remaining
+    timeout --kill-after=1 "$wifi_wait" nmcli --wait "$wifi_wait" "$@"
+}
+
 capture_wifi_state() {
     activation=$1
     restore_state=$2
     while read -r directive interface extra || [ -n "${directive:-}${interface:-}${extra:-}" ]; do
         [ "${directive:-}" = restore-wifi-connection ] || continue
-        command -v nmcli >/dev/null 2>&1 || continue
-        connection_uuid=$(nmcli -g GENERAL.CON-UUID device show "$interface" 2>/dev/null |
-            sed -n '1{s/\r//g;p;}')
-        case "$connection_uuid" in ''|--|*[!A-Fa-f0-9-]*) continue ;; esac
-        printf '%s %s\n' "$interface" "$connection_uuid" >> "$restore_state"
+        # On a first install the new driver may create this interface. There
+        # cannot be a connection to preserve if the kernel has no device yet.
+        [ -e "/sys/class/net/$interface" ] || continue
+        if ! command -v nmcli >/dev/null 2>&1; then
+            echo "wendyos-sysext-apply: cannot capture $interface connection: nmcli is unavailable" >&2
+            return 1
+        fi
+        if ! connection_uuid=$(wifi_nmcli 5 -g GENERAL.CON-UUID device show "$interface"); then
+            echo "wendyos-sysext-apply: cannot capture $interface connection; refusing to unload its driver" >&2
+            return 1
+        fi
+        case "$connection_uuid" in
+            ''|--) continue ;; # A successful query found no active connection.
+            *[!A-Fa-f0-9-]*)
+                echo "wendyos-sysext-apply: invalid connection UUID for $interface" >&2
+                return 1 ;;
+        esac
+        printf '%s %s\n' "$interface" "$connection_uuid" >> "$restore_state" || return 1
     done < "$activation"
 }
 
 restore_wifi_state() {
     restore_state=$1
+    [ -f "$restore_state" ] || return 1
     [ -s "$restore_state" ] || return 0
-    udevadm settle --timeout=10 >/dev/null 2>&1 || true
+    wifi_restore_failed=0
+    udevadm settle --timeout=5 >/dev/null 2>&1 || true
     while read -r interface connection_uuid; do
         [ -n "$interface" ] || continue
         attempts=0
-        while [ "$attempts" -lt 30 ]; do
-            nm_state=$(nmcli -g GENERAL.STATE device show "$interface" 2>/dev/null |
-                sed -n '1{s/\r//g;p;}')
+        while [ "$attempts" -lt 10 ] && [ "$(date +%s)" -lt "$WIFI_DEADLINE" ]; do
+            nm_state=$(wifi_nmcli 5 -g GENERAL.STATE device show "$interface" 2>/dev/null) || nm_state=""
             case "$nm_state" in
-                30*|40*|50*|60*|70*|80*|90*|100*)
-                    nmcli device wifi rescan ifname "$interface" >/dev/null 2>&1 || true
-                    if nmcli -t -f SSID device wifi list ifname "$interface" 2>/dev/null |
-                        sed '/^$/d' | grep -q .; then
-                        break
-                    fi
-                    ;;
+                30*|40*|50*|60*|70*|80*|90*|100*) break ;;
             esac
             attempts=$((attempts+1))
             sleep 1
         done
-        nmcli connection up uuid "$connection_uuid" ifname "$interface" ||
+        # NetworkManager can activate hidden profiles too; seeing some unrelated
+        # SSID in a scan is neither necessary nor sufficient for restoration.
+        if ! wifi_nmcli 15 connection up uuid "$connection_uuid" ifname "$interface"; then
             echo "wendyos-sysext-apply: could not restore $interface connection" >&2
+            wifi_restore_failed=1
+        fi
     done < "$restore_state"
+    [ "$wifi_restore_failed" = 0 ]
+}
+
+rollback_package() {
+    rollback_incomplete=0
+    rollback_modules "$inserted" -r || rollback_incomplete=1
+    hide_payload "$PLAN/$name.exposed" || rollback_incomplete=1
+    if ! depmod -a "$KVER"; then
+        echo "wendyos-sysext-apply: could not rebuild module index during rollback for $name" >&2
+        rollback_incomplete=1
+    fi
+    rollback_modules "$removed" "" || rollback_incomplete=1
+    udevadm control --reload >/dev/null 2>&1 || true
+    restore_wifi_state "$restore_state" || rollback_incomplete=1
+    if [ "$rollback_incomplete" = 0 ]; then
+        echo "wendyos-sysext-apply: activation rolled back and prior modules restored for $name" >&2
+    else
+        echo "wendyos-sysext-apply: activation rollback incomplete for $name; reboot required" >&2
+    fi
+    [ "$rollback_incomplete" = 0 ]
 }
 
 # Globs follow LC_ALL=C, making the first-wins policy stable across boots. Claims are
@@ -395,6 +453,7 @@ for link in "$RUNDIR"/*.raw; do
         want=$(sed -n 's/^WENDYOS_KERNEL=//p' "$rel")
         if [ -n "$want" ] && [ "$want" != "$KVER" ]; then
             echo "wendyos-sysext-apply: $name is for kernel $want, running $KVER — skipping" >&2
+            [ "$SUBJECT" != "$name" ] || rc=1
             continue
         fi
     fi
@@ -435,6 +494,7 @@ for link in "$RUNDIR"/*.raw; do
         fi
         if [ "$pci_declared" = 1 ] && [ "$pci_matched" = 0 ]; then
             echo "wendyos-sysext-apply: $name has no matching PCI device — skipping" >&2
+            [ "$SUBJECT" != "$name" ] || rc=1
             continue
         fi
     fi
@@ -457,25 +517,25 @@ for link in "$RUNDIR"/*.raw; do
     fi
 
     make_claims "$name" "$payload"
-    payload_collision "$name" && continue
+    if payload_collision "$name"; then
+        [ "$SUBJECT" != "$name" ] || rc=1
+        continue
+    fi
 
     activate_now=0
     if [ -z "$SUBJECT" ] || [ "$SUBJECT" = "$name" ]; then activate_now=1; fi
     removed="$PLAN/$name.removed"
     inserted="$PLAN/$name.inserted"
     restore_state="$PLAN/$name.restore"
-    : > "$removed"
-    : > "$inserted"
-    : > "$restore_state"
+    : > "$removed" && : > "$inserted" && : > "$restore_state" && : > "$PLAN/$name.exposed" || exit 1
 
     if [ -f "$activation" ] && [ "$activate_now" = 1 ]; then
-        capture_wifi_state "$activation" "$restore_state"
-        if ! preflight_unload "$name" "$activation" || ! unload_targets "$name"; then
-            if rollback_modules "$removed" ""; then
-                echo "wendyos-sysext-apply: replacement aborted and prior modules restored for $name" >&2
-            else
-                echo "wendyos-sysext-apply: replacement aborted for $name; rollback incomplete, reboot required" >&2
-            fi
+        if ! preflight_unload "$name" "$activation" || ! capture_wifi_state "$activation" "$restore_state"; then
+            rc=$((rc|fail))
+            continue
+        fi
+        if ! unload_targets "$name"; then
+            rollback_package || true # Logs incomplete recovery; the original operation already failed.
             rc=$((rc|fail))
             continue
         fi
@@ -483,11 +543,7 @@ for link in "$RUNDIR"/*.raw; do
 
     if ! expose_payload "$name" "$payload" || ! depmod -a "$KVER"; then
         echo "wendyos-sysext-apply: could not expose payload for $name" >&2
-        hide_payload "$PLAN/$name.exposed" ||
-            echo "wendyos-sysext-apply: resource rollback incomplete for $name; reboot required" >&2
-        depmod -a "$KVER" >/dev/null 2>&1 || true
-        rollback_modules "$removed" "" ||
-            echo "wendyos-sysext-apply: rollback incomplete for $name; reboot required" >&2
+        rollback_package || true
         rc=$((rc|fail))
         continue
     fi
@@ -513,33 +569,24 @@ for link in "$RUNDIR"/*.raw; do
         done < "$activation"
     fi
 
-    if [ "$package_failed" != 0 ]; then
-        rollback_incomplete=0
-        rollback_modules "$inserted" -r || rollback_incomplete=1
-        hide_payload "$PLAN/$name.exposed" || rollback_incomplete=1
-        depmod -a "$KVER" >/dev/null 2>&1 || true
-        rollback_modules "$removed" "" || rollback_incomplete=1
-        udevadm control --reload >/dev/null 2>&1 || true
-        if [ "$rollback_incomplete" = 0 ]; then
-            echo "wendyos-sysext-apply: activation rolled back for $name" >&2
-        else
-            echo "wendyos-sysext-apply: activation rollback incomplete for $name; reboot required" >&2
+    if [ "$package_failed" = 0 ] && [ -f "$activation" ] && [ "$activate_now" = 1 ]; then
+        while read -r directive unit extra || [ -n "${directive:-}${unit:-}${extra:-}" ]; do
+            [ "${directive:-}" = restart-service ] || continue
+            if ! timeout --kill-after=1 15 systemctl try-restart -- "$unit"; then
+                echo "wendyos-sysext-apply: could not restart $unit for $name" >&2
+                package_failed=1
+            fi
+        done < "$activation"
+        if [ "$package_failed" = 0 ]; then
+            restore_wifi_state "$restore_state" || package_failed=1
         fi
+    fi
+    if [ "$package_failed" != 0 ]; then
+        rollback_package || true
         rc=$((rc|fail))
         continue
     fi
-
     reserve_claims "$name"
-    if [ -f "$activation" ] && [ "$activate_now" = 1 ]; then
-        while read -r directive unit extra || [ -n "${directive:-}${unit:-}${extra:-}" ]; do
-            [ "${directive:-}" = restart-service ] || continue
-            if ! systemctl try-restart "$unit"; then
-                echo "wendyos-sysext-apply: could not restart $unit for $name" >&2
-                rc=$((rc|fail))
-            fi
-        done < "$activation"
-        restore_wifi_state "$restore_state"
-    fi
 done
 
 udevadm trigger >/dev/null 2>&1 || true

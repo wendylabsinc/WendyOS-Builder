@@ -30,4 +30,5 @@ FILES:${PN} += " \
 "
 
 # systemd-sysext comes from systemd's sysext PACKAGECONFIG; depmod/modprobe from kmod.
-RDEPENDS:${PN} = "systemd kmod"
+# GNU timeout bounds NetworkManager D-Bus calls and service restarts.
+RDEPENDS:${PN} = "systemd kmod coreutils"

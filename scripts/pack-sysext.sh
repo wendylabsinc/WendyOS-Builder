@@ -141,7 +141,7 @@ for field, directive in (("modules_replace", "replace"),
         print(directive + " " + module)
 
 for unit in activation.get("services_restart", []):
-    if not re.fullmatch(r"[A-Za-z0-9_.@:-]+", unit):
+    if unit.startswith("-") or not re.fullmatch(r"[A-Za-z0-9_.@:-]+", unit):
         sys.exit("invalid activation service unit: %r" % unit)
     print("restart-service " + unit)
 
