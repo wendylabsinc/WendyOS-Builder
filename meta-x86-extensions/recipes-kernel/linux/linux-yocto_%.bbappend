@@ -25,8 +25,8 @@ require recipes-kernel/linux/mesh-local.inc
 require recipes-kernel/linux/mesh-internet.inc
 
 # SocketCAN: core, protocols and the USB/SPI adapter drivers. The shared fragment
-# sets every symbol it needs explicitly -- including CONFIG_SPI, which the
-# genericx86-64 config chain does not otherwise enable and which the two MCP251x
-# drivers depend on -- so the result does not depend on what the linux-yocto
-# standard config happens to carry.
+# sets the CAN symbols explicitly, including CONFIG_SPI, which the genericx86-64
+# config chain does not otherwise enable and which the two MCP251x drivers depend
+# on. It does not pin CONFIG_USB, which the ten USB adapter drivers depend on --
+# that is "=y" on every board in the fleet, so the fragment relies on it.
 require ${@'recipes-kernel/linux/can.inc' if d.getVar('WENDYOS_CAN') == '1' else ''}

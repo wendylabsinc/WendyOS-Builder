@@ -11,12 +11,17 @@
 # read from the config datastore at BuildStarted, so a recipe-scope append never
 # reached the banner -- for a long time this list printed nothing at all.
 #
-# These "?=" lines do fire. wendyos.conf declares its base defaults with "??=", a
-# weak default that a later "?=" overrides, so the per-family value set here wins
-# while a machine conf or local.conf still wins over both. That was not always
-# true: while those defaults were "?=" they landed first and made
-# WENDYOS_UPDATE_BOOTLOADER below dead, so the VM resolved to "1" -- the exact
-# thing the comment above says it is here to prevent.
+# wendyos.conf declares its base defaults with "??=", a weak default that a later
+# "?=" overrides, so a per-family value set here wins while a machine conf or
+# local.conf still wins over both. That was not always true: while those defaults
+# were "?=" they landed first and made WENDYOS_UPDATE_BOOTLOADER below dead, so
+# the VM resolved to "1" -- the exact thing the comment above says it prevents.
+#
+# Not every line below fires. WENDYOS_UPDATE_BOOTLOADER, WENDYOS_DEEPSTREAM,
+# WENDYOS_NVIDIA_DGPU and WENDYOS_CAN do. WENDYOS_USB_GADGET and
+# WENDYOS_MDNS_INTERFACES do not: conf/template/include/local/vm.inc sets both
+# with a hard "=" at local.conf scope, which wins over a "?=" here. They stay so
+# the VM's position is stated rather than inherited.
 WENDYOS_UPDATE_BOOTLOADER ?= "0"
 WENDYOS_USB_GADGET ?= "0"
 WENDYOS_DEEPSTREAM ?= "0"
