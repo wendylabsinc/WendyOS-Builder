@@ -322,9 +322,11 @@ unload_targets() {
     : > "$removed"
     while IFS= read -r mod; do
         sysname=$(module_sysname "$mod")
-        # modprobe -r can remove newly-unused dependencies as well as its named target.
+        # Refresh has already removed the previous add-on from the module index.
+        # rmmod addresses the loaded module directly and leaves dependencies for
+        # their own journalled removals; modprobe -r needs the vanished .ko file.
         [ -d "/sys/module/$sysname" ] || continue
-        if ! modprobe -r -- "$mod"; then
+        if ! rmmod -- "$sysname"; then
             echo "wendyos-sysext-apply: could not unload $mod for $package" >&2
             return 1
         fi
