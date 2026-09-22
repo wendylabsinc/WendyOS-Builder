@@ -73,7 +73,11 @@ case "$cmd" in
                 case " ${FAIL_RESTORE:-} " in *" $n "*) exit 1 ;; esac ;;
         esac ;;
     systemctl) [ "${FAIL_SERVICE:-0}" = 0 ] || exit 1 ;;
+    rmmod) [ "${2:-}" != "${FAIL_UNLOAD:-}" ] || exit 1 ;;
     modprobe)
+        if [ "${1:-}" = -r ] && [ "${3:-}" = "${UNINDEXED_MODULE:-}" ]; then
+            echo "Module ${3} not found" >&2; exit 1
+        fi
         if [ "${1:-}" = -- ] && [ "${2:-}" = "${SIGNAL_ON_LOAD:-}" ]; then
             kill -"${TEST_SIGNAL:-TERM}" "$PPID"
             exit 1
@@ -88,7 +92,7 @@ esac
 exit 0
 '''
         for name in ("uname", "systemd-sysext", "depmod", "udevadm", "modprobe",
-                     "systemctl", "timeout", "nmcli", "date", "sleep"):
+                     "systemctl", "timeout", "nmcli", "date", "sleep", "rmmod"):
             path = self.root / "bin" / name
             path.write_text(mock)
             path.chmod(0o755)
@@ -104,10 +108,18 @@ exit 0
     def test_replacement_order(self):
         result, calls = self.run_apply()
         self.assertEqual(result.returncode, 0, result.stderr)
-        operations = [line for line in calls if line.startswith(("modprobe -r", "modprobe -- ", "systemctl"))]
-        self.assertEqual(operations, ["modprobe -r -- oldwifi", "modprobe -r -- cfg80211",
+        operations = [line for line in calls if line.startswith(("rmmod", "modprobe -r", "modprobe -- ", "systemctl"))]
+        self.assertEqual(operations, ["rmmod -- oldwifi", "rmmod -- cfg80211",
                                      "modprobe -- newwifi", "modprobe -- btusb",
                                      "systemctl try-restart -- wpa_supplicant.service"])
+
+    def test_loaded_addon_can_unload_after_refresh_removes_its_index_entry(self):
+        self.env["UNINDEXED_MODULE"] = "oldwifi"
+        result, calls = self.run_apply()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("rmmod -- oldwifi", calls)
+        self.assertNotIn("modprobe -r -- oldwifi", calls)
+        self.assertIn("modprobe -- newwifi", calls)
 
     def test_explicit_install_fails_on_absent_hardware(self):
         (self.root / "sys/bus/pci/devices/card/device").write_text("0x1234\n")
@@ -119,7 +131,7 @@ exit 0
     def test_unrelated_install_does_not_reload(self):
         result, calls = self.run_apply("other")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertFalse(any(line.startswith(("modprobe -r", "systemctl")) for line in calls))
+        self.assertFalse(any(line.startswith(("rmmod", "modprobe -r", "systemctl")) for line in calls))
 
     def test_unload_failure_does_not_insert_mixed_stack(self):
         self.env["FAIL_UNLOAD"] = "cfg80211"
@@ -152,7 +164,7 @@ exit 0
         result, calls = self.run_apply()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("unexpected depends on it", result.stderr)
-        self.assertFalse(any(line.startswith("modprobe -r") for line in calls))
+        self.assertFalse(any(line.startswith(("rmmod", "modprobe -r")) for line in calls))
 
     def test_failed_rollback_reports_reboot_requirement(self):
         self.env["FAIL_LOAD"] = "btusb"
@@ -177,7 +189,7 @@ exit 0
         result, calls = self.run_apply()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("modprobe -- newwifi", calls)
-        self.assertFalse(any(line.startswith(("modprobe -r", "systemctl")) for line in calls))
+        self.assertFalse(any(line.startswith(("rmmod", "modprobe -r", "systemctl")) for line in calls))
 
     def test_alphabetically_first_payload_wins_module_collision(self):
         (self.root / "data/extensions/enabled/test-kernel/zeta.raw").touch()
@@ -269,7 +281,7 @@ exit 0
         result, calls = self.run_apply()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("cannot capture wlan0", result.stderr)
-        self.assertFalse(any(c.startswith("modprobe -r") for c in calls))
+        self.assertFalse(any(c.startswith(("rmmod", "modprobe -r")) for c in calls))
 
     def test_first_install_without_interface_needs_no_capture(self):
         self.with_wifi()
