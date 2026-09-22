@@ -58,9 +58,9 @@ RDEPENDS:${PN}:append = " \
 # WENDYOS_CAN: on for the robotics targets, off elsewhere. Per-family values live
 # in conf/distro/include/{rpi,x86,qemu,vm}-distro.inc and, for Jetson, in
 # conf/template/include/local/tegra-t{234,264}.inc -- Tegra has no *-distro.inc,
-# and tegra-image.inc is parsed too late to gate a recipe. A board in no such
-# family (Dragonwing today) falls back to the weak default in conf/distro/
-# wendyos.conf, which is "0".
+# and tegra-image.inc is parsed too late to gate a recipe. Dragonwing states "0"
+# in its own machine conf. A board none of those covers falls back to the weak
+# default in conf/distro/wendyos.conf, which is "0".
 RDEPENDS:${PN}:append = " \
     ${@oe.utils.ifelse(d.getVar('WENDYOS_CAN') == '1', 'packagegroup-wendyos-can', '')} \
     "

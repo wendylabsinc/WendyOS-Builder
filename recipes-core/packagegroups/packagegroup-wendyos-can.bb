@@ -7,14 +7,13 @@ inherit packagegroup
 
 # SocketCAN core, the transport protocols and every USB/SPI adapter driver.
 #
-# RRECOMMENDS, not RDEPENDS, because the set is not identical on every board and a
-# missing one must not fail the build. Concretely: CAN_MCP251X/CAN_MCP251XFD sit
-# behind "depends on SPI" (drivers/net/can/spi/Kconfig), and genericx86-64 has no
-# CONFIG_SPI, so those two packages never exist there. With RRECOMMENDS the rpm
-# backend treats them as weak deps and skips them (oe.package_manager.rpm honours
-# dnf Recommends unless NO_RECOMMENDATIONS is set, which this distro does not set).
-# The same pattern is already used, for the same reason, in
-# packagegroup-wendyos-container.bb.
+# RRECOMMENDS, not RDEPENDS. can.cfg pins every symbol behind this list, so all of
+# these resolve on every board that sets WENDYOS_CAN. The weak form is insurance:
+# whether a kernel-module package exists is decided by the kernel config, so a BSP
+# defconfig change or a board-scoped fragment could drop one, and that should not
+# fail the build. rpm treats them as weak deps and skips a missing one
+# (oe.package_manager.rpm honours dnf Recommends unless NO_RECOMMENDATIONS is set,
+# which this distro does not).
 #
 # Package names follow oe-core kernel-module-split.bbclass: the .ko basename with
 # "_" -> "-", exposed unversioned via RPROVIDES. Verified against
@@ -28,7 +27,6 @@ RRECOMMENDS:${PN} = " \
     kernel-module-can-j1939 \
     kernel-module-can-gw \
     kernel-module-vcan \
-    kernel-module-slcan \
     kernel-module-gs-usb \
     kernel-module-usb-8dev \
     kernel-module-ems-usb \
