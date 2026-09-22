@@ -102,7 +102,7 @@ PLAN=$(mktemp -d "/run/wendyos-driver-plan.XXXXXX") || exit 1
 # A signal must never erase the journal and then resume activation. A command
 # may have been interrupted mid-mutation, so do not claim a clean rollback.
 trap 'rm -rf "$PLAN"' 0
-# shellcheck disable=SC2329 # Invoked by the signal traps below.
+# shellcheck disable=SC2317,SC2329 # Invoked by the signal traps below.
 interrupted() {
     trap '' 1 2 15
     echo "wendyos-sysext-apply: interrupted; activation state uncertain, reboot required" >&2
