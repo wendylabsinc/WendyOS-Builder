@@ -1,0 +1,645 @@
+From 62f89c83dc793ba98af61e7667f39e08042f527d Mon Sep 17 00:00:00 2001
+From: Wendy Labs <engineering@wendy.dev>
+Date: Wed, 23 Sep 2026 21:31:29 +1000
+Subject: [PATCH] update: reject incompatible data encryption before slot write
+
+Upstream-Status: Pending
+
+
+Plain-data artifacts keep the stock v1 wire format for OTA bootstrap; LUKS2
+uses explicit v2 metadata. The existing live-data compatibility guard remains.
+
+---
+ cmd/wendyos-update/pack.go              |   6 +-
+ docs/cli-contract.md                    |   2 +-
+ docs/manifest-schema.md                 |  22 ++++++-
+ internal/artifact/manifest.go           |  20 ++++--
+ internal/artifact/reader.go             |   4 +-
+ internal/artifact/reader_test.go        |  15 ++++-
+ internal/artifact/writer.go             |  14 +++-
+ internal/artifact/writer_test.go        |  65 +++++++++++++++++-
+ internal/engine/data_encryption.go      |  89 +++++++++++++++++++++++++
+ internal/engine/data_encryption_test.go | 112 ++++++++++++++++++++++++++++++++
+ internal/engine/engine.go               |   4 ++
+ internal/engine/engine_test.go          |   5 ++
+ 12 files changed, 340 insertions(+), 18 deletions(-)
+
+diff --git a/cmd/wendyos-update/pack.go b/cmd/wendyos-update/pack.go
+index d4e0193..57da053 100644
+--- a/cmd/wendyos-update/pack.go
++++ b/cmd/wendyos-update/pack.go
+@@ -30,6 +30,7 @@ func cmdPack(args []string) error {
+ 		version     = fs.String("version", "", "artifact version (e.g. 0.16.0)")
+ 		compression = fs.String("compression", "zstd", "payload compression: zstd|gzip|none")
+ 		blUpdate    = fs.Bool("bootloader-update", false, "informational flag (the rootfs marker decides at install time)")
++		dataMode    = fs.String("data-encryption", "", "target /data format: plain|luks2 (required)")
+ 		minTool     = fs.String("min-tool-version", "", "minimum wendyos-update version able to install this artifact")
+ 		output      = fs.String("o", "", "output .wendy path")
+ 		noVerify    = fs.Bool("no-verify", false, "skip the read-back verification pass")
+@@ -39,9 +40,9 @@ func cmdPack(args []string) error {
+ 	if err := fs.Parse(args); err != nil {
+ 		return err
+ 	}
+-	if *image == "" || *name == "" || *version == "" || *output == "" || len(devices) == 0 {
++	if *image == "" || *name == "" || *version == "" || *output == "" || len(devices) == 0 || *dataMode == "" {
+ 		fs.Usage()
+-		return fmt.Errorf("pack: --image, --name, --version, --device, and -o are required")
++		return fmt.Errorf("pack: --image, --name, --version, --device, --data-encryption, and -o are required")
+ 	}
+ 
+ 	out, err := os.OpenFile(*output, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+@@ -55,6 +56,7 @@ func cmdPack(args []string) error {
+ 		CompatibleDevices: devices,
+ 		Compression:       *compression,
+ 		BootloaderUpdate:  *blUpdate,
++		DataEncryption:    *dataMode,
+ 		MinToolVersion:    *minTool,
+ 	})
+ 	if err != nil {
+diff --git a/docs/cli-contract.md b/docs/cli-contract.md
+index 753f07e..d550cbe 100644
+--- a/docs/cli-contract.md
++++ b/docs/cli-contract.md
+@@ -14,7 +14,7 @@ later the wendy-agent wrapper). Changes after v1 are additive only.
+ | `status [--json] [--verbose]` | Per-slot state for **both** A/B — rootfs device + health, distro and kernel version, trial retries/notes — plus a system-wide section (bootloader version, last capsule status) and any pending update. `--verbose` adds a raw board `diagnostics` map for debugging (raw `RootfsStatusSlot` bytes, per-slot bootloader state, `BootChainFw*`, `OsIndications`). Inactive-slot distro/kernel are read via a best-effort read-only mount (root only; `unknown` otherwise). Best-effort/display-only. | No |
+ | `check [--json]` | Report whether this device could take an install right now: no update pending, plus the platform conditions that decide whether a slot switch can take effect (tegra: rootfs A/B redundancy armed, and ESP room to stage a capsule). Reads state and probes hardware, changes nothing, safe to run at any time. Takes **no artifact** — everything an artifact carries is already rejected by `install` after reading only the manifest, and the one thing that would help, the size of the capsule the incoming image ships, lives inside the payload rather than the manifest. Exit 5 when not ready. | No |
+ | `mark-good` | Manual escape hatch: reset slot health vars, clear pending state | No |
+-| `pack <flags>` | Host-side: build a `.wendy` artifact from a rootfs image (`--image --name --version --device... -o`); self-verifies by re-reading the output unless `--no-verify` | n/a |
++| `pack <flags>` | Host-side: build a `.wendy` artifact from a rootfs image (`--image --name --version --device... --data-encryption plain\|luks2 -o`); self-verifies by re-reading the output unless `--no-verify` | n/a |
+ 
+ ## Exit codes
+ 
+diff --git a/docs/manifest-schema.md b/docs/manifest-schema.md
+index cce4b80..bba1ae4 100644
+--- a/docs/manifest-schema.md
++++ b/docs/manifest-schema.md
+@@ -1,4 +1,4 @@
+-# .wendy artifact format (v1 — frozen)
++# .wendy artifact format (v1 and v2)
+ 
+ A `.wendy` file is a **tar archive** (no outer compression) with a fixed
+ member order so the whole artifact installs in one streaming pass from a
+@@ -6,7 +6,7 @@ URL — no temp copy of the payload.
+ 
+ ```
+ manifest.json        # FIRST member — everything needed to validate up front
+-manifest.sig         # reserved for future signing; absent in v1
++manifest.sig         # reserved for future signing; not verified in v1 or v2
+ payload              # the rootfs image, compressed per manifest
+ ```
+ 
+@@ -14,7 +14,7 @@ payload              # the rootfs image, compressed per manifest
+ 
+ ```json
+ {
+-  "format_version": 1,
++  "format_version": 2,
+   "artifact_name": "wendyos-image-jetson-agx-thor-devkit-nvme-wendyos-0.16.0",
+   "artifact_version": "0.16.0",
+   "compatible_devices": ["jetson-agx-thor"],
+@@ -26,14 +26,26 @@ payload              # the rootfs image, compressed per manifest
+     "compression": "zstd"
+   },
+   "bootloader_update": false,
++  "data_encryption": "luks2",
+   "min_tool_version": "0.1.0"
+ }
+ ```
+ 
++The packer emits v1 with no `data_encryption` field for `--data-encryption plain`,
++so stock v1 updaters can install plain images. `--data-encryption luks2` emits
++v2 with explicit metadata. New receivers retain the live-partition guard for
++both versions; v1 is accepted only on plain data.
++
+ Field semantics:
+ 
+ - `compatible_devices` — matched against `/etc/wendyos/device-type`
+   (WENDYOS_BOARD_ID). Install refuses (exit 3) on mismatch.
++- `data_encryption` — required in v2: `plain` means an ext4 filesystem on
++  the raw `/data` partition; `luks2` means a LUKS2 header there and ext4 in
++  its unlocked mapper. The installer probes the live raw partition and refuses
++  a mismatch before opening the inactive rootfs slot. v1 artifacts have no
++  field: they remain installable on plain `/data`, but are refused on LUKS2.
++  Old updaters reject v2 rather than silently ignoring this safety field.
+ - `payload.sha256` — verified with a rolling hash while streaming the
+   decompressed image to the block device; mismatch → exit 3, slot not
+   flipped.
+@@ -44,3 +56,7 @@ Field semantics:
+   new image, not to whoever packaged the artifact.
+ - `min_tool_version` — forward-compat gate; older tools refuse artifacts
+   they can't handle correctly (exit 3).
++
++`manifest.sig` is still only a reserved member. The payload digests detect
++corruption against the manifest but do not authenticate the manifest itself.
++Artifact authenticity requires a separate trusted signature mechanism.
+diff --git a/internal/artifact/manifest.go b/internal/artifact/manifest.go
+index 70b9656..ee14c9f 100644
+--- a/internal/artifact/manifest.go
++++ b/internal/artifact/manifest.go
+@@ -1,5 +1,5 @@
+ // Package artifact reads .wendy update artifacts.
+-// Format: docs/manifest-schema.md (v1, frozen). A .wendy file is a tar
++// Format: docs/manifest-schema.md. A .wendy file is a tar
+ // with manifest.json FIRST, then the compressed payload — designed for
+ // one streaming pass from a URL.
+ package artifact
+@@ -9,7 +9,7 @@ import "fmt"
+ // sha256HexLen is the length of a SHA-256 digest in lowercase hex.
+ const sha256HexLen = 64
+ 
+-// Manifest is the parsed manifest.json (format v1).
++// Manifest is the parsed manifest.json (format v1 or v2).
+ type Manifest struct {
+ 	FormatVersion     int      `json:"format_version"`
+ 	ArtifactName      string   `json:"artifact_name"`
+@@ -17,6 +17,7 @@ type Manifest struct {
+ 	CompatibleDevices []string `json:"compatible_devices"`
+ 	Payload           Payload  `json:"payload"`
+ 	BootloaderUpdate  bool     `json:"bootloader_update"`
++	DataEncryption    string   `json:"data_encryption,omitempty"` // v2: "plain" | "luks2"
+ 	MinToolVersion    string   `json:"min_tool_version"`
+ }
+ 
+@@ -40,12 +41,21 @@ func (m *Manifest) CompatibleWith(deviceType string) bool {
+ 	return false
+ }
+ 
+-// Validate checks structural validity of a parsed manifest (format v1).
++// Validate checks structural validity of a parsed manifest.
+ // Device compatibility and tool-version gating are policy checks the
+ // engine performs separately — this is "is the manifest well-formed".
+ func (m *Manifest) Validate() error {
+-	if m.FormatVersion != 1 {
+-		return fmt.Errorf("unsupported format_version %d (tool supports 1)", m.FormatVersion)
++	switch m.FormatVersion {
++	case 1:
++		if m.DataEncryption != "" {
++			return fmt.Errorf("format_version 1 cannot specify data_encryption")
++		}
++	case 2:
++		if m.DataEncryption != "plain" && m.DataEncryption != "luks2" {
++			return fmt.Errorf("format_version 2 requires data_encryption plain or luks2, got %q", m.DataEncryption)
++		}
++	default:
++		return fmt.Errorf("unsupported format_version %d (tool supports 1 and 2)", m.FormatVersion)
+ 	}
+ 	if m.ArtifactName == "" || m.ArtifactVersion == "" {
+ 		return fmt.Errorf("artifact_name and artifact_version are required")
+diff --git a/internal/artifact/reader.go b/internal/artifact/reader.go
+index c0f2b4f..02fa47f 100644
+--- a/internal/artifact/reader.go
++++ b/internal/artifact/reader.go
+@@ -58,7 +58,7 @@ func Open(r io.Reader) (*Reader, error) {
+ // Payload advances to the payload member and returns a reader over its
+ // (still compressed) bytes. The reader is teed into a sha256 so the
+ // stored-bytes digest can be verified after consumption. manifest.sig
+-// members are skipped (reserved, unverified in v1).
++// members are skipped (reserved, unverified in v1 and v2).
+ func (r *Reader) Payload() (io.Reader, error) {
+ 	if r.payloadTaken {
+ 		return nil, fmt.Errorf("artifact: Payload may only be called once")
+@@ -73,7 +73,7 @@ func (r *Reader) Payload() (io.Reader, error) {
+ 		}
+ 		name := memberName(hdr)
+ 		if name == "manifest.sig" {
+-			continue // reserved for future signing; ignored in v1
++			continue // reserved for future signing; ignored in v1 and v2
+ 		}
+ 		if name != r.Manifest.Payload.Name {
+ 			return nil, fmt.Errorf("artifact: unexpected member %q before payload %q", hdr.Name, r.Manifest.Payload.Name)
+diff --git a/internal/artifact/reader_test.go b/internal/artifact/reader_test.go
+index d7950d9..57d1055 100644
+--- a/internal/artifact/reader_test.go
++++ b/internal/artifact/reader_test.go
+@@ -189,9 +189,22 @@ func TestManifestValidate(t *testing.T) {
+ 	compressed := zstdCompress(t, image)
+ 
+ 	bad := validManifest(image, compressed)
++	bad.FormatVersion = 3
++	if err := bad.Validate(); err == nil {
++		t.Fatal("format_version 3 must be rejected")
++	}
++	bad = validManifest(image, compressed)
+ 	bad.FormatVersion = 2
+ 	if err := bad.Validate(); err == nil {
+-		t.Fatal("format_version 2 must be rejected")
++		t.Fatal("format_version 2 without data_encryption must be rejected")
++	}
++	for _, mode := range []string{"plain", "luks2"} {
++		valid := validManifest(image, compressed)
++		valid.FormatVersion = 2
++		valid.DataEncryption = mode
++		if err := valid.Validate(); err != nil {
++			t.Fatalf("format_version 2 with %s: %v", mode, err)
++		}
+ 	}
+ 
+ 	bad = validManifest(image, compressed)
+diff --git a/internal/artifact/writer.go b/internal/artifact/writer.go
+index 199b766..107184c 100644
+--- a/internal/artifact/writer.go
++++ b/internal/artifact/writer.go
+@@ -27,6 +27,7 @@ type PackOptions struct {
+ 	CompatibleDevices []string // WENDYOS_BOARD_ID values
+ 	Compression       string   // "zstd" (default), "gzip", "none"
+ 	BootloaderUpdate  bool     // informational (the rootfs marker decides)
++	DataEncryption    string   // required: "plain" or "luks2" for target /data support
+ 	MinToolVersion    string   // optional forward-compat gate
+ }
+ 
+@@ -37,6 +38,9 @@ func Pack(out io.Writer, opts PackOptions) (*Manifest, error) {
+ 	if opts.Compression == "" {
+ 		opts.Compression = "zstd"
+ 	}
++	if opts.DataEncryption != "plain" && opts.DataEncryption != "luks2" {
++		return nil, fmt.Errorf("pack: data_encryption must be plain or luks2, got %q", opts.DataEncryption)
++	}
+ 
+ 	imgFile, err := os.Open(opts.ImagePath)
+ 	if err != nil {
+@@ -97,8 +101,15 @@ func Pack(out io.Writer, opts PackOptions) (*Manifest, error) {
+ 		return nil, err
+ 	}
+ 
++	// Plain artifacts retain the stock v1 wire format so existing updaters
++	// can bootstrap. New receivers already interpret v1 as plain-only.
++	// LUKS2 requires explicit v2 metadata and a receiver that understands it.
++	formatVersion, dataEncryption := 1, ""
++	if opts.DataEncryption == "luks2" {
++		formatVersion, dataEncryption = 2, opts.DataEncryption
++	}
+ 	m := &Manifest{
+-		FormatVersion:     1,
++		FormatVersion:     formatVersion,
+ 		ArtifactName:      opts.ArtifactName,
+ 		ArtifactVersion:   opts.ArtifactVersion,
+ 		CompatibleDevices: opts.CompatibleDevices,
+@@ -110,6 +121,7 @@ func Pack(out io.Writer, opts PackOptions) (*Manifest, error) {
+ 			Compression:      opts.Compression,
+ 		},
+ 		BootloaderUpdate: opts.BootloaderUpdate,
++		DataEncryption:   dataEncryption,
+ 		MinToolVersion:   opts.MinToolVersion,
+ 	}
+ 	if err := m.Validate(); err != nil {
+diff --git a/internal/artifact/writer_test.go b/internal/artifact/writer_test.go
+index a4a2394..eb2ee90 100644
+--- a/internal/artifact/writer_test.go
++++ b/internal/artifact/writer_test.go
+@@ -24,6 +24,7 @@ func packToBytes(t *testing.T, image []byte, compression string) ([]byte, *Manif
+ 		ArtifactVersion:   "9.9.9",
+ 		CompatibleDevices: []string{"jetson-agx-thor"},
+ 		Compression:       compression,
++		DataEncryption:    "plain",
+ 		MinToolVersion:    "0.1.0",
+ 	})
+ 	if err != nil {
+@@ -44,7 +45,7 @@ func TestPackReadRoundTrip(t *testing.T) {
+ 		if err != nil {
+ 			t.Fatalf("%s: %v", compression, err)
+ 		}
+-		if r.Manifest.ArtifactName != m.ArtifactName || r.Manifest.Payload.Size != int64(len(image)) {
++		if r.Manifest.ArtifactName != m.ArtifactName || r.Manifest.Payload.Size != int64(len(image)) || r.Manifest.FormatVersion != 1 || r.Manifest.DataEncryption != "" {
+ 			t.Fatalf("%s: manifest roundtrip: %+v", compression, r.Manifest)
+ 		}
+ 
+@@ -90,21 +91,79 @@ func TestPackRejectsBadOptions(t *testing.T) {
+ 	// no devices
+ 	if _, err := Pack(&out, PackOptions{
+ 		ImagePath: imgPath, ArtifactName: "a", ArtifactVersion: "1",
++		DataEncryption: "plain",
+ 	}); err == nil {
+ 		t.Fatal("empty compatible_devices must be rejected")
+ 	}
+ 	// bad compression
+ 	if _, err := Pack(&out, PackOptions{
+ 		ImagePath: imgPath, ArtifactName: "a", ArtifactVersion: "1",
+-		CompatibleDevices: []string{"d"}, Compression: "xz",
++		CompatibleDevices: []string{"d"}, Compression: "xz", DataEncryption: "plain",
+ 	}); err == nil {
+ 		t.Fatal("unsupported compression must be rejected")
+ 	}
+ 	// missing image
+ 	if _, err := Pack(&out, PackOptions{
+ 		ImagePath: filepath.Join(t.TempDir(), "absent"), ArtifactName: "a",
+-		ArtifactVersion: "1", CompatibleDevices: []string{"d"},
++		ArtifactVersion: "1", CompatibleDevices: []string{"d"}, DataEncryption: "plain",
+ 	}); err == nil {
+ 		t.Fatal("missing image must be rejected")
+ 	}
++	if _, err := Pack(&out, PackOptions{
++		ImagePath: imgPath, ArtifactName: "a", ArtifactVersion: "1",
++		CompatibleDevices: []string{"d"}, Compression: "none",
++	}); err == nil {
++		t.Fatal("missing data encryption mode must be rejected")
++	}
++}
++
++// Stock receivers can bootstrap plain images; LUKS2 keeps explicit v2 policy.
++func TestPackDataEncryptionFormats(t *testing.T) {
++	for _, tc := range []struct {
++		mode     string
++		format   int
++		metadata string
++	}{
++		{"plain", 1, ""}, {"luks2", 2, "luks2"},
++	} {
++		t.Run(tc.mode, func(t *testing.T) {
++			image := []byte("ordinary pack/read roundtrip")
++			path := filepath.Join(t.TempDir(), "image.ext4")
++			if err := os.WriteFile(path, image, 0600); err != nil {
++				t.Fatal(err)
++			}
++			var out bytes.Buffer
++			m, err := Pack(&out, PackOptions{ImagePath: path, ArtifactName: "ordinary", ArtifactVersion: "1", CompatibleDevices: []string{"raspberry-pi-4"}, Compression: "none", DataEncryption: tc.mode})
++			if err != nil {
++				t.Fatal(err)
++			}
++			if m.FormatVersion != tc.format || m.DataEncryption != tc.metadata {
++				t.Fatalf("packed manifest: %+v", m)
++			}
++			if tc.mode == "plain" && bytes.Contains(out.Bytes(), []byte(`"data_encryption"`)) {
++				t.Fatal("plain v1 must omit data_encryption for stock receivers")
++			}
++			r, err := Open(bytes.NewReader(out.Bytes()))
++			if err != nil {
++				t.Fatal(err)
++			}
++			if r.Manifest.FormatVersion != tc.format || r.Manifest.DataEncryption != tc.metadata {
++				t.Fatalf("read manifest: %+v", r.Manifest)
++			}
++			payload, err := r.Payload()
++			if err != nil {
++				t.Fatal(err)
++			}
++			got, err := io.ReadAll(payload)
++			if err != nil {
++				t.Fatal(err)
++			}
++			if !bytes.Equal(got, image) {
++				t.Fatal("payload changed")
++			}
++			if err := r.VerifyPayloadDigests(sha256hex(image)); err != nil {
++				t.Fatal(err)
++			}
++		})
++	}
+ }
+diff --git a/internal/engine/data_encryption.go b/internal/engine/data_encryption.go
+new file mode 100644
+index 0000000..a1ca1c9
+--- /dev/null
++++ b/internal/engine/data_encryption.go
+@@ -0,0 +1,89 @@
++package engine
++
++import (
++	"bytes"
++	"encoding/binary"
++	"errors"
++	"fmt"
++	"io"
++	"os"
++
++	"github.com/wendylabsinc/wendyos-update/internal/artifact"
++)
++
++const (
++	dataPartLabel = "/dev/disk/by-partlabel/data"
++	dataFSLabel   = "/dev/disk/by-label/data" // MBR Raspberry Pi has no PARTLABEL
++	ext4MagicAt   = 1024 + 56
++)
++
++var luksMagic = []byte{'L', 'U', 'K', 'S', 0xba, 0xbe}
++
++// checkDataEncryption compares the target rootfs's /data support with the
++// existing raw data partition before the inactive rootfs slot is opened.
++func (e *Engine) checkDataEncryption(m artifact.Manifest) error {
++	path := e.DataDevicePath
++	if path == "" {
++		var err error
++		path, err = findDataDevice(dataPartLabel, dataFSLabel)
++		if err != nil {
++			return reject("cannot identify live /data partition: %v", err)
++		}
++	}
++	live, err := probeDataEncryption(path)
++	if err != nil {
++		return reject("cannot identify live /data format on %s: %v", path, err)
++	}
++	if m.FormatVersion == 1 {
++		// Old artifacts carry no encryption policy. Keep upgrades working for
++		// plain-data devices, but never put an unknown old rootfs over LUKS2.
++		if live != "plain" {
++			return reject("legacy artifact has no data_encryption metadata; live /data is %s", live)
++		}
++		return nil
++	}
++	if m.DataEncryption != live {
++		return reject("artifact requires /data %s but live /data is %s", m.DataEncryption, live)
++	}
++	return nil
++}
++
++func findDataDevice(partLabel, fsLabel string) (string, error) {
++	for _, path := range []string{partLabel, fsLabel} {
++		if _, err := os.Stat(path); err == nil {
++			return path, nil
++		} else if !errors.Is(err, os.ErrNotExist) {
++			return "", err
++		}
++	}
++	return "", errors.New("neither /dev/disk/by-partlabel/data nor /dev/disk/by-label/data exists")
++}
++
++// Read on-disk signatures directly so detection works even when the target
++// image does not ship cryptsetup or blkid. Unknown/blank partitions fail closed.
++func probeDataEncryption(path string) (string, error) {
++	f, err := os.Open(path)
++	if err != nil {
++		return "", err
++	}
++	defer f.Close()
++	header := make([]byte, 8)
++	if _, err := io.ReadFull(f, header); err != nil {
++		return "", fmt.Errorf("read partition header: %w", err)
++	}
++	if bytes.Equal(header[:6], luksMagic) {
++		version := binary.BigEndian.Uint16(header[6:8])
++		if version != 2 {
++			return "", fmt.Errorf("unsupported LUKS version %d", version)
++		}
++		return "luks2", nil
++	}
++	magic := make([]byte, 2)
++	if _, err := f.ReadAt(magic, ext4MagicAt); err != nil {
++		return "", fmt.Errorf("read ext4 superblock: %w", err)
++	}
++	if magic[0] == 0x53 && magic[1] == 0xef {
++		return "plain", nil
++	}
++	return "", errors.New("partition is neither LUKS2 nor ext4")
++}
+diff --git a/internal/engine/data_encryption_test.go b/internal/engine/data_encryption_test.go
+new file mode 100644
+index 0000000..95d0142
+--- /dev/null
++++ b/internal/engine/data_encryption_test.go
+@@ -0,0 +1,112 @@
++package engine
++
++import (
++	"bytes"
++	"errors"
++	"os"
++	"path/filepath"
++	"strings"
++	"testing"
++
++	"github.com/wendylabsinc/wendyos-update/internal/artifact"
++	"github.com/wendylabsinc/wendyos-update/internal/connector"
++)
++
++func writeDataSignature(t *testing.T, path, mode string) {
++	t.Helper()
++	data := make([]byte, ext4MagicAt+2)
++	switch mode {
++	case "plain":
++		data[ext4MagicAt], data[ext4MagicAt+1] = 0x53, 0xef
++	case "luks2":
++		copy(data, luksMagic)
++		data[6], data[7] = 0, 2
++	case "unknown":
++	default:
++		t.Fatalf("unknown test mode %q", mode)
++	}
++	if err := os.WriteFile(path, data, 0o600); err != nil {
++		t.Fatal(err)
++	}
++}
++
++func TestInstallDataEncryptionCompatibilityBeforeWrite(t *testing.T) {
++	for _, tc := range []struct {
++		name, live, image string
++		version           int
++		accept            bool
++	}{
++		{"v2 plain on plain", "plain", "plain", 2, true},
++		{"v2 luks2 on luks2", "luks2", "luks2", 2, true},
++		{"v2 luks2 on plain", "plain", "luks2", 2, false},
++		{"v2 plain on luks2", "luks2", "plain", 2, false},
++		{"v1 on plain", "plain", "", 1, true},
++		{"v1 on luks2", "luks2", "", 1, false},
++		{"v2 missing mode", "plain", "", 2, false},
++		{"v2 unknown live format", "unknown", "plain", 2, false},
++	} {
++		t.Run(tc.name, func(t *testing.T) {
++			conn := &fakeConn{cur: connector.SlotA}
++			eng := testEngine(t, conn)
++			writeDataSignature(t, eng.DataDevicePath, tc.live)
++			art, _ := buildArtifact(t, func(m *artifact.Manifest) {
++				m.FormatVersion = tc.version
++				m.DataEncryption = tc.image
++			})
++			_, err := eng.Install(bytes.NewReader(art))
++			if tc.accept {
++				if err != nil {
++					t.Fatalf("compatible install rejected: %v", err)
++				}
++				return
++			}
++			var rejected *RejectError
++			if !errors.As(err, &rejected) {
++				t.Fatalf("want artifact rejection, got %v", err)
++			}
++			if data, err := os.ReadFile(conn.dev); err != nil || len(data) != 0 {
++				t.Fatalf("inactive slot changed before rejection: bytes=%d error=%v", len(data), err)
++			}
++			if len(conn.prepared) != 0 || len(conn.swapped) != 0 {
++				t.Fatal("connector changed before rejection")
++			}
++		})
++	}
++}
++
++func TestProbeDataEncryptionAndLabelFallback(t *testing.T) {
++	dir := t.TempDir()
++	partLabel := filepath.Join(dir, "partlabel", "data")
++	fsLabel := filepath.Join(dir, "label", "data")
++	if err := os.MkdirAll(filepath.Dir(fsLabel), 0o700); err != nil {
++		t.Fatal(err)
++	}
++	writeDataSignature(t, fsLabel, "plain")
++	if got, err := findDataDevice(partLabel, fsLabel); err != nil || got != fsLabel {
++		t.Fatalf("MBR filesystem-label fallback = %q, %v", got, err)
++	}
++	if mode, err := probeDataEncryption(fsLabel); err != nil || mode != "plain" {
++		t.Fatalf("plain ext4 signature = %q, %v", mode, err)
++	}
++	if err := os.MkdirAll(filepath.Dir(partLabel), 0o700); err != nil {
++		t.Fatal(err)
++	}
++	writeDataSignature(t, partLabel, "luks2")
++	if got, err := findDataDevice(partLabel, fsLabel); err != nil || got != partLabel {
++		t.Fatalf("GPT partition-label preference = %q, %v", got, err)
++	}
++	if mode, err := probeDataEncryption(partLabel); err != nil || mode != "luks2" {
++		t.Fatalf("LUKS2 signature = %q, %v", mode, err)
++	}
++	data, err := os.ReadFile(partLabel)
++	if err != nil {
++		t.Fatal(err)
++	}
++	data[6], data[7] = 0, 1
++	if err := os.WriteFile(partLabel, data, 0o600); err != nil {
++		t.Fatal(err)
++	}
++	if _, err := probeDataEncryption(partLabel); err == nil || !strings.Contains(err.Error(), "unsupported LUKS version") {
++		t.Fatalf("LUKS1 must be refused: %v", err)
++	}
++}
+diff --git a/internal/engine/engine.go b/internal/engine/engine.go
+index 02f73cd..11cfae3 100644
+--- a/internal/engine/engine.go
++++ b/internal/engine/engine.go
+@@ -41,6 +41,7 @@ type Engine struct {
+ 	Conn           connector.Connector
+ 	StateDir       string // default: StateDir const
+ 	DeviceTypePath string // default: DefaultDeviceTypePath
++	DataDevicePath string // default: /dev/disk/by-partlabel/data, then /dev/disk/by-label/data
+ 	HooksDir       string // default: DefaultHooksDir; root for the per-phase hook dirs
+ 	HealthDir      string // legacy override for the health phase only (config health_dir)
+ 	ToolVersion    string
+@@ -92,6 +93,9 @@ func (e *Engine) Install(src io.Reader) (*InstallResult, error) {
+ 	if !versionAtLeast(e.ToolVersion, m.MinToolVersion) {
+ 		return nil, reject("artifact requires tool >= %s, this is %s", m.MinToolVersion, e.ToolVersion)
+ 	}
++	if err := e.checkDataEncryption(m); err != nil {
++		return nil, err
++	}
+ 	slog.Info("install: artifact accepted", "device", devType)
+ 
+ 	// Resolve the target slot.
+diff --git a/internal/engine/engine_test.go b/internal/engine/engine_test.go
+index 03a1bc0..98e6452 100644
+--- a/internal/engine/engine_test.go
++++ b/internal/engine/engine_test.go
+@@ -172,11 +172,16 @@ func testEngine(t *testing.T, f *fakeConn) *Engine {
+ 
+ 	f.dev = filepath.Join(dir, "fake-partition")
+ 	os.WriteFile(f.dev, nil, 0o644)
++	dataDev := filepath.Join(dir, "data-partition")
++	dataBytes := make([]byte, ext4MagicAt+2)
++	dataBytes[ext4MagicAt], dataBytes[ext4MagicAt+1] = 0x53, 0xef
++	os.WriteFile(dataDev, dataBytes, 0o644)
+ 
+ 	return &Engine{
+ 		Conn:           f,
+ 		StateDir:       filepath.Join(dir, "state"),
+ 		DeviceTypePath: devicePath,
++		DataDevicePath: dataDev,
+ 		ToolVersion:    "0.1.0-dev",
+ 	}
+ }
+-- 
+2.54.0 (Apple Git-157)

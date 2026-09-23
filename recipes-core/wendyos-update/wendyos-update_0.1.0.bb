@@ -23,6 +23,10 @@ GO_IMPORT = "github.com/wendylabsinc/wendyos-update"
 GO_SRCURI_DESTSUFFIX ?= "${@os.path.join(os.path.basename(d.getVar('S')), 'src', d.getVar('GO_IMPORT')) + '/'}"
 
 SRC_URI = "git://${GO_IMPORT};protocol=https;branch=main;destsuffix=${GO_SRCURI_DESTSUFFIX}"
+# Build the release-gate fix reproducibly from the already-pinned upstream
+# source revision. Apply the same patch to target and native packer variants.
+FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
+SRC_URI:append = " file://0001-update-reject-incompatible-data-encryption.patch;patchdir=${GO_SRCDIR}"
 # 2ef50a95 (main): add the grubenv connector (generic x86-64 GRUB-EFI A/B) — the
 # third connector, wiring up x86 A/B OTA Phase 2. Jetson
 # (tegrauefi) and RPi (ubootenv) are unaffected and each board still selects its
