@@ -1,0 +1,187 @@
+From: Wendy Labs <engineering@wendy.dev>
+Subject: [PATCH] ctrl_iface: select an explicit parent radio for interface creation
+
+Upstream-Status: Pending
+
+Global INTERFACE_ADD previously used the first interface in the daemon.
+Add an optional parent interface after the optional MAC address, retaining
+legacy behavior when omitted. Use that same parent for failed-add cleanup. Global interface removal
+also retains a surviving driver context on the removed interface's radio.
+Expose phyname in global STATUS so controllers can select a capable radio
+and remove only its mutually exclusive P2P management device.
+
+diff --git a/wpa_supplicant/ctrl_iface.c b/wpa_supplicant/ctrl_iface.c
+--- a/wpa_supplicant/ctrl_iface.c
++++ b/wpa_supplicant/ctrl_iface.c
+@@ -14676,7 +14676,7 @@
+ {
+ 	struct wpa_interface iface;
+ 	char *pos, *extra;
+-	struct wpa_supplicant *wpa_s;
++	struct wpa_supplicant *wpa_s, *parent = global->ifaces;
+ 	unsigned int create_iface = 0;
+ 	u8 mac_addr[ETH_ALEN];
+ 	const u8 *addr_ptr = NULL;
+@@ -14684,7 +14684,8 @@
+ 
+ 	/*
+ 	 * <ifname>TAB<confname>TAB<driver>TAB<ctrl_interface>TAB<driver_param>
+-	 * TAB<bridge_ifname>[TAB<create>[TAB<interface_type>][TAB<addr>]]
++	 * TAB<bridge_ifname>[TAB<create>[TAB<interface_type>][TAB<addr>]
++	 * [TAB<parent_ifname>]]
+ 	 */
+ 	wpa_printf(MSG_DEBUG, "CTRL_IFACE GLOBAL INTERFACE_ADD '%s'", cmd);
+ 
+@@ -14779,17 +14780,29 @@
+ 			}
+ 
+ 			pos = extra;
+-			if (!pos || !pos[0])
++			if (!pos)
+ 				break;
+-
+-			if (hwaddr_aton(pos, mac_addr)) {
+-				wpa_printf(MSG_DEBUG,
+-					   "INTERFACE_ADD invalid MAC address: '%s'",
+-					   pos);
+-				return -1;
++			extra = os_strchr(pos, '\t');
++			if (extra)
++				*extra++ = '\0';
++			if (pos[0]) {
++				if (hwaddr_aton(pos, mac_addr)) {
++					wpa_printf(MSG_DEBUG,
++						   "INTERFACE_ADD invalid MAC address: '%s'",
++						   pos);
++					return -1;
++				}
++				addr_ptr = mac_addr;
+ 			}
+-
+-			addr_ptr = mac_addr;
++			if (extra && extra[0]) {
++				parent = wpa_supplicant_get_iface(global, extra);
++				if (!parent) {
++					wpa_printf(MSG_DEBUG,
++						   "INTERFACE_ADD unknown parent: '%s'",
++						   extra);
++					return -1;
++				}
++			}
+ 		} else {
+ 			wpa_printf(MSG_DEBUG,
+ 				   "INTERFACE_ADD unsupported extra parameter: '%s'",
+@@ -14801,9 +14814,9 @@
+ 	if (create_iface) {
+ 		wpa_printf(MSG_DEBUG, "CTRL_IFACE creating interface '%s'",
+ 			   iface.ifname);
+-		if (!global->ifaces)
++		if (!parent)
+ 			return -1;
+-		if (wpa_drv_if_add(global->ifaces, type, iface.ifname,
++		if (wpa_drv_if_add(parent, type, iface.ifname,
+ 				   addr_ptr, NULL, NULL, mac_addr, NULL) < 0) {
+ 			wpa_printf(MSG_ERROR,
+ 				   "CTRL_IFACE interface creation failed");
+@@ -14828,7 +14841,7 @@
+ 	if (create_iface) {
+ 		/* wpa_supplicant does not create multi-BSS AP, so collapse to
+ 		 * WPA_IF_STATION to avoid unwanted clean up in the driver. */
+-		wpa_drv_if_remove(global->ifaces, WPA_IF_STATION, iface.ifname);
++		wpa_drv_if_remove(parent, WPA_IF_STATION, iface.ifname);
+ 	}
+ 	return -1;
+ }
+@@ -14837,7 +14850,7 @@
+ static int wpa_supplicant_global_iface_remove(struct wpa_global *global,
+ 					      char *cmd)
+ {
+-	struct wpa_supplicant *wpa_s;
++	struct wpa_supplicant *wpa_s, *parent = NULL;
+ 	int ret;
+ 	unsigned int delete_iface;
+ 
+@@ -14847,13 +14860,25 @@
+ 	if (wpa_s == NULL)
+ 		return -1;
+ 	delete_iface = wpa_s->added_vif;
++	if (delete_iface) {
++		/* Keep a driver context on this radio alive across unregistering
++		 * the interface. The global head may belong to another radio or
++		 * even a wired driver. Refuse before changing state if none survives.
++		 */
++		for (parent = global->ifaces; parent; parent = parent->next) {
++			if (parent != wpa_s && parent->radio == wpa_s->radio)
++				break;
++		}
++		if (!parent)
++			return -1;
++	}
+ 	ret = wpa_supplicant_remove_iface(global, wpa_s, 0);
+ 	if (!ret && delete_iface) {
+ 		wpa_printf(MSG_DEBUG, "CTRL_IFACE deleting the interface '%s'",
+ 			   cmd);
+ 		/* wpa_supplicant does not create multi-BSS AP, so collapse to
+ 		 * WPA_IF_STATION to avoid unwanted clean up in the driver. */
+-		ret = wpa_drv_if_remove(global->ifaces, WPA_IF_STATION, cmd);
++		ret = wpa_drv_if_remove(parent, WPA_IF_STATION, cmd);
+ 	}
+ 	return ret;
+ }
+@@ -15229,9 +15254,13 @@
+ #endif /* CONFIG_WIFI_DISPLAY */
+ 
+ 	for (wpa_s = global->ifaces; wpa_s; wpa_s = wpa_s->next) {
++		const char *phyname = wpa_driver_get_radio_name(wpa_s);
++
+ 		ret = os_snprintf(pos, end - pos, "ifname=%s\n"
+-				  "address=" MACSTR "\n",
+-				  wpa_s->ifname, MAC2STR(wpa_s->own_addr));
++				  "address=" MACSTR "\n"
++				  "phyname=%s\n",
++				  wpa_s->ifname, MAC2STR(wpa_s->own_addr),
++				  phyname ? phyname : "");
+ 		if (os_snprintf_error(end - pos, ret))
+ 			return pos - buf;
+ 		pos += ret;
+diff --git a/wpa_supplicant/wpa_cli.c b/wpa_supplicant/wpa_cli.c
+--- a/wpa_supplicant/wpa_cli.c
++++ b/wpa_supplicant/wpa_cli.c
+@@ -1887,21 +1887,23 @@
+ 		printf("Invalid INTERFACE_ADD command: needs at least one "
+ 		       "argument (interface name)\n"
+ 		       "All arguments: ifname confname driver ctrl_interface "
+-		       "driver_param bridge_name [create <type> [addr]]\n");
++		       "driver_param bridge_name [create <type> [addr] [parent_ifname]]\n");
+ 		return -1;
+ 	}
+ 
+ 	/*
+ 	 * INTERFACE_ADD <ifname>TAB<confname>TAB<driver>TAB<ctrl_interface>TAB
+-	 * <driver_param>TAB<bridge_name>[TAB<create>[TAB<type>][TAB<addr>]]
++	 * <driver_param>TAB<bridge_name>[TAB<create>[TAB<type>][TAB<addr>]
++	 * [TAB<parent_ifname>]]
+ 	 */
+ 	res = os_snprintf(cmd, sizeof(cmd),
+-			  "INTERFACE_ADD %s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s",
++			  "INTERFACE_ADD %s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s",
+ 			  argv[0],
+ 			  argc > 1 ? argv[1] : "", argc > 2 ? argv[2] : "",
+ 			  argc > 3 ? argv[3] : "", argc > 4 ? argv[4] : "",
+ 			  argc > 5 ? argv[5] : "", argc > 6 ? argv[6] : "",
+-			  argc > 7 ? argv[7] : "", argc > 8 ? argv[8] : "");
++			  argc > 7 ? argv[7] : "", argc > 8 ? argv[8] : "",
++			  argc > 9 ? argv[9] : "");
+ 	if (os_snprintf_error(sizeof(cmd), res))
+ 		return -1;
+ 	cmd[sizeof(cmd) - 1] = '\0';
+@@ -3735,7 +3737,8 @@
+ 	{ "interface_add", wpa_cli_cmd_interface_add, NULL,
+ 	  cli_cmd_flag_none,
+ 	  "<ifname> <confname> <driver> <ctrl_interface> <driver_param>\n"
+-	  "  <bridge_name> <create> <type> = adds new interface, all "
++	  "  <bridge_name> <create> <type> <addr> <parent_ifname> = adds new\n"
++	  "  interface, all "
+ 	  "parameters but\n"
+ 	  "  <ifname> are optional. Supported types are station ('sta') and "
+ 	  "AP ('ap')" },

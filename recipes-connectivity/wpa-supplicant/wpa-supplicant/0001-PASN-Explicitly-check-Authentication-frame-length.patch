@@ -1,0 +1,51 @@
+From d6100aa8d0c1b01d998693593efa4778a5950b6f Mon Sep 17 00:00:00 2001
+From: Jouni Malinen <jouni.malinen@oss.qualcomm.com>
+Date: Tue, 18 Aug 2026 19:16:38 +0300
+Subject: [PATCH 1/3] PASN: Explicitly check Authentication frame length
+
+Upstream-Status: Backport [d6100aa8d0c1b01d998693593efa4778a5950b6f]
+
+---
+ src/ap/ieee802_11.c       | 2 +-
+ src/pasn/pasn_responder.c | 6 ++++--
+ 2 files changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/src/ap/ieee802_11.c b/src/ap/ieee802_11.c
+index 9b897a7..ff94643 100644
+--- a/src/ap/ieee802_11.c
++++ b/src/ap/ieee802_11.c
+@@ -4096,7 +4096,7 @@ static void handle_auth_pasn(struct hostapd_data *hapd, struct sta_info *sta,
+ #ifdef CONFIG_P2P
+ 	struct ieee802_11_elems elems;
+ 
+-	if (len < 24) {
++	if (len < offsetof(struct ieee80211_mgmt, u.auth.variable)) {
+ 		wpa_printf(MSG_DEBUG, "PASN: Too short Management frame");
+ 		return;
+ 	}
+diff --git a/src/pasn/pasn_responder.c b/src/pasn/pasn_responder.c
+index c669271..6015022 100644
+--- a/src/pasn/pasn_responder.c
++++ b/src/pasn/pasn_responder.c
+@@ -861,7 +861,8 @@ int handle_auth_pasn_1(struct pasn_data *pasn,
+ 		goto send_resp;
+ 	}
+ 
+-	if (ieee802_11_parse_elems(mgmt->u.auth.variable,
++	if (len < offsetof(struct ieee80211_mgmt, u.auth.variable) ||
++	    ieee802_11_parse_elems(mgmt->u.auth.variable,
+ 				   len - offsetof(struct ieee80211_mgmt,
+ 						  u.auth.variable),
+ 				   &elems, 0) == ParseFailed) {
+@@ -1257,7 +1258,8 @@ int handle_auth_pasn_3(struct pasn_data *pasn, const u8 *own_addr,
+ 	size_t copy_len, mic_offset;
+ 	u8 hash[SHA512_MAC_LEN];
+ 
+-	if (ieee802_11_parse_elems(mgmt->u.auth.variable,
++	if (len < offsetof(struct ieee80211_mgmt, u.auth.variable) ||
++	    ieee802_11_parse_elems(mgmt->u.auth.variable,
+ 				   len - offsetof(struct ieee80211_mgmt,
+ 						  u.auth.variable),
+ 				   &elems, 0) == ParseFailed) {
+-- 
+2.51.0

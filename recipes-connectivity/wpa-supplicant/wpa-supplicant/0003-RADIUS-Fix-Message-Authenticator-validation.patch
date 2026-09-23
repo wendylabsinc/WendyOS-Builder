@@ -1,0 +1,41 @@
+From aa02cfa569477f67f3915c8b9a83d1a7ca93693d Mon Sep 17 00:00:00 2001
+From: Jouni Malinen <jouni.malinen@oss.qualcomm.com>
+Date: Fri, 14 Aug 2026 11:20:34 +0300
+Subject: [PATCH 3/3] RADIUS: Fix Message-Authenticator validation
+
+Upstream-Status: Backport [aa02cfa569477f67f3915c8b9a83d1a7ca93693d]
+
+---
+ src/radius/radius.c | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/src/radius/radius.c b/src/radius/radius.c
+index 40c037d..77cb9c0 100644
+--- a/src/radius/radius.c
++++ b/src/radius/radius.c
+@@ -695,6 +695,11 @@ int radius_msg_verify_das_req(struct radius_msg *msg, const u8 *secret,
+ 		return 0;
+ 	}
+ 
++	if (attr->length != sizeof(*attr) + MD5_MAC_LEN) {
++		wpa_printf(MSG_WARNING, "Invalid Message-Authenticator length");
++		return 1;
++	}
++
+ 	os_memcpy(orig, attr + 1, MD5_MAC_LEN);
+ 	os_memset(attr + 1, 0, MD5_MAC_LEN);
+ 	os_memcpy(orig_authenticator, msg->hdr->authenticator,
+@@ -993,6 +998,11 @@ int radius_msg_verify_msg_auth(struct radius_msg *msg, const u8 *secret,
+ 		return 1;
+ 	}
+ 
++	if (attr->length != sizeof(*attr) + MD5_MAC_LEN) {
++		wpa_printf(MSG_INFO, "Invalid Message-Authenticator length");
++		return 1;
++	}
++
+ 	os_memcpy(orig, attr + 1, MD5_MAC_LEN);
+ 	os_memset(attr + 1, 0, MD5_MAC_LEN);
+ 	if (req_auth) {
+-- 
+2.51.0
