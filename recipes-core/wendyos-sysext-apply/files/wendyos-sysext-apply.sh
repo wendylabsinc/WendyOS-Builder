@@ -27,6 +27,7 @@ RELDIR="/usr/lib/extension-release.d"
 ACTIVATIONDIR="/usr/lib/wendyos-driver-activation.d"
 PAYLOADDIR="/usr/lib/wendyos-driver-payloads"
 EXPOSEDMODDIR="/usr/lib/modules/$KVER/updates/wendyos"
+STATEDIR="/usr/lib/wendyos-driver-state"
 
 # The boot unit and an agent-driven install rewrite the same merge, so only one
 # runs at a time. The guard variable stops the re-exec from recursing.
@@ -91,13 +92,6 @@ if ! has_links; then
     exit 0
 fi
 
-# --always-refresh: reinstalling a driver reuses the image filename, which on its own looks
-# like no change.
-if ! systemd-sysext --mutable=ephemeral --always-refresh=yes refresh; then
-    echo "wendyos-sysext-apply: systemd-sysext refresh failed" >&2
-    exit 1
-fi
-
 PLAN=$(mktemp -d "/run/wendyos-driver-plan.XXXXXX") || exit 1
 # A signal must never erase the journal and then resume activation. A command
 # may have been interrupted mid-mutation, so do not claim a clean rollback.
@@ -111,18 +105,84 @@ interrupted() {
 trap 'interrupted 129' 1
 trap 'interrupted 130' 2
 trap 'interrupted 143' 15
+# The previous /usr upper layer and image disappear during refresh. Preserve
+# owned files as bytes, not symlinks back into that layer. State is itself in the
+# ephemeral /usr layer: no stale ownership survives removal or reboot.
+snapshot_previous() (
+    for previous_directory in "$EXPOSEDMODDIR"/* "$STATEDIR"/*; do
+        [ -d "$previous_directory" ] || continue
+        previous_name=$(basename "$previous_directory")
+        case "$previous_name" in ''|*[!A-Za-z0-9_.-]*) return 1 ;; esac
+        previous="$PLAN/prior/$previous_name"
+        [ ! -f "$previous/paths" ] || continue
+        previous_modules="$EXPOSEDMODDIR/$previous_name"
+        previous_state="$STATEDIR/$previous_name"
+        mkdir -p "$previous/files" || return 1
+        if [ -f "$previous_state/files" ]; then
+            cp "$previous_state/files" "$previous/paths" || return 1
+            cp -a "$previous_state" "$previous/state" || return 1
+        else
+            # Migration from the earlier private-payload runtime, which exposed
+            # symlinks but did not yet write an ownership journal.
+            previous_payload="$PAYLOADDIR/$previous_name"
+            [ -d "$previous_payload" ] || continue
+            : > "$previous/paths"
+            for path in "$previous_modules"/*.ko; do
+                [ ! -f "$path" ] || printf '%s\n' "$path" >> "$previous/paths"
+            done
+            [ -s "$previous/paths" ] || continue
+            for kind in firmware udev; do
+                [ -d "$previous_payload/$kind" ] || continue
+                find "$previous_payload/$kind" \( -type f -o -type l \) -print > "$previous/sources"
+                while IFS= read -r source; do
+                    relative=${source#"$previous_payload/$kind/"}
+                    case "$kind" in
+                        firmware) path="/usr/lib/firmware/$relative" ;;
+                        udev) path="/usr/lib/udev/rules.d/$relative" ;;
+                    esac
+                    # Only retain resources this package actually owns.
+                    [ "$(readlink -f "$path")" = "$(readlink -f "$source")" ] || continue
+                    printf '%s\n' "$path" >> "$previous/paths"
+                done < "$previous/sources"
+            done
+            mkdir -p "$previous/state" || return 1
+            if [ -f "$ACTIVATIONDIR/$previous_name.conf" ]; then
+                cp "$ACTIVATIONDIR/$previous_name.conf" "$previous/state/activation.conf" || return 1
+            fi
+            cp "$previous/paths" "$previous/state/files" || return 1
+            if [ -f "$previous_payload/modules-load.conf" ]; then
+                cp "$previous_payload/modules-load.conf" "$previous/state/modules-load.conf" || return 1
+            fi
+        fi
+        while IFS= read -r path; do
+            case "$path" in
+                "$EXPOSEDMODDIR/$previous_name/"*|/usr/lib/firmware/*|/usr/lib/udev/rules.d/*) ;;
+                *) echo "wendyos-sysext-apply: invalid prior resource path $path" >&2; return 1 ;;
+            esac
+            relative=${path#/usr/lib/}
+            mkdir -p "$previous/files/$(dirname "$relative")" || return 1
+            cp -Lp "$path" "$previous/files/$relative" || return 1
+        done < "$previous/paths"
+    done
+)
+
+if ! snapshot_previous; then
+    echo "wendyos-sysext-apply: cannot preserve previous payloads; refusing refresh" >&2
+    exit 1
+fi
+
+# --always-refresh: reinstalling a driver reuses the image filename, which on its own looks
+# like no change.
+if ! systemd-sysext --mutable=ephemeral --always-refresh=yes refresh; then
+    echo "wendyos-sysext-apply: systemd-sysext refresh failed" >&2
+    exit 1
+fi
+
 # Shared across all interfaces, packages and rollback attempts. Leave time for
 # module recovery inside the agent's two-minute apply deadline.
 WIFI_DEADLINE=$(($(date +%s) + 60))
 CLAIMS="$PLAN/claims"
 : > "$CLAIMS"
-
-# Private payloads are not in a module search path yet. Rebuild first so unloading and
-# rollback still resolve the previously active (normally base-system) drivers.
-if ! depmod -a "$KVER"; then
-    echo "wendyos-sysext-apply: depmod failed" >&2
-    exit 1
-fi
 
 depmod_rebuilt=0
 resolves() {
@@ -266,6 +326,55 @@ hide_payload() {
     [ "$hide_failed" = 0 ]
 }
 
+# Copy saved bytes into the mutable layer so rollback remains usable after PLAN
+# cleanup. In particular, never leave a symlink pointing into a temporary backup.
+restore_previous() (
+    previous="$PLAN/prior/$1"
+    [ -s "$previous/paths" ] || return 0
+    # The previous active package still owns these resources. Do not let a later
+    # candidate overwrite a restored stack just because this upgrade failed.
+    while IFS= read -r path; do
+        case "$path" in
+            "$EXPOSEDMODDIR/$1/"*) claim="module:$(module_sysname "$(basename "$path" .ko)")" ;;
+            /usr/lib/firmware/*) claim="firmware:${path#/usr/lib/firmware/}" ;;
+            /usr/lib/udev/rules.d/*) claim="udev:$(basename "$path")" ;;
+            *) return 1 ;;
+        esac
+        printf '%s\t%s\n' "$claim" "$1" >> "$CLAIMS" || return 1
+    done < "$previous/paths"
+    while IFS= read -r path; do
+        relative=${path#/usr/lib/}
+        mkdir -p "$(dirname "$path")" || return 1
+        rm -f "$path" || return 1
+        cp -p "$previous/files/$relative" "$path" || return 1
+    done < "$previous/paths"
+    mkdir -p "$STATEDIR" || return 1
+    rm -rf "${STATEDIR:?}/$1"
+    cp -a "$previous/state" "$STATEDIR/$1"
+)
+
+module_conf() {
+    conf="$STORE/modules-load.d/$KVER/$1.conf"
+    [ -f "$conf" ] || conf="$STORE/modules-load.d/any/$1.conf"
+    [ -f "$conf" ] || conf="$STORE/modules-load.d/$1.conf"
+    [ -f "$conf" ] || conf="$2/modules-load.conf"
+}
+
+record_active() (
+    state="$STATEDIR/$name"
+    mkdir -p "$state" || return 1
+    cp "$PLAN/$name.exposed" "$state/files" || return 1
+    if [ -f "$conf" ]; then
+        cp "$conf" "$state/modules-load.conf" || return 1
+    fi
+    if [ -f "$activation" ]; then
+        cp "$activation" "$state/activation.conf" || return 1
+    fi
+    cp "$removed" "$state/replaced-modules" || return 1
+    # The agent compares generations to distinguish this apply from an old receipt.
+    basename "$PLAN" > "$state/generation"
+)
+
 preflight_unload() {
     package=$1
     activation=$2
@@ -403,18 +512,31 @@ restore_wifi_state() {
     udevadm settle --timeout=5 >/dev/null 2>&1 || true
     while read -r interface connection_uuid; do
         [ -n "$interface" ] || continue
-        attempts=0
-        while [ "$attempts" -lt 10 ] && [ "$(date +%s)" -lt "$WIFI_DEADLINE" ]; do
+        wifi_connected=0
+        retries=0
+        while [ "$retries" -lt 3 ] && [ "$(date +%s)" -lt "$WIFI_DEADLINE" ]; do
+            attempts=0
+            while [ "$attempts" -lt 10 ] && [ "$(date +%s)" -lt "$WIFI_DEADLINE" ]; do
+                nm_state=$(wifi_nmcli 5 -g GENERAL.STATE device show "$interface" 2>/dev/null) || nm_state=""
+                case "${nm_state%% *}" in
+                    30|40|50|60|70|80|90|100) break ;;
+                esac
+                attempts=$((attempts+1))
+                sleep 1
+            done
+            # Service restart and NM device rediscovery are asynchronous. Retry
+            # only a device that became unavailable during the activation call;
+            # authentication/association failures on a ready device still fail.
+            if wifi_nmcli 15 connection up uuid "$connection_uuid" ifname "$interface"; then
+                wifi_connected=1
+                break
+            fi
             nm_state=$(wifi_nmcli 5 -g GENERAL.STATE device show "$interface" 2>/dev/null) || nm_state=""
-            case "$nm_state" in
-                30*|40*|50*|60*|70*|80*|90*|100*) break ;;
-            esac
-            attempts=$((attempts+1))
+            case "${nm_state%% *}" in ''|10|20) ;; *) break ;; esac
+            retries=$((retries+1))
             sleep 1
         done
-        # NetworkManager can activate hidden profiles too; seeing some unrelated
-        # SSID in a scan is neither necessary nor sufficient for restoration.
-        if ! wifi_nmcli 15 connection up uuid "$connection_uuid" ifname "$interface"; then
+        if [ "$wifi_connected" = 0 ]; then
             echo "wendyos-sysext-apply: could not restore $interface connection" >&2
             wifi_restore_failed=1
         fi
@@ -422,16 +544,40 @@ restore_wifi_state() {
     [ "$wifi_restore_failed" = 0 ]
 }
 
+restart_services() (
+    service_activation=$1
+    [ -f "$service_activation" ] || return 0
+    services_failed=0
+    while read -r directive unit extra || [ -n "${directive:-}${unit:-}${extra:-}" ]; do
+        [ "${directive:-}" = restart-service ] || continue
+        if ! timeout --kill-after=1 15 systemctl try-restart -- "$unit"; then
+            echo "wendyos-sysext-apply: could not restart $unit for $name" >&2
+            services_failed=1
+        fi
+    done < "$service_activation"
+    [ "$services_failed" = 0 ]
+)
+
 rollback_package() {
     rollback_incomplete=0
     rollback_modules "$inserted" -r || rollback_incomplete=1
     hide_payload "$PLAN/$name.exposed" || rollback_incomplete=1
+    rm -rf "${STATEDIR:?}/$name" || rollback_incomplete=1
+    restore_previous "$name" || rollback_incomplete=1
     if ! depmod -a "$KVER"; then
         echo "wendyos-sysext-apply: could not rebuild module index during rollback for $name" >&2
         rollback_incomplete=1
     fi
     rollback_modules "$removed" "" || rollback_incomplete=1
     udevadm control --reload >/dev/null 2>&1 || true
+    # Restored devices have new kernel identities. Restart the previous payload's
+    # consumers, especially supplicant, before asking NM to reconnect. A failed
+    # candidate may have declared a different (or nonexistent) service.
+    recovery_activation="$STATEDIR/$name/activation.conf"
+    [ -f "$recovery_activation" ] || recovery_activation="$activation"
+    if [ -s "$removed" ] || [ -s "$inserted" ]; then
+        restart_services "$recovery_activation" || rollback_incomplete=1
+    fi
     restore_wifi_state "$restore_state" || rollback_incomplete=1
     if [ "$rollback_incomplete" = 0 ]; then
         echo "wendyos-sysext-apply: activation rolled back and prior modules restored for $name" >&2
@@ -441,9 +587,20 @@ rollback_package() {
     [ "$rollback_incomplete" = 0 ]
 }
 
-# Globs follow LC_ALL=C, making the first-wins policy stable across boots. Claims are
-# reserved only after a package is successfully exposed and loaded, so a broken earlier
-# candidate does not prevent a later compatible package from getting a chance.
+# Private payloads are not in a module search path yet. Index the base system.
+# Even a failure before unloading must restore the files discarded by refresh.
+if ! depmod -a "$KVER"; then
+    echo "wendyos-sysext-apply: depmod failed" >&2
+    for previous in "$PLAN/prior"/*; do
+        [ -d "$previous" ] || continue
+        restore_previous "$(basename "$previous")" || echo "wendyos-sysext-apply: could not restore previous exposure" >&2
+    done
+    depmod -a "$KVER" || echo "wendyos-sysext-apply: could not rebuild previous module index" >&2
+    exit 1
+fi
+
+# Globs follow LC_ALL=C, making the first-wins policy stable across boots. Claims
+# belong to successfully activated candidates or restored previous payloads.
 rc=0
 for link in "$RUNDIR"/*.raw; do
     [ -e "$link" ] || continue
@@ -531,8 +688,12 @@ for link in "$RUNDIR"/*.raw; do
     restore_state="$PLAN/$name.restore"
     : > "$removed" && : > "$inserted" && : > "$restore_state" && : > "$PLAN/$name.exposed" || exit 1
 
+    module_conf "$name" "$payload"
     if [ -f "$activation" ] && [ "$activate_now" = 1 ]; then
         if ! preflight_unload "$name" "$activation" || ! capture_wifi_state "$activation" "$restore_state"; then
+            if ! restore_previous "$name" || ! depmod -a "$KVER"; then
+                echo "wendyos-sysext-apply: could not restore previous exposure for $name" >&2
+            fi
             rc=$((rc|fail))
             continue
         fi
@@ -572,18 +733,18 @@ for link in "$RUNDIR"/*.raw; do
     fi
 
     if [ "$package_failed" = 0 ] && [ -f "$activation" ] && [ "$activate_now" = 1 ]; then
-        while read -r directive unit extra || [ -n "${directive:-}${unit:-}${extra:-}" ]; do
-            [ "${directive:-}" = restart-service ] || continue
-            if ! timeout --kill-after=1 15 systemctl try-restart -- "$unit"; then
-                echo "wendyos-sysext-apply: could not restart $unit for $name" >&2
-                package_failed=1
-            fi
-        done < "$activation"
+        restart_services "$activation" || package_failed=1
         if [ "$package_failed" = 0 ]; then
             restore_wifi_state "$restore_state" || package_failed=1
         fi
     fi
     if [ "$package_failed" != 0 ]; then
+        rollback_package || true
+        rc=$((rc|fail))
+        continue
+    fi
+    if ! record_active; then
+        echo "wendyos-sysext-apply: could not record active payload for $name" >&2
         rollback_package || true
         rc=$((rc|fail))
         continue
