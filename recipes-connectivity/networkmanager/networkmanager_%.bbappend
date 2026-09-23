@@ -9,6 +9,7 @@ SRC_URI += " \
     file://10-usb-gadget.conf \
     file://usb-gadget.nmconnection \
     file://99-interface-metrics.conf \
+    file://50-wendy-local-mesh.conf \
     "
 
 # Map WENDYOS_USB_NET_MODE to NetworkManager ipv4.method value
@@ -36,6 +37,7 @@ do_install:append() {
     install -m 0644 ${UNPACKDIR}/00-manage-usb0.conf ${D}${sysconfdir}/NetworkManager/conf.d/00-manage-usb0.conf
     install -m 0644 ${UNPACKDIR}/10-usb-gadget.conf ${D}${sysconfdir}/NetworkManager/conf.d/10-usb-gadget.conf
     install -m 0644 ${UNPACKDIR}/99-interface-metrics.conf ${D}${sysconfdir}/NetworkManager/conf.d/99-interface-metrics.conf
+    install -m 0644 ${UNPACKDIR}/50-wendy-local-mesh.conf ${D}${sysconfdir}/NetworkManager/conf.d/50-wendy-local-mesh.conf
 
     # Install distro-managed connection profile to /usr/lib (read-only on rootfs).
     # NM 1.46+ natively reads /usr/lib/NetworkManager/system-connections/ as a
@@ -58,6 +60,7 @@ FILES:${PN} += " \
     ${sysconfdir}/NetworkManager/conf.d/00-manage-usb0.conf \
     ${sysconfdir}/NetworkManager/conf.d/10-usb-gadget.conf \
     ${sysconfdir}/NetworkManager/conf.d/99-interface-metrics.conf \
+    ${sysconfdir}/NetworkManager/conf.d/50-wendy-local-mesh.conf \
     "
 
 # Ensure NetworkManager starts after USB gadget is set up
