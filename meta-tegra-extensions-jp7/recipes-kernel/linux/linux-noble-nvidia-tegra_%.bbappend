@@ -18,6 +18,7 @@ SRC_URI += " \
     file://usb-gadget.cfg \
     file://usb-gadget-builtin.cfg \
     file://usb-serial.cfg \
+    file://mesh-tproxy.cfg \
     file://0001-crypto-scatterwalk-Backport-memcpy_sglist.patch \
     file://0002-crypto-algif_aead-use-memcpy_sglist-instead-of-null-skcipher.patch \
     file://0003-crypto-algif_aead-Revert-to-operating-out-of-place-CVE-2026-31431.patch \
@@ -25,6 +26,21 @@ SRC_URI += " \
     file://0005-crypto-algif_aead-Fix-minimum-RX-size-check-for-decryption.patch \
     file://cve-2026-46333-ptrace.patch \
     "
+
+# Mesh UDP VIP interception uses the iptables TPROXY target. A fragment is
+# only a request: fail the build if a vendor Kconfig change drops either module.
+python __anonymous() {
+    d.appendVarFlag('do_configure', 'postfuncs', ' wendyos_check_mesh_tproxy')
+}
+
+wendyos_check_mesh_tproxy() {
+    config="${B}/.config"
+    [ -f "$config" ] || bbfatal "mesh TPROXY: no resolved kernel config at $config"
+    for symbol in CONFIG_NETFILTER_XT_TARGET_TPROXY CONFIG_NF_TPROXY_IPV4; do
+        grep -q "^$symbol=m$" "$config" || \
+            bbfatal "mesh TPROXY: $symbol must be a module for ${MACHINE}"
+    done
+}
 
 # Driver add-ons: the board-neutral filesystem/module-signing prerequisites.
 # Kept behind the machine opt-in so other JP7 images retain their vendor kernel
