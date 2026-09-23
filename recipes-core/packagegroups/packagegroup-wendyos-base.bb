@@ -54,6 +54,17 @@ RDEPENDS:${PN}:append = " \
         )} \
     "
 
+# SocketCAN (kernel modules, plus can-utils in debug images). Gated on
+# WENDYOS_CAN: on for the robotics targets, off elsewhere. Per-family values live
+# in conf/distro/include/{rpi,x86,qemu,vm}-distro.inc and, for Jetson, in
+# conf/template/include/local/tegra-t{234,264}.inc -- Tegra has no *-distro.inc,
+# and tegra-image.inc is parsed too late to gate a recipe. Dragonwing states "0"
+# in its own machine conf. A board none of those covers falls back to the weak
+# default in conf/distro/wendyos.conf, which is "0".
+RDEPENDS:${PN}:append = " \
+    ${@oe.utils.ifelse(d.getVar('WENDYOS_CAN') == '1', 'packagegroup-wendyos-can', '')} \
+    "
+
 # Include hardware-specific packagegroup configuration
 require ${@'qemu-packagegroup-base.inc'  if 'qemuall' in d.getVar('MACHINEOVERRIDES').split(':') else ''}
 require ${@'tegra-packagegroup-base.inc' if 'tegra'   in d.getVar('MACHINEOVERRIDES').split(':') else ''}

@@ -958,7 +958,8 @@ In `build/conf/local.conf`:
 - `WENDYOS_DEBUG_UART` - Enable UART debug output (default: 0)
 - `WENDYOS_SSHD` - Include OpenSSH server (`sshd`) in the image (default: 0; set to `1` to enable sshd)
 - `WENDYOS_USB_GADGET` - Enable USB gadget mode (default: 0)
-- `WENDYOS_PERSIST_JOURNAL_LOGS` - Persist logs to storage (default: 0)
+- `WENDYOS_CAN` - Enable SocketCAN support: CAN kernel drivers and module packages (default: 1 on Tegra/RPi/x86, 0 on QEMU/VM/Dragonwing)
+- `WENDYOS_PERSIST_JOURNAL_LOGS` - Persist logs to storage (default: tracks `WENDYOS_OTA` - 1 unless OTA is "none", so 1 on Tegra/x86/Dragonwing/VM; RPi and QEMU set 0 explicitly)
 - `WENDYOS_GAME_CONTROLLER` - Guarantee the native game-controller kernel interfaces (default: 1; see [`docs/game-controller-support.md`](docs/game-controller-support.md))
 
 **Note**: Choose `WENDYOS_FLASH_IMAGE_SIZE` based on your target storage device capacity and expected rootfs size. Larger images provide more space for root filesystems and future updates.

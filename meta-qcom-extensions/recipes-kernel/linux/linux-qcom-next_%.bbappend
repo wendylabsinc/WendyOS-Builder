@@ -1,10 +1,11 @@
 # WendyOS kernel deltas for the Dragonwing boards.
 #
-# USB configuration and board-scoped networking fixes. Other requirements are
-# already in meta-qcom's defconfig: the container prerequisites (namespaces, cgroups,
-# overlayfs, veth, bridge, netfilter masquerade, seccomp, BPF) are all present,
-# and root-mount critical drivers (SCSI_UFSHCD, SCSI_UFS_QCOM, BLK_DEV_SD,
-# EXT4_FS, EFI_PARTITION) are built in, so no fragment is needed for those.
+# The USB gadget stack, and SocketCAN when it is turned on. Everything else
+# WendyOS needs is already in meta-qcom's defconfig: the container prerequisites
+# (namespaces, cgroups, overlayfs, veth, bridge, netfilter masquerade, seccomp,
+# BPF) are all present, and root-mount critical drivers (SCSI_UFSHCD,
+# SCSI_UFS_QCOM, BLK_DEV_SD, EXT4_FS, EFI_PARTITION) are built in, so no fragment
+# is needed for those.
 FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 
 require ${@'recipes-kernel/linux/game-controller.inc' if d.getVar('WENDYOS_GAME_CONTROLLER') == '1' else ''}
@@ -40,3 +41,8 @@ SRC_URI:append:qcom-wendyos = " file://0004-Revert-usb-dwc3-qcom-skip-phy-manage
 # it: setlocalversion checks with `git status -uno`, which ignores untracked
 # files. A machine override, so it reaches the devupstream variant as well.
 PATCHTOOL:qcom-wendyos = "git"
+
+# SocketCAN: core, protocols and the USB/SPI adapter drivers. Board-neutral, and
+# shared with the Tegra, RPi and x86 kernel bbappends. Inert while WENDYOS_CAN is
+# "0", which is what this board sets today -- see the machine conf for why.
+require ${@'recipes-kernel/linux/can.inc' if d.getVar('WENDYOS_CAN') == '1' else ''}

@@ -20,3 +20,10 @@ WENDYOS_X86_DEBUG_KCFG = " \
     file://pstore.cfg \
     "
 SRC_URI:append:x86-wendyos = " ${@bb.utils.contains('WENDYOS_DEBUG', '1', d.getVar('WENDYOS_X86_DEBUG_KCFG'), '', d)}"
+
+# SocketCAN: core, protocols and the USB/SPI adapter drivers. The shared fragment
+# sets the CAN symbols explicitly, including CONFIG_SPI, which the genericx86-64
+# config chain does not otherwise enable and which the two MCP251x drivers depend
+# on. It does not pin CONFIG_USB, which the ten USB adapter drivers depend on --
+# that is "=y" on every board in the fleet, so the fragment relies on it.
+require ${@'recipes-kernel/linux/can.inc' if d.getVar('WENDYOS_CAN') == '1' else ''}
