@@ -10,13 +10,13 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class DriverManifestTests(unittest.TestCase):
-    def validate(self, script, marker, manifest):
+    def validate(self, script, marker, manifest, machine="test-machine"):
         source = (ROOT / "scripts" / script).read_text()
         python = source.split(marker, 1)[1].split("\nPY", 1)[0]
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "driver.json"
             path.write_text(json.dumps(manifest))
-            return subprocess.run(["python3", "-", str(path)], input=python,
+            return subprocess.run(["python3", "-", str(path), machine], input=python,
                                   text=True, capture_output=True, check=False)
 
     def firmware(self, path, **overrides):
@@ -47,16 +47,39 @@ class DriverManifestTests(unittest.TestCase):
 
     def test_service_options_are_rejected_at_pack_time(self):
         for unit in ["--help", "-H", "-host.service"]:
-            result = self.validate("pack-sysext.sh", 'python3 - "$DRIVER/driver.json" > "$ACTIVATION_CONF" <<\'PY\'\n',
+            result = self.validate("pack-sysext.sh", 'python3 - "$DRIVER/driver.json" "$MACHINE" > "$ACTIVATION_CONF" <<\'PY\'\n',
                                    {"activation": {"services_restart": [unit]}})
             self.assertNotEqual(result.returncode, 0)
             self.assertEqual(result.stdout, "")
 
     def test_service_instance_remains_valid(self):
-        result = self.validate("pack-sysext.sh", 'python3 - "$DRIVER/driver.json" > "$ACTIVATION_CONF" <<\'PY\'\n',
+        result = self.validate("pack-sysext.sh", 'python3 - "$DRIVER/driver.json" "$MACHINE" > "$ACTIVATION_CONF" <<\'PY\'\n',
                                {"activation": {"services_restart": ["wpa_supplicant@wlan0.service"]}})
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, "restart-service wpa_supplicant@wlan0.service\n")
+
+    def test_be202_pi5_activation_replaces_onboard_wifi_and_restores_only_pci_wifi(self):
+        manifest = json.loads((ROOT / "drivers/intel-be202/driver.json").read_text())
+        marker = 'python3 - "$DRIVER/driver.json" "$MACHINE" > "$ACTIVATION_CONF" <<\'PY\'\n'
+        for machine in ("raspberrypi5-wendyos", "raspberrypi5-nvme-wendyos"):
+            with self.subTest(machine=machine):
+                result = self.validate("pack-sysext.sh", marker, manifest, machine)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("replace brcmfmac\n", result.stdout)
+                self.assertIn("restore-wifi-pci 8086:272b\n", result.stdout)
+                self.assertNotIn("restore-wifi-connection wlan0", result.stdout)
+        jetson = self.validate("pack-sysext.sh", marker, manifest,
+                               "jetson-agx-thor-devkit-nvme-wendyos")
+        self.assertEqual(jetson.returncode, 0, jetson.stderr)
+        self.assertNotIn("brcmfmac", jetson.stdout)
+        self.assertIn("restore-wifi-connection wlan0\n", jetson.stdout)
+        self.assertNotIn("raspberry-pi-4", manifest["devices"])
+
+    def test_invalid_wifi_restore_pci_id_is_rejected(self):
+        result = self.validate("pack-sysext.sh",
+                               'python3 - "$DRIVER/driver.json" "$MACHINE" > "$ACTIVATION_CONF" <<\'PY\'\n',
+                               {"activation": {"wifi_pci_devices_restore": ["8086:wrong"]}})
+        self.assertNotEqual(result.returncode, 0)
 
 
 if __name__ == "__main__":
