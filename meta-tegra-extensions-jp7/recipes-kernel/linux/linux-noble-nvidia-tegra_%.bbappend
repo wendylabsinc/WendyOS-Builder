@@ -53,3 +53,6 @@ require recipes-kernel/linux/mesh-internet.inc
 # Config changes alter exported kernel symbols. Give kernels and driver add-ons
 # a new release key so an old sysext cannot masquerade as a matching build.
 KERNEL_LOCALVERSION:append = "-wendy-mesh2"
+
+# Retire the actual failed pending LE connection, including a second queued dial.
+require recipes-kernel/linux/bluetooth-le-pending.inc

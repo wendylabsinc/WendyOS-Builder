@@ -8,6 +8,8 @@ SRC_URI:append:rpi = "${@' file://container.cfg' if d.getVar('WENDYOS_CONTAINER_
 # Add USB gadget kernel config when WENDYOS_USB_GADGET is enabled
 SRC_URI:append:rpi = "${@' file://usb-gadget.cfg' if d.getVar('WENDYOS_USB_GADGET') == '1' else ''}"
 SRC_URI += "file://0001-dwc2-force-g_dma-false-for-BCM2712-in-peripheral-mod.patch"
+SRC_URI += "file://0002-bluetooth-l2cap-release-ident-for-le-credits.patch"
+SRC_URI += "file://0003-bluetooth-preserve-legacy-advertising-on-central-connect.patch"
 
 # Driver add-ons: the kernel prerequisites (sysext/module-sign fragments plus module
 # signing). Isolated so the kernel is untouched on boards that ship no add-ons. The
@@ -21,3 +23,6 @@ require recipes-kernel/linux/mesh-internet.inc
 # Config changes alter exported kernel symbols. Give kernels and driver add-ons
 # a new release key so an old sysext cannot masquerade as a matching build.
 KERNEL_LOCALVERSION:append = "-wendy-mesh2"
+
+# Retire the actual failed pending LE connection, including a second queued dial.
+require recipes-kernel/linux/bluetooth-le-pending.inc
