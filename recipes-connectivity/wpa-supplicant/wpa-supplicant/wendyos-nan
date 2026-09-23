@@ -1,0 +1,464 @@
+#!/bin/sh
+
+set -eu
+
+GLOBAL_CTRL=${WENDYOS_NAN_GLOBAL_CTRL:-/run/wpa_supplicant/global}
+IFACE_CTRL=${WENDYOS_NAN_IFACE_CTRL:-/run/wpa_supplicant}
+NAN_IFACE=${WENDYOS_NAN_IFACE:-nan0}
+PARENT_IFACE=${WENDYOS_NAN_PARENT_IFACE:-}
+NDI_IFACE=${WENDYOS_NAN_NDI_IFACE:-ndi0}
+WPA_CLI=${WENDYOS_NAN_WPA_CLI:-/usr/sbin/wpa_cli}
+SYSTEMCTL=${WENDYOS_NAN_SYSTEMCTL:-/usr/bin/systemctl}
+RUNTIME_DIR=${WENDYOS_NAN_RUNTIME_DIR:-/run/wendyos-nan}
+P2P_RESTORE_MARKER=$RUNTIME_DIR/p2p-interfaces
+
+usage() {
+    cat >&2 <<EOF
+Usage: wendyos-nan <command> [arguments]
+
+Commands:
+  start                         Create the NAN interface and join a cluster
+  stop                          Stop NAN without interrupting station Wi-Fi
+  restore-p2p                   Restore removed P2P devices (restarts supplicant)
+  status                        Show NAN state
+  publish <arguments...>        Run wpa_cli nan_publish
+  subscribe <arguments...>      Run wpa_cli nan_subscribe
+  publish-sync <arguments...>   Publish in the synchronized NAN cluster
+  subscribe-sync <arguments...> Subscribe in the synchronized NAN cluster
+  transmit <arguments...>       Run wpa_cli nan_transmit
+  events                        Monitor NAN events until interrupted
+  schedule-default              Configure a portable 2.4 GHz NDP schedule
+  schedule <arguments...>       Run wpa_cli nan_sched_config_map
+  ndi-create [interface]        Create a NAN data interface (default: ndi0)
+  ndi-remove [interface]        Remove a NAN data interface
+  ndp-request <arguments...>    Request a NAN data path
+  ndp-respond <arguments...>    Accept or reject a NAN data path request
+  ndp-terminate <arguments...>  Terminate a NAN data path
+  command <wpa_cli command...>  Run an arbitrary command on the NAN interface
+
+Environment overrides:
+  WENDYOS_NAN_IFACE             NAN management interface (default: nan0)
+  WENDYOS_NAN_PARENT_IFACE      Select a NAN-capable parent (required if ambiguous)
+  WENDYOS_NAN_NDI_IFACE         NAN data interface (default: ndi0)
+  WENDYOS_NAN_GLOBAL_CTRL       Global control socket path
+  WENDYOS_NAN_IFACE_CTRL        Per-interface control directory
+  WENDYOS_NAN_WPA_CLI           wpa_cli executable path
+EOF
+    exit 2
+}
+
+# Different apps, the mesh provider, and shell callers share one supplicant.
+# Serialize complete check/mutate/cleanup transactions, not individual wpa_cli
+# calls. Keep the inode under /run for the whole boot; unlinking it while a
+# waiter holds it would allow a second independent lock. Never lock events or
+# ordinary discovery/NDP commands, which must remain usable during lifecycle
+# operations. Direct socket access and the explicit raw command escape hatch
+# remain trusted, unmanaged interfaces.
+lock_lifecycle() {
+    umask 077
+    mkdir -p "$RUNTIME_DIR"
+    exec 9>"$RUNTIME_DIR/lifecycle.lock"
+    if ! flock -w 15 9; then
+        echo "Timed out waiting for NAN lifecycle operation" >&2
+        return 1
+    fi
+}
+
+global_cli() {
+    "$WPA_CLI" -g "$GLOBAL_CTRL" "$@"
+}
+
+iface_cli() {
+    "$WPA_CLI" -p "$IFACE_CTRL" -i "$NAN_IFACE" "$@"
+}
+
+event_cli() {
+    "$WPA_CLI" -p "$IFACE_CTRL" -i "$NAN_IFACE"
+}
+
+read_global_status() {
+    GLOBAL_STATUS=$(global_cli status) || {
+        echo "Cannot query supplicant interfaces" >&2
+        return 1
+    }
+    # wpa_cli can exit successfully for FAIL/UNKNOWN COMMAND responses.
+    # Never turn an unavailable or malformed snapshot into confirmed absence.
+    if ! printf '%s\n' "$GLOBAL_STATUS" |
+        grep -Eq '^(ifname=.+|wifi_display=[01]|p2p_state=.+|p2p_device_address=.+)$'; then
+        echo "Invalid supplicant interface status" >&2
+        return 1
+    fi
+}
+
+list_ifaces() {
+    printf '%s\n' "$GLOBAL_STATUS" | sed -n 's/^ifname=//p'
+}
+
+has_iface() {
+    list_ifaces | grep -Fxq "$1"
+}
+
+has_nan_iface() {
+    has_iface "$NAN_IFACE"
+}
+
+iface_radio() {
+    printf '%s\n' "$GLOBAL_STATUS" | awk -F= -v iface="$1" '
+        $1 == "ifname" { selected = ($2 == iface) }
+        selected && $1 == "phyname" { print $2; exit }
+    '
+}
+
+select_nan_parent() {
+    selected_parent=
+    selected_radio=
+    candidates=$(list_ifaces)
+    if [ -n "$PARENT_IFACE" ]; then
+        has_iface "$PARENT_IFACE" || {
+            echo "NAN parent $PARENT_IFACE is not present" >&2
+            return 1
+        }
+        candidates=$PARENT_IFACE
+    fi
+    for candidate in $candidates; do
+        # This interface must survive removal of the P2P devices.
+        case "$candidate" in p2p-dev-*) continue ;; esac
+        capabilities=$(global_cli raw "IFNAME=$candidate" GET_CAPABILITY nan) || {
+            echo "Cannot query NAN capabilities for $candidate" >&2
+            return 1
+        }
+        case "$capabilities" in
+            FAIL*|'UNKNOWN COMMAND')
+                echo "Cannot query NAN capabilities for $candidate" >&2
+                return 1 ;;
+        esac
+        case " $capabilities " in *' NAN '*) ;; *) continue ;; esac
+        radio=$(iface_radio "$candidate")
+        [ -n "$radio" ] || {
+            echo "Cannot identify NAN radio for $candidate" >&2
+            return 1
+        }
+        if [ -n "$selected_radio" ] && [ "$radio" != "$selected_radio" ]; then
+            echo "Multiple NAN radios; set WENDYOS_NAN_PARENT_IFACE" >&2
+            return 1
+        fi
+        selected_parent=$candidate
+        selected_radio=$radio
+    done
+    [ -n "$selected_parent" ] || {
+        echo "No NAN-capable parent interface is available" >&2
+        return 1
+    }
+}
+
+remove_p2p_ifaces() {
+    p2p_ifaces=
+    for p2p_iface in $(list_ifaces | sed -n '/^p2p-dev-/p'); do
+        radio=$(iface_radio "$p2p_iface")
+        [ -n "$radio" ] || {
+            echo "Cannot identify P2P radio for $p2p_iface" >&2
+            return 1
+        }
+        [ "$radio" = "$selected_radio" ] || continue
+        p2p_ifaces="${p2p_ifaces}${p2p_iface}
+"
+    done
+    [ -n "$p2p_ifaces" ] || return 0
+
+    umask 077
+    mkdir -p "$RUNTIME_DIR"
+    # Retain devices deferred by earlier start/stop cycles as well.
+    printf '%s' "$p2p_ifaces" >>"$P2P_RESTORE_MARKER"
+
+    printf '%s' "$p2p_ifaces" | while IFS= read -r p2p_iface; do
+        expect_ok global_cli interface_remove "$p2p_iface"
+    done
+}
+
+restore_p2p_ifaces() {
+    [ -s "$P2P_RESTORE_MARKER" ] || return 0
+
+    # Intel's advertised concurrency combinations make P2P management and
+    # NAN mutually exclusive. The normal stop path intentionally leaves the
+    # P2P device absent: restarting the shared supplicant drops an associated
+    # wlan0, even though station Wi-Fi itself works without the P2P device.
+    # Only the explicit restore-p2p command may pay that disruption cost.
+    # Do not treat a failed STATUS query as evidence that NAN is absent.
+    read_global_status || {
+        echo "Cannot verify NAN is absent before restoring P2P devices" >&2
+        return 1
+    }
+    if ! printf '%s\n' "$GLOBAL_STATUS" | grep -q '^ifname='; then
+        echo "Cannot verify supplicant interfaces before restoring P2P devices" >&2
+        return 1
+    fi
+    if has_nan_iface; then
+        echo "Remove $NAN_IFACE before restoring P2P devices" >&2
+        return 1
+    fi
+    missing_p2p=0
+    while IFS= read -r p2p_iface; do
+        if ! has_iface "$p2p_iface"; then
+            missing_p2p=1
+        fi
+    done <"$P2P_RESTORE_MARKER"
+    if [ "$missing_p2p" -eq 0 ]; then
+        rm -f "$P2P_RESTORE_MARKER"
+        return 0
+    fi
+    "$SYSTEMCTL" restart wpa_supplicant.service
+    wait_for_global_ctrl
+
+    while IFS= read -r p2p_iface; do
+        attempts=0
+        while :; do
+            read_global_status || return 1
+            has_iface "$p2p_iface" && break
+            attempts=$((attempts + 1))
+            if [ "$attempts" -ge 100 ]; then
+                echo "Timed out waiting for $p2p_iface to be restored" >&2
+                return 1
+            fi
+            sleep 0.1
+        done
+    done <"$P2P_RESTORE_MARKER"
+
+    rm -f "$P2P_RESTORE_MARKER"
+}
+
+defer_p2p_restore() {
+    [ -s "$P2P_RESTORE_MARKER" ] || return 0
+    # Keep the marker across stop/start cycles. It is under /run, so a normal
+    # reboot restores the default P2P device without a stale restoration job.
+    echo "P2P restoration deferred to preserve station Wi-Fi; run wendyos-nan restore-p2p after NAN stops" >&2
+}
+
+wait_for_global_ctrl() {
+    attempts=0
+    while [ ! -S "$GLOBAL_CTRL" ]; do
+        attempts=$((attempts + 1))
+        if [ "$attempts" -ge 50 ]; then
+            echo "Timed out waiting for $GLOBAL_CTRL" >&2
+            return 1
+        fi
+        sleep 0.1
+    done
+}
+
+expect_ok() {
+    output=$("$@") || {
+        status=$?
+        [ -z "${output:-}" ] || printf '%s\n' "$output" >&2
+        return "$status"
+    }
+    if [ "$output" != "OK" ]; then
+        printf '%s\n' "$output" >&2
+        return 1
+    fi
+}
+
+start_nan() {
+    "$SYSTEMCTL" start wpa_supplicant.service
+    wait_for_global_ctrl
+    read_global_status
+    created_nan=0
+
+    if ! has_nan_iface; then
+        select_nan_parent
+        remove_p2p_ifaces
+        if ! expect_ok global_cli interface_add "$NAN_IFACE" "" nl80211 \
+            "$IFACE_CTRL" "" "" create nan "" "$selected_parent"; then
+            defer_p2p_restore
+            return 1
+        fi
+        created_nan=1
+    elif [ -n "$PARENT_IFACE" ]; then
+        select_nan_parent
+        if [ "$(iface_radio "$NAN_IFACE")" != "$selected_radio" ]; then
+            echo "$NAN_IFACE is on a different radio from $PARENT_IFACE" >&2
+            return 1
+        fi
+    fi
+
+    if ! read_nan_status; then
+        rollback_nan
+        return 1
+    fi
+    if [ "$nan_started" = 0 ]; then
+        if ! expect_ok iface_cli nan_start; then
+            rollback_nan
+            return 1
+        fi
+        read_nan_status
+    fi
+    printf '%s\n' "$NAN_STATUS"
+}
+
+read_nan_status() {
+    NAN_STATUS=$(iface_cli nan_status) || {
+        echo "Cannot query NAN state for $NAN_IFACE" >&2
+        return 1
+    }
+    nan_started=$(printf '%s\n' "$NAN_STATUS" | sed -n 's/^nan_started=//p')
+    case "$nan_started" in 0|1) ;; *)
+        echo "Invalid NAN state for $NAN_IFACE" >&2
+        return 1 ;;
+    esac
+}
+
+rollback_nan() {
+    # An existing management interface belongs to its existing callers, even
+    # if it was stopped or a query/START failed. Never roll their cluster back.
+    if [ "$created_nan" -eq 1 ]; then
+        iface_cli nan_stop >/dev/null 2>&1 || true
+        global_cli interface_remove "$NAN_IFACE" >/dev/null 2>&1 || true
+        defer_p2p_restore
+    fi
+}
+
+stop_nan() {
+    wait_for_global_ctrl
+    read_global_status
+    if ! has_nan_iface; then
+        echo "$NAN_IFACE is not present"
+        defer_p2p_restore
+        return 0
+    fi
+
+    # A failed NAN_STOP should not leave the management interface behind.
+    iface_cli nan_stop >/dev/null 2>&1 || true
+    expect_ok global_cli interface_remove "$NAN_IFACE"
+    defer_p2p_restore
+}
+
+create_ndi() {
+    ndi_iface=$1
+    read_global_status
+    has_nan_iface || {
+        echo "$NAN_IFACE is not present" >&2
+        return 1
+    }
+    nan_radio=$(iface_radio "$NAN_IFACE")
+    [ -n "$nan_radio" ] || {
+        echo "Cannot identify NAN radio for $NAN_IFACE" >&2
+        return 1
+    }
+    if has_iface "$ndi_iface"; then
+        [ "$(iface_radio "$ndi_iface")" = "$nan_radio" ] || {
+            echo "$ndi_iface is on a different radio from $NAN_IFACE" >&2
+            return 1
+        }
+        echo "$ndi_iface is already present"
+        return 0
+    fi
+    expect_ok global_cli interface_add "$ndi_iface" "" nl80211 \
+        "$IFACE_CTRL" "" "" create nan_data "" "$NAN_IFACE"
+}
+
+remove_ndi() {
+    ndi_iface=$1
+    read_global_status
+    if ! has_iface "$ndi_iface"; then
+        echo "$ndi_iface is not present"
+        return 0
+    fi
+    expect_ok global_cli interface_remove "$ndi_iface"
+}
+
+[ "$#" -gt 0 ] || usage
+command=$1
+shift
+
+case "$command" in
+start)
+    [ "$#" -eq 0 ] || usage
+    lock_lifecycle
+    start_nan
+    ;;
+stop)
+    [ "$#" -eq 0 ] || usage
+    lock_lifecycle
+    stop_nan
+    ;;
+restore-p2p)
+    [ "$#" -eq 0 ] || usage
+    lock_lifecycle
+    wait_for_global_ctrl
+    restore_p2p_ifaces
+    ;;
+status)
+    [ "$#" -eq 0 ] || usage
+    wait_for_global_ctrl
+    read_global_status
+    has_nan_iface || {
+        echo "$NAN_IFACE is not present" >&2
+        exit 1
+    }
+    read_nan_status
+    printf '%s\n' "$NAN_STATUS"
+    ;;
+publish)
+    [ "$#" -gt 0 ] || usage
+    iface_cli nan_publish "$@"
+    ;;
+subscribe)
+    [ "$#" -gt 0 ] || usage
+    iface_cli nan_subscribe "$@"
+    ;;
+publish-sync)
+    [ "$#" -gt 0 ] || usage
+    iface_cli nan_publish "$@" sync=1
+    ;;
+subscribe-sync)
+    [ "$#" -gt 0 ] || usage
+    iface_cli nan_subscribe "$@" sync=1
+    ;;
+transmit)
+    [ "$#" -gt 0 ] || usage
+    iface_cli nan_transmit "$@"
+    ;;
+events)
+    [ "$#" -eq 0 ] || usage
+    event_cli
+    ;;
+schedule-default)
+    [ "$#" -eq 0 ] || usage
+    # 2437 MHz is accepted under the conservative world/AU regulatory states
+    # seen on Jetson. The bitmap advertises a broad availability window so an
+    # NDP can be negotiated without relying on a DFS/passive 5 GHz channel.
+    expect_ok iface_cli nan_sched_config_map map_id=1 2437:0e000000
+    ;;
+schedule)
+    [ "$#" -gt 0 ] || usage
+    expect_ok iface_cli nan_sched_config_map "$@"
+    ;;
+ndi-create)
+    [ "$#" -le 1 ] || usage
+    lock_lifecycle
+    create_ndi "${1:-$NDI_IFACE}"
+    ;;
+ndi-remove)
+    [ "$#" -le 1 ] || usage
+    lock_lifecycle
+    remove_ndi "${1:-$NDI_IFACE}"
+    ;;
+ndp-request)
+    [ "$#" -gt 0 ] || usage
+    iface_cli nan_ndp_request "$@"
+    ;;
+ndp-respond)
+    [ "$#" -gt 0 ] || usage
+    iface_cli nan_ndp_response "$@"
+    ;;
+ndp-terminate)
+    [ "$#" -gt 0 ] || usage
+    iface_cli nan_ndp_terminate "$@"
+    ;;
+command)
+    [ "$#" -gt 0 ] || usage
+    iface_cli "$@"
+    ;;
+*)
+    usage
+    ;;
+esac
