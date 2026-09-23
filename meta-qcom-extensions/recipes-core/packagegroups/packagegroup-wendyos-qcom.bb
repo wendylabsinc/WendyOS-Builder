@@ -39,6 +39,15 @@ RDEPENDS:${PN} = " \
     kernel-module-uvcvideo \
     "
 
+# The Wi-Fi stack for the WCN6855 in the M.2 slot. meta-qcom supplies all three
+# through RRECOMMENDS, which bitbake drops in silence; without regulatory.db
+# cfg80211 also falls back to the world domain and 5 GHz goes passive-only.
+RDEPENDS:${PN} += " \
+    kernel-module-ath11k-pci \
+    linux-firmware-ath11k-wcn6855 \
+    wireless-regdb-static \
+    "
+
 # Hardware only the 8275 carries.
 #
 #  lontium-lt8713sx    the DP bridge on i2c. Without it the displayport
