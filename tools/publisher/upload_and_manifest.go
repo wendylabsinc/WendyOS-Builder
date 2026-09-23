@@ -181,6 +181,11 @@ type VersionMetadata struct {
 	FlashpackPath      string     `json:"flashpack_path,omitempty"`
 	FlashpackChecksum  string     `json:"flashpack_checksum,omitempty"`
 	FlashpackSizeBytes int64      `json:"flashpack_size_bytes,omitempty"`
+	// The Dragonwing EDL flash bundle. Kept out of the generic Path because it
+	// is not a writable disk image: a CLI resolving it there would dd a tarball.
+	QcomflashPath      string `json:"qcomflash_path,omitempty"`
+	QcomflashChecksum  string `json:"qcomflash_checksum,omitempty"`
+	QcomflashSizeBytes int64  `json:"qcomflash_size_bytes,omitempty"`
 	// SBOM is the image-level SPDX Software Bill of Materials bundle
 	// (.spdx.tar.zst from the create-spdx class). It describes the OS image
 	// contents and is not storage-specific, so a single top-level field
@@ -2445,6 +2450,38 @@ func isRecoveryFirstT234(deviceType string) bool {
 	return deviceType == "jetson-orin-nano" || deviceType == "jetson-agx-orin"
 }
 
+// isEDLFlashBundle reports whether a device's install artifact is an EDL flash
+// bundle rather than a writable disk image.
+func isEDLFlashBundle(deviceType string) bool {
+	return strings.HasPrefix(deviceType, "dragonwing-")
+}
+
+// keepsLegacyBundleImagePath reports whether a flash-bundle device must also
+// publish under the generic image fields. Released CLIs resolve the IQ-8275's
+// bundle from there. Nothing else belongs here: leaving those fields empty is
+// what makes an older CLI fail resolution instead of writing a bundle to a disk.
+func keepsLegacyBundleImagePath(deviceType string) bool {
+	return deviceType == "dragonwing-iq-8275"
+}
+
+// applyEDLFlashBundle publishes the bundle under its own fields, leaving the
+// generic image route empty unless a released CLI still resolves it from there.
+func applyEDLFlashBundle(meta *VersionMetadata, deviceType, filePath string, fileSize int64, fileChecksum string) {
+	meta.InstallMode = "edl"
+	meta.QcomflashPath, meta.QcomflashSizeBytes, meta.QcomflashChecksum = filePath, fileSize, fileChecksum
+	if keepsLegacyBundleImagePath(deviceType) {
+		meta.Path, meta.SizeBytes, meta.Checksum = filePath, fileSize, fileChecksum
+		return
+	}
+	meta.Path, meta.SizeBytes, meta.Checksum = "", 0, ""
+}
+
+// hasPromotableImage reports whether a version carries a primary artifact the
+// promotion can copy. An EDL bundle is one, and it publishes no generic path.
+func hasPromotableImage(meta VersionMetadata) bool {
+	return meta.Path != "" || meta.InstallMode == "recovery" || meta.QcomflashPath != ""
+}
+
 // applyRecoveryRootfsOnly publishes raw media solely under explicit
 // *_rootfs_only_* fields and clears every legacy image route. This makes old
 // CLIs fail artifact resolution instead of installing a JP rootfs beside stale
@@ -2619,6 +2656,24 @@ func applyPromotedRecoveryFields(dest *VersionMetadata, source VersionMetadata, 
 	}
 }
 
+// validateBundlePromotion stops a promotion that would leave an EDL device's
+// stable version with no install artifact: the bundle is the only one it has.
+func validateBundlePromotion(deviceType string, source VersionMetadata, copiedBundlePath string) error {
+	if !isEDLFlashBundle(deviceType) {
+		return nil
+	}
+	if source.QcomflashPath == "" {
+		if keepsLegacyBundleImagePath(deviceType) {
+			return nil
+		}
+		return fmt.Errorf("nightly is missing the EDL flash bundle")
+	}
+	if copiedBundlePath == "" {
+		return fmt.Errorf("failed to copy the EDL flash bundle")
+	}
+	return nil
+}
+
 func validateRecoveryPromotion(deviceType string, source VersionMetadata, paths promotedRecoveryPaths) error {
 	if source.InstallMode != "recovery" {
 		return nil
@@ -2756,6 +2811,11 @@ func updateDeviceManifest(ctx context.Context, logger *logrus.Entry, bucket *sto
 		recoveryFirst := isRecoveryFirstT234(deviceType)
 		if recoveryFirst {
 			applyRecoveryRootfsOnly(&versionMetadata, storageType, filePath, fileSize, fileChecksum, bmapPath, zstPath, zstChecksum, zstSize)
+		} else if isEDLFlashBundle(deviceType) && filePath != "" {
+			applyEDLFlashBundle(&versionMetadata, deviceType, filePath, fileSize, fileChecksum)
+			logger.WithFields(logrus.Fields{
+				"path": filePath, "size": fileSize, "checksum": fileChecksum,
+			}).Info("Updating EDL flash bundle metadata")
 		} else if filePath != "" {
 			switch storageType {
 			case "nvme":
@@ -3139,7 +3199,7 @@ func promoteNightlyToStable(ctx context.Context, bucket *storage.BucketHandle, p
 			logger.WithError(err).Fatal("Failed to copy file to stable path")
 		}
 		logger.WithField("size_bytes", attrs.Size).Info("File copied successfully")
-	} else if sourceVersionMeta.InstallMode != "recovery" {
+	} else if !hasPromotableImage(sourceVersionMeta) {
 		logger.Fatal("Version has no primary image path")
 	}
 
@@ -3256,6 +3316,8 @@ func promoteNightlyToStable(ctx context.Context, bucket *storage.BucketHandle, p
 	nvmeRootfsZstDest := copyManifestArtifact(ctx, logger, bucket, prefix, sourceVersionMeta.NVMERootfsOnlyZstPath, deviceType, stableVersion, "NVMe rootfs-only seekable-zstd")
 	sdRootfsZstDest := copyManifestArtifact(ctx, logger, bucket, prefix, sourceVersionMeta.SDRootfsOnlyZstPath, deviceType, stableVersion, "SD rootfs-only seekable-zstd")
 
+	qcomflashDest := copyManifestArtifact(ctx, logger, bucket, prefix, sourceVersionMeta.QcomflashPath, deviceType, stableVersion, "EDL flash bundle")
+
 	// Copy flashpacks, mirroring bmap/zst promotion. Flashpacks are
 	// per-storage artifacts; the top-level fields mirror the NVMe one and are
 	// the only fields on single-storage devices (Thor).
@@ -3276,29 +3338,35 @@ func promoteNightlyToStable(ctx context.Context, bucket *storage.BucketHandle, p
 	if err := validateRecoveryPromotion(deviceType, sourceVersionMeta, promotionRecoveryPaths); err != nil {
 		logger.WithError(err).Fatal("Cannot promote incomplete recovery artifacts")
 	}
+	if err := validateBundlePromotion(deviceType, sourceVersionMeta, qcomflashDest); err != nil {
+		logger.WithError(err).Fatal("Cannot promote an incomplete EDL flash bundle")
+	}
 
 	// Create new stable version entry with promotion metadata
 	promotedAt := time.Now()
 	sourceVersion := nightlyVersion
 	stableVersionMeta := VersionMetadata{
-		InstallMode:    sourceVersionMeta.InstallMode,
-		ReleaseDate:    sourceVersionMeta.ReleaseDate,
-		Path:           destinationPath,
-		Checksum:       sourceVersionMeta.Checksum,
-		SizeBytes:      sourceVersionMeta.SizeBytes,
-		Changelog:      sourceVersionMeta.Changelog,
-		IsLatest:       true,
-		IsNightly:      false,
-		PromotedFrom:   &sourceVersion,
-		PromotedAt:     &promotedAt,
-		NVMEPath:       nvmeDestPath,
-		NVMEChecksum:   nvmeChecksum,
-		SDCardPath:     sdDestPath,
-		SDCardChecksum: sdChecksum,
-		NVMEBmapPath:   nvmeBmapDest,
-		SDCardBmapPath: sdBmapDest,
-		BmapPath:       topBmapDest,
-		ZstPath:        topZstDest,
+		InstallMode:        sourceVersionMeta.InstallMode,
+		QcomflashPath:      qcomflashDest,
+		QcomflashChecksum:  sourceVersionMeta.QcomflashChecksum,
+		QcomflashSizeBytes: sourceVersionMeta.QcomflashSizeBytes,
+		ReleaseDate:        sourceVersionMeta.ReleaseDate,
+		Path:               destinationPath,
+		Checksum:           sourceVersionMeta.Checksum,
+		SizeBytes:          sourceVersionMeta.SizeBytes,
+		Changelog:          sourceVersionMeta.Changelog,
+		IsLatest:           true,
+		IsNightly:          false,
+		PromotedFrom:       &sourceVersion,
+		PromotedAt:         &promotedAt,
+		NVMEPath:           nvmeDestPath,
+		NVMEChecksum:       nvmeChecksum,
+		SDCardPath:         sdDestPath,
+		SDCardChecksum:     sdChecksum,
+		NVMEBmapPath:       nvmeBmapDest,
+		SDCardBmapPath:     sdBmapDest,
+		BmapPath:           topBmapDest,
+		ZstPath:            topZstDest,
 		ZstChecksum: func() string {
 			if nvmeZstDest != "" {
 				return sourceVersionMeta.NVMEZstChecksum
@@ -3540,10 +3608,15 @@ func swapImageFile(ctx context.Context, bucket *storage.BucketHandle, prefix, de
 		logger.WithError(err).Fatal("Failed to upload new file")
 	}
 
-	// Warn if filename changed
-	oldFilename := filepath.Base(existingVersion.Path)
+	// Warn if filename changed. An EDL bundle publishes no generic path, so the
+	// artifact it replaces -- and orphans -- is the old flash bundle.
+	replaced := existingVersion.Path
+	if replaced == "" {
+		replaced = existingVersion.QcomflashPath
+	}
+	oldFilename := filepath.Base(replaced)
 	newFilename := filepath.Base(localFile)
-	if newFilename != oldFilename {
+	if replaced != "" && newFilename != oldFilename {
 		logger.WithFields(logrus.Fields{
 			"old_filename": oldFilename,
 			"new_filename": newFilename,
@@ -3657,6 +3730,10 @@ func swapImageFile(ctx context.Context, bucket *storage.BucketHandle, prefix, de
 		updatedVersion.RecoveryPath = existingVersion.RecoveryPath
 		updatedVersion.RecoveryChecksum = existingVersion.RecoveryChecksum
 		updatedVersion.RecoverySizeBytes = existingVersion.RecoverySizeBytes
+	}
+
+	if isEDLFlashBundle(deviceType) {
+		applyEDLFlashBundle(&updatedVersion, deviceType, newPath, attrs.Size, checksum)
 	}
 
 	// Write updated manifest

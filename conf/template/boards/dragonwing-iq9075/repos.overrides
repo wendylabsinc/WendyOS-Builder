@@ -1,0 +1,10 @@
+# Per-board repo overrides for dragonwing-iq9075 (blacksail tree).
+#
+# Qualcomm Dragonwing IQ-9075 EVK -- QCS9075, SA8775P SoC family, board
+# codename "lemans". Upstream MACHINE is iq-9075-evk in meta-qcom.
+#
+# No SRCREV overrides: every pin comes from the shared blacksail set in
+# scripts/upstream-repos.env, SRCREV_QCOM included. The meta-tegra*/meta-rpi/
+# meta-security pins in that set are irrelevant here -- bootstrap skips cloning
+# any layer this board's bblayers does not name.
+WENDYOS_LAYER_TREE="blacksail"

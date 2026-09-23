@@ -10,10 +10,10 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/../../files/grub:"
 SRC_URI = "file://grubAB-qcom.cfg"
 S = "${UNPACKDIR}"
 
-COMPATIBLE_MACHINE = "iq-8275-evk-wendyos"
+COMPATIBLE_MACHINE = "qcom-wendyos"
 
-# Machine-scoped, not allarch: the config hardcodes this board's console
-# (ttyMSM0) and its slot partition numbers.
+# Machine-scoped, not allarch: do_install bakes WENDYOS_QCOM_DTB into the config,
+# so one machine's grub.cfg would otherwise be reused for the other's DTB.
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 # Take over oe-core's virtual for the ESP grub.cfg. grub-efi RDEPENDS on

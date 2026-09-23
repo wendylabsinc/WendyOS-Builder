@@ -28,6 +28,7 @@ This repository provides the meta-layer and build flow to build **WendyOS** — 
 | Virtual machine (x86_64) | virtual | configurable | `vm-x86-64` | `vm-x86-64-wendyos` | virtio (.wic) | wendyos-update |
 | Virtual machine (arm64) | virtual | configurable | `vm-arm64` | `vm-arm64-wendyos` | virtio (.wic) | wendyos-update |
 | Qualcomm Dragonwing IQ-8275 EVK | QCS8275 (aarch64) | 12 GB | `dragonwing-iq8275` | `iq-8275-evk-wendyos` | UFS (EDL / qdl) | wendyos-update |
+| Qualcomm Dragonwing IQ-9075 EVK | QCS9075 (aarch64) | 12 GB | `dragonwing-iq9075` | `iq-9075-evk-wendyos` | UFS (EDL / qdl) | wendyos-update |
 
 ## TL;DR
 
@@ -221,6 +222,10 @@ make build MACHINE=vm-arm64-wendyos
 # Qualcomm Dragonwing IQ-8275 EVK (UFS, flashed over EDL with qdl)
 make setup BOARD=dragonwing-iq8275
 make build MACHINE=iq-8275-evk-wendyos
+
+# Qualcomm Dragonwing IQ-9075 EVK (UFS, flashed over EDL with qdl)
+make setup BOARD=dragonwing-iq9075
+make build MACHINE=iq-9075-evk-wendyos
 ```
 
 > `BOARD` must be set to a board id matching a directory
@@ -275,6 +280,7 @@ make build MACHINE=iq-8275-evk-wendyos
    BOARD=vm-x86-64             ./meta-wendyos/bootstrap.sh
    BOARD=vm-arm64              ./meta-wendyos/bootstrap.sh
    BOARD=dragonwing-iq8275     ./meta-wendyos/bootstrap.sh
+   BOARD=dragonwing-iq9075     ./meta-wendyos/bootstrap.sh
    ```
 
    `MACHINE=<board-id>` remains supported as a deprecated alias (prints a
@@ -311,6 +317,7 @@ make build MACHINE=iq-8275-evk-wendyos
      - `vm-x86-64`               → `vm-x86-64-wendyos`
      - `vm-arm64`                → `vm-arm64-wendyos`
      - `dragonwing-iq8275`       → `iq-8275-evk-wendyos`
+     - `dragonwing-iq9075`       → `iq-9075-evk-wendyos`
    - `WENDYOS_FLASH_IMAGE_SIZE` - Flash image size: "64GB"):
      - `"4GB"` - 3.2GB Mender storage (~1.3GB per rootfs partition)
      - `"8GB"` - 6.4GB Mender storage (~2.9GB per rootfs partition)
