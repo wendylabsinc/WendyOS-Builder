@@ -1,0 +1,100 @@
+From: WendyOS maintainers <hello@wendylabs.com>
+Subject: [PATCH] wifi: bound recovery of a transient stored-key handshake timeout
+
+A reason-15 disconnect alone does not prove a saved key is invalid. Permit
+one existing-deadline retry for an automatically activated infrastructure
+profile with an unchanged system-owned PSK, including a fresh OTA boot
+without NetworkManager timestamp history.
+Keep explicit mismatch/new-profile prompts and user-requested activation
+unchanged. Request-owned state survives secret reentry; expiry fails the
+activation instead of restarting the deadline through auth-retries=0.
+
+Upstream-Status: Pending
+
+--- a/src/core/devices/wifi/nm-device-wifi.c
++++ b/src/core/devices/wifi/nm-device-wifi.c
+@@ -2392,6 +2392,46 @@
+     return FALSE;
+ }
+ 
++/* Keep this allowance on the activation request: stage 1 can run again after
++ * obtaining secrets, and must not replenish it.  No association timer is reset. */
++#define TRANSIENT_PSK_TIMEOUT_ALLOWED "nm-wifi-transient-psk-timeout-allowed"
++
++static gboolean
++allow_transient_psk_timeout(NMDeviceWifi *self, NMActRequest *req, int disconnect_reason)
++{
++    NMDeviceWifiPrivate       *priv = NM_DEVICE_WIFI_GET_PRIVATE(self);
++    NMSettingsConnection      *settings;
++    NMSettingWirelessSecurity *stored, *applied;
++    const char                *psk;
++
++    if (disconnect_reason != 15 /* WLAN_REASON_4WAY_HANDSHAKE_TIMEOUT */
++        || priv->mode != _NM_802_11_MODE_INFRA || !priv->sup_timeout_id
++        || nm_active_connection_get_activation_reason(NM_ACTIVE_CONNECTION(req))
++               != NM_ACTIVATION_REASON_AUTOCONNECT
++        || g_object_get_data(G_OBJECT(req), TRANSIENT_PSK_TIMEOUT_ALLOWED))
++        return FALSE;
++
++    settings = nm_act_request_get_settings_connection(req);
++    stored = nm_connection_get_setting_wireless_security(
++        nm_settings_connection_get_connection(settings));
++    applied = nm_connection_get_setting_wireless_security(
++        nm_act_request_get_applied_connection(req));
++    if (!stored || !applied
++        || g_strcmp0(nm_setting_wireless_security_get_key_mgmt(stored), "wpa-psk") != 0
++        || nm_setting_wireless_security_get_psk_flags(stored) != NM_SETTING_SECRET_FLAG_NONE
++        || nm_setting_wireless_security_get_psk_flags(applied) != NM_SETTING_SECRET_FLAG_NONE)
++        return FALSE;
++    psk = nm_setting_wireless_security_get_psk(stored);
++    if (!psk || !psk[0] || g_strcmp0(psk, nm_setting_wireless_security_get_psk(applied)) != 0)
++        return FALSE;
++
++    g_object_set_data(G_OBJECT(req), TRANSIENT_PSK_TIMEOUT_ALLOWED, GINT_TO_POINTER(1));
++    _LOGI(LOGD_DEVICE | LOGD_WIFI,
++          "Activation: (wifi) allowing one transient four-way timeout for a stored-key "
++          "profile within the existing association deadline");
++    return TRUE;
++}
++
+ static gboolean
+ handle_8021x_or_psk_auth_fail(NMDeviceWifi              *self,
+                               NMSupplicantInterfaceState new_state,
+@@ -2402,6 +2442,7 @@
+     NMActRequest *req;
+     const char   *setting_name = NULL;
+     gboolean      handled      = FALSE;
++    gboolean      new_8021x;
+ 
+     g_return_val_if_fail(new_state == NM_SUPPLICANT_INTERFACE_STATE_DISCONNECTED, FALSE);
+ 
+@@ -2411,8 +2452,11 @@
+     req = nm_device_get_act_request(NM_DEVICE(self));
+     g_return_val_if_fail(req != NULL, FALSE);
+ 
+-    if (need_new_8021x_secrets(self, old_state, &setting_name)
+-        || need_new_wpa_psk(self, old_state, disconnect_reason, &setting_name)) {
++    new_8021x = need_new_8021x_secrets(self, old_state, &setting_name);
++    if (new_8021x || need_new_wpa_psk(self, old_state, disconnect_reason, &setting_name)) {
++        if (!new_8021x && allow_transient_psk_timeout(self, req, disconnect_reason))
++            return FALSE;
++
+         nm_act_request_clear_secrets(req);
+ 
+         _LOGI(LOGD_DEVICE | LOGD_WIFI,
+@@ -2910,6 +2954,15 @@
+ 
+     connection = nm_act_request_get_applied_connection(req);
+     g_assert(connection);
++
++    /* The single transient allowance cannot turn auth-retries=0 into an
++     * unbounded activation.  Its original association deadline is final. */
++    if (g_object_get_data(G_OBJECT(req), TRANSIENT_PSK_TIMEOUT_ALLOWED)) {
++        nm_device_state_changed(device,
++                                NM_DEVICE_STATE_FAILED,
++                                NM_DEVICE_STATE_REASON_SUPPLICANT_TIMEOUT);
++        return FALSE;
++    }
+ 
+     if (NM_IN_SET(priv->mode, _NM_802_11_MODE_ADHOC, _NM_802_11_MODE_MESH, _NM_802_11_MODE_AP)) {
+         /* In Ad-Hoc and AP modes there's nothing to check the encryption key
