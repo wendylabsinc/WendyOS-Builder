@@ -103,9 +103,14 @@ printf '%s\\n' "$result"
         self.assertEqual(selected["devkit"]["kernel_version"], "6.9")
         self.assertEqual(selected["source"], "current OS build artifact")
 
+    def test_failed_job_rerun_uses_successful_os_artifact_from_prior_attempt(self):
+        selected, urls = self.select(os_devices="jetson-agx-thor",
+                                     entries=[self.entry(build_run_attempt="1")])
+        self.assertEqual(urls, [])
+        self.assertEqual(selected["devkit"]["kernel_version"], "6.9")
+
     def test_os_build_refuses_missing_or_stale_artifacts(self):
-        for entries in [[], [self.entry(build_run_attempt="1")],
-                        [self.entry(build_run_id="old")], [self.entry(version="pr-261")],
+        for entries in [[], [self.entry(build_run_id="old")], [self.entry(version="pr-261")],
                         [self.entry(devkit=None)]]:
             with self.subTest(entries=entries):
                 _, urls = self.select(os_devices="jetson-agx-thor", entries=entries,

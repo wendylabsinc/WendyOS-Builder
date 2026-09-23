@@ -24,10 +24,13 @@ if [[ -n "${OS_DEVICES:-}" ]]; then
     shopt -s nullglob
     entries=("${BUILT_ENTRIES:?}"/*.json)
     [[ ${#entries[@]} -gt 0 ]] || fail "${dev}: no OS build metadata from this run; refusing public devkit fallback"
+    # Successful OS jobs keep their artifacts when only failed jobs are rerun.
+    # The run ID stays fixed across attempts, so do not require their attempt
+    # number to match the current publish attempt.
     sel=$(jq -sc --arg dev "$dev" --arg version "$WANT_VERSION" \
-      --arg run "${GITHUB_RUN_ID:?}" --arg attempt "${GITHUB_RUN_ATTEMPT:?}" '
+      --arg run "${GITHUB_RUN_ID:?}" '
       [.[] | select(.device == $dev or ((.aliases // []) | index($dev)) != null)
-        | select(.version == $version and .build_run_id == $run and .build_run_attempt == $attempt)
+        | select(.version == $version and .build_run_id == $run)
         | select(.devkit != null)] | sort_by(.storage) | last
       | if . == null then empty else {version, devkit, nightly, source: "current OS build artifact"} end' "${entries[@]}")
     [[ -n "$sel" ]] || fail "${dev}: no matching devkit from OS build ${GITHUB_RUN_ID}/${GITHUB_RUN_ATTEMPT}; rerun the OS build, refusing fallback"
