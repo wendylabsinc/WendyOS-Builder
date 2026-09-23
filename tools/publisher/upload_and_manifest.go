@@ -3548,8 +3548,8 @@ func swapImageFile(ctx context.Context, bucket *storage.BucketHandle, prefix, de
 	if !exists {
 		logger.WithField("version", version).Fatal("Cannot swap - version does not exist. Use normal upload to create new version.")
 	}
-	if existingVersion.InstallMode == "recovery" && isRecoveryFirstT234(deviceType) {
-		logger.Fatal("Cannot use --swap on a recovery-first T234 release: it would recreate a legacy image path. Republish the storage-scoped rootfs-only artifact instead.")
+	if existingVersion.InstallMode == "recovery" {
+		logger.Fatal("Cannot use --swap on a recovery-mode release: it would recreate a legacy image path. Republish the storage-scoped rootfs-only artifact instead.")
 	}
 
 	// Verify IsNightly flag matches

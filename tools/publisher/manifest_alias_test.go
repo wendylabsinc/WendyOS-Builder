@@ -8,6 +8,8 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
 	"reflect"
 	"strings"
 	"testing"
@@ -146,5 +148,45 @@ func TestManifestEntryRejectsInvalidAliases(t *testing.T) {
 		if err := entry.validate(); err == nil {
 			t.Errorf("accepted aliases %q", aliases)
 		}
+	}
+}
+
+// A recovery-mode alias must be rejected before --swap uploads an image into
+// the legacy path. Run the publisher path in a child because it calls log.Fatal.
+func TestSwapRejectsRecoveryAlias(t *testing.T) {
+	const childEnv = "TEST_SWAP_RECOVERY_ALIAS_CHILD"
+	const endpointEnv = "TEST_SWAP_RECOVERY_ALIAS_ENDPOINT"
+	if os.Getenv(childEnv) == "1" {
+		client, err := storage.NewClient(context.Background(),
+			option.WithEndpoint(os.Getenv(endpointEnv)), option.WithoutAuthentication())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer client.Close()
+		swapImageFile(context.Background(), client.Bucket("test-bucket"), "",
+			"jetson-agx-orin-emmc", "v1", "nonexistent.img", "", true)
+		t.Fatal("swap accepted recovery-mode alias")
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/test-bucket/manifests/jetson-agx-orin-emmc.json" {
+			t.Errorf("unexpected GCS request: %s %s", r.Method, r.URL.Path)
+			http.Error(w, "unexpected request", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Goog-Generation", "7")
+		json.NewEncoder(w).Encode(DeviceManifest{
+			DeviceID: "jetson-agx-orin-emmc",
+			Versions: map[string]VersionMetadata{"v1": {InstallMode: "recovery", IsNightly: true}},
+		})
+	}))
+	defer server.Close()
+
+	cmd := exec.Command(os.Args[0], "-test.run=^TestSwapRejectsRecoveryAlias$")
+	cmd.Env = append(os.Environ(), childEnv+"=1", endpointEnv+"="+server.URL)
+	out, err := cmd.CombinedOutput()
+	if err == nil || !strings.Contains(string(out), "Cannot use --swap on a recovery-mode release") {
+		t.Fatalf("swap did not reject the recovery alias before upload: error=%v, output=%s", err, out)
 	}
 }
