@@ -46,6 +46,7 @@ cmd=${0##*/}
 printf '%s %s\n' "$cmd" "$*" >> "$TEST_LOG"
 case "$cmd" in
     uname) echo test-kernel ;;
+    systemd-sysext) [ -z "${REFRESH_HOOK:-}" ] || "$REFRESH_HOOK" ;;
     timeout) shift 2; exec "$@" ;;
     date)
         counter="$TEST_LOG.clock"
@@ -65,16 +66,27 @@ case "$cmd" in
             '-g GENERAL.CON-UUID device show '* )
                 [ "${FAIL_CAPTURE:-0}" = 0 ] || exit 1
                 printf '%s\\n' "${CONNECTION_UUID-12345678-1234-1234-1234-123456789abc}" ;;
-            '-g GENERAL.STATE device show '* ) echo '100 (connected)' ;;
+            '-g GENERAL.STATE device show '* )
+                if [ "${REDISCOVER_DEVICE:-0}" = 1 ] && [ -e "$TEST_LOG.restore-count" ] && [ ! -e "$TEST_LOG.rediscovered" ]; then
+                    touch "$TEST_LOG.rediscovered"; echo '20 (unavailable)'
+                else
+                    echo '100 (connected)'
+                fi ;;
             'connection up '* )
                 counter="$TEST_LOG.restore-count"
                 n=0; [ ! -f "$counter" ] || n=$(cat "$counter")
                 n=$((n+1)); echo "$n" > "$counter"
                 case " ${FAIL_RESTORE:-} " in *" $n "*) exit 1 ;; esac ;;
         esac ;;
-    systemctl) [ "${FAIL_SERVICE:-0}" = 0 ] || exit 1 ;;
+    systemctl)
+        if [ "${FAIL_SERVICE:-0}" != 0 ] && [ ! -e "$TEST_LOG.service-failed" ]; then
+            touch "$TEST_LOG.service-failed"; exit 1
+        fi ;;
     rmmod) [ "${2:-}" != "${FAIL_UNLOAD:-}" ] || exit 1 ;;
     modprobe)
+        if [ "${1:-}" = -- ] && [ "${2:-}" = oldwifi ] && [ -n "${REQUIRE_OLD_MODULE:-}" ]; then
+            [ "$(cat "$REQUIRE_OLD_MODULE" 2>/dev/null)" = old-module ] || exit 1
+        fi
         if [ "${1:-}" = -r ] && [ "${3:-}" = "${UNINDEXED_MODULE:-}" ]; then
             echo "Module ${3} not found" >&2; exit 1
         fi
@@ -104,6 +116,98 @@ exit 0
                                 capture_output=True, text=True, check=False)
         calls = self.log.read_text().splitlines()
         return result, calls
+
+    def previous_payload(self):
+        previous = self.root / "previous-payload"
+        self.payload.rename(previous)
+        self.payload.mkdir()
+        (self.payload / "modules/test-kernel").mkdir(parents=True)
+        (self.payload / "modules/test-kernel/oldwifi.ko").write_text("old-module")
+        (self.payload / "modules-load.conf").write_text("oldwifi\n")
+        (self.payload / "firmware").mkdir()
+        (self.payload / "firmware/card.bin").write_text("old-firmware")
+        exposed = self.root / "usr/lib/modules/test-kernel/updates/wendyos/card"
+        exposed.mkdir(parents=True)
+        old_module = exposed / "oldwifi.ko"
+        old_module.symlink_to(self.payload / "modules/test-kernel/oldwifi.ko")
+        firmware = self.root / "usr/lib/firmware/card.bin"
+        firmware.parent.mkdir(parents=True)
+        firmware.symlink_to(self.payload / "firmware/card.bin")
+        hook = self.root / "refresh"
+        hook.write_text(f"#!/bin/sh\nrm -rf '{exposed}' '{firmware}' '{self.payload}'\n"
+                        f"cp -R '{previous}' '{self.payload}'\n"
+                        f"rm -rf '{self.root}/usr/lib/wendyos-driver-state'\n")
+        hook.chmod(0o755)
+        self.env.update(REFRESH_HOOK=str(hook), REQUIRE_OLD_MODULE=str(old_module))
+        return old_module, firmware
+
+    def test_real_files_survive_refresh_and_repeated_failed_activation(self):
+        old_module, firmware = self.previous_payload()
+        self.env["FAIL_SERVICE"] = "1"
+        for attempt in range(2):
+            (self.root / "commands.log.service-failed").unlink(missing_ok=True)
+            result, calls = self.run_apply()
+            self.assertNotEqual(result.returncode, 0, result.stderr)
+            self.assertIn("activation rolled back", result.stderr)
+            self.assertNotIn("rollback incomplete", result.stderr)
+            self.assertEqual(old_module.read_text(), "old-module")
+            self.assertEqual(firmware.read_text(), "old-firmware")
+            self.assertFalse(old_module.is_symlink())
+            self.assertEqual(list((self.root / "run").glob("wendyos-driver-plan.*")), [])
+            state = self.root / "usr/lib/wendyos-driver-state/card/modules-load.conf"
+            self.assertEqual(state.read_text(), "oldwifi\n")
+
+    def test_rolled_back_owner_still_blocks_a_later_conflicting_package(self):
+        self.previous_payload()
+        (self.root / "data/extensions/enabled/test-kernel/zeta.raw").touch()
+        zeta = self.root / "usr/lib/wendyos-driver-payloads/zeta/modules/test-kernel"
+        zeta.mkdir(parents=True)
+        (zeta / "oldwifi.ko").write_text("conflicting-module")
+        self.env["FAIL_SERVICE"] = "1"
+        result, _ = self.run_apply("")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("zeta conflicts with earlier package card", result.stderr)
+        self.assertFalse((self.root / "usr/lib/modules/test-kernel/updates/wendyos/zeta/oldwifi.ko").exists())
+
+    def test_capture_failure_preserves_old_exposure_after_refresh(self):
+        self.with_wifi()
+        old_module, firmware = self.previous_payload()
+        self.env["FAIL_CAPTURE"] = "1"
+        result, calls = self.run_apply()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(any(c.startswith("rmmod") for c in calls))
+        self.assertEqual(old_module.read_text(), "old-module")
+        self.assertEqual(firmware.read_text(), "old-firmware")
+
+    def test_initial_depmod_failure_preserves_old_exposure(self):
+        old_module, firmware = self.previous_payload()
+        self.env["FAIL_DEPMOD"] = "1"
+        result, calls = self.run_apply()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(any(c.startswith("rmmod") for c in calls))
+        self.assertEqual(old_module.read_text(), "old-module")
+        self.assertEqual(firmware.read_text(), "old-firmware")
+
+    def test_incomplete_snapshot_refuses_refresh(self):
+        old_module, _ = self.previous_payload()
+        state = self.root / "usr/lib/wendyos-driver-state/card"
+        state.mkdir(parents=True)
+        (state / "files").write_text(str(old_module) + ".missing\n")
+        result, calls = self.run_apply()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("refusing refresh", result.stderr)
+        self.assertFalse(any(c.startswith("systemd-sysext") for c in calls))
+        self.assertEqual(old_module.read_text(), "old-module")
+
+    def test_success_records_private_metadata_and_replacement_receipt(self):
+        old_module, _ = self.previous_payload()
+        result, _ = self.run_apply()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(old_module.exists())
+        state = self.root / "usr/lib/wendyos-driver-state/card"
+        self.assertEqual((state / "modules-load.conf").read_text(), "newwifi\n")
+        self.assertIn("oldwifi", (state / "replaced-modules").read_text())
+        self.assertTrue((state / "generation").read_text().strip())
 
     def test_replacement_order(self):
         result, calls = self.run_apply()
@@ -140,7 +244,7 @@ exit 0
         self.assertIn("prior modules restored", result.stderr)
         self.assertIn("modprobe -- oldwifi", calls)
         self.assertNotIn("modprobe -- newwifi", calls)
-        self.assertFalse(any(line.startswith("systemctl") for line in calls))
+        self.assertIn("systemctl try-restart -- wpa_supplicant.service", calls)
 
     def test_load_failure_unexposes_payload_and_restores_old_stack(self):
         (self.payload / "firmware").mkdir()
@@ -306,6 +410,14 @@ exit 0
         self.assertEqual(len(self.restores(calls)), 2)
         self.assertIn("modprobe -- oldwifi", calls)
         self.assertIn("activation rolled back", result.stderr)
+
+    def test_reconnect_retries_when_nm_rediscovers_recreated_device(self):
+        self.with_wifi()
+        self.env.update(FAIL_RESTORE="1", REDISCOVER_DEVICE="1")
+        result, calls = self.run_apply()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(self.restores(calls)), 2)
+        self.assertNotIn("modprobe -- oldwifi", calls)
 
     def test_failed_reconnect_during_rollback_reports_incomplete(self):
         self.with_wifi()
