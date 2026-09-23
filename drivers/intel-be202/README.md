@@ -7,8 +7,8 @@ the controller firmware supplied by this add-on.
 
 ## Installation
 
-Use a WendyOS image with Jetson driver add-on support and a published add-on
-matching its kernel. With the BE202 fitted and wired management connected:
+Use a WendyOS image with driver add-on support and a published add-on matching
+its kernel. With the BE202 fitted and wired management connected:
 
 ```sh
 wendy device drivers list --available
@@ -17,12 +17,22 @@ wendy device wifi list
 ```
 
 For a draft PR build, add `--pr <number>` to the driver install command after
-installing its matching WendyOS PR image. An old Jetson image lacking the
-driver runtime must be updated first. Future OS updates stage the add-on built
-for the target kernel through the existing Wendy driver workflow.
+installing its matching WendyOS PR image. An old image lacking the driver
+runtime must be updated first. Future OS updates stage the add-on built for the
+target kernel through the existing Wendy driver workflow.
 
 Supported hardware: AGX Thor developer kit (NVMe) and AGX Orin developer kit
 (NVMe or eMMC), using a PCIe BE202 with its USB Bluetooth function connected.
+The same package is built for Raspberry Pi 5 (SD or NVMe image). The Waveshare
+PCIe TO M.2 E KEY HAT+ connects to the Pi 5 PCIe FPC connector; use the SD boot
+image while its single M.2 slot holds the BE202. NVMe boot needs a carrier that
+can host both devices. This HAT does not provide native PCIe on a standard Pi 4
+Model B, whose PCIe lane is used by its USB 3 controller. A Pi 4 BE202 build
+would require different hardware, such as a Compute Module 4 carrier exposing
+native PCIe. A USB-attached Wi-Fi adapter does not satisfy the PCI hardware match.
+
+The BE202's Bluetooth function needs a separate USB 2.0 connection from the M.2
+socket. A PCIe-only HAT can provide Wi-Fi but cannot expose BE202 Bluetooth.
 The Thor package applies a PCIe No-Snoop workaround limited to Intel `8086:272b`
 behind NVIDIA root port `10de:22d8`.
 
@@ -31,7 +41,8 @@ verified by SHA-256. Wi-Fi firmware c107 is preferred, with c106 retained as a
 fallback supported by the pinned driver. The PNVM is retained for compatibility.
 
 The Bluetooth payload is the `ibt-0291-0291` pair requested by the BE202's
-`8087:0038` USB function on the AGX Thor developer kit.
+`8087:0038` USB function on the AGX Thor developer kit. Verify the same USB
+identity and firmware request on each Pi carrier during hardware testing.
 Both firmware notices are included: `LICENCE.iwlwifi_firmware` for Wi-Fi and
 `LICENCE.ibt_firmware` for Bluetooth, as identified by upstream `WHENCE`.
 
@@ -43,6 +54,13 @@ supplicant is restarted after the cfg80211 replacement, and a NetworkManager
 profile active before the reload is restored by UUID. Install and upgrade it
 with wired management available because activation briefly removes the managed
 Wi-Fi interface.
+
+On Pi, the onboard Broadcom `brcmfmac` module must unload before the backported
+`cfg80211` can replace the kernel's wireless stack. While the BE202 add-on is
+active, the onboard Wi-Fi radio is unavailable. A BE202 connection is restored
+by PCI identity, independent of whether it was named `wlan0` or `wlan1`; an
+onboard Wi-Fi connection is intentionally not restored. Keep Ethernet or USB
+gadget management connected for installation and removal.
 
 The package uses WendyOS's existing NetworkManager and wpa_supplicant. It does
 not change either userspace package or configure Wi-Fi Aware, internet sharing,

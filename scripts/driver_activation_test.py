@@ -335,6 +335,20 @@ exit 0
         (self.root / "sys/class/net/wlan0").mkdir(parents=True, exist_ok=True)
         self.activation.write_text(self.activation.read_text() + "restore-wifi-connection wlan0\n")
 
+    def with_pci_wifi(self):
+        for name, vendor, device in (("wlan0", "0x14e4", "0x43a0"),
+                                     ("wlan1", "0x8086", "0x272b")):
+            pci = self.root / "sys/class/net" / name / "device"
+            pci.mkdir(parents=True)
+            (pci / "vendor").write_text(vendor + "\n")
+            (pci / "device").write_text(device + "\n")
+        (self.root / "sys/module/brcmfmac").mkdir()
+        holders = self.root / "sys/module/cfg80211/holders"
+        holders.mkdir()
+        (holders / "brcmfmac").touch()
+        self.activation.write_text("pci 8086:272b\nreplace brcmfmac\nreplace cfg80211\n"
+                                   "restore-wifi-pci 8086:272b\n")
+
     def restores(self, calls):
         return [c for c in calls if c.startswith("nmcli --wait") and " connection up " in c]
 
@@ -361,6 +375,25 @@ exit 0
         self.assertEqual(len(self.restores(calls)), 1)
         self.assertLess(calls.index("modprobe -- oldwifi"), calls.index(self.restores(calls)[0]))
         self.assertIn("prior modules restored", result.stderr)
+
+    def test_pci_wifi_restore_ignores_onboard_interface(self):
+        self.with_pci_wifi()
+        result, calls = self.run_apply()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("rmmod -- brcmfmac", calls)
+        self.assertLess(calls.index("rmmod -- brcmfmac"), calls.index("rmmod -- cfg80211"))
+        self.assertIn("nmcli --wait 5 -g GENERAL.CON-UUID device show wlan1", calls)
+        self.assertNotIn("nmcli --wait 5 -g GENERAL.CON-UUID device show wlan0", calls)
+        self.assertEqual(len(self.restores(calls)), 1)
+        self.assertIn("ifname wlan1", self.restores(calls)[0])
+
+    def test_pci_wifi_capture_failure_prevents_onboard_unload(self):
+        self.with_pci_wifi()
+        self.env["FAIL_CAPTURE"] = "1"
+        result, calls = self.run_apply()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("cannot capture wlan1", result.stderr)
+        self.assertFalse(any(c.startswith("rmmod") for c in calls))
 
     def test_wifi_restored_after_payload_index_failure(self):
         self.with_wifi()

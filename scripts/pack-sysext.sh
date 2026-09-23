@@ -47,7 +47,7 @@ PY
 }
 
 devkit_vars=$(read_json "$DEVKIT/devkit.json" \
-    KVER=kernel_version ARCH=arch OS_ID=os_id LEVEL=sysext_level) \
+    KVER=kernel_version ARCH=arch OS_ID=os_id LEVEL=sysext_level MACHINE=machine) \
     || err "cannot read $DEVKIT/devkit.json"
 eval "$devkit_vars"
 driver_vars=$(read_json "$DRIVER/driver.json" NAME=name) \
@@ -59,6 +59,7 @@ eval "$driver_vars"
 [ -n "$KVER" ]  || err "devkit.json has no kernel_version"
 [ -n "$OS_ID" ] || err "devkit.json has no os_id — rebuild the devkit"
 [ -n "$LEVEL" ] || err "devkit.json has no sysext_level — rebuild the devkit"
+[ -n "$MACHINE" ] || err "devkit.json has no machine — rebuild the devkit"
 
 # The shipped mksquashfs stays executable but cannot run until setup.sh rewrites its ELF
 # interpreter, and then fails naming the binary rather than the missing loader.
@@ -114,20 +115,31 @@ for m in json.load(open(sys.argv[1])).get("modules_load", []):
 [ -s "$CONF" ] || rm -f "$CONF"
 
 # Optional activation metadata lets an add-on replace a base-kernel module stack after
-# the late /data sysext merge. Keep the on-device format deliberately simple: WendyOS
-# does not need a JSON parser in the base image, and every value is validated here.
+# the late /data sysext merge. A devkit machine may override the default activation
+# when a board has extra module holders. Keep the on-device format deliberately simple:
+# WendyOS does not need a JSON parser in the base image, and every value is validated here.
 #
 #   pci <vendor>:<device>  activate only when any declared PCI ID is present
 #   replace <module>       unload in manifest order before modules_load
 #   reload <module>        unload before modules_load and load again afterwards
 #   restart-service <unit> restart an active service after module insertion
 #   restore-wifi-connection <interface>  restore its active NetworkManager profile
+#   restore-wifi-pci <vendor>:<device>  restore a PCI Wi-Fi interface's profile
 install -d "$STAGE/usr/lib/wendyos-driver-activation.d"
 ACTIVATION_CONF="$STAGE/usr/lib/wendyos-driver-activation.d/$NAME.conf"
-python3 - "$DRIVER/driver.json" > "$ACTIVATION_CONF" <<'PY'
+python3 - "$DRIVER/driver.json" "$MACHINE" > "$ACTIVATION_CONF" <<'PY'
 import json, re, sys
 
-activation = json.load(open(sys.argv[1])).get("activation", {})
+manifest = json.load(open(sys.argv[1]))
+overrides = manifest.get("activation_by_machine", {})
+if not isinstance(overrides, dict) or any(
+    not re.fullmatch(r"[A-Za-z0-9_.-]+", machine) or not isinstance(value, dict)
+    for machine, value in overrides.items()
+):
+    sys.exit("activation_by_machine must map machine names to activation objects")
+activation = overrides.get(sys.argv[2], manifest.get("activation", {}))
+if not isinstance(activation, dict):
+    sys.exit("activation must be an object")
 for device in activation.get("pci_devices", []):
     if not re.fullmatch(r"[0-9a-fA-F]{4}:[0-9a-fA-F]{4}", device):
         sys.exit("invalid activation PCI ID: %r" % device)
@@ -149,6 +161,11 @@ for interface in activation.get("wifi_devices_restore", []):
     if not re.fullmatch(r"[A-Za-z0-9_.:-]+", interface):
         sys.exit("invalid activation network interface: %r" % interface)
     print("restore-wifi-connection " + interface)
+
+for device in activation.get("wifi_pci_devices_restore", []):
+    if not re.fullmatch(r"[0-9a-fA-F]{4}:[0-9a-fA-F]{4}", device):
+        sys.exit("invalid Wi-Fi restore PCI ID: %r" % device)
+    print("restore-wifi-pci " + device.lower())
 PY
 [ -s "$ACTIVATION_CONF" ] || {
     rm -f "$ACTIVATION_CONF"
