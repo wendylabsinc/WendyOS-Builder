@@ -8,6 +8,8 @@ SRC_URI:append:rpi = "${@' file://container.cfg' if d.getVar('WENDYOS_CONTAINER_
 # Add USB gadget kernel config when WENDYOS_USB_GADGET is enabled
 SRC_URI:append:rpi = "${@' file://usb-gadget.cfg' if d.getVar('WENDYOS_USB_GADGET') == '1' else ''}"
 SRC_URI += "file://0001-dwc2-force-g_dma-false-for-BCM2712-in-peripheral-mod.patch"
+SRC_URI += "file://0002-bluetooth-l2cap-release-ident-for-le-credits.patch"
+SRC_URI += "file://0003-bluetooth-preserve-legacy-advertising-on-central-connect.patch"
 
 # Driver add-ons: the kernel prerequisites (sysext/module-sign fragments plus module
 # signing). Isolated so the kernel is untouched on boards that ship no add-ons. The
@@ -15,3 +17,5 @@ SRC_URI += "file://0001-dwc2-force-g_dma-false-for-BCM2712-in-peripheral-mod.pat
 # other board's kernel bbappend enables the same thing with this one line.
 require ${@'recipes-kernel/linux/driver-extensions.inc' if d.getVar('WENDYOS_DRIVER_EXTENSIONS') == '1' else ''}
 
+# Retire the actual failed pending LE connection, including a second queued dial.
+require recipes-kernel/linux/bluetooth-le-pending.inc
