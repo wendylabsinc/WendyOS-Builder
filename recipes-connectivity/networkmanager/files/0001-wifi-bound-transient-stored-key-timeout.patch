@@ -1,0 +1,117 @@
+From: Wendy Labs <engineering@wendy.dev>
+Subject: [PATCH] wifi: tolerate one stored-key autoconnect handshake timeout
+
+During automatic Wi-Fi activation, NetworkManager can classify a remote
+reason-15 four-way handshake timeout as a bad password, clear the applied
+credentials and request a new key. A transient timeout does not establish
+that the saved key is wrong; this can interrupt unattended reconnection
+after a reboot or OTA even when the password has not changed.
+
+Skip that classification once per activation request, only for an
+infrastructure WPA-PSK profile with identical nonempty stored/applied
+system-owned keys and an association timer already running. Leave the
+supplicant to recover within that timer; do not launch another attempt,
+reset the timer or bypass WPA authentication. No previous-success timestamp
+is required because native OTA can replace the root-local timestamp database.
+
+Explicit mismatch notifications and subsequent handshake failures still
+take the upstream credential-request path. That path can cancel the timer
+and restart configuration after obtaining secrets, but cannot replenish the
+allowance. Once it has been used, any association timeout on the same request
+fails with SUPPLICANT_TIMEOUT instead of re-entering authentication retries,
+even with auth-retries=0. This does not impose a request-wide original deadline
+or change NetworkManager's separate autoconnect retry policy. Manual activation,
+enterprise/other key management and agent-owned or unsaved keys are excluded.
+
+This mitigates false-secret classification, not the underlying RF timeout;
+controlled physical recovery acceptance remains pending.
+
+Upstream-Status: Pending
+
+--- a/src/core/devices/wifi/nm-device-wifi.c
++++ b/src/core/devices/wifi/nm-device-wifi.c
+@@ -2392,6 +2392,46 @@
+     return FALSE;
+ }
+ 
++/* Keep this allowance on the activation request across secret-stage reentry.
++ * Granting it preserves the current association timer; it does not start a retry. */
++#define TRANSIENT_PSK_TIMEOUT_ALLOWED "nm-wifi-transient-psk-timeout-allowed"
++
++static gboolean
++allow_transient_psk_timeout(NMDeviceWifi *self, NMActRequest *req, int disconnect_reason)
++{
++    NMDeviceWifiPrivate       *priv = NM_DEVICE_WIFI_GET_PRIVATE(self);
++    NMSettingsConnection      *settings;
++    NMSettingWirelessSecurity *stored, *applied;
++    const char                *psk;
++
++    if (disconnect_reason != 15 /* WLAN_REASON_4WAY_HANDSHAKE_TIMEOUT */
++        || priv->mode != _NM_802_11_MODE_INFRA || !priv->sup_timeout_id
++        || nm_active_connection_get_activation_reason(NM_ACTIVE_CONNECTION(req))
++               != NM_ACTIVATION_REASON_AUTOCONNECT
++        || g_object_get_data(G_OBJECT(req), TRANSIENT_PSK_TIMEOUT_ALLOWED))
++        return FALSE;
++
++    settings = nm_act_request_get_settings_connection(req);
++    stored = nm_connection_get_setting_wireless_security(
++        nm_settings_connection_get_connection(settings));
++    applied = nm_connection_get_setting_wireless_security(
++        nm_act_request_get_applied_connection(req));
++    if (!stored || !applied
++        || g_strcmp0(nm_setting_wireless_security_get_key_mgmt(stored), "wpa-psk") != 0
++        || nm_setting_wireless_security_get_psk_flags(stored) != NM_SETTING_SECRET_FLAG_NONE
++        || nm_setting_wireless_security_get_psk_flags(applied) != NM_SETTING_SECRET_FLAG_NONE)
++        return FALSE;
++    psk = nm_setting_wireless_security_get_psk(stored);
++    if (!psk || !psk[0] || g_strcmp0(psk, nm_setting_wireless_security_get_psk(applied)) != 0)
++        return FALSE;
++
++    g_object_set_data(G_OBJECT(req), TRANSIENT_PSK_TIMEOUT_ALLOWED, GINT_TO_POINTER(1));
++    _LOGI(LOGD_DEVICE | LOGD_WIFI,
++          "Activation: (wifi) allowing one transient four-way timeout for a stored-key "
++          "profile within the existing association deadline");
++    return TRUE;
++}
++
+ static gboolean
+ handle_8021x_or_psk_auth_fail(NMDeviceWifi              *self,
+                               NMSupplicantInterfaceState new_state,
+@@ -2402,6 +2442,7 @@
+     NMActRequest *req;
+     const char   *setting_name = NULL;
+     gboolean      handled      = FALSE;
++    gboolean      new_8021x;
+ 
+     g_return_val_if_fail(new_state == NM_SUPPLICANT_INTERFACE_STATE_DISCONNECTED, FALSE);
+ 
+@@ -2411,8 +2452,11 @@
+     req = nm_device_get_act_request(NM_DEVICE(self));
+     g_return_val_if_fail(req != NULL, FALSE);
+ 
+-    if (need_new_8021x_secrets(self, old_state, &setting_name)
+-        || need_new_wpa_psk(self, old_state, disconnect_reason, &setting_name)) {
++    new_8021x = need_new_8021x_secrets(self, old_state, &setting_name);
++    if (new_8021x || need_new_wpa_psk(self, old_state, disconnect_reason, &setting_name)) {
++        if (!new_8021x && allow_transient_psk_timeout(self, req, disconnect_reason))
++            return FALSE;
++
+         nm_act_request_clear_secrets(req);
+ 
+         _LOGI(LOGD_DEVICE | LOGD_WIFI,
+@@ -2910,6 +2954,15 @@
+ 
+     connection = nm_act_request_get_applied_connection(req);
+     g_assert(connection);
++
++    /* Once the allowance is used, an association timeout fails this request
++     * instead of re-entering authentication retries, even with auth-retries=0. */
++    if (g_object_get_data(G_OBJECT(req), TRANSIENT_PSK_TIMEOUT_ALLOWED)) {
++        nm_device_state_changed(device,
++                                NM_DEVICE_STATE_FAILED,
++                                NM_DEVICE_STATE_REASON_SUPPLICANT_TIMEOUT);
++        return FALSE;
++    }
+ 
+     if (NM_IN_SET(priv->mode, _NM_802_11_MODE_ADHOC, _NM_802_11_MODE_MESH, _NM_802_11_MODE_AP)) {
+         /* In Ad-Hoc and AP modes there's nothing to check the encryption key
