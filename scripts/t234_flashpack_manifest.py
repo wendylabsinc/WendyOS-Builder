@@ -12,7 +12,9 @@ import sys
 import xml.etree.ElementTree as ET
 
 SCHEMA = 2
-PROTOCOL = "usb-mass-storage-v1"
+# v2: the flashing initrd keeps one USB enumeration and switches LUN media in
+# place. v1 re-enumerated per disk; CLIs speak exactly one of the two.
+PROTOCOL = "usb-mass-storage-v2"
 USB_PRODUCT_ID = "0x7023"
 
 # Partition types the host CLI generates natively (protective MBR + both GPT
@@ -140,6 +142,9 @@ def generate(root: pathlib.Path, *, version: str, device: str, storage: str,
         raise ValueError("flash package status template is missing")
     if not (root / "stage2/flashpkg/logs").is_dir():
         raise ValueError("flash package log directory is missing")
+    # The protocol promises in-place media switching; the initrd reads it here.
+    if require_file(root, "stage2/flashpkg/conf/usb-mode").read_text().strip() != "single":
+        raise ValueError("flash package does not request single USB enumeration (conf/usb-mode)")
 
     files: dict[str, dict[str, int | str]] = {}
     for path in sorted(root.rglob("*")):

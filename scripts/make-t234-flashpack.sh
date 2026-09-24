@@ -246,6 +246,9 @@ cp bootloader_staging/* "$PKG/bootloader/"
     echo "extra"
     echo "reboot"
 } > "$PKG/conf/command_sequence"
+# Ask the flashing initrd to keep one USB enumeration and switch LUN media in
+# place; the manifest declares it as protocol usb-mass-storage-v2.
+echo "single" > "$PKG/conf/usb-mode"
 echo "PENDING: expecting command sequence from host" > "$PKG/status"
 
 # stage2/flashpkg.ext4 — the same tree as a ready-made 128 MiB ext4 image,

@@ -41,6 +41,8 @@ class ManifestV2Tests(unittest.TestCase):
         with (root / "stage2/flashpkg.ext4").open("r+b") as stream:
             stream.truncate(128 << 20)
         (root / "stage2/flashpkg/status").write_text("PENDING")
+        (root / "stage2/flashpkg/conf").mkdir(parents=True, exist_ok=True)
+        (root / "stage2/flashpkg/conf/usb-mode").write_text("single\n")
         return root
 
     def generate(self, root, **overrides):
@@ -56,7 +58,7 @@ class ManifestV2Tests(unittest.TestCase):
     def test_schema_v2_identity_and_all_consumed_files(self):
         result = self.generate(self.fixture())
         self.assertEqual(result["schema"], 2)
-        self.assertEqual(result["protocol"], "usb-mass-storage-v1")
+        self.assertEqual(result["protocol"], "usb-mass-storage-v2")
         self.assertEqual(result["usb_product_id"], "0x7023")
         self.assertEqual(result["target"], {
             "device": "jetson-orin-nano", "storage": "nvme",
@@ -66,6 +68,12 @@ class ManifestV2Tests(unittest.TestCase):
         for path in ("stage2/flashpkg.ext4", "stage2/flash/initrd-flash.xml",
                      "stage2/flash/config-partition.fat32.img", "stage2/flash/rootfs.img"):
             self.assertIn(path, result["files"])
+
+    def test_missing_single_enumeration_marker_is_rejected(self):
+        root = self.fixture()
+        (root / "stage2/flashpkg/conf/usb-mode").unlink()
+        with self.assertRaisesRegex(ValueError, "conf/usb-mode"):
+            self.generate(root)
 
     def test_wrong_sku_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "does not match target"):
