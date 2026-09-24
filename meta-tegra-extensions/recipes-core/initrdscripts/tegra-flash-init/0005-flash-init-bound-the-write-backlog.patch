@@ -1,0 +1,36 @@
+From 101db78006b4c094275f7337576a5013b33aae74 Mon Sep 17 00:00:00 2001
+From: Wendy Labs <engineering@wendy.dev>
+Date: Thu, 24 Sep 2026 14:08:51 +0300
+Subject: [PATCH] flash-init: bound the write backlog of the exported disks
+
+The mass-storage gadget writes LUN data through the page cache, so on a
+board with lots of RAM gigabytes of an image can sit unflushed. The next
+SYNCHRONIZE CACHE, or a write that hits the dirty limit, then takes longer
+than the host's 30 s SCSI command timeout and the host resets the device
+mid-flash. Cap the dirty memory so every flush stays small.
+
+Upstream-Status: Inappropriate [wendy-specific]
+---
+ init-flash.sh | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/init-flash.sh b/init-flash.sh
+index 432122a..2f831ba 100644
+--- a/init-flash.sh
++++ b/init-flash.sh
+@@ -7,6 +7,12 @@ mkdir -m 0755 /dev/pts
+ mount -t devpts devpts /dev/pts
+ mount -t sysfs sysfs -o nosuid,nodev,noexec /sys
+ 
++# Bound how much the exported disks can buffer in RAM, so no host command (a
++# write or SYNCHRONIZE CACHE) waits on a flush long enough to hit the host's
++# SCSI timeout and get the device reset mid-flash.
++echo $((32 << 20)) > /proc/sys/vm/dirty_bytes
++echo $((8 << 20)) > /proc/sys/vm/dirty_background_bytes
++
+ find /lib/modules -name 'usb_f_*.ko' -type f | while read m; do
+     modprobe -v "$m"
+ done
+-- 
+2.43.0
+
