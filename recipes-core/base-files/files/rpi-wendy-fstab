@@ -23,4 +23,4 @@ tmpfs                   /var/volatile  tmpfs  defaults              0 0
 # provisioning partition.
 LABEL=boot              /boot    vfat  defaults,nofail       0 2
 LABEL=config            /config  vfat  defaults,nofail       0 0
-LABEL=data              /data    ext4  defaults,noatime,nofail  0 2
+/dev/wendyos/data       /data    ext4  defaults,noatime,nofail  0 2

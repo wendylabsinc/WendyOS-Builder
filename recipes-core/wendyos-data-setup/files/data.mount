@@ -5,7 +5,7 @@ Requires=wendyos-data-init.service
 After=wendyos-data-init.service
 
 [Mount]
-What=/dev/disk/by-partlabel/data
+What=/dev/wendyos/data
 Where=/data
 Type=ext4
 Options=defaults,noatime
