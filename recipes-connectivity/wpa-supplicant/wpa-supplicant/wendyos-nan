@@ -192,10 +192,23 @@ restore_p2p_ifaces() {
         echo "Cannot verify supplicant interfaces before restoring P2P devices" >&2
         return 1
     fi
-    if has_nan_iface; then
-        echo "Remove $NAN_IFACE before restoring P2P devices" >&2
-        return 1
-    fi
+    # Restarting this daemon affects every radio and interface name, including
+    # management interfaces created by callers with different overrides.
+    for restore_iface in $(list_ifaces); do
+        nan_mgmt=$(printf '%s\n' "$GLOBAL_STATUS" | awk -F= -v iface="$restore_iface" '
+            $1 == "ifname" { selected = ($2 == iface) }
+            selected && $1 == "nan_mgmt" { print $0 }
+        ')
+        case "$nan_mgmt" in
+        nan_mgmt=0) ;;
+        nan_mgmt=1)
+            echo "Remove $restore_iface before restoring P2P devices" >&2
+            return 1 ;;
+        *)
+            echo "Cannot verify NAN interface type for $restore_iface" >&2
+            return 1 ;;
+        esac
+    done
     missing_p2p=0
     while IFS= read -r p2p_iface; do
         if ! has_iface "$p2p_iface"; then
@@ -289,7 +302,10 @@ start_nan() {
             rollback_nan
             return 1
         fi
-        read_nan_status
+        if ! read_nan_status; then
+            rollback_nan
+            return 1
+        fi
     fi
     printf '%s\n' "$NAN_STATUS"
 }

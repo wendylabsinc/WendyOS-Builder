@@ -7,8 +7,9 @@ Global INTERFACE_ADD previously used the first interface in the daemon.
 Add an optional parent interface after the optional MAC address, retaining
 legacy behavior when omitted. Use that same parent for failed-add cleanup. Global interface removal
 also retains a surviving driver context on the removed interface's radio.
-Expose phyname in global STATUS so controllers can select a capable radio
-and remove only its mutually exclusive P2P management device.
+Expose phyname and nan_mgmt in global STATUS so controllers can select a
+capable radio, remove only its mutually exclusive P2P management device,
+and refuse a daemon restart while any NAN management interface remains.
 
 diff --git a/wpa_supplicant/ctrl_iface.c b/wpa_supplicant/ctrl_iface.c
 --- a/wpa_supplicant/ctrl_iface.c
@@ -128,7 +129,7 @@ diff --git a/wpa_supplicant/ctrl_iface.c b/wpa_supplicant/ctrl_iface.c
  	}
  	return ret;
  }
-@@ -15229,9 +15254,13 @@
+@@ -15229,9 +15254,14 @@
  #endif /* CONFIG_WIFI_DISPLAY */
  
  	for (wpa_s = global->ifaces; wpa_s; wpa_s = wpa_s->next) {
@@ -138,9 +139,10 @@ diff --git a/wpa_supplicant/ctrl_iface.c b/wpa_supplicant/ctrl_iface.c
 -				  "address=" MACSTR "\n",
 -				  wpa_s->ifname, MAC2STR(wpa_s->own_addr));
 +				  "address=" MACSTR "\n"
-+				  "phyname=%s\n",
++				  "phyname=%s\n"
++				  "nan_mgmt=%d\n",
 +				  wpa_s->ifname, MAC2STR(wpa_s->own_addr),
-+				  phyname ? phyname : "");
++				  phyname ? phyname : "", wpa_s->nan_mgmt);
  		if (os_snprintf_error(end - pos, ret))
  			return pos - buf;
  		pos += ret;

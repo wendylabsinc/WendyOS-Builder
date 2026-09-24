@@ -45,6 +45,7 @@ def mock():
                 sys.exit(1)
             output = state.get('status_reply', '\n'.join(
                 'ifname=' + n + '\nphyname=' + state.get('radios', {}).get(n, 'phy0')
+                + '\nnan_mgmt=' + str(int(state.get('nan_management', {}).get(n, n == 'nan0')))
                 for n in state['ifaces']))
         elif command == 'nan_status':
             if state.get('fail_nan_status'):
@@ -68,6 +69,7 @@ def mock():
             output = 'FAIL' if name in state['ifaces'] else 'OK'
             if output == 'OK':
                 state['ifaces'].append(name)
+                state.setdefault('nan_management', {})[name] = args[8] == 'nan'
                 parent = args[10]
                 state.setdefault('radios', {})[name] = state.get('radios', {}).get(parent, 'phy0')
         elif command == 'interface_remove':
@@ -271,6 +273,73 @@ class LifecycleTest(unittest.TestCase):
                 self.assertEqual(self.state()['ifaces'], ['wlan0', 'foreign-ndi'])
                 removed = [c[2] for c in self.state()['calls'] if c[1] == 'interface_remove']
                 self.assertEqual(removed, ['nan0'])
+
+    def test_post_start_query_failure_rolls_back_only_a_new_interface(self):
+        for existing in [False, True]:
+            for failure in [dict(fail_nan_status=True), dict(nan_status_reply='FAIL'),
+                            dict(nan_status_reply=''), dict(nan_status_reply='nan_started=2')]:
+                with self.subTest(existing=existing, failure=failure):
+                    self.set_state()
+                    if not existing:
+                        self.replace_state(ifaces=['wlan0', 'foreign-ndi'])
+                    # Hold the successful START response so only its follow-up
+                    # state query fails; the initial state query has succeeded.
+                    for name in ['first-snapshot', 'release-first']:
+                        (self.root / name).unlink(missing_ok=True)
+                    child = self.start('start', ACTOR='first', GATE_COMMAND='nan_start')
+                    wait_for(lambda: (self.root / 'first-snapshot').exists())
+                    self.replace_state(**failure)
+                    (self.root / 'release-first').touch()
+                    out, err = child.communicate(timeout=5)
+                    self.assertNotEqual(child.returncode, 0, (out, err))
+                    state = self.state()
+                    self.assertEqual(state['started'], existing)
+                    self.assertEqual('nan0' in state['ifaces'], existing)
+                    self.assertIn('foreign-ndi', state['ifaces'])
+                    removed = [c[2] for c in state['calls'] if c[1] == 'interface_remove']
+                    self.assertEqual(removed, [] if existing else ['nan0'])
+                    self.assertNotIn('restart', (self.root / 'systemctl.log').read_text())
+
+    def deferred_p2p(self):
+        runtime = self.root / 'run'
+        runtime.mkdir(exist_ok=True)
+        marker = runtime / 'p2p-interfaces'
+        marker.write_text('p2p-dev-wlan0\n')
+        return marker
+
+    def test_restore_refuses_other_named_management_interfaces_on_any_radio(self):
+        for radio in ['phy0', 'phy1']:
+            for started in [False, True]:
+                with self.subTest(radio=radio, started=started):
+                    self.set_state(started=started,
+                                   radios={'app-aware': radio},
+                                   nan_management={'app-aware': True})
+                    self.replace_state(ifaces=['wlan0', 'app-aware'])
+                    marker = self.deferred_p2p()
+                    err = self.fails_without_mutation(self.start('restore-p2p'))
+                    self.assertIn('Remove app-aware', err)
+                    self.assertEqual(marker.read_text(), 'p2p-dev-wlan0\n')
+                    self.assertFalse((self.root / 'systemctl.log').exists())
+
+    def test_restore_requires_valid_management_type_for_every_interface(self):
+        for field in ['', '\nnan_mgmt=2', '\nnan_mgmt=0\nnan_mgmt=1',
+                      '\nnan_mgmt=0=unexpected']:
+            with self.subTest(field=field):
+                self.set_state(status_reply='ifname=wlan0\nphyname=phy0' + field)
+                self.replace_state(ifaces=['wlan0'])
+                marker = self.deferred_p2p()
+                err = self.fails_without_mutation(self.start('restore-p2p'))
+                self.assertIn('Cannot verify NAN interface type', err)
+                self.assertTrue(marker.exists())
+                self.assertFalse((self.root / 'systemctl.log').exists())
+
+    def test_restore_uses_interface_type_instead_of_name(self):
+        self.set_state(nan_management={'nan0': False})
+        self.replace_state(ifaces=['wlan0', 'nan0', 'p2p-dev-wlan0'])
+        marker = self.deferred_p2p()
+        self.succeeds(self.start('restore-p2p'))
+        self.assertFalse(marker.exists())
+        self.assertFalse((self.root / 'systemctl.log').exists())
 
     def two_radios(self, capable=True):
         self.set_state()
