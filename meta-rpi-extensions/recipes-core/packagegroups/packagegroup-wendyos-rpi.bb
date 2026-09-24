@@ -23,7 +23,11 @@ RDEPENDS:${PN} = " \
 # flashed it. These are RPi5-only EEPROM keys (BCM2712); RPi4's EEPROM differs
 # and RPi3 has none, and the runtime script skips on non-RPi5. Include only on
 # RPi5 to keep it out of RPi4/RPi3 builds.
-RDEPENDS:${PN}:append:raspberrypi5 = " rpi-eeprom-config"
+# The BE202 uses the hostap 2.12 NAN-capable wpa_supplicant from this layer.
+# Its package ships wendyos-nan and pulls in wpa_cli; make it an explicit image
+# dependency so the Pi 5 SD image has host-shell NAN control even if
+# NetworkManager changes its optional Wi-Fi backend dependencies.
+RDEPENDS:${PN}:append:raspberrypi5 = " rpi-eeprom-config wpa-supplicant"
 
 # Camera stack. Mirrors stock Raspberry Pi OS so an official CSI camera
 # (IMX219/IMX477/IMX708), auto-detected via camera_auto_detect=1 in the Pi 5
