@@ -49,6 +49,48 @@ IMAGE_INSTALL:append = " \
     v4l-utils \
     "
 
+# Wi-Fi and Bluetooth for M.2 E-key cards. The Intel and Realtek drivers come
+# from wifi.cfg (meta-tegra-extensions-jp7 kernel bbappend); mt7921e, ath11k,
+# ath10k, brcmfmac and mwifiex NVIDIA already builds as modules. None of them
+# can bind without firmware, and the stock image ships none (/lib/firmware
+# holds only nvidia/, rtl_nic/ and tegra23x/). Named sub-packages rather than
+# the linux-firmware meta-package (1.9 GB): the A/B rootfs slot is size-pinned
+# (wendyos-rootfs-size.inc). The Intel and MediaTek carve-outs are defined in
+# recipes-kernel/linux-firmware/linux-firmware_%.bbappend, the rest are
+# upstream's own splits; about 70 MB in all (linux-firmware 20260622).
+#
+# Hard IMAGE_INSTALL entries, not RRECOMMENDS: a kernel that stops emitting one
+# of these modules, or an upstream firmware package rename, fails the build
+# instead of shipping a board with no wlan0 (the trap #270 describes).
+#
+# Not covered: Intel BE200/BE202 (need IWLMLD, kernel 6.15+), CNVi parts such
+# as AX201/AX211 (need an Intel chipset), Realtek RTL8852/RTL8851 (rtw89 is
+# not enabled). The devkit's own RTL8822CE keeps NVIDIA's out-of-tree
+# rtl8822ce.ko; -rtl8822 below adds its rtw88/rtl_bt blobs for the in-tree
+# Bluetooth path and for RTL8822BE cards.
+IMAGE_INSTALL:append = " \
+    kernel-module-iwlwifi \
+    kernel-module-iwlmvm \
+    kernel-module-rtw88-pci \
+    kernel-module-rtw88-8822be \
+    kernel-module-rtw88-8821ce \
+    kernel-module-rtw88-8723de \
+    linux-firmware-iwlwifi-ax210 \
+    linux-firmware-iwlwifi-ax200 \
+    linux-firmware-ibt-ax210 \
+    linux-firmware-ibt-20 \
+    linux-firmware-rtl8822 \
+    linux-firmware-rtl8821 \
+    linux-firmware-rtl8723 \
+    linux-firmware-mt7921 \
+    linux-firmware-ath11k-qca6390 \
+    linux-firmware-ath11k-wcn6855 \
+    linux-firmware-ath10k-qca6174 \
+    linux-firmware-bcm43602 \
+    linux-firmware-bcm4356-pcie \
+    linux-firmware-pcie8997 \
+    "
+
 # Enable DeepStream SDK support (optional - adds ~1GB to image)
 # Tegra/NVIDIA hardware only - DeepStream requires NVIDIA GPUs
 # Also enables l4t-deepstream.csv which provides:
