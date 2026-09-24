@@ -7,7 +7,20 @@ Description=WendyOS grow /data PARTITION to fill the storage device (offline, fi
 # partition (config sits before it), so it grows into the trailing free space.
 # The slow ext4 grow is split off into grow-data-fs-online.service (online, off
 # the boot path) so it can't gate data.mount. Idempotent: parted no-ops once full.
+#
+# /data is named in fstab by the udev alias /dev/wendyos/data, so this unit must
+# not run before udev has created it. A LABEL= spec did not need this: libblkid
+# evaluates tags "udev,scan" (blkid(8) EVALUATE), so findfs fell back to scanning
+# /proc/partitions when the symlink was missing. A literal path under /dev has no
+# such fallback -- the script's `[ -b ]` check would defer, and defer() exits 0,
+# so the unit would report success while /data silently never grows.
+# After= without Wants= is deliberate: this unit is WantedBy=data.mount, and a
+# block-backed mount implicitly Requires=/After= its device unit, so the device
+# is always in the transaction when we run and the ordering always applies. A
+# Wants= here would instead stall a legacy board that has no /data entry at all
+# (see grow-data-part.sh) for DefaultDeviceTimeoutSec.
 DefaultDependencies=no
+After=systemd-udevd.service dev-wendyos-data.device
 Before=local-fs-pre.target data.mount
 Conflicts=shutdown.target
 

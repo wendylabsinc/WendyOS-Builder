@@ -45,7 +45,14 @@ case "$DATA_DEV" in
         log "no /data entry in /etc/fstab; nothing to grow"; exit 0 ;;
     *) fail "no usable /data device in /etc/fstab ('$DATA_DEV')" ;;
 esac
+
 [ -b "$DATA_DEV" ] || defer "$DATA_DEV not present yet"
+
+# The /data device may be the udev alias /dev/wendyos/data, which is a SYMLINK.
+# Resolve it to the real kernel name before any sysfs lookup: basename on the
+# alias yields "data", every /sys/class/block/data/* read below then misses, and
+# defer() exits 0 -- the unit would report success while /data never grows.
+DATA_DEV="$(readlink -f "$DATA_DEV")"
 data_base="$(basename "$DATA_DEV")"
 
 resolve_disk() {
