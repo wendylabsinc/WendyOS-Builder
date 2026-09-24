@@ -65,6 +65,7 @@ class DriverManifestTests(unittest.TestCase):
             with self.subTest(machine=machine):
                 result = self.validate("pack-sysext.sh", marker, manifest, machine)
                 self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("replace brcmfmac_cyw\n", result.stdout)
                 self.assertIn("replace brcmfmac\n", result.stdout)
                 self.assertIn("restore-wifi-pci 8086:272b\n", result.stdout)
                 self.assertNotIn("restore-wifi-connection wlan0", result.stdout)
