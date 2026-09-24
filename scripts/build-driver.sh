@@ -3,7 +3,7 @@
 # Build one driver add-on's kernel module against a kernel devkit.
 #
 # No build-system dependency by design: given an unpacked devkit and a driver directory
-# this needs only make, tar, patch, git and python3, so adding or rebuilding a driver
+# this needs only make, tar, patch, git, curl and python3, so adding or rebuilding a driver
 # never requires a kernel build.
 #
 #   build-driver.sh --devkit <dir> --driver <dir> [--out <dir>] [--sign-key <pem>]
@@ -143,6 +143,45 @@ make -C "$SRCDIR" KERNEL_SRC="$KBUILD" KERNEL_VERSION="$KVER"
 mapfile -t KOS < <(find "$SRCDIR" -name '*.ko' -print)
 [ "${#KOS[@]}" -gt 0 ] || err "no .ko produced"
 
+# --- firmware -----------------------------------------------------------------------
+# Large redistributable firmware blobs stay in their authoritative upstream repository.
+# The manifest pins both immutable URLs and hashes; pack-sysext consumes this staged tree
+# beside modules/. A malicious path must not escape the image's firmware directory.
+FIRMWARE=$(python3 - "$MANIFEST" <<'PY'
+import json, pathlib, re, sys
+for entry in json.load(open(sys.argv[1])).get("firmware", []):
+    url, digest, path = (entry.get(k, "") for k in ("url", "sha256", "path"))
+    if any(not isinstance(value, str) or any(ord(c) < 32 or ord(c) == 127 for c in value)
+           for value in (url, digest, path)):
+        sys.exit("firmware fields must be strings without control characters")
+    p = pathlib.PurePosixPath(path)
+    if not url.startswith("https://"):
+        sys.exit("firmware URL must use https: %r" % url)
+    if not re.fullmatch(r"[0-9a-f]{64}", digest):
+        sys.exit("firmware sha256 must be 64 lowercase hex characters: %r" % digest)
+    if not p.parts or p.is_absolute() or ".." in p.parts or path != p.as_posix():
+        sys.exit("unsafe firmware path: %r" % path)
+    print("%s\t%s\t%s" % (url, digest, path))
+PY
+) || err "invalid firmware entries in $MANIFEST"
+
+if [ -n "$FIRMWARE" ]; then
+    command -v curl >/dev/null || err "curl is required to fetch firmware"
+    command -v sha256sum >/dev/null || err "sha256sum is required to verify firmware"
+    while IFS=$'\t' read -r url digest path; do
+        [ -n "$path" ] || continue
+        destination="$OUT/firmware/$path"
+        mkdir -p "$(dirname "$destination")"
+        echo "fetching firmware $path"
+        curl --fail --location --silent --show-error --retry 3 --retry-all-errors \
+            --output "$destination.tmp" "$url"
+        actual=$(sha256sum "$destination.tmp" | cut -d' ' -f1)
+        [ "$actual" = "$digest" ] \
+            || err "firmware sha256 mismatch for $path: expected $digest, got $actual"
+        mv "$destination.tmp" "$destination"
+    done <<< "$FIRMWARE"
+fi
+
 # insmod rejects a vermagic that does not match the devkit's uname -r, so catch it here
 # rather than on a device. `|| true`: head's early exit SIGPIPEs strings, which pipefail
 # would otherwise turn into a fatal error on a valid module.
@@ -181,4 +220,5 @@ echo
 echo "driver:  $NAME"
 echo "kernel:  $KVER"
 echo "modules: ${KOS[*]##*/}"
+[ -z "$FIRMWARE" ] || echo "firmware: $OUT/firmware"
 echo "output:  $OUT/modules"

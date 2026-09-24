@@ -129,6 +129,16 @@ jobs:
               exit "$rc"
             fi
             for drv in "${DRIVERS[@]}"; do
+              if scripts/driver_supports_device.py "drivers/$drv/driver.json" "$dev"; then
+                :
+              else
+                rc=$?
+                if [[ "$rc" -eq 1 ]]; then
+                  echo "${drv}: does not support ${dev}; skipping"
+                  continue
+                fi
+                exit "$rc"
+              fi
               ENTRIES=$(jq -c --arg d "$dev" --arg drv "$drv" --argjson s "$sel" \
                 '. + [{device: $d, driver: $drv, os_version: $s.version,
                        kernel: $s.devkit.kernel_version, devkit_path: $s.devkit.path,
