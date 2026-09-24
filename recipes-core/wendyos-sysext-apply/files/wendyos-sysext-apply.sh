@@ -63,6 +63,10 @@ has_links() {
 # previous run merged something, so removing the last add-on still unmerges it here rather
 # than leaving /usr merged until the next boot.
 if ! has_images && ! has_links && ! mountpoint -q /usr; then
+    if [ -n "$SUBJECT" ]; then
+        echo "wendyos-sysext-apply: no enabled image named '$SUBJECT' for kernel $KVER" >&2
+        exit 1
+    fi
     exit 0
 fi
 
@@ -81,6 +85,11 @@ for raw in "$ENABLED/$KVER"/*.raw "$ENABLED/any"/*.raw "$ENABLED"/*.raw; do
     link="$RUNDIR/$(basename "$raw")"
     [ -e "$link" ] || ln -s "$raw" "$link"
 done
+
+if [ -n "$SUBJECT" ] && [ ! -e "$RUNDIR/$SUBJECT.raw" ]; then
+    echo "wendyos-sysext-apply: no enabled image named '$SUBJECT' for kernel $KVER" >&2
+    exit 1
+fi
 
 # Nothing left to merge: unmerge outright, since a refresh would leave an empty mutable
 # layer stacked on /usr.
@@ -257,8 +266,8 @@ payload_collision() {
     package=$1
     while IFS= read -r claim; do
         owner=$(claim_owner "$claim")
-        if [ -n "$owner" ]; then
-            echo "wendyos-sysext-apply: $package conflicts with earlier package $owner on $claim — skipping" >&2
+        if [ -n "$owner" ] && [ "$owner" != "$package" ]; then
+            echo "wendyos-sysext-apply: $package conflicts with package $owner on $claim — skipping" >&2
             return 0
         fi
     done < "$PLAN/$package.claims"
@@ -267,10 +276,41 @@ payload_collision() {
 
 reserve_claims() {
     package=$1
+    next_claims="$PLAN/claims.next"
+    awk -F '\t' -v package="$package" '$2 != package { print }' "$CLAIMS" > "$next_claims" || return 1
     while IFS= read -r claim; do
-        printf '%s\t%s\n' "$claim" "$package" >> "$CLAIMS"
+        printf '%s\t%s\n' "$claim" "$package" >> "$next_claims" || return 1
     done < "$PLAN/$package.claims"
+    mv "$next_claims" "$CLAIMS"
 }
+
+prior_claim() {
+    case "$2" in
+        "$EXPOSEDMODDIR/$1/"*) printf 'module:%s\n' "$(module_sysname "$(basename "$2" .ko)")" ;;
+        /usr/lib/firmware/*) printf 'firmware:%s\n' "${2#/usr/lib/firmware/}" ;;
+        /usr/lib/udev/rules.d/*) printf 'udev:%s\n' "$(basename "$2")" ;;
+        *) return 1 ;;
+    esac
+}
+
+# A hot apply must not let a new package evict resources already in use. Keep
+# the previous owners' claims until each package replaces its own exposure.
+reserve_previous_claims() (
+    for previous in "$PLAN/prior"/*; do
+        [ -s "$previous/paths" ] || continue
+        previous_name=$(basename "$previous")
+        [ -e "$RUNDIR/$previous_name.raw" ] || continue
+        while IFS= read -r path; do
+            claim=$(prior_claim "$previous_name" "$path") || return 1
+            owner=$(claim_owner "$claim")
+            if [ -n "$owner" ] && [ "$owner" != "$previous_name" ]; then
+                echo "wendyos-sysext-apply: prior resource $claim has multiple owners" >&2
+                return 1
+            fi
+            [ "$owner" = "$previous_name" ] || printf '%s\t%s\n' "$claim" "$previous_name" >> "$CLAIMS" || return 1
+        done < "$previous/paths"
+    done
+)
 
 expose_one() {
     source=$1
@@ -334,13 +374,13 @@ restore_previous() (
     # The previous active package still owns these resources. Do not let a later
     # candidate overwrite a restored stack just because this upgrade failed.
     while IFS= read -r path; do
-        case "$path" in
-            "$EXPOSEDMODDIR/$1/"*) claim="module:$(module_sysname "$(basename "$path" .ko)")" ;;
-            /usr/lib/firmware/*) claim="firmware:${path#/usr/lib/firmware/}" ;;
-            /usr/lib/udev/rules.d/*) claim="udev:$(basename "$path")" ;;
-            *) return 1 ;;
-        esac
-        printf '%s\t%s\n' "$claim" "$1" >> "$CLAIMS" || return 1
+        claim=$(prior_claim "$1" "$path") || return 1
+        owner=$(claim_owner "$claim")
+        if [ -n "$owner" ] && [ "$owner" != "$1" ]; then
+            echo "wendyos-sysext-apply: cannot restore $1; $claim belongs to $owner" >&2
+            return 1
+        fi
+        [ "$owner" = "$1" ] || printf '%s\t%s\n' "$claim" "$1" >> "$CLAIMS" || return 1
     done < "$previous/paths"
     while IFS= read -r path; do
         relative=${path#/usr/lib/}
@@ -352,6 +392,14 @@ restore_previous() (
     rm -rf "${STATEDIR:?}/$1"
     cp -a "$previous/state" "$STATEDIR/$1"
 )
+
+restore_skipped_previous() {
+    [ -s "$PLAN/prior/$1/paths" ] || return 0
+    if ! restore_previous "$1" || ! depmod -a "$KVER"; then
+        echo "wendyos-sysext-apply: could not restore previous exposure for $1; reboot required" >&2
+        return 1
+    fi
+}
 
 module_conf() {
     conf="$STORE/modules-load.d/$KVER/$1.conf"
@@ -600,11 +648,22 @@ if ! depmod -a "$KVER"; then
 fi
 
 # Globs follow LC_ALL=C, making the first-wins policy stable across boots. Claims
-# belong to successfully activated candidates or restored previous payloads.
+# belong to successfully activated candidates or previously active payloads.
+if ! reserve_previous_claims; then
+    echo "wendyos-sysext-apply: could not reserve previous resource claims" >&2
+    for previous in "$PLAN/prior"/*; do
+        [ -d "$previous" ] || continue
+        restore_previous "$(basename "$previous")" || echo "wendyos-sysext-apply: could not restore previous exposure" >&2
+    done
+    depmod -a "$KVER" || echo "wendyos-sysext-apply: could not rebuild previous module index" >&2
+    exit 1
+fi
 rc=0
+subject_seen=0
 for link in "$RUNDIR"/*.raw; do
     [ -e "$link" ] || continue
     name=$(basename "$link" .raw)
+    [ "$SUBJECT" != "$name" ] || subject_seen=1
     case "$name" in ''|*[!A-Za-z0-9_.-]*) echo "wendyos-sysext-apply: invalid package name '$name'" >&2; rc=1; continue ;; esac
 
     rel="$RELDIR/extension-release.$name"
@@ -612,6 +671,7 @@ for link in "$RUNDIR"/*.raw; do
         want=$(sed -n 's/^WENDYOS_KERNEL=//p' "$rel")
         if [ -n "$want" ] && [ "$want" != "$KVER" ]; then
             echo "wendyos-sysext-apply: $name is for kernel $want, running $KVER — skipping" >&2
+            restore_skipped_previous "$name" || rc=1
             [ "$SUBJECT" != "$name" ] || rc=1
             continue
         fi
@@ -648,11 +708,13 @@ for link in "$RUNDIR"/*.raw; do
         done < "$activation"
         if [ "$activation_bad" = 1 ]; then
             echo "wendyos-sysext-apply: malformed activation metadata for $name" >&2
+            restore_skipped_previous "$name" || rc=1
             rc=$((rc|fail))
             continue
         fi
         if [ "$pci_declared" = 1 ] && [ "$pci_matched" = 0 ]; then
             echo "wendyos-sysext-apply: $name has no matching PCI device — skipping" >&2
+            restore_skipped_previous "$name" || rc=1
             [ "$SUBJECT" != "$name" ] || rc=1
             continue
         fi
@@ -677,6 +739,7 @@ for link in "$RUNDIR"/*.raw; do
 
     make_claims "$name" "$payload"
     if payload_collision "$name"; then
+        restore_skipped_previous "$name" || rc=1
         [ "$SUBJECT" != "$name" ] || rc=1
         continue
     fi
@@ -749,8 +812,17 @@ for link in "$RUNDIR"/*.raw; do
         rc=$((rc|fail))
         continue
     fi
-    reserve_claims "$name"
+    if ! reserve_claims "$name"; then
+        echo "wendyos-sysext-apply: could not record resource claims for $name" >&2
+        rollback_package || true
+        rc=$((rc|fail))
+        continue
+    fi
 done
 
+if [ -n "$SUBJECT" ] && [ "$subject_seen" = 0 ]; then
+    echo "wendyos-sysext-apply: no enabled image named '$SUBJECT' for kernel $KVER" >&2
+    rc=1
+fi
 udevadm trigger >/dev/null 2>&1 || true
 exit "$rc"

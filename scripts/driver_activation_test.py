@@ -46,6 +46,7 @@ cmd=${0##*/}
 printf '%s %s\n' "$cmd" "$*" >> "$TEST_LOG"
 case "$cmd" in
     uname) echo test-kernel ;;
+    mountpoint) exit 1 ;;
     systemd-sysext) [ -z "${REFRESH_HOOK:-}" ] || "$REFRESH_HOOK" ;;
     timeout) shift 2; exec "$@" ;;
     date)
@@ -103,7 +104,7 @@ case "$cmd" in
 esac
 exit 0
 '''
-        for name in ("uname", "systemd-sysext", "depmod", "udevadm", "modprobe",
+        for name in ("uname", "mountpoint", "systemd-sysext", "depmod", "udevadm", "modprobe",
                      "systemctl", "timeout", "nmcli", "date", "sleep", "rmmod"):
             path = self.root / "bin" / name
             path.write_text(mock)
@@ -166,7 +167,7 @@ exit 0
         self.env["FAIL_SERVICE"] = "1"
         result, _ = self.run_apply("")
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("zeta conflicts with earlier package card", result.stderr)
+        self.assertIn("zeta conflicts with package card", result.stderr)
         self.assertFalse((self.root / "usr/lib/modules/test-kernel/updates/wendyos/zeta/oldwifi.ko").exists())
 
     def test_capture_failure_preserves_old_exposure_after_refresh(self):
@@ -178,6 +179,56 @@ exit 0
         self.assertFalse(any(c.startswith("rmmod") for c in calls))
         self.assertEqual(old_module.read_text(), "old-module")
         self.assertEqual(firmware.read_text(), "old-firmware")
+
+    def test_boot_pci_skip_preserves_previous_exposure_after_refresh(self):
+        old_module, firmware = self.previous_payload()
+        (self.root / "sys/bus/pci/devices/card/device").write_text("0x1234\n")
+        result, _ = self.run_apply("")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("no matching PCI device", result.stderr)
+        self.assertEqual(old_module.read_text(), "old-module")
+        self.assertEqual(firmware.read_text(), "old-firmware")
+        self.assertFalse(old_module.is_symlink())
+        state = self.root / "usr/lib/wendyos-driver-state/card/modules-load.conf"
+        self.assertEqual(state.read_text(), "oldwifi\n")
+
+    def test_prior_restore_failure_on_skip_is_reported(self):
+        self.previous_payload()
+        (self.root / "sys/bus/pci/devices/card/device").write_text("0x1234\n")
+        self.env["FAIL_DEPMOD"] = "2"
+        result, _ = self.run_apply("")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("could not restore previous exposure", result.stderr)
+
+    def test_kernel_mismatch_preserves_previous_exposure(self):
+        old_module, firmware = self.previous_payload()
+        (self.root / "usr/lib/extension-release.d/extension-release.card").write_text(
+            "WENDYOS_KERNEL=other-kernel\n")
+        result, _ = self.run_apply("card")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(old_module.read_text(), "old-module")
+        self.assertEqual(firmware.read_text(), "old-firmware")
+
+    def test_malformed_metadata_preserves_previous_exposure(self):
+        old_module, firmware = self.previous_payload()
+        self.activation.write_text("replace invalid module\n")
+        result, _ = self.run_apply("card")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(old_module.read_text(), "old-module")
+        self.assertEqual(firmware.read_text(), "old-firmware")
+
+    def test_missing_subject_image_fails_before_refresh(self):
+        result, calls = self.run_apply("missing")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("no enabled image named 'missing'", result.stderr)
+        self.assertFalse(any(c.startswith("systemd-sysext") for c in calls))
+
+        (self.root / "data/extensions/enabled/test-kernel/card.raw").unlink()
+        self.log.unlink()
+        result, calls = self.run_apply("card")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("no enabled image named 'card'", result.stderr)
+        self.assertFalse(any(c.startswith("systemd-sysext") for c in calls))
 
     def test_initial_depmod_failure_preserves_old_exposure(self):
         old_module, firmware = self.previous_payload()
@@ -233,6 +284,7 @@ exit 0
         self.assertFalse((self.root / "usr/lib/modules/test-kernel/updates/wendyos/card").exists())
 
     def test_unrelated_install_does_not_reload(self):
+        (self.root / "data/extensions/enabled/test-kernel/other.raw").touch()
         result, calls = self.run_apply("other")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse(any(line.startswith(("rmmod", "modprobe -r", "systemctl")) for line in calls))
@@ -303,10 +355,42 @@ exit 0
         (zeta / "modules-load.conf").write_text("newwifi\n")
         result, calls = self.run_apply("")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("zeta conflicts with earlier package card", result.stderr)
+        self.assertIn("zeta conflicts with package card", result.stderr)
         self.assertTrue((self.root / "usr/lib/modules/test-kernel/updates/wendyos/card/newwifi.ko").is_symlink())
         self.assertFalse((self.root / "usr/lib/modules/test-kernel/updates/wendyos/zeta").exists())
         self.assertEqual(calls.count("modprobe -- newwifi"), 1)
+
+    def test_collision_skip_preserves_disjoint_previous_exposure(self):
+        old_module, firmware = self.previous_payload()
+        (self.root / "data/extensions/enabled/test-kernel/alpha.raw").touch()
+        alpha = self.root / "usr/lib/wendyos-driver-payloads/alpha/modules/test-kernel"
+        alpha.mkdir(parents=True)
+        (alpha / "newwifi.ko").write_text("alpha-module")
+        result, _ = self.run_apply("alpha")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("card conflicts with package alpha", result.stderr)
+        self.assertEqual(old_module.read_text(), "old-module")
+        self.assertEqual(firmware.read_text(), "old-firmware")
+
+    def test_new_package_cannot_take_claim_from_active_package(self):
+        old_module, firmware = self.previous_payload()
+        # Refresh the same card payload while installing an earlier-named add-on.
+        prior_image = self.root / "previous-payload"
+        (prior_image / "modules/test-kernel/newwifi.ko").unlink()
+        (prior_image / "modules/test-kernel/oldwifi.ko").write_text("old-module")
+        (prior_image / "modules-load.conf").write_text("oldwifi\n")
+        (prior_image / "firmware").mkdir()
+        (prior_image / "firmware/card.bin").write_text("old-firmware")
+        (self.root / "data/extensions/enabled/test-kernel/alpha.raw").touch()
+        alpha = self.root / "usr/lib/wendyos-driver-payloads/alpha/modules/test-kernel"
+        alpha.mkdir(parents=True)
+        (alpha / "oldwifi.ko").write_text("alpha-module")
+        result, _ = self.run_apply("alpha")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("alpha conflicts with package card", result.stderr)
+        self.assertEqual(old_module.read_text(), "old-module")
+        self.assertEqual(firmware.read_text(), "old-firmware")
+        self.assertFalse((self.root / "usr/lib/modules/test-kernel/updates/wendyos/alpha").exists())
 
     def test_dash_and_underscore_module_names_collide(self):
         (self.payload / "modules/test-kernel/newwifi.ko").unlink()
@@ -351,7 +435,7 @@ exit 0
         (zeta / "newwifi.ko").touch()
         result, _ = self.run_apply("zeta")
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("zeta conflicts with earlier package card", result.stderr)
+        self.assertIn("zeta conflicts with package card", result.stderr)
 
     def test_wifi_restored_after_partial_unload_failure(self):
         self.with_wifi()
