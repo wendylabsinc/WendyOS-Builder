@@ -31,11 +31,12 @@ case " $* " in
 *" nan_start ")
     if [ "${WENDYOS_NAN_TEST_START_FAIL:-0}" = 1 ]; then echo FAIL; else echo OK; fi ;;
 *" interface_remove nan0 ")
-    sed '/^ifname=nan0$/d' "$WENDYOS_NAN_TEST_STATE" >"$WENDYOS_NAN_TEST_STATE.tmp"
+    awk '/^ifname=/ { removed = ($0 == "ifname=nan0") } !removed' \
+        "$WENDYOS_NAN_TEST_STATE" >"$WENDYOS_NAN_TEST_STATE.tmp"
     mv "$WENDYOS_NAN_TEST_STATE.tmp" "$WENDYOS_NAN_TEST_STATE"
     echo OK ;;
 *" interface_add nan0 "*)
-    printf 'ifname=nan0\nphyname=phy0\n' >>"$WENDYOS_NAN_TEST_STATE"
+    printf 'ifname=nan0\nphyname=phy0\nnan_mgmt=1\n' >>"$WENDYOS_NAN_TEST_STATE"
     echo OK ;;
 *) echo "unexpected wpa_cli command: $*" >&2; exit 1 ;;
 esac
@@ -44,7 +45,7 @@ cat >"$WENDYOS_NAN_SYSTEMCTL" <<'EOF'
 #!/bin/sh
 printf '%s\n' "$*" >>"$WENDYOS_NAN_TEST_SYSTEMCTL_LOG"
 if [ "$*" = 'restart wpa_supplicant.service' ]; then
-    printf 'ifname=p2p-dev-wlan0\nphyname=phy0\n' >>"$WENDYOS_NAN_TEST_STATE"
+    printf 'ifname=p2p-dev-wlan0\nphyname=phy0\nnan_mgmt=0\n' >>"$WENDYOS_NAN_TEST_STATE"
 fi
 EOF
 chmod +x "$WENDYOS_NAN_WPA_CLI" "$WENDYOS_NAN_SYSTEMCTL"
@@ -79,7 +80,7 @@ done
 
 mkdir -p "$WENDYOS_NAN_RUNTIME_DIR"
 printf 'p2p-dev-wlan0\n' >"$WENDYOS_NAN_RUNTIME_DIR/p2p-interfaces"
-printf 'ifname=wlan0\nphyname=phy0\nifname=nan0\nphyname=phy0\n' >"$WENDYOS_NAN_TEST_STATE"
+printf 'ifname=wlan0\nphyname=phy0\nnan_mgmt=0\nifname=nan0\nphyname=phy0\nnan_mgmt=1\n' >"$WENDYOS_NAN_TEST_STATE"
 : >"$WENDYOS_NAN_TEST_SYSTEMCTL_LOG"
 
 "$HELPER" stop >"$TEST_DIR/stop.out" 2>"$TEST_DIR/stop.err"

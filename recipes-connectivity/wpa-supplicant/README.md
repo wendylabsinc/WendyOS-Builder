@@ -40,8 +40,11 @@ not assign IP addresses or start a mesh agent.
 Normal `stop` preserves station Wi-Fi and leaves P2P restoration deferred. Use
 `wendyos-nan restore-p2p` after stopping NAN when P2P functionality is needed;
 that explicit operation restarts the shared supplicant and interrupts station
-Wi-Fi. The lifecycle lock coordinates helper callers, but direct control-socket
-access and the raw `command` escape hatch remain unmanaged operator interfaces.
+Wi-Fi. Restoration requires every NAN management interface to be removed,
+including interfaces with other names or on other radios; missing or invalid
+interface-type metadata prevents the restart. The lifecycle lock coordinates
+helper callers, but direct control-socket access and the raw `command` escape
+hatch remain unmanaged operator interfaces.
 
 The intended agent carrier uses **unencrypted NAN data paths** and puts Wendy
 device mTLS QUIC above them. Until that carrier is installed, manual NDP

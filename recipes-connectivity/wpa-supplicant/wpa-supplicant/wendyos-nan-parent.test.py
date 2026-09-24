@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise the actual patched INTERFACE_ADD parser with two mock radios.
+"""Exercise patched interface control and STATUS with two mock radios.
 
 Usage: python3 wendyos-nan-parent.test.py /path/to/patched/wpa_supplicant-2.12
 Requires a C compiler. Driver stubs check selection/rollback, not radio behavior.
@@ -20,8 +20,9 @@ typedef unsigned char u8;
 #define ETH_ALEN 6
 #define MSG_DEBUG 0
 #define MSG_ERROR 1
-#define MACSTR ""
-#define MAC2STR(a) 0
+#define MACSTR "%02x:%02x:%02x:%02x:%02x:%02x"
+#define MAC2STR(a) (a)[0], (a)[1], (a)[2], (a)[3], (a)[4], (a)[5]
+#define os_snprintf snprintf
 #define os_strchr strchr
 #define os_strcmp strcmp
 #define os_memset memset
@@ -37,6 +38,8 @@ struct wpa_supplicant {
     struct wpa_supplicant *next;
     unsigned int added_vif;
     void *radio;
+    u8 own_addr[ETH_ALEN];
+    bool nan_mgmt;
 };
 struct wpa_global { struct wpa_supplicant *ifaces; };
 static struct wpa_supplicant wrong, wanted, created;
@@ -45,6 +48,14 @@ static bool fail_register, saw_addr;
 static enum wpa_driver_if_type added_type;
 static char created_name[32];
 static int phy0, phy1;
+static int os_snprintf_error(size_t size, int ret)
+{
+    return ret < 0 || (size_t)ret >= size;
+}
+static const char *wpa_driver_get_radio_name(struct wpa_supplicant *s)
+{
+    return s->radio == &phy0 ? "phy0" : s->radio == &phy1 ? "phy1" : NULL;
+}
 static int hwaddr_aton(const char *s, u8 *addr)
 {
     if (strcmp(s, "02:00:00:00:00:01"))
@@ -91,6 +102,7 @@ wpa_supplicant_add_iface(struct wpa_global *g, struct wpa_interface *iface,
     created.ifname = created_name;
     created.next = g->ifaces;
     created.radio = add_parent->radio;
+    created.nan_mgmt = iface->nan_mgmt;
     g->ifaces = &created;
     return &created;
 }
@@ -106,6 +118,7 @@ static int wpa_supplicant_remove_iface(struct wpa_global *g,
     return 0;
 }
 #include "interface-add.inc"
+#include "global-status.inc"
 static struct wpa_global reset(void)
 {
     wanted = (struct wpa_supplicant){ .ifname = "wlan0", .radio = &phy0 };
@@ -125,6 +138,7 @@ static int add(struct wpa_global *g, const char *type, const char *addr,
 int main(void)
 {
     struct wpa_global g = reset();
+    char status[512];
     assert(add(&g, "nan", "", "wlan0") == 0);
     assert(add_parent == &wanted && added_type == WPA_IF_NAN && !saw_addr);
     assert(created.added_vif && !remove_parent);
@@ -157,7 +171,19 @@ int main(void)
     wanted.radio = &phy0;
     assert(wpa_supplicant_global_iface_remove(&g, created_name) == -1);
     assert(g.ifaces == &created && !remove_parent);
-    puts("INTERFACE_ADD/REMOVE explicit radio, NDI parent, rollback and legacy tests passed");
+    g = reset();
+    wanted.ifname = "app-aware";
+    wanted.nan_mgmt = true;
+    assert(wpas_global_ctrl_iface_status(&g, status, sizeof(status)) > 0);
+    assert(strstr(status, "ifname=app-aware\naddress=00:00:00:00:00:00\n"
+                          "phyname=phy0\nnan_mgmt=1\n"));
+    assert(strstr(status, "ifname=wlan1\naddress=00:00:00:00:00:00\n"
+                          "phyname=phy1\nnan_mgmt=0\n"));
+    /* Even a driver without a radio name supplies authoritative type metadata. */
+    wrong.radio = NULL;
+    assert(wpas_global_ctrl_iface_status(&g, status, sizeof(status)) > 0);
+    assert(strstr(status, "phyname=\nnan_mgmt=0\n"));
+    puts("Interface parent/removal/rollback, legacy and STATUS type tests passed");
     return 0;
 }
 '''
@@ -167,9 +193,12 @@ def main():
     source = (Path(sys.argv[1]) / 'wpa_supplicant/ctrl_iface.c').read_text()
     start = source.index('static int wpa_supplicant_global_iface_add(')
     end = source.index('\n\nstatic void wpa_free_iface_info(', start)
+    status_start = source.index('static int wpas_global_ctrl_iface_status(')
+    status_end = source.index('\n\n#ifdef CONFIG_FST', status_start)
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         (root / 'interface-add.inc').write_text(source[start:end])
+        (root / 'global-status.inc').write_text(source[status_start:status_end])
         (root / 'test.c').write_text(HARNESS)
         subprocess.run([os.environ.get('CC', 'cc'), '-std=c99', '-Wall', '-Wextra',
                         '-Werror', str(root / 'test.c'), '-o', str(root / 'test')], check=True)
