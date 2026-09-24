@@ -8,6 +8,11 @@ name: Build driver add-ons
 on:
   workflow_call:
     inputs:
+      os-devices:
+        description: OS devices built in this run; requires their current build artifacts instead of fallback
+        type: string
+        required: false
+        default: ""
       # Defaulted here, not just at the call site: an input the caller omits
       # otherwise resolves to that run's own dispatch value.
       version:
@@ -50,8 +55,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Download current OS build metadata
+        if: inputs.os-devices != ''
+        uses: actions/download-artifact@v4
+        with:
+          pattern: manifest-entry-*
+          path: manifest-entries
+          merge-multiple: true
+
       - id: set
         env:
+          OS_DEVICES: ${{ inputs.os-devices }}
+          BUILT_ENTRIES: ${{ github.workspace }}/manifest-entries
           WANT_VERSION: ${{ inputs.version }}
           ONLY_DEVICE: ${{ inputs.device }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -77,12 +92,14 @@ jobs:
 
           # device-artifacts.json is the single source of truth for the device
           # list; its keys are device/storage, so collapse to unique devices.
-          mapfile -t DEVICES < <(jq -r 'keys[] | split("/")[0]' \
+          mapfile -t DEVICES < <(jq -r 'to_entries[] | (.key | split("/")[0]), (.value.manifest_alias // empty)' \
             .github/device-artifacts.json | sort -u)
           # 'all' is build.yml's every-device sentinel, and its dispatch inputs
           # reach this called workflow even though the call does not pass them.
           if [[ -n "${ONLY_DEVICE:-}" && "$ONLY_DEVICE" != "all" ]]; then
-            DEVICES=("$ONLY_DEVICE")
+            mapfile -t DEVICES < <(jq -r --arg device "$ONLY_DEVICE" \
+              '$device, (to_entries[] | select((.key | split("/")[0]) == $device) | .value.manifest_alias // empty)' \
+              .github/device-artifacts.json | sort -u)
           fi
           # mapfile cannot fail the step, so an unreadable inventory would leave
           # DEVICES empty and this job green having checked nothing.
@@ -100,30 +117,17 @@ jobs:
             exit 0
           fi
 
-          # A device only enters the matrix once it publishes a devkit, so
-          # enabling a board is a build-side change and needs nothing here.
+          # OS builds must supply current-run devkits for opted-in inventory
+          # entries. Driver-only runs may use published inputs with provenance.
           ENTRIES='[]'
           for dev in "${DEVICES[@]}"; do
-            url="${PUBLIC_BASE}/${PREFIX}manifests/${dev}.json"
-            if ! manifest=$(curl -sSfL --retry 3 --retry-all-errors "$url" 2>/dev/null); then
-              echo "no manifest for ${dev}; skipping"
-              continue
+            if sel=$(PREFIX="$PREFIX" scripts/select-driver-devkit.sh "$dev"); then
+              :
+            else
+              rc=$?
+              [[ "$rc" -eq 1 ]] && continue
+              exit "$rc"
             fi
-            # Prefer the requested version, else the newest version that has a
-            # devkit at all — a device that has never published one is skipped.
-            sel=$(jq -c --arg want "${WANT_VERSION:-}" '
-              [ .versions // {} | to_entries[]
-                | select(.value.devkit != null)
-                | {version: .key, devkit: .value.devkit,
-                   nightly: (.value.is_nightly // false)} ]
-              | (map(select(.version == $want)) | .[0]) // (sort_by(.version) | last)
-              // empty' <<<"$manifest")
-            if [[ -z "$sel" || "$sel" == "null" ]]; then
-              echo "no devkit published for ${dev}; skipping"
-              continue
-            fi
-            echo "${dev}: devkit $(jq -r .devkit.kernel_version <<<"$sel") from $(jq -r .version <<<"$sel")" \
-              | tee -a "$GITHUB_STEP_SUMMARY"
             for drv in "${DRIVERS[@]}"; do
               ENTRIES=$(jq -c --arg d "$dev" --arg drv "$drv" --argjson s "$sel" \
                 '. + [{device: $d, driver: $drv, os_version: $s.version,
@@ -266,6 +270,13 @@ jobs:
           modules=$(jq -r '(.modules_load // []) | join(",")' "drivers/$DRIVER/driver.json")
           version=$(jq -r '.version // ""' "drivers/$DRIVER/driver.json")
 
+          # A public devkit is only a build input for a driver-only PR. Publish
+          # under the PR version that `drivers install --pr` resolves.
+          if [[ "${GITHUB_EVENT_NAME:-}" == "pull_request" ]]; then
+            OS_VERSION="pr-${PR_NUMBER}"
+            IS_NIGHTLY=true
+          fi
+
           ARGS=(
             --device "$DEVICE"
             --version "$OS_VERSION"
@@ -303,6 +314,7 @@ jobs:
           PREFIX=""
           if [[ "${GITHUB_EVENT_NAME:-}" == "pull_request" ]]; then
             PREFIX="pr/${PR_NUMBER}/"
+            OS_VERSION="pr-${PR_NUMBER}"
           fi
 
           # The manifest is what the CLI resolves an add-on through, so assert the
@@ -330,3 +342,41 @@ jobs:
             exit 1
           fi
           echo "verified ${DRIVER} for ${KERNEL}: ${served}" | tee -a "$GITHUB_STEP_SUMMARY"
+
+  index-pr:
+    name: Index PR drivers
+    needs: [discover, build]
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    # Master index writes are serialized after all per-device publishers finish.
+    concurrency:
+      group: driver-pr-index-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: tools/publisher/go.mod
+          cache-dependency-path: tools/publisher/go.sum
+      - name: Update PR master index
+        env:
+          MATRIX: ${{ needs.discover.outputs.matrix }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          cd tools/publisher
+          go build -o "$RUNNER_TEMP/publisher" .
+          jq -c --arg version "pr-${PR_NUMBER}" \
+            '[.include[].device] | unique | map({device: ., version: $version, nightly: true, stability: "stable"})' \
+            <<< "$MATRIX" > "$RUNNER_TEMP/master-updates.json"
+          TOKEN=$(gcloud auth print-access-token)
+          "$RUNNER_TEMP/publisher" --master-manifest-batch "$RUNNER_TEMP/master-updates.json" \
+            --pr "$PR_NUMBER" --access-token "$TOKEN"

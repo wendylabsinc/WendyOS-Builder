@@ -1,9 +1,13 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
+
+	"cloud.google.com/go/storage"
+	"github.com/sirupsen/logrus"
 )
 
 // ManifestEntry is the handoff record between a build job running
@@ -12,11 +16,15 @@ import (
 // single serialised job after all parallel builds have finished, instead of
 // having every matrix entry race read-modify-writes on the shared manifests.
 type ManifestEntry struct {
-	Device    string `json:"device"`
-	Version   string `json:"version"`
-	Storage   string `json:"storage,omitempty"`
-	Nightly   bool   `json:"nightly"`
-	Stability string `json:"stability,omitempty"`
+	Device string `json:"device"`
+	// Aliases share canonical board semantics and this entry's storage devkit.
+	Aliases         []string `json:"aliases,omitempty"`
+	BuildRunID      string   `json:"build_run_id,omitempty"`
+	BuildRunAttempt string   `json:"build_run_attempt,omitempty"`
+	Version         string   `json:"version"`
+	Storage         string   `json:"storage,omitempty"`
+	Nightly         bool     `json:"nightly"`
+	Stability       string   `json:"stability,omitempty"`
 	// PR, when > 0, marks this entry as a per-PR debug build. It routes all
 	// uploads and manifest writes into the self-contained pr/<N>/ subtree
 	// instead of the shared release manifests. Zero for release/nightly.
@@ -63,6 +71,16 @@ type ManifestEntry struct {
 func (e *ManifestEntry) validate() error {
 	if err := validateDeviceType(e.Device); err != nil {
 		return fmt.Errorf("invalid device: %w", err)
+	}
+	seen := map[string]bool{e.Device: true}
+	for _, alias := range e.Aliases {
+		if err := validateDeviceType(alias); err != nil {
+			return fmt.Errorf("invalid alias: %w", err)
+		}
+		if seen[alias] {
+			return fmt.Errorf("duplicate or canonical alias %q", alias)
+		}
+		seen[alias] = true
 	}
 	if err := validateVersion(e.Version); err != nil {
 		return fmt.Errorf("invalid version: %w", err)
@@ -116,4 +134,20 @@ func prPrefix(pr int) string {
 		return ""
 	}
 	return fmt.Sprintf("pr/%d/", pr)
+}
+
+// applyManifestEntry writes only device manifests. The workflow advances the
+// canonical and alias master pointers after every entry has been applied.
+func applyManifestEntry(ctx context.Context, logger *logrus.Entry, bucket *storage.BucketHandle, entry ManifestEntry) error {
+	if err := entry.validate(); err != nil {
+		return err
+	}
+	return updateDeviceManifest(ctx, logger, bucket, prPrefix(entry.PR), entry.Device, entry.Version,
+		entry.FilePath, entry.FileSize, entry.FileChecksum, entry.BmapPath,
+		entry.ZstPath, entry.ZstChecksum, entry.ZstSize,
+		entry.OTAUpdatePath, entry.OTAUpdateSize, entry.OTAUpdateChecksum,
+		entry.RecoveryPath, entry.RecoverySize, entry.RecoveryChecksum,
+		entry.FlashpackPath, entry.FlashpackSize, entry.FlashpackChecksum,
+		entry.SBOMPath, entry.SBOMSize, entry.SBOMChecksum,
+		entry.Extensions, entry.Devkit, entry.Storage, entry.Nightly, entry.Aliases...)
 }
