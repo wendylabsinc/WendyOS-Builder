@@ -55,10 +55,10 @@ profile active before the reload is restored by UUID. Install and upgrade it
 with wired management available because activation briefly removes the managed
 Wi-Fi interface.
 
-On Pi, the onboard Broadcom `brcmfmac` module must unload before the backported
-`cfg80211` can replace the kernel's wireless stack. While the BE202 add-on is
-active, the onboard Wi-Fi radio is unavailable. A BE202 connection is restored
-by PCI identity, independent of whether it was named `wlan0` or `wlan1`; an
+On Pi, the onboard Broadcom `brcmfmac_cyw` and `brcmfmac` modules must unload
+before the backported `cfg80211` can replace the kernel's wireless stack. While
+the BE202 add-on is active, the onboard Wi-Fi radio is unavailable. A BE202
+connection is restored by PCI identity, whether named `wlan0` or `wlan1`; an
 onboard Wi-Fi connection is intentionally not restored. Keep Ethernet or USB
 gadget management connected for installation and removal.
 

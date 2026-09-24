@@ -343,10 +343,15 @@ exit 0
             (pci / "vendor").write_text(vendor + "\n")
             (pci / "device").write_text(device + "\n")
         (self.root / "sys/module/brcmfmac").mkdir()
+        (self.root / "sys/module/brcmfmac_cyw").mkdir()
+        brcm_holders = self.root / "sys/module/brcmfmac/holders"
+        brcm_holders.mkdir()
+        (brcm_holders / "brcmfmac_cyw").touch()
         holders = self.root / "sys/module/cfg80211/holders"
         holders.mkdir()
         (holders / "brcmfmac").touch()
-        self.activation.write_text("pci 8086:272b\nreplace brcmfmac\nreplace cfg80211\n"
+        (holders / "brcmfmac_cyw").touch()
+        self.activation.write_text("pci 8086:272b\nreplace brcmfmac_cyw\nreplace brcmfmac\nreplace cfg80211\n"
                                    "restore-wifi-pci 8086:272b\n")
 
     def restores(self, calls):
@@ -380,7 +385,9 @@ exit 0
         self.with_pci_wifi()
         result, calls = self.run_apply()
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("rmmod -- brcmfmac_cyw", calls)
         self.assertIn("rmmod -- brcmfmac", calls)
+        self.assertLess(calls.index("rmmod -- brcmfmac_cyw"), calls.index("rmmod -- brcmfmac"))
         self.assertLess(calls.index("rmmod -- brcmfmac"), calls.index("rmmod -- cfg80211"))
         self.assertIn("nmcli --wait 5 -g GENERAL.CON-UUID device show wlan1", calls)
         self.assertNotIn("nmcli --wait 5 -g GENERAL.CON-UUID device show wlan0", calls)

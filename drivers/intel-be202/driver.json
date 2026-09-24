@@ -27,14 +27,14 @@
   "activation_by_machine": {
     "raspberrypi5-wendyos": {
       "pci_devices": ["8086:272b"],
-      "modules_replace": ["iwlmld", "iwlmvm", "iwldvm", "iwlwifi", "brcmfmac", "mac80211", "cfg80211", "compat"],
+      "modules_replace": ["iwlmld", "iwlmvm", "iwldvm", "iwlwifi", "brcmfmac_cyw", "brcmfmac", "mac80211", "cfg80211", "compat"],
       "modules_reload": ["btusb"],
       "services_restart": ["wpa_supplicant.service"],
       "wifi_pci_devices_restore": ["8086:272b"]
     },
     "raspberrypi5-nvme-wendyos": {
       "pci_devices": ["8086:272b"],
-      "modules_replace": ["iwlmld", "iwlmvm", "iwldvm", "iwlwifi", "brcmfmac", "mac80211", "cfg80211", "compat"],
+      "modules_replace": ["iwlmld", "iwlmvm", "iwldvm", "iwlwifi", "brcmfmac_cyw", "brcmfmac", "mac80211", "cfg80211", "compat"],
       "modules_reload": ["btusb"],
       "services_restart": ["wpa_supplicant.service"],
       "wifi_pci_devices_restore": ["8086:272b"]
