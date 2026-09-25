@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate and validate the consumed T234 recovery flashpack schema v2."""
+"""Generate and validate the consumed T234 recovery flashpack schema."""
 
 from __future__ import annotations
 
@@ -11,9 +11,11 @@ import re
 import sys
 import xml.etree.ElementTree as ET
 
-SCHEMA = 2
-# v2: the flashing initrd keeps one USB enumeration and switches LUN media in
-# place. v1 re-enumerated per disk; CLIs speak exactly one of the two.
+# Schema 3 / family t234-ums: the flashing initrd keeps one USB enumeration and
+# switches LUN media in place. The family moved from "t234" so that older wendy
+# versions reject these packs as too new and ask to be updated.
+SCHEMA = 3
+FAMILY = "t234-ums"
 PROTOCOL = "usb-mass-storage-v2"
 USB_PRODUCT_ID = "0x7023"
 
@@ -164,7 +166,7 @@ def generate(root: pathlib.Path, *, version: str, device: str, storage: str,
 
     return {
         "schema": SCHEMA,
-        "family": "t234",
+        "family": FAMILY,
         "protocol": PROTOCOL,
         "usb_product_id": USB_PRODUCT_ID,
         "wendyos_version": version,

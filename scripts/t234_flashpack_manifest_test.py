@@ -55,10 +55,11 @@ class ManifestV2Tests(unittest.TestCase):
         args.update(overrides)
         return manifest.generate(root, **args)
 
-    def test_schema_v2_identity_and_all_consumed_files(self):
+    def test_schema_v3_identity_and_all_consumed_files(self):
         result = self.generate(self.fixture())
-        self.assertEqual(result["schema"], 2)
+        self.assertEqual(result["schema"], 3)
         self.assertEqual(result["protocol"], "usb-mass-storage-v2")
+        self.assertEqual(result["family"], "t234-ums")
         self.assertEqual(result["usb_product_id"], "0x7023")
         self.assertEqual(result["target"], {
             "device": "jetson-orin-nano", "storage": "nvme",
@@ -109,7 +110,7 @@ class ManifestV2Tests(unittest.TestCase):
         xml_path.write_text(layout)
         # gpt_secondary_3_0.bin is intentionally never created in stage2/flash.
         result = self.generate(root)
-        self.assertEqual(result["schema"], 2)
+        self.assertEqual(result["schema"], 3)
         self.assertNotIn("stage2/flash/gpt_secondary_3_0.bin", result["files"])
 
     def test_agx_storage_specific_identity(self):
