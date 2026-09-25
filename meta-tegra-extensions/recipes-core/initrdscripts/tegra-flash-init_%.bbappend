@@ -21,3 +21,12 @@ SRC_URI += "file://0002-flash-init-accept-medium-eject-release.patch"
 # function beside mass storage. init-flash.sh still drives the mass_storage LUN
 # unchanged; only the enumeration shape changes.
 SRC_URI += "file://0003-flash-init-composite-gadget-for-windows.patch"
+
+# Keep one USB enumeration for the whole flash: upstream re-imports the gadget
+# per exported disk, and a hub can miss one of those reconnects. Only packages
+# marked conf/usb-mode=single switch LUN media in place.
+SRC_URI += "file://0004-flash-init-switch-lun-media-in-place.patch"
+
+# Cap the RAM the exported disks can buffer, so no host command waits on a
+# flush long enough to hit the host's SCSI command timeout.
+SRC_URI += "file://0005-flash-init-bound-the-write-backlog.patch"
