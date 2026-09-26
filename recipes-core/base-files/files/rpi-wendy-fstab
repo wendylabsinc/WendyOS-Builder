@@ -19,8 +19,8 @@ tmpfs                   /var/volatile  tmpfs  defaults              0 0
 # slot (never re-partitions), so a baked PARTUUID drifts and emergency-boots.
 #
 # /data is grown to fill the card on first boot by grow-data-part, which reads
-# this entry; it resolves LABEL=data to the device. /config is the FAT
-# provisioning partition.
+# this entry. It resolves the /dev/wendyos/data symlink to the real device.
+# /config is the FAT provisioning partition.
 LABEL=boot              /boot    vfat  defaults,nofail       0 2
 LABEL=config            /config  vfat  defaults,nofail       0 0
 /dev/wendyos/data       /data    ext4  defaults,noatime,nofail  0 2

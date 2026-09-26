@@ -45,8 +45,9 @@ IMAGE_INSTALL:append = " \
 
 # A/B wic build: GPT + ext4 label tooling, and DO NOT let wic write an fstab. The
 # stock wic fstab update would bake a single "/" entry, wrong on the other slot;
-# the A/B fstab (vm-wendy-fstab, no "/" entry, LABEL mounts) is installed by
-# base-files instead. Mirrors x86-image.inc / rpi-image.inc.
+# the A/B fstab (vm-wendy-fstab, no "/" entry, LABEL mounts plus the
+# /dev/wendyos/data alias) is installed by base-files instead. Mirrors
+# x86-image.inc / rpi-image.inc.
 WIC_CREATE_EXTRA_ARGS ?= "--no-fstab-update"
 do_image_wic[depends] += " \
     wic-tools:do_populate_sysroot \
@@ -68,18 +69,18 @@ WENDYOS_VM_OTA_INSTALL = " \
     "
 IMAGE_INSTALL:append = "${@' ' + d.getVar('WENDYOS_VM_OTA_INSTALL') if d.getVar('WENDYOS_OTA') == 'wendy' else ''}"
 
-# 2) Drop wendyos-data-setup (pulled by wendyos-update.inc). Its explicit
-#    data.mount uses /dev/disk/by-partlabel/data and its data-init would not grow
-#    our wic-preformatted ext4 /data anyway. The VM instead relies on the
-#    fstab-generated data.mount (LABEL=data, vm-wendy-fstab), which also satisfies
-#    wendyos-etc-binds' Requires=data.mount, plus grow-data-part above for the
-#    first-boot grow. Mirrors x86-image.inc / rpi-image.inc.
+# 2) Drop wendyos-data-setup (pulled by wendyos-update.inc). It ships its own
+#    data.mount for the same mount point, and its data-init would not grow our
+#    wic-preformatted ext4 /data anyway. The VM instead relies on the
+#    fstab-generated data.mount (/dev/wendyos/data, vm-wendy-fstab), which also
+#    satisfies wendyos-etc-binds' Requires=data.mount, plus grow-data-part above
+#    for the first-boot grow. Mirrors x86-image.inc / rpi-image.inc.
 IMAGE_INSTALL:remove = "${@'wendyos-data-setup' if d.getVar('WENDYOS_OTA') == 'wendy' else ''}"
 
 # /config and /data mount points. Both are real partitions in the VM wks files,
-# mounted by
-# LABEL from vm-wendy-fstab, so the rootfs must carry empty mount-point
-# directories for the mounts to land on. install -d is idempotent.
+# mounted from vm-wendy-fstab: /config by LABEL, /data by the /dev/wendyos/data
+# alias. The rootfs must carry empty mount-point directories for the mounts to
+# land on. install -d is idempotent.
 create_wendyos_vm_dirs() {
     install -d -m 0755 ${IMAGE_ROOTFS}/config
     install -d -m 0755 ${IMAGE_ROOTFS}/data

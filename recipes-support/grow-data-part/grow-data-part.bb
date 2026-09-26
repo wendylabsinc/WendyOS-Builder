@@ -6,7 +6,7 @@ backup header (and, on an MBR layout, grows the extended container) so the \
 partition can reach the disk end. Split in two phases: the fast partition grow runs \
 offline before data.mount (grow-data-part.service), the slow ext4 resize2fs runs \
 online afterwards off the boot path (grow-data-fs-online.service). Board-agnostic \
-(resolves /data by LABEL from fstab and the disk from sysfs); pulled into the image \
+(takes the /data device from fstab and the disk from sysfs); pulled into the image \
 only where the wendy A/B layout exists (WENDYOS_OTA == \"wendy\")."
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"

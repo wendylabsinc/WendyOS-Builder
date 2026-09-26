@@ -14,7 +14,8 @@
 # only the rootfs slot and never re-partitions.
 #
 # /data is grown to fill the disk on first boot. /config is the FAT provisioning
-# partition. All by LABEL, all nofail.
+# partition. All nofail. /boot and /config are by label, /data by the udev alias
+# /dev/wendyos/data, the partition or the device-mapper node once encrypted.
 tmpfs                   /var/volatile  tmpfs  defaults              0 0
 LABEL=boot              /boot    vfat  defaults,nofail          0 2
 LABEL=config            /config  vfat  defaults,nofail          0 0

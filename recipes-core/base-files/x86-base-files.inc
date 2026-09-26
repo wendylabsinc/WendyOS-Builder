@@ -9,8 +9,9 @@ SRC_URI:append = " \
 # update is disabled (WIC_CREATE_EXTRA_ARGS = "--no-fstab-update") because a baked
 # "/" entry would be wrong on the other slot. Install our A/B fstab instead — no
 # "/" entry (GRUB mounts the slot via root=PARTLABEL in grubAB.cfg), /boot stays
-# mounted so the grubenv connector can edit EFI/BOOT/grubenv, and /boot, /config
-# and /data are all referenced by LABEL so there is nothing to substitute.
+# mounted so the grubenv connector can edit EFI/BOOT/grubenv, /boot and /config
+# are referenced by LABEL and /data by the /dev/wendyos/data alias, so there is
+# nothing to substitute.
 #
 # Installed unconditionally for x86 (the generic x86 board is being converted to
 # A/B). It does not depend on WENDYOS_OTA, so it is correct both in Phase 1
