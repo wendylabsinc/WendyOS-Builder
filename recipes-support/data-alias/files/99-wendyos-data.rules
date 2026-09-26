@@ -33,7 +33,8 @@
 # which is installed only on the one board with an MBR layout. See that file
 # for why it is not shipped fleet-wide.
 #
-# As of this change nothing consumes /dev/wendyos/data yet.
+# Consumers: the x86, VM and RPi4/5 fstabs, and the data.mount used on Tegra and
+# Qualcomm. RPi3 is the one board still mounting /data by LABEL.
 ACTION!="remove", SUBSYSTEM=="block", ENV{ID_PART_ENTRY_SCHEME}=="gpt", \
     ENV{ID_PART_ENTRY_NAME}=="data", ENV{ID_FS_TYPE}!="crypto_LUKS", \
     SYMLINK+="wendyos/data"

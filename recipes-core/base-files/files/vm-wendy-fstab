@@ -1,8 +1,8 @@
 # WendyOS VM A/B fstab (wendyos-update OTA stack).
 #
-# Origin: recipes-core/base-files/files/x86-wendy-fstab. Identical content — every
-# entry is label-based and carries nothing architecture- or board-specific — kept
-# as a separate file only so the VM boards stay isolated from the x86 board.
+# Origin: recipes-core/base-files/files/x86-wendy-fstab. Identical content — no
+# entry carries anything architecture- or board-specific — kept as a separate
+# file only so the VM boards stay isolated from the x86 board.
 #
 # Deliberately NO "/" entry: the rootfs slot is A/B and is mounted by the kernel
 # from the root= that GRUB sets per slot (root=PARTLABEL=rootfsA|rootfsB, see
@@ -19,9 +19,10 @@
 # only the rootfs slot and never re-partitions.
 #
 # /data is grown to fill the disk on first boot. /config is the FAT provisioning
-# partition. All by LABEL, all nofail.
+# partition. All nofail. /boot and /config are by label, /data by the udev alias
+# /dev/wendyos/data, the partition or the device-mapper node once encrypted.
 tmpfs                   /var/volatile  tmpfs  defaults              0 0
 LABEL=boot              /boot    vfat  defaults,nofail          0 2
 LABEL=config            /config  vfat  defaults,nofail          0 0
-LABEL=data              /data    ext4  defaults,noatime,nofail  0 2
+/dev/wendyos/data       /data    ext4  defaults,noatime,nofail  0 2
 
