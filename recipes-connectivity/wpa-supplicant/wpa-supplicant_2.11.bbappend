@@ -15,6 +15,7 @@ SRC_URI = "https://w1.fi/releases/wpa_supplicant-${PV}.tar.gz \
            file://0003-RADIUS-Fix-Message-Authenticator-validation.patch \
            file://0004-NAN-local-lifecycle-cleanup.patch \
            file://0005-control-interface-parent-radio.patch \
+           file://0006-NAN-accept-unselected-NDC-in-Request.patch \
            file://wendyos-nan \
            file://wendyos-nan-control.conf \
            "
