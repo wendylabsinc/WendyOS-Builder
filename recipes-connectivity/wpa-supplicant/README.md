@@ -33,5 +33,9 @@ it does not resolve the rare lower-layer NDP data-plane stall documented in
 `nan/jetson/notes/22-ndp-data-plane-root-cause.md` in the parent workspace.
 
 Local validation: run `sh wpa-supplicant/wendyos-nan.test.sh` and ShellCheck.
-The four patches apply in order to the pinned hostap 2.12 tarball. Image build,
-Thor/Orin runtime, and NDP recovery still require hardware validation.
+The five patches apply in order to the pinned hostap 2.12 tarball. Patch 0005
+accepts an informational, unselected NDC in an NDL Request so an Android
+Pixel 7 can negotiate an NDP with the Pi 5. The responder still selects its
+own NDC, and Response/Confirm frames still require a selected NDC. The
+regression fixture uses the Pixel's captured NDC bytes. Cross-vendor NDP and
+camera-protocol hardware acceptance is tracked with the Pi camera demo.
