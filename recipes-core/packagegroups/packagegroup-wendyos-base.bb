@@ -32,7 +32,7 @@ RDEPENDS:${PN} = " \
     containerd-config \
     xdg-dbus-proxy \
     usb-power-config \
-    data-alias \
+    data-device \
     "
 
 # Recipes that bind-mount or otherwise depend on the /data partition the

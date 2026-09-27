@@ -55,28 +55,27 @@ do_image_wic[depends] += " \
 
 # --- wendyos-update (wendy OTA) image deltas for x86 -----------------------
 # All gated on WENDYOS_OTA == "wendy". When set, wendyos.conf auto-requires
-# wendyos-update.inc (installs the wendyos-update agent + wendyos-data-setup, and
+# wendyos-update.inc (installs the wendyos-update agent + data-mount, and
 # builds the .wendy payload) and packagegroup-wendyos-base pulls in
 # wendyos-etc-binds (identity persists on /data across A/B slots).
 #
 # 1) Extra packages for the wendy A/B OTA image, added only when WENDYOS_OTA=="wendy":
 #    - wendyos-update-config: pins the OTA connector to grubenv (meta-x86-extensions).
-#    - grow-data-part: grows /data to fill the disk on first boot (shared,
-#      board-agnostic; the wks makes /data the last partition so it can grow).
+#    Nothing is listed for the first-boot /data grow: wendyos-data.service (the
+#    data-device recipe) does it, and every board already gets that through
+#    packagegroup-wendyos-base. The wks makes /data the last partition so it can
+#    grow.
 WENDYOS_X86_OTA_INSTALL = " \
     wendyos-update-config \
-    grow-data-part \
     "
 IMAGE_INSTALL:append = "${@' ' + d.getVar('WENDYOS_X86_OTA_INSTALL') if d.getVar('WENDYOS_OTA') == 'wendy' else ''}"
 
-# 2) Drop wendyos-data-setup (pulled by wendyos-update.inc). It ships its own
-#    data.mount for the same mount point, and its data-init would not grow our
-#    wic-preformatted ext4 /data anyway. x86 instead relies on the
-#    fstab-generated data.mount (/dev/wendyos/data, x86-wendy-fstab) — proven
-#    mounting in Phase 1 — which also satisfies wendyos-etc-binds'
-#    Requires=data.mount, plus grow-data-part above for the first-boot grow.
+# 2) Drop data-mount (pulled by wendyos-update.inc). It ships its own data.mount
+#    for the same mount point. x86 instead relies on the fstab-generated
+#    data.mount (/dev/wendyos/data, x86-wendy-fstab) — proven mounting in
+#    Phase 1 — which also satisfies wendyos-etc-binds' Requires=data.mount.
 #    Mirrors rpi-image.inc.
-IMAGE_INSTALL:remove = "${@'wendyos-data-setup' if d.getVar('WENDYOS_OTA') == 'wendy' else ''}"
+IMAGE_INSTALL:remove = "${@'data-mount' if d.getVar('WENDYOS_OTA') == 'wendy' else ''}"
 
 # TPM2 + LUKS2 userspace for /data encryption.
 # - cryptsetup does luksFormat/open
@@ -92,13 +91,6 @@ WENDYOS_TPM_INSTALL = " \
     data-crypt \
     "
 IMAGE_INSTALL:append = "${@' ' + d.getVar('WENDYOS_TPM_INSTALL') if d.getVar('WENDYOS_DATA_ENCRYPTED') == '1' else ''}"
-
-# When the encryption stack owns /data (WENDYOS_DATA_ENCRYPTED), the first-boot
-# enroll service (data-crypt) grows the data partition itself before formatting it
-# LUKS2, so the shared grow-data-part must not also run on /data -- it resolves
-# /data from fstab (now /dev/mapper/data) and would only defer/no-op. Drop it in
-# that case (D4/§13).
-IMAGE_INSTALL:remove = "${@'grow-data-part' if d.getVar('WENDYOS_DATA_ENCRYPTED') == '1' else ''}"
 
 # NVIDIA dGPU compute stack. When WENDYOS_NVIDIA_DGPU=1 this bakes the full
 # driver stack into the image: the open kernel modules, the matching proprietary
