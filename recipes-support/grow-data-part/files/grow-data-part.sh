@@ -29,10 +29,9 @@ sysblk() { cat "/sys/class/block/$1/$2" 2>/dev/null; }
 log "Start $(date -Is 2>/dev/null || true)"
 
 # The wendy (wendyos-update) fstab names /data by the udev alias
-# /dev/wendyos/data, or by label on the RPi3 MBR board, so it stays
-# machine-agnostic (mmcblk0pN vs nvme0n1pN). Read it (both phases need the
-# device) and resolve any tag spec to a device node. The /dev/* form skips this
-# and is resolved by readlink below.
+# /dev/wendyos/data on every board, so it stays machine-agnostic (mmcblk0pN vs
+# nvme0n1pN). Read it (both phases need the device) and resolve any tag spec to
+# a device node. The /dev/* form skips this and is resolved by readlink below.
 DATA_DEV="$(awk '$1 !~ /^#/ && $2 == "/data" { print $1; exit }' /etc/fstab 2>/dev/null || true)"
 case "$DATA_DEV" in
     /dev/*) ;;

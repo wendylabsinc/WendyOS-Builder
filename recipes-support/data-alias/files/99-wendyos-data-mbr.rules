@@ -12,8 +12,8 @@
 # It is gated to that one board instead of being shipped everywhere because
 # matching on a filesystem label alone is weaker than matching a GPT partition
 # name. On a GPT board this rule would let an attached MBR drive labelled
-# "data" steal the alias. On rpi3 that exposure exists regardless, since its
-# fstab already mounts /data by LABEL=data.
+# "data" steal the alias. rpi3 has no partition name to match instead, so the
+# filesystem label is all there is.
 #
 # ENV{DEVTYPE}=="partition" excludes device-mapper devices, which are
 # DEVTYPE=disk, and whole-disk "superfloppy" media. Without it this rule
@@ -27,8 +27,10 @@
 # via partitions.c:777).
 #
 # Known residual: an MBR-partitioned external drive with a partition labelled
-# "data" can still match here on rpi3. That is the same exposure as its
-# existing LABEL=data fstab entry, so it is not a regression.
+# "data" can still match here on rpi3. MBR offers nothing stronger to match on,
+# so this is the accepted floor for that board. Until rpi3 moved onto the alias
+# its fstab named LABEL=data directly and carried the same exposure; this rule
+# inherited it rather than introducing it.
 ACTION!="remove", SUBSYSTEM=="block", ENV{DEVTYPE}=="partition", \
     ENV{ID_PART_ENTRY_SCHEME}=="dos", ENV{ID_FS_LABEL}=="data", \
     ENV{ID_FS_TYPE}!="crypto_LUKS", \
