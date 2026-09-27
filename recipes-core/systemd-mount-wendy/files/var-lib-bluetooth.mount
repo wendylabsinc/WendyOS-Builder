@@ -16,8 +16,10 @@ After=wendyos-bluetooth-state.service
 Requires=wendyos-bluetooth-state.service
 
 # Wait for the /data fs grow, same as var-lib-wendy.mount and
-# var-lib-containerd.mount. Board-specific, inert where absent.
-After=grow-data-fs-online.service
+# var-lib-containerd.mount. wendyos-data-resize.service (data-device) ships
+# fleet-wide, so this edge is live on every board rather than only where a
+# grower happened to be installed.
+After=wendyos-data-resize.service
 
 # bluetoothd reads this directory once at startup, so mounting it afterwards
 # would leave it seeing an empty state and treating paired devices as unknown.

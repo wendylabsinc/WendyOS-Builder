@@ -57,25 +57,25 @@ do_image_wic[depends] += " \
 
 # --- wendyos-update (wendy OTA) image deltas ------------------------------
 # Gated on WENDYOS_OTA == "wendy". When set, wendyos.conf auto-requires
-# wendyos-update.inc (the client + wendyos-data-setup + the .wendy payload) and
+# wendyos-update.inc (the client + data-mount + the .wendy payload) and
 # packagegroup-wendyos-base pulls in wendyos-etc-binds.
 #
 # 1) wendyos-update-config pins the OTA connector to grubenv (meta-vm-extensions).
-#    grow-data-part grows /data to fill the disk on first boot (board-agnostic;
-#    the wks makes /data the last partition so it can grow).
+#    Nothing is listed here for the first-boot /data grow: wendyos-data.service
+#    (the data-device recipe) does it, and every board already gets that through
+#    packagegroup-wendyos-base. The wks makes /data the last partition so it can
+#    grow.
 WENDYOS_VM_OTA_INSTALL = " \
     wendyos-update-config \
-    grow-data-part \
     "
 IMAGE_INSTALL:append = "${@' ' + d.getVar('WENDYOS_VM_OTA_INSTALL') if d.getVar('WENDYOS_OTA') == 'wendy' else ''}"
 
-# 2) Drop wendyos-data-setup (pulled by wendyos-update.inc). It ships its own
-#    data.mount for the same mount point, and its data-init would not grow our
-#    wic-preformatted ext4 /data anyway. The VM instead relies on the
-#    fstab-generated data.mount (/dev/wendyos/data, vm-wendy-fstab), which also
-#    satisfies wendyos-etc-binds' Requires=data.mount, plus grow-data-part above
-#    for the first-boot grow. Mirrors x86-image.inc / rpi-image.inc.
-IMAGE_INSTALL:remove = "${@'wendyos-data-setup' if d.getVar('WENDYOS_OTA') == 'wendy' else ''}"
+# 2) Drop data-mount (pulled by wendyos-update.inc). It ships its own data.mount
+#    for the same mount point. The VM instead relies on the fstab-generated
+#    data.mount (/dev/wendyos/data, vm-wendy-fstab), which also satisfies
+#    wendyos-etc-binds' Requires=data.mount. Mirrors x86-image.inc /
+#    rpi-image.inc.
+IMAGE_INSTALL:remove = "${@'data-mount' if d.getVar('WENDYOS_OTA') == 'wendy' else ''}"
 
 # /config and /data mount points. Both are real partitions in the VM wks files,
 # mounted from vm-wendy-fstab: /config by LABEL, /data by the /dev/wendyos/data

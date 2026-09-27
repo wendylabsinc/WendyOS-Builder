@@ -37,8 +37,8 @@ WIC_CREATE_EXTRA_ARGS ?= "--no-fstab-update"
 # Create the /config and /data mount point directories (fstab entries are in
 # rpi-fstab / rpi-wendy-fstab). The rootfs is read-only at runtime (A/B slot), so
 # systemd cannot mkdir a missing mount point -- data.mount then fails on a clean
-# fs and the /data bind mounts + Wendy Agent cascade-fail. wendyos-data-setup is
-# dropped on RPi (see below), so /data must be created here.
+# fs and the /data bind mounts + Wendy Agent cascade-fail. data-mount is dropped
+# on RPi (see below), so /data must be created here.
 create_rpi_mountpoints() {
     mkdir -p ${IMAGE_ROOTFS}/config
     mkdir -p ${IMAGE_ROOTFS}/data
@@ -58,11 +58,12 @@ create_rpi_mountpoints() {
 ROOTFS_POSTPROCESS_COMMAND:append = " create_rpi_mountpoints;"
 
 # --- wendyos-update (wendy) image deltas for RPi --------------------------
-# 1) Drop wendyos-data-setup (pulled by wendyos-update.inc): on RPi the /data
-#    first-boot grow is done by grow-data-part (in packagegroup-wendyos-rpi).
-#    wendyos-data-init only (re)formats a missing/oversized fs, so it would skip
-#    the wic-preformatted ext4 data partition.
-IMAGE_INSTALL:remove = "wendyos-data-setup"
+# 1) Drop data-mount (pulled by wendyos-update.inc): it ships its own data.mount
+#    for the same mount point, and on RPi /data already has an fstab entry
+#    (rpi-wendy-fstab) that systemd-fstab-generator turns into a data.mount. The
+#    first-boot /data grow is unaffected: wendyos-data.service (the data-device
+#    recipe) does it on every board.
+IMAGE_INSTALL:remove = "data-mount"
 
 # 2) wendy-stack RPi extras:
 #    - wendyos-fw-env       /etc/fw_env.config so the ubootenv connector's

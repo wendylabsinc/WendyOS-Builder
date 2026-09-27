@@ -13,9 +13,11 @@ RequiresMountsFor=/data
 After=data.mount
 
 # Wait for the /data fs grow so first-boot volume data can't hit ENOSPC while the
-# fs is still small. Growers are board-specific, inert where absent:
-# grow-data-fs-online (RPi); safe if the unit doesn't exist.
-After=grow-data-fs-online.service
+# fs is still small. The grow is wendyos-data-resize.service (data-device),
+# which unlike the grow-data-part unit it replaces ships on EVERY board. On
+# Tegra and Qualcomm that makes this edge live where it used to be inert, at
+# no cost: their /data is mkfs'd to the full partition, so resize2fs no-ops.
+After=wendyos-data-resize.service
 
 # Must be mounted before the agent starts
 Before=wendyos-agent.service

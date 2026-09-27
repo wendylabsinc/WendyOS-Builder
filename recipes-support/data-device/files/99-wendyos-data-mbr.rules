@@ -18,7 +18,7 @@
 # ENV{DEVTYPE}=="partition" excludes device-mapper devices, which are
 # DEVTYPE=disk, and whole-disk "superfloppy" media. Without it this rule
 # matches unlocked LUKS mappers, including the transient "data_init" bootstrap
-# mapper that data-enroll.sh opens and labels "data" before closing it again.
+# mapper that wendyos-data.sh opens and labels "data" before closing it again.
 #
 # ENV{ID_PART_ENTRY_SCHEME}=="dos" is a positive match on a real MBR table.
 # Testing !="gpt" instead would also be true when the property is unset, which

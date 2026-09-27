@@ -1,0 +1,85 @@
+[Unit]
+Description=Resolve the WendyOS /data device (plain, encrypted, or converting)
+# Runs in the early boot phase, before any local filesystem is mounted, so it
+# cannot take the default dependency set. Conflicts=/Before=shutdown.target is
+# the boilerplate every DefaultDependencies=no unit in this tree carries
+# (10-early.conf): without it the unit is not ordered out of the way of a
+# shutdown.
+DefaultDependencies=no
+Conflicts=shutdown.target
+Before=shutdown.target
+
+# udev has to be running before anything looks for the /data partition. The
+# wait for the partition device itself is NOT here: it is board-specific and
+# lives in the wendyos-data.service.d/10-device.conf drop-in, which ships only
+# on GPT boards. An MBR board has no GPT partition name, so the device can
+# never appear there and the wait would only cost it a 90-second boot stall.
+After=systemd-udevd.service
+
+# The flag, the marker and the status file all live on /config, so it has to be
+# mounted first. WantsMountsFor=, never RequiresMountsFor= (C31):
+# RequiresMountsFor= adds Requires= as well as After=, which re-arms the very
+# failure the nofail on every /config fstab entry exists to prevent -- an
+# unmountable /config would take /data down with it. An unreadable flag file
+# already reads as unset, which is the safe answer.
+WantsMountsFor=/config
+
+# What this unit decides is what data.mount mounts, so it must finish first.
+Before=data.mount
+
+# C54 ordered this unit after the two other /data preparers. It is superseded
+# and there is nothing left to order against: this unit now does the grow and
+# the format itself (C57), so the three programs that all wanted to resize and
+# write the same partition are one program.
+#
+# Before the /data fsck, which is what keeps the filesystem unopened while the
+# partition is resized under it (C58). grow-data-part used
+# Before=local-fs-pre.target for this; that is not available here, because this
+# unit is After=config.mount through WantsMountsFor=/config above and
+# config.mount is itself After=local-fs-pre.target -- the C31 cycle. Naming the
+# fsck unit says the same thing without the broad target. systemd-fsck@.service
+# is instantiated only where fstab gives the mount a passno > 0
+# (systemd-fsck@.service(8)), which is x86, VM and RPi; on Tegra and Qualcomm
+# /data has no fstab entry at all and this line is simply inert.
+Before=systemd-fsck@dev-wendyos-data.service
+
+# The producer half of systemd's own mechanism for "a service synthesizes a
+# block device that a mount consumes" (systemd.special(7), blockdev@.target:
+# storage services are ordered before an instance of it, consumers after it,
+# and it "should be pulled in via a Wants= dependency of the storage daemon").
+# The consumer half is already in force without anyone writing it: data.mount
+# carries After=blockdev@dev-wendyos-data.target, read off a live board. This
+# also fixes shutdown ordering, which the man page names as the target's main
+# purpose -- the mount is deactivated first and the service backing it after.
+Wants=blockdev@dev-wendyos-data.target
+Before=blockdev@dev-wendyos-data.target
+
+# KNOWN FRAGILITY: both instance names above are hardcoded, and both are
+# derived from the /data device path as fstab writes it (/dev/wendyos/data on
+# every board that has an fstab entry). If that path ever changes, the two
+# names match no unit, the ordering silently becomes a no-op and nothing
+# errors. The guard is a build-time check that fails the build when the fstab
+# and these names disagree; it lands in a later pass of this same series, so
+# until then the only thing holding them together is this comment. Full graph
+# and the rule it follows: docs/plans/data-boot-graph.md.
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# No timeout (C55). Any finite number is a guess about the largest disk we will
+# ever ship, and guessing low does not fail the wipe -- it kills the unit
+# mid-wipe, so the device retries the whole scrub on every boot and never
+# converges. Visibility replaces the limit: the wipe prints progress as it
+# goes. Nothing waits on a long run either, because a conversion boot mounts no
+# /data and ends in a reboot.
+TimeoutStartSec=infinity
+ExecStart=/usr/sbin/wendyos-data.sh
+
+[Install]
+# data.mount pulls this in, and data.mount does NOT Requires= it (C30). A
+# Requires= would fail the mount on any image that does not install this unit,
+# and on x86, RPi and VM data.mount is generated from fstab where no recipe can
+# add one. WantedBy= drops a symlink into data.mount.wants/, which a generated
+# mount honours just as well, and it keeps a failed resolver from taking /data
+# down -- which is what "refusing is recoverable" requires.
+WantedBy=data.mount
