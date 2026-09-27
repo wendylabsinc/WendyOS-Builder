@@ -15,8 +15,9 @@
 # uboot.env). It must stay mounted: the ubootenv connector edits /boot/uboot.env
 # via fw_setenv (see wendyos-fw-env / fw_env.config).
 #
-# /data is grown to fill the card on first boot by grow-data-part, which reads
-# this entry. It resolves the /dev/wendyos/data symlink to the real device.
+# /data is grown to fill the card on first boot by wendyos-data.service, which
+# resolves the /dev/wendyos/data symlink to the real device itself rather than
+# reading this entry.
 # /config is the FAT provisioning partition.
 tmpfs             /var/volatile  tmpfs  defaults                 0 0
 LABEL=boot        /boot          vfat   defaults                 0 2

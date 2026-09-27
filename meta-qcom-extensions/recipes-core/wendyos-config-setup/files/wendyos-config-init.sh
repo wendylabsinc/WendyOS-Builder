@@ -4,7 +4,7 @@
 #
 # qcom-ptool ALLOCATES the config partition but a partitions.conf entry with no
 # --filename is left raw, so unlike the wic boards nothing puts a filesystem on
-# it. /data has wendyos-data-setup for exactly this reason; this is its
+# it. /data has wendyos-data.service for exactly this reason; this is its
 # counterpart for /config.
 #
 # Idempotency keys on the FILESYSTEM, never a stamp file: the rootfs is A/B and

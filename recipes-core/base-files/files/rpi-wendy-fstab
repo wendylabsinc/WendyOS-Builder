@@ -18,8 +18,9 @@ tmpfs                   /var/volatile  tmpfs  defaults              0 0
 # Referenced by LABEL, not a per-build PARTUUID: OTA writes only the rootfs
 # slot (never re-partitions), so a baked PARTUUID drifts and emergency-boots.
 #
-# /data is grown to fill the card on first boot by grow-data-part, which reads
-# this entry. It resolves the /dev/wendyos/data symlink to the real device.
+# /data is grown to fill the card on first boot by wendyos-data.service, which
+# resolves the /dev/wendyos/data symlink to the real device itself rather than
+# reading this entry.
 # /config is the FAT provisioning partition.
 LABEL=boot              /boot    vfat  defaults,nofail       0 2
 LABEL=config            /config  vfat  defaults,nofail       0 0

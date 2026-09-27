@@ -5,7 +5,7 @@
 # survives A/B OTA updates. With the fTPM encrypting /data that is circular: the
 # fTPM's own NV lives in OP-TEE secure storage, which would then sit inside the
 # very volume the fTPM must unlock (and the unit ordering deadlocks:
-# data.mount -> systemd-cryptsetup@data -> /dev/tpmrm0 -> tee-ftpm-modprobe ->
+# data.mount -> wendyos-data.service -> /dev/tpmrm0 -> tee-ftpm-modprobe ->
 # tee-supplicant -> var-lib-tee.mount -> data.mount). So back it with /config
 # instead: mounted early from a plain partition, independent of /data, and it
 # also survives A/B OTA updates. The REE-FS content is encrypted and integrity-

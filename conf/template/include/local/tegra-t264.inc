@@ -13,12 +13,12 @@
 WENDYOS_UPDATE_BOOTLOADER = "1"
 
 # Thor runs the wendyos-update OTA stack (wendyos.conf defaults tegra264 to
-# "none"; override here). This pulls in the client + data-setup + the
+# "none"; override here). This pulls in the client + the data.mount unit + the
 # .wendy artifact (conf/distro/include/wendyos-update.inc) and implies the
 # persistent /data partition (no separate WENDYOS_DATA_PART needed — its
 # default derives "1" from WENDYOS_OTA != "none"). The data partition is
 # allocated empty at flash time and formatted/grown on first boot by
-# wendyos-data-setup. See tegra_partition_config.bbclass.
+# wendyos-data.service. See tegra_partition_config.bbclass.
 WENDYOS_OTA = "wendy"
 
 # Fixed A/B rootfs slot size: 12 GiB per slot on every build, so an OTA rootfs

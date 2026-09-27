@@ -6,10 +6,10 @@
 # can share one Yocto series (blacksail) and one OTA stack (wendyos-update).
 
 # wendyos-update OTA (also the wendyos.conf default; kept explicit here).
-# Pulls in the client + data-setup + the .wendy artifact
+# Pulls in the client + the data.mount unit + the .wendy artifact
 # (conf/distro/include/wendyos-update.inc) and implies the persistent /data
 # partition — allocated empty at flash time and formatted/grown on first
-# boot by wendyos-data-setup. See tegra_partition_config.bbclass.
+# boot by wendyos-data.service. See tegra_partition_config.bbclass.
 WENDYOS_OTA = "wendy"
 
 # Fixed A/B rootfs slot size: 12 GiB per slot on every build, so an OTA rootfs
