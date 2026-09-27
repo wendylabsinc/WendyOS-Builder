@@ -46,8 +46,10 @@ SYSTEMD_AUTO_ENABLE = "enable"
 
 # Phase 1 runs offline (before local-fs-pre.target): reads /data from fstab, finds
 # partitions via sysfs. coreutils for cat/readlink -f/basename; util-linux-sfdisk
-# detects the MBR extended partition; util-linux-findfs resolves the LABEL=/PARTUUID=
-# /data spec (wendy fstab); gptfdisk provides sgdisk -e (relocate GPT backup header);
+# detects the MBR extended partition; util-linux-findfs resolves a LABEL=/PARTUUID=
+# /data spec, which no shipped fstab has used since rpi3 moved onto the alias --
+# kept as cheap insurance for a hand-edited one; gptfdisk provides sgdisk -e
+# (relocate GPT backup header);
 # parted provides parted + partprobe; e2fsprogs for resize2fs (phase 2) + the
 # clean-flag e2fsck (phase 1); udev for udevadm settle. awk assumed present from the
 # base image (busybox/gawk).
