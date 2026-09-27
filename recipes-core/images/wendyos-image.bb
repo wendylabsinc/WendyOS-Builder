@@ -211,11 +211,12 @@ require ${@'conf/distro/include/x86-image.inc' if 'x86-wendyos' in d.getVar('MAC
 require ${@'conf/distro/include/vm-image.inc' if 'vm-wendyos' in d.getVar('MACHINEOVERRIDES').split(':') else ''}
 require ${@'conf/distro/include/qcom-image.inc' if 'qcom-wendyos' in d.getVar('MACHINEOVERRIDES').split(':') else ''}
 
-# Config sanity check. Encrypting /data needs a TPM at runtime -- data-enroll seals
-# the LUKS2 keyslot to it -- so WENDYOS_DATA_ENCRYPTED turns WENDYOS_ENABLE_TPM on
-# in the per-board local includes. Writing the two to contradictory values by hand
-# would build an image whose first-boot enroll can never succeed, and the failure
-# would only show up on the device. Catch it at parse time instead.
+# Config sanity check. Encrypting /data needs a TPM at runtime -- the /data
+# resolver seals the LUKS2 keyslot to it -- so WENDYOS_DATA_ENCRYPTED turns
+# WENDYOS_ENABLE_TPM on in the per-board local includes. Writing the two to
+# contradictory values by hand would build an image whose conversion can never
+# succeed, and the failure would only show up on the device. Catch it at parse
+# time instead.
 # Boards that set neither variable (RPi) leave both unset and are unaffected.
 python () {
     if d.getVar('WENDYOS_DATA_ENCRYPTED') == '1' and d.getVar('WENDYOS_ENABLE_TPM') != '1':
