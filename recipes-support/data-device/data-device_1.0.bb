@@ -135,12 +135,24 @@ FILES:${PN}:append:raspberrypi3-64 = " \
 # absence shows up in the journal instead of as a /data that quietly stays
 # small.
 #
-# The crypt stack is deliberately NOT here. cryptsetup, systemd-crypt and
-# util-linux-blkdiscard are installed only where WENDYOS_DATA_ENCRYPTED is 1,
-# through the per-board image includes, while this recipe ships fleet-wide
-# including RPi, which can never encrypt. Depending on them here would drag the
-# whole stack onto every board. The resolver looks each one up at runtime and
-# reports no_support when they are missing.
+# The crypt stack is deliberately NOT here. cryptsetup and systemd-crypt are
+# installed only where WENDYOS_DATA_ENCRYPTED is 1, through the per-board image
+# includes, while this recipe ships fleet-wide including RPi, which can never
+# encrypt. Depending on them here would drag the whole stack onto every board.
+# The resolver looks each one up at runtime and reports no_support when they
+# are missing.
+#
+# blkdiscard is the exception and used to be listed above as though it were
+# gated too. It is not: oe-core appends every split util-linux binary package
+# to RRECOMMENDS of the util-linux metapackage (util-linux_2.42.2.bb:63), and
+# packagegroup-wendyos-base pulls util-linux, so util-linux-blkdiscard lands on
+# every board whatever WENDYOS_DATA_ENCRYPTED says. Confirmed on a Thor built
+# at the default: cryptsetup and systemd-cryptenroll absent, blkdiscard present
+# at /sbin/blkdiscard. data-crypt declaring it stays correct and is worth
+# keeping -- an RRECOMMENDS is not a guarantee, and NO_RECOMMENDATIONS would
+# remove it. Nothing in the resolver breaks either way: the missing-tools check
+# only consults blkdiscard when the erase is enabled, and cryptsetup is absent
+# on such a board regardless, so no_support still fires.
 RDEPENDS:${PN} = " \
     coreutils \
     e2fsprogs-dumpe2fs \
