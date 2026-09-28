@@ -17,8 +17,8 @@
 # rule was one line and C60 widened it to two, because this program now has a
 # second job: fail whenever the device was told to encrypt and did not, and
 # fail whenever /data could not be made mountable. The second half is what the
-# format_failed and fsck_failed outcomes report, on every board including the
-# ones that can never encrypt.
+# format_failed, fsck_failed and not_ext4 outcomes report, on every board
+# including the ones that can never encrypt.
 #
 # It also PREPARES a plain /data -- grow the partition to fill the disk, then
 # make sure the partition carries a filesystem the kernel can mount. That work
@@ -397,14 +397,37 @@ resolve_device() {
 # -p is a direct low-level probe rather than a cache lookup, which matters
 # because this runs right after the device changed underneath udev.
 #
-# fs_rc comes straight from blkid: 0 = a signature was found, 2 = nothing is
-# there at all, anything else = the probe itself failed
-# (util-linux misc-utils/blkid.c:31-33,592-594). A failed probe must never be
-# mistaken for "blank": every destructive step below requires fs_rc 2, so an
-# unreadable device is left alone instead of formatted.
+# fs_type is the signature blkid found, and it is EMPTY when the device holds
+# no filesystem. That empty string is the ONLY sign of a blank device, because
+# fs_rc cannot give it on a partition. blkid counts every value it probed --
+# for a partition that includes the PART_ENTRY_* fields it reads out of the
+# partition table -- and returns 2 only when that count is zero (util-linux
+# misc-utils/blkid.c:551,593-594). `-s TYPE` filters the printed output inside
+# the loop and never the count (blkid.c:565), so a GPT partition with no
+# filesystem on it exits 0 and prints nothing at all.
+#
+# fs_rc still carries one fact: anything but 0 or 2 means the probe itself
+# failed, and a failed probe must never be mistaken for "blank". probe_data is
+# what refuses those, so after it every caller may trust fs_type alone.
 probe_fs() {
     fs_type=$(blkid -p -o value -s TYPE "$1" 2>/dev/null)
     fs_rc=$?
+}
+
+# Probe a block device for a PARTITION TABLE signature, setting pt_type and
+# pt_rc. Same shape as probe_fs, and -p for the same reason.
+#
+# It answers the question an empty fs_type cannot: "no filesystem" is not "no
+# content". A device carrying a partition table and nothing else reports an
+# empty TYPE and a PTTYPE naming the table, so only the two answers together
+# say the device is blank.
+#
+# pt_rc carries the same one fact fs_rc does: anything but 0 or 2 means the
+# probe itself failed, and a failed probe must never be read as "blank". The
+# caller refuses those, exactly as probe_data refuses them for fs_rc.
+probe_pt() {
+    pt_type=$(blkid -p -o value -s PTTYPE "$1" 2>/dev/null)
+    pt_rc=$?
 }
 
 # Probe the raw partition, and refuse to continue on anything but a clear
@@ -630,11 +653,34 @@ prepare_filesystem() {
     # device is left alone instead.
     probe_data
 
-    if [ "$fs_rc" -eq 2 ] && [ -z "$fs_type" ]; then
-        # No signature of any kind (C35). Reachable three ways: a flash layout
-        # that carves /data empty, the stale-LUKS erase above falling through,
-        # and a bad flash or a hand-run wipefs -- which used to need a reflash
-        # to recover.
+    if [ -z "$fs_type" ]; then
+        # No filesystem signature (C35). That on its own is NOT "nothing
+        # here": a device carrying a partition table and no filesystem reports
+        # an empty TYPE too, and formatting it would destroy whatever that
+        # table describes. So ask the second question -- and ask it only here,
+        # because once blkid has named a filesystem the partition table has no
+        # bearing on any branch below and the extra probe is waste.
+        probe_pt "$DATA"
+        [ "$pt_rc" -eq 0 ] || [ "$pt_rc" -eq 2 ] \
+            || finish probe_failed 1 "cannot probe $DATA for a partition table (blkid exit $pt_rc), so nothing is touched"
+
+        if [ -n "$pt_type" ]; then
+            # not_ext4 rather than a new value: the result set is closed (C53)
+            # and already gained one in C64, and "what is there is not the ext4
+            # we manage" covers a partition table as well as it covers a
+            # foreign filesystem.
+            finish not_ext4 1 "$DATA carries a $pt_type partition table and no filesystem, which is not ours to make or to replace, so it is left exactly as it is and /data cannot be mounted"
+        fi
+
+        # Nothing at all, and now proven so: no filesystem and no partition
+        # table. Reachable three ways: a flash layout that carves /data empty,
+        # the stale-LUKS erase above falling through, and a bad flash or a
+        # hand-run wipefs -- which used to need a reflash to recover.
+        #
+        # The line below claims "no signature at all", and that is true only
+        # because of the PTTYPE check above it. Whoever removes that check has
+        # to rewrite this message too, or it starts lying on the one device
+        # where it matters.
         announce "$DATA carries no signature at all, so making the filesystem"
         timeout "$TOOL_TIMEOUT" mkfs.ext4 -q -L data "$DATA" \
             || finish format_failed 1 "$DATA carries no filesystem and mkfs.ext4 failed ($(exit_reason $?)), so /data cannot be mounted"
@@ -647,10 +693,14 @@ prepare_filesystem() {
         # do not recognise: whatever it is, somebody put it there, and the only
         # state this program is allowed to destroy is one it can prove holds
         # nothing (the unfinished container of C34, the stale header above).
-        # ${fs_type:-...}: blkid can also answer 0 with no TYPE at all, for
-        # something it recognises that is not a filesystem.
-        announce "$DATA carries a ${fs_type:-non-ext4} signature, which is not ours to make or to replace, so it is left exactly as it is"
-        return 0
+        #
+        # Leaving it alone also leaves /data unmountable, so this reports a
+        # failure (C60). The refusal is right; calling it success was not.
+        # not_ext4 names exactly what was tested: the branch above already took
+        # the empty case, so blkid named a concrete type here and "unknown"
+        # would be false, and "foreign" would assert an owner we cannot
+        # establish. fs_type cannot be empty here, so it needs no fallback.
+        finish not_ext4 1 "$DATA carries a $fs_type signature, which is not ours to make or to replace, so it is left exactly as it is and /data cannot be mounted"
     fi
 
     if ! fs_fits_device "$DATA"; then
@@ -850,6 +900,16 @@ if [ "$fs_type" = "crypto_LUKS" ]; then
         # finished, so make the filesystem. Any existing signature, even a
         # corrupt filesystem, is left strictly alone -- which is why this needs
         # blkid's "nothing at all" exit and not merely an empty TYPE.
+        #
+        # That test is right here and wrong in prepare_filesystem, and the
+        # device is the whole difference. A LUKS mapping's DM UUID starts with
+        # CRYPT, not part (cryptsetup lib/libdevmapper.c:1159), so libblkid
+        # reads the mapper as a whole disk (util-linux lib/sysfs.c:564-592) and
+        # gives it none of the PART_ENTRY_* values a partition always carries.
+        # With no values at all, blkid does exit 2 on a blank mapper. The test
+        # earns its place twice over: this calls probe_fs directly, so nothing
+        # else here rejects a failed probe, and a partition table on the mapper
+        # (values, but no TYPE) has to stay out of this branch.
         probe_fs "$MAPPER"
         if [ "$fs_rc" -eq 2 ] && [ -z "$fs_type" ]; then
             announce "$MAPPER carries no signature at all: the volume was never finished, making the filesystem"
@@ -945,11 +1005,12 @@ abort() {
     clear_marker
     # The reason reaches the journal BEFORE prepare_filesystem, never after.
     # prepare_filesystem can end the program itself through `finish
-    # format_failed` or `finish fsck_failed`, and that would record ITS result
-    # and lose why the conversion aborted. Announcing first puts the original
-    # cause in the journal whichever way prepare_filesystem goes. The price is
-    # one repeated line when it returns normally, because `finish` prints the
-    # same text again -- do not "tidy" this by moving the announce down.
+    # format_failed`, `finish fsck_failed` or `finish not_ext4`, and that
+    # would record ITS result and lose why the conversion aborted. Announcing
+    # first puts the original cause in the journal whichever way
+    # prepare_filesystem goes. The price is one repeated line when it returns
+    # normally, because `finish` prints the same text again -- do not "tidy"
+    # this by moving the announce down.
     announce "$*"
     prepare_filesystem
     finish "$_result" 1 "$*"
