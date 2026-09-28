@@ -47,21 +47,43 @@ Before=systemd-fsck@dev-wendyos-data.service
 # block device that a mount consumes" (systemd.special(7), blockdev@.target:
 # storage services are ordered before an instance of it, consumers after it,
 # and it "should be pulled in via a Wants= dependency of the storage daemon").
-# The consumer half is already in force without anyone writing it: data.mount
-# carries After=blockdev@dev-wendyos-data.target, read off a live board. This
-# also fixes shutdown ordering, which the man page names as the target's main
-# purpose -- the mount is deactivated first and the service backing it after.
+# The consumer half is NOT automatic everywhere, and getting that wrong is how
+# this line sat dead on two board families. systemd does add
+# After=blockdev@<what>.target to every mount by itself, but it re-derives that
+# dependency from the device the KERNEL RESOLVED as soon as /data is mounted
+# (mount.c:567 purges the tags it uses, mount.c:381 re-adds from mountinfo), so
+# the instance stops being the one named here and becomes the raw node. Only a
+# line written in the unit file survives the purge (load-fragment.c:300).
+# systemd-fstab-generator writes exactly that line on the boards whose
+# data.mount it generates (generator.c:889) -- x86, VM, RPi -- and the shipped
+# data.mount now carries it for Tegra and Qualcomm
+# (recipes-core/data-mount/files/data.mount). The claim this comment used to
+# make, that the consumer half was in force with nobody writing it, was read
+# off a VM and was false on every board with a shipped data.mount.
+#
+# WHAT IT BUYS TODAY IS NOTHING OBSERVABLE, and that is worth saying plainly.
+# The ordering puts data.mount down before this service at shutdown, and this
+# service has no ExecStop=, so stopping it runs nothing. It becomes
+# load-bearing the moment it gains one -- closing the mapper on the encrypted
+# path is the obvious candidate. It is written now because the alternative is a
+# declared ordering that silently means nothing, which is the failure this
+# whole stanza exists to prevent.
 Wants=blockdev@dev-wendyos-data.target
 Before=blockdev@dev-wendyos-data.target
 
 # KNOWN FRAGILITY: both instance names above are hardcoded, and both are
-# derived from the /data device path as fstab writes it (/dev/wendyos/data on
-# every board that has an fstab entry). If that path ever changes, the two
+# derived from the /data device path (/dev/wendyos/data). That path is written
+# in fstab on x86, VM and RPi, and in the data.mount unit on Tegra and
+# Qualcomm, which carry no /data fstab line at all. If it ever changes, the two
 # names match no unit, the ordering silently becomes a no-op and nothing
-# errors. The guard is a build-time check that fails the build when the fstab
-# and these names disagree; it lands in a later pass of this same series, so
-# until then the only thing holding them together is this comment. Full graph
-# and the rule it follows: docs/plans/data-boot-graph.md.
+# errors. The guard is check_data_ordering in
+# recipes-core/images/wendyos-image.bb: it reads the path back out of the
+# finished rootfs, from whichever of those two sources the board has, and fails
+# the build when it disagrees with the names here. Neither instance unit exists
+# until systemd creates it at boot, so a build check can only compare strings
+# -- which is the whole point, because the drift it guards against is a drift
+# of the string. Full graph and the rule it follows:
+# docs/plans/data-boot-graph.md.
 
 [Service]
 Type=oneshot
