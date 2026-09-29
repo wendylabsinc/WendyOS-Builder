@@ -67,8 +67,9 @@ tegraflash_custom_post:append() {
 }
 
 # Add fstab entry for config partition on Jetson (RPi5 has it in rpi-fstab)
+# Type auto, not vfat: /config is FAT today and is converted to ext4 in place later.
 add_config_fstab() {
-    echo "LABEL=config  /config  vfat  defaults,nofail  0 0" >> ${IMAGE_ROOTFS}${sysconfdir}/fstab
+    echo "LABEL=config  /config  auto  defaults,nofail  0 0" >> ${IMAGE_ROOTFS}${sysconfdir}/fstab
     mkdir -p ${IMAGE_ROOTFS}/config
 }
 ROOTFS_POSTPROCESS_COMMAND:append:tegra = " add_config_fstab;"

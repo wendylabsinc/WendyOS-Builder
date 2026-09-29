@@ -10,7 +10,8 @@ After=wendyos-config-init.service
 [Mount]
 What=/dev/disk/by-partlabel/config
 Where=/config
-Type=vfat
+# auto, not vfat: /config is FAT today and is converted to ext4 in place later.
+Type=auto
 Options=defaults,nofail
 
 [Install]
