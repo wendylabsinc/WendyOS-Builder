@@ -7,7 +7,28 @@ Documentation=man:systemd.mount(5)
 RequiresMountsFor=/data
 After=data.mount
 
-Before=systemd-journald.service
+# Deliberately NOT Before=systemd-journald.service. That line was here from the
+# start, on the premise that journald creates /var/log/journal/<machine-id> as
+# soon as it sees Storage=persistent, so it had to wait for this bind mount or
+# the directory would land on the rootfs and be shadowed. The premise is false.
+# journald creates that directory only after the flush is requested
+# (journald-manager.c:359-372, gated on flush_requested ||
+# manager_flushed_flag_is_set; the flag is /run/systemd/journal/flushed, :324-336,
+# and the startup call passes flush_requested=false, :2532 -- all at v261.1, the
+# version we ship). At startup journald opens the RUNTIME journal instead, which
+# is what journald.conf(5) means by "initially use volatile storage".
+#
+# The ordering we actually wanted is already upstream: systemd-journal-flush.service
+# carries RequiresMountsFor=/var/log/journal, so the flush cannot run before this
+# mount whatever we write here.
+#
+# The line cost the early-boot journal. It put journald behind data.mount and so
+# behind wendyos-data.service, and journald cannot record what happened before it
+# starts -- measured on jetson-agx-thor 2026-09-29, the journal began 1.06 s after
+# the resolver ran, which is exactly the window where an ordering cycle would be
+# logged. p2c section 5 could only print SKIP. Without the line journald starts at
+# its normal early position, that window lands in /run/log/journal, and the flush
+# moves it here once /data is up.
 DefaultDependencies=no
 
 [Mount]
