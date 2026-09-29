@@ -68,3 +68,18 @@ IMAGE_INSTALL:append = " \
             '' \
         )} \
     "
+
+# /data and the /var/lib bind targets need mount points in the rootfs to
+# mount onto. The var-lib-*.mount units' x-systemd.mkdir option only creates
+# the target on a WRITABLE fs, which the read-only A/B rootfs is not, so
+# without a pre-created directory the binds fail and wendyos-agent/containerd
+# never start -- same reasoning as create_wendyos_qcom_dirs (qcom-image.inc)
+# and create_rpi_mountpoints (rpi-image.inc). This also pre-creates the
+# containerd bind target so a data.mount failure can't leave containerd
+# starting into a directory that never existed on the rootfs (WDY-3127).
+create_wendyos_tegra_dirs() {
+    install -d -m 0755 ${IMAGE_ROOTFS}/data
+    install -d -m 0755 ${IMAGE_ROOTFS}/var/lib/wendy
+    install -d -m 0755 ${IMAGE_ROOTFS}/var/lib/containerd
+}
+ROOTFS_POSTPROCESS_COMMAND:append = " create_wendyos_tegra_dirs;"
