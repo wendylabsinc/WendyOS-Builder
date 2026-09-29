@@ -1,3 +1,4 @@
 LABEL=boot              /boot  vfat    defaults,nofail   0 2
 PARTUUID=RPI_ROOT_UUID  /      ext4    defaults,noatime  0 1
-LABEL=config  /config  vfat  defaults,nofail  0 0
+# Type auto, not vfat: /config is FAT today and is converted to ext4 in place later.
+LABEL=config  /config  auto  defaults,nofail  0 0
