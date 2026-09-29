@@ -998,6 +998,19 @@ helper=$(find_cryptsetup_helper)
 #
 # grow_partition is deliberately NOT repeated here: step 2 already ran it, so
 # prepare_filesystem alone closes the gap.
+#
+# ONE CALLER SITS BEFORE BOTH OF THOSE, and the two paragraphs above are scoped
+# to the rest. The failed write_marker at step 1 aborts before the wipe and
+# before the grow, so for that caller: nothing has been destroyed, so the
+# "contents are gone by intent" reasoning does not apply and is not needed --
+# prepare_filesystem formats only a device carrying no filesystem AND no
+# partition table, or an ext4 superblock that overruns its partition, so a
+# populated /data gets e2fsck and nothing else. And /data is left MOUNTABLE BUT
+# POSSIBLY UNGROWN, smaller than the disk, because step 2 never ran. That is
+# accepted rather than fixed: it is the same outcome prepare_plain tolerates
+# with a warning, and it self-heals on the next boot that does not attempt a
+# conversion, where prepare_plain grows the partition and
+# wendyos-data-resize.service resizes the filesystem online.
 abort() {
     _result=$1
     shift
@@ -1060,7 +1073,23 @@ announce "converting /data to LUKS2 (this device was armed through $CONF)"
 
 # 1) The marker brackets the whole conversion and is cleared LAST, immediately
 #    before the reboot (C34).
-write_marker || finish convert_failed 1 "cannot write $MARKER, so the conversion cannot be made safe to interrupt. /data stays plain"
+#
+#    A FAILED write_marker still leaves the marker behind, which is why this
+#    aborts rather than finishing. `>` opens the file O_CREAT|O_TRUNC before the
+#    redirection can fail, so an ENOSPC on /config leaves a ZERO-BYTE marker --
+#    measured -- and marker_present() tests existence alone (:305), so it reads
+#    that leftover as a conversion in progress. data.mount.d/10-conversion.conf
+#    is ConditionPathExists=!/config/data.enroll.pending, so the leftover skips
+#    the mount on this boot AND on every boot after it, until someone deletes
+#    the file by hand, while the message below says /data stays plain.
+#
+#    abort() is the right primitive twice over: it calls clear_marker, and it
+#    runs prepare_filesystem. The second half is what makes "stays plain" true
+#    at all -- the conversion path deliberately skips prepare_plain (:938), so
+#    /data is NOT prepared when this fires and a blank partition would otherwise
+#    be left with no filesystem on it.
+write_marker \
+    || abort convert_failed "cannot write $MARKER, so the conversion cannot be made safe to interrupt. /data stays plain"
 
 # 2) Grow first (C6). On a re-flashed device the region past the old layout
 #    still holds the PREVIOUS installation's /data, so wiping only the pre-grow
