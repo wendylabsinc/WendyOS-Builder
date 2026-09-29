@@ -29,14 +29,25 @@ fi
 
 DEV=$(readlink -f "$BYLABEL")
 
-# Already a FAT filesystem labelled "config"? Then leave it entirely alone -- it
-# may hold a provisioning seed written by `wendy os install`.
+# Already a filesystem we recognise, labelled "config"? Then leave it entirely
+# alone -- it may hold a provisioning seed written by `wendy os install`.
+#
+# ext4 is accepted as well as vfat because /config is converted from FAT32 to
+# ext4 in place later. Without this, a board that had been converted and then
+# rolled back by A/B to a rootfs older than the conversion would fall through to
+# the mkfs below and lose /config on every boot -- config.mount Requires= this
+# service, so it runs before the mount. Accepting ext4 must therefore ship in
+# the same release as the tolerant `Type=auto` mount entry, ahead of the
+# conversion itself, for the same reason that entry does. Inert until the first
+# board converts.
 TYPE=$(blkid -o value -s TYPE "$DEV" 2>/dev/null || true)
 LABEL=$(blkid -o value -s LABEL "$DEV" 2>/dev/null || true)
-if [ "$TYPE" = "vfat" ] && [ "$LABEL" = "config" ]; then
-    log "$DEV already vfat/config; leaving untouched"
-    exit 0
-fi
+case "${TYPE}:${LABEL}" in
+    vfat:config|ext4:config)
+        log "$DEV already $TYPE/config; leaving untouched"
+        exit 0
+        ;;
+esac
 
 # Anything else -- unformatted, or a stale filesystem left at the same LBA by a
 # previous layout (this board ships with Qualcomm Linux, whose 'persist'
