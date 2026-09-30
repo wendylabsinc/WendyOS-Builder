@@ -10,6 +10,10 @@ Before=wendyos-agent.service
 
 [Service]
 Type=oneshot
+# oneshot otherwise has no start deadline. Leave headroom below the agent's
+# two-minute apply limit; the script bounds Wi-Fi work and reports interruption.
+TimeoutStartSec=110s
+TimeoutStopSec=5s
 RemainAfterExit=yes
 ExecStart=/usr/sbin/wendyos-sysext-apply.sh
 

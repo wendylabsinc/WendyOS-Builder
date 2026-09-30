@@ -8,12 +8,14 @@ on:
     paths:
       - 'tools/publisher/**'
       - '.github/workflows/build.yml'
+      - '.github/workflows/drivers.yml'
       - '.github/workflows/publisher-ci.yml'
   push:
     branches: [main]
     paths:
       - 'tools/publisher/**'
       - '.github/workflows/build.yml'
+      - '.github/workflows/drivers.yml'
       - '.github/workflows/publisher-ci.yml'
 
 jobs:

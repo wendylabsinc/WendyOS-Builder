@@ -9,11 +9,13 @@ import tempfile
 import unittest
 
 
-WORKFLOW = Path(__file__).resolve().parents[2] / ".github/workflows/build.yml"
+ROOT = Path(__file__).resolve().parents[2]
+BUILD_WORKFLOW = ROOT / ".github/workflows/build.yml"
+DRIVER_WORKFLOW = ROOT / ".github/workflows/drivers.yml"
 
 
-def step_script(name):
-    lines = WORKFLOW.read_text().splitlines()
+def step_script(name, workflow=BUILD_WORKFLOW):
+    lines = workflow.read_text().splitlines()
     start = lines.index(f"      - name: {name}")
     start = lines.index("        run: |", start) + 1
     script = []
@@ -63,9 +65,11 @@ with (Path(os.environ["TEST_ROOT"]) / "calls.jsonl").open("a") as f:
     def write_json(self, name, value):
         (self.root / name).write_text(json.dumps(value))
 
-    def run_step(self, name):
-        result = subprocess.run([os.environ.get("PUBLISHER_TEST_BASH", "bash"), "-c", step_script(name)],
-                                env=self.env, text=True, capture_output=True, timeout=20)
+    def run_step(self, name, workflow=BUILD_WORKFLOW):
+        result = subprocess.run([os.environ.get("PUBLISHER_TEST_BASH", "bash"), "-c",
+                                 step_script(name, workflow)],
+                                cwd=ROOT, env=self.env, text=True,
+                                capture_output=True, timeout=20)
         calls = self.root / "calls.jsonl"
         return result, [json.loads(line) for line in calls.read_text().splitlines()] if calls.exists() else []
 
@@ -84,6 +88,24 @@ with (Path(os.environ["TEST_ROOT"]) / "calls.jsonl").open("a") as f:
         self.assertEqual(len(calls[0]["batch"]), 3)
         self.assertTrue(all(row["nightly"] for row in calls[0]["batch"]))
         self.assertEqual(calls[0]["batch"][0]["stability"], "experimental")
+
+    def test_driver_index_batches_unique_devices(self):
+        self.env["MATRIX"] = json.dumps({"include": [
+            {"device": "jetson-agx-thor"},
+            {"device": "jetson-agx-orin"},
+            {"device": "jetson-agx-thor"},
+        ]})
+        result, calls = self.run_step("Update PR master index", DRIVER_WORKFLOW)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["args"][-4:],
+                         ["--pr", "270", "--access-token", "test-token"])
+        self.assertEqual(calls[0]["batch"], [
+            {"device": "jetson-agx-orin", "version": "pr-270",
+             "nightly": True, "stability": "stable"},
+            {"device": "jetson-agx-thor", "version": "pr-270",
+             "nightly": True, "stability": "stable"},
+        ])
 
     def test_release_preserves_driver_gate_and_channels(self):
         self.entry("held", "held", nightly=True)

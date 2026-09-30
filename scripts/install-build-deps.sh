@@ -25,7 +25,7 @@ apt-get -qy upgrade
 # Yocto / OE build prerequisites for blacksail on Ubuntu 24.04, plus a few
 # wendyos-specific extras (jetson tegraflash, image builder).
 apt-get -qy install \
-    gawk wget git-core diffstat unzip texinfo \
+    gawk wget curl git-core diffstat unzip texinfo \
     build-essential chrpath socat cpio \
     python3 python3-pip python3-pexpect python3-venv python3-git \
     xz-utils bzip2 libxml2-utils debianutils iputils-ping \
