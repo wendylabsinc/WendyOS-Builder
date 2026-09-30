@@ -30,3 +30,7 @@ SRC_URI += "file://0004-flash-init-switch-lun-media-in-place.patch"
 # Cap the RAM the exported disks can buffer, so no host command waits on a
 # flush long enough to hit the host's SCSI command timeout.
 SRC_URI += "file://0005-flash-init-bound-the-write-backlog.patch"
+
+# Optional identity capability lets new hosts opt into persistent LUNs while
+# published schema-v2 packages remain usable by older hosts in legacy mode.
+SRC_URI += "file://0006-flash-init-advertise-single-enumeration.patch"
