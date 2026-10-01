@@ -1,0 +1,34 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Benjamin Kelenyi <benjamin@wendy.sh>
+Subject: [PATCH] arm64: dts: qcom: qrb2210-arduino-imola: keep the ADSP remote
+ heap out of the page allocator
+
+agatti.dtsi declares the ADSP FastRPC remote heap as a reusable CMA pool.
+The ADSP has no IOMMU, so fastrpc hands the whole region to the DSP through
+the hypervisor at probe, while the page allocator keeps lending the pool's
+pages to movable allocations. Under memory pressure Linux then touches
+DSP-owned memory and the board resets.
+
+Declare the heap no-map, as monaco.dtsi and lemans.dtsi do.
+
+Upstream-Status: Submitted [https://lore.kernel.org/linux-arm-msm/20261001085247.1897991-1-benjamin@wendy.sh/]
+Signed-off-by: Benjamin Kelenyi <benjamin@wendy.sh>
+---
+--- a/arch/arm64/boot/dts/qcom/qrb2210-arduino-imola.dts
++++ b/arch/arm64/boot/dts/qcom/qrb2210-arduino-imola.dts
+@@ -222,6 +222,15 @@
+ 	};
+ };
+ 
++/*
++ * The ADSP has no IOMMU, so fastrpc hands its whole remote heap to the DSP
++ * through the hypervisor; a reusable pool would also be lent to Linux.
++ */
++&adsp_rpc_remote_heap_mem {
++	/delete-property/ reusable;
++	no-map;
++};
++
+ &gpi_dma0 {
+ 	status = "okay";
+ };

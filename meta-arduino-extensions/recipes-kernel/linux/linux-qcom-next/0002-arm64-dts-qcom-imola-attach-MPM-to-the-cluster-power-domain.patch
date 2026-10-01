@@ -1,0 +1,46 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Benjamin Kelenyi <benjamin@wendy.sh>
+Subject: [PATCH] arm64: dts: qcom: qrb2210-arduino-imola: attach MPM to the
+ cluster power domain
+
+agatti.dtsi makes the MPM the parent power domain of cluster_pd, but the
+MPM driver registers no genpd provider: it consumes the cluster domain
+and programs wakeups from a GENPD_NOTIFY_PRE_OFF notifier, as the binding
+describes. The subdomain link can never resolve, so cpuidle-psci-domain
+defers forever and, because each attempt re-registers providers, the
+retries never settle and the root filesystem is never mounted.
+
+Invert the link for this board as qcom,mpm.yaml documents.
+
+Upstream-Status: Inappropriate [qcom-next snapshot without the irq-qcom-mpm power-domain provider; drop once linux-qcom-next has it]
+Signed-off-by: Benjamin Kelenyi <benjamin@wendy.sh>
+---
+--- a/arch/arm64/boot/dts/qcom/qrb2210-arduino-imola.dts
++++ b/arch/arm64/boot/dts/qcom/qrb2210-arduino-imola.dts
+@@ -231,6 +231,14 @@
+ 	no-map;
+ };
+ 
++/*
++ * The MPM driver consumes the cluster power domain (see qcom,mpm.yaml) rather
++ * than providing one, so the cluster domain cannot take it as its parent.
++ */
++&cluster_pd {
++	/delete-property/ power-domains;
++};
++
+ &gpi_dma0 {
+ 	status = "okay";
+ };
+@@ -335,6 +343,11 @@
+ 	status = "okay";
+ };
+ 
++&mpm {
++	/delete-property/ #power-domain-cells;
++	power-domains = <&cluster_pd>;
++};
++
+ &pm4125_vbus {
+ 	regulator-min-microamp = <500000>;
+ 	regulator-max-microamp = <500000>;
