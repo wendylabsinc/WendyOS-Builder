@@ -3,6 +3,7 @@
 import importlib.util
 import json
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -49,6 +50,20 @@ class MarkerTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 mark.mark_image(self.image)
             run.assert_not_called()
+
+    def test_standalone_image_command_append_separators(self):
+        # BitBake concatenates function-form :append bodies to string-form
+        # IMAGE_CMD values. A missing leading newline turns touch into mkfs args.
+        for path, kind in (
+            ("meta-tegra-extensions/recipes-bsp/uefi/tegra-espimage.bbappend", "esp"),
+            ("meta-qcom-extensions/recipes-core/images/wendyos-esp-image.bb", "vfat"),
+        ):
+            with self.subTest(kind=kind):
+                source = (ROOT / path).read_text()
+                body = re.search(r"IMAGE_CMD:" + kind + r":append\(\) \{\n(.*?)\n\}", source, re.S).group(1)
+                self.assertTrue(body.startswith("\n"), "append must start on a new command line")
+                script = "mkfs_stub() { test \"$#\" -eq 1; }\ntouch() { :; }\nmcopy() { :; }\nset -e\n"
+                subprocess.run(["sh", "-c", script + "mkfs_stub size" + body], check=True)
 
     def test_reject_offset_delimiter(self):
         image = self.image.with_name("bad@@0.wic")

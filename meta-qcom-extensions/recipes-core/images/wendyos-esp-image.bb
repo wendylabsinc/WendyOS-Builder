@@ -68,7 +68,9 @@ setup_efi_folder() {
 IMAGE_PREPROCESS_COMMAND:append = " setup_efi_folder"
 
 # oe_mkvfatfs copies IMAGE_ROOTFS/*, so add the hidden marker explicitly.
+# Preserve the leading blank line: upstream IMAGE_CMD:vfat is a one-line string.
 IMAGE_CMD:vfat:append() {
+
     touch "${WORKDIR}/.metadata_never_index"
     # This reserved empty sentinel is safe to replace on incremental builds.
     mcopy -o -i "${IMGDEPLOYDIR}/${IMAGE_NAME}.vfat" "${WORKDIR}/.metadata_never_index" ::/.metadata_never_index

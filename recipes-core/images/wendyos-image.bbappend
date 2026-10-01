@@ -6,6 +6,7 @@ WENDYOS_FAT_MARKER_SCRIPT := "${THISDIR}/files/mark-fat-volumes.py"
 do_image_wic[file-checksums] += "${WENDYOS_FAT_MARKER_SCRIPT}:True"
 do_image_wic[depends] += "util-linux-native:do_populate_sysroot mtools-native:do_populate_sysroot python3-native:do_populate_sysroot"
 IMAGE_CMD:wic:append() {
+
     "${STAGING_BINDIR_NATIVE}/python3-native/python3" "${WENDYOS_FAT_MARKER_SCRIPT}" "${IMGDEPLOYDIR}/${IMAGE_NAME}.wic"
 }
 
