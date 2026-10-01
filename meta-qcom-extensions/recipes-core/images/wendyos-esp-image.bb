@@ -66,3 +66,9 @@ setup_efi_folder() {
     find ${IMAGE_ROOTFS} -mindepth 1 ! -path "${IMAGE_ROOTFS}/EFI*" -exec rm -rf {} +
 }
 IMAGE_PREPROCESS_COMMAND:append = " setup_efi_folder"
+
+# oe_mkvfatfs copies IMAGE_ROOTFS/*, so add the hidden marker explicitly.
+IMAGE_CMD:vfat:append() {
+    touch ${WORKDIR}/.metadata_never_index
+    mcopy -i ${IMGDEPLOYDIR}/${IMAGE_NAME}.vfat ${WORKDIR}/.metadata_never_index ::/.metadata_never_index
+}
