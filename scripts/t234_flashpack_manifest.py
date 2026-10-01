@@ -11,12 +11,11 @@ import re
 import sys
 import xml.etree.ElementTree as ET
 
-# Schema 3 / family t234-ums: the flashing initrd keeps one USB enumeration and
-# switches LUN media in place. The family moved from "t234" so that older wendy
-# versions reject these packs as too new and ask to be updated.
-SCHEMA = 3
-FAMILY = "t234-ums"
-PROTOCOL = "usb-mass-storage-v2"
+# Single enumeration is an optional recovery capability. The published pack
+# defaults to the existing handshake so older hosts can still flash it.
+SCHEMA = 2
+FAMILY = "t234"
+PROTOCOL = "usb-mass-storage-v1"
 USB_PRODUCT_ID = "0x7023"
 
 # Partition types the host CLI generates natively (protective MBR + both GPT
@@ -144,9 +143,11 @@ def generate(root: pathlib.Path, *, version: str, device: str, storage: str,
         raise ValueError("flash package status template is missing")
     if not (root / "stage2/flashpkg/logs").is_dir():
         raise ValueError("flash package log directory is missing")
-    # The protocol promises in-place media switching; the initrd reads it here.
-    if require_file(root, "stage2/flashpkg/conf/usb-mode").read_text().strip() != "single":
-        raise ValueError("flash package does not request single USB enumeration (conf/usb-mode)")
+    # An unconditional opt-in would make the schema-2 pack incompatible with
+    # older hosts. New hosts select the capability in a per-run image copy.
+    mode_path = root / "stage2/flashpkg/conf/usb-mode"
+    if mode_path.exists() and mode_path.read_text() not in ("legacy", "legacy\n"):
+        raise ValueError("published flash package must default to legacy USB mode")
 
     files: dict[str, dict[str, int | str]] = {}
     for path in sorted(root.rglob("*")):

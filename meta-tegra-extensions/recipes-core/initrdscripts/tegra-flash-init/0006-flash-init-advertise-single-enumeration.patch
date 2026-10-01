@@ -1,0 +1,23 @@
+From: Wendy Labs <engineering@wendy.dev>
+Subject: [PATCH] flash-init: advertise optional single-enumeration capability
+
+Keep the existing identity protocol and published flashpack contract. Old
+hosts ignore this optional JSON field and use the legacy path; capable hosts
+opt in by adding conf/usb-mode to a private command-package copy.
+
+Upstream-Status: Inappropriate [wendy-specific]
+---
+ init-flash.sh | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/init-flash.sh b/init-flash.sh
+--- a/init-flash.sh
++++ b/init-flash.sh
+@@ -197,6 +197,7 @@ write_device_identity() {
+     cat > /tmp/flashpkg_tree/flashpkg/device.json <<EOF
+ {
+   "protocol": "wendy-t234-recovery-v2",
++  "capabilities": ["usb-single-enumeration-v1"],
+   "session_id": "$sernum",
+   "module_id": "$module_id",
+   "module_sku": "$module_sku",
