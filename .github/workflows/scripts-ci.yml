@@ -5,6 +5,12 @@ name: Scripts CI
 on:
   pull_request:
     paths:
+      - 'scripts/mark_fat_volumes_test.py'
+      - 'recipes-core/images/files/mark-fat-volumes.py'
+      - 'recipes-core/images/wendyos-image.bbappend'
+      - 'recipes-bsp/config-partition/**'
+      - 'meta-tegra-extensions/recipes-bsp/uefi/tegra-espimage.bbappend'
+      - 'meta-qcom-extensions/recipes-core/images/wendyos-esp-image.bb'
       - 'scripts/resolve-artifacts*'
       - 'scripts/make-t234-flashpack.sh'
       - 'scripts/t234_flashpack_manifest*'
@@ -48,6 +54,12 @@ on:
   push:
     branches: [main]
     paths:
+      - 'scripts/mark_fat_volumes_test.py'
+      - 'recipes-core/images/files/mark-fat-volumes.py'
+      - 'recipes-core/images/wendyos-image.bbappend'
+      - 'recipes-bsp/config-partition/**'
+      - 'meta-tegra-extensions/recipes-bsp/uefi/tegra-espimage.bbappend'
+      - 'meta-qcom-extensions/recipes-core/images/wendyos-esp-image.bb'
       - 'scripts/resolve-artifacts*'
       - 'scripts/make-t234-flashpack.sh'
       - 'scripts/t234_flashpack_manifest*'
@@ -93,6 +105,8 @@ jobs:
   test:
     name: Resolver map + unit tests
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
@@ -150,6 +164,15 @@ jobs:
 
       - name: Run T234 flashpack manifest tests
         run: python3 -m unittest scripts/t234_flashpack_manifest_test.py
+
+      - name: Run FAT image marker tests
+        run: |
+          sudo apt-get update
+          # Signed Ubuntu repositories supply ephemeral test tools; log the
+          # selected versions instead of pinning unavailable rolling packages.
+          sudo apt-get install -y fdisk mtools
+          dpkg-query -W fdisk mtools
+          python3 -m unittest scripts/mark_fat_volumes_test.py -v
 
       - name: Run Jetson raw disk image tests
         run: python3 -m unittest scripts/make_jetson_disk_img_test.py
