@@ -50,6 +50,22 @@ class MarkerTests(unittest.TestCase):
                 mark.mark_image(self.image)
             run.assert_not_called()
 
+    def test_reject_offset_delimiter(self):
+        image = self.image.with_name("bad@@0.wic")
+        self.image.rename(image)
+        with self.assertRaisesRegex(ValueError, "offset delimiter"):
+            mark.mark_image(image)
+
+    def test_reject_invalid_source_epoch_before_writing(self):
+        self.stamp(2048 * 512, b"FAT16   ")
+        for epoch in ("-1", "not-a-number", "999999999999999999"):
+            with self.subTest(epoch=epoch), mock.patch.dict(mark.os.environ, {"SOURCE_DATE_EPOCH": epoch}), \
+                    mock.patch.object(mark.subprocess, "check_output", return_value=json.dumps({"partitiontable": self.table})), \
+                    mock.patch.object(mark.subprocess, "run") as run:
+                with self.assertRaises(ValueError):
+                    mark.mark_image(self.image)
+                run.assert_not_called()
+
     def test_usage_without_image(self):
         result = subprocess.run([sys.executable, str(spec.origin)], capture_output=True, text=True)
         self.assertNotEqual(result.returncode, 0)
@@ -62,6 +78,7 @@ class MarkerTests(unittest.TestCase):
     @unittest.skipUnless(all(shutil.which(tool) for tool in ("sfdisk", "mformat", "mcopy", "mtype")), "requires native sfdisk and mtools")
     def test_real_images_preserve_other_files(self):
         # Exercise both layouts shipped by WendyOS, without mounts or root.
+        self.image = pathlib.Path(self.tmp.name) / "image with spaces.wic"
         seed = pathlib.Path(self.tmp.name) / "seed"
         seed.write_text("preserve me")
         for label in ("dos", "gpt"):

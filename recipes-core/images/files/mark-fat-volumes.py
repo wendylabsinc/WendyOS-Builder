@@ -38,7 +38,10 @@ def fat_offsets(image, table):
 
 
 def mark_image(image):
-    image = pathlib.Path(image)
+    image = pathlib.Path(image).resolve(strict=True)
+    # mtools reserves @@ for offsets. Spaces are safe as individual argv values.
+    if "@@" in str(image):
+        raise ValueError("image path contains mtools offset delimiter")
     if not stat.S_ISREG(image.stat().st_mode):
         raise ValueError("only regular image files are allowed")
     table = json.loads(subprocess.check_output(["sfdisk", "--json", str(image)]))["partitiontable"]
@@ -48,6 +51,10 @@ def mark_image(image):
         marker.touch()
         if "SOURCE_DATE_EPOCH" in os.environ:
             epoch = int(os.environ["SOURCE_DATE_EPOCH"])
+            if not 0 <= epoch <= 4354819199:  # FAT timestamps end in 2107.
+                raise ValueError("SOURCE_DATE_EPOCH is outside the supported FAT range")
+            # FAT timestamps start in 1980; old source epochs clamp consistently.
+            epoch = max(epoch, 315532800)
             os.utime(marker, (epoch, epoch))
         for offset in offsets:
             target = f"{image}@@{offset}"
