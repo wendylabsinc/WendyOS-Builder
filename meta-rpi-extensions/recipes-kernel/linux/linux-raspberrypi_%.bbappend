@@ -26,3 +26,6 @@ KERNEL_LOCALVERSION:append = "-wendy-mesh2"
 
 # Retire the actual failed pending LE connection, including a second queued dial.
 require recipes-kernel/linux/bluetooth-le-pending.inc
+
+# Keep legacy active scans from re-enabling expired adverts or retaining stale RPA state.
+SRC_URI += "file://0004-bluetooth-legacy-active-scan-retain-expiry.patch"
