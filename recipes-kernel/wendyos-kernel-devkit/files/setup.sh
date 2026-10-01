@@ -43,6 +43,10 @@ sed "s|##DEFAULT_INSTALL_DIR##|$OLD_PREFIX|g" "$D/relocate_sdk.py" > "$D/.reloca
 # Rewrites both each binary's PT_INTERP and the loader's own library search path; with only
 # the former the binaries start and then fail to find libc. PT_INTERP is patched in place,
 # so the new path must be no longer than the original — unpack the devkit somewhere short.
+# Copied sstate executables can be read-only. Relocation edits their bytes;
+# make the archive owner able to write each regular executable first.
+find "$D/toolchain" "$D/kernel-build/scripts" "$D/hosttools" "$RUNTIME" \
+        -type f -perm -u+x -exec chmod u+w {} +
 find "$D/toolchain" "$D/kernel-build/scripts" "$D/hosttools" "$RUNTIME" \
         -type f -perm -u+x -print0 2>/dev/null \
     | xargs -0 -r python3 "$D/.relocate.py" "$RUNTIME" "$LOADER"
