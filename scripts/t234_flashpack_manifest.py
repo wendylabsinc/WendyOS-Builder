@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate and validate the consumed T234 recovery flashpack schema v2."""
+"""Generate and validate the consumed T234 recovery flashpack schema."""
 
 from __future__ import annotations
 
@@ -11,7 +11,10 @@ import re
 import sys
 import xml.etree.ElementTree as ET
 
+# Single enumeration is an optional recovery capability. The published pack
+# defaults to the existing handshake so older hosts can still flash it.
 SCHEMA = 2
+FAMILY = "t234"
 PROTOCOL = "usb-mass-storage-v1"
 USB_PRODUCT_ID = "0x7023"
 
@@ -140,6 +143,11 @@ def generate(root: pathlib.Path, *, version: str, device: str, storage: str,
         raise ValueError("flash package status template is missing")
     if not (root / "stage2/flashpkg/logs").is_dir():
         raise ValueError("flash package log directory is missing")
+    # An unconditional opt-in would make the schema-2 pack incompatible with
+    # older hosts. New hosts select the capability in a per-run image copy.
+    mode_path = root / "stage2/flashpkg/conf/usb-mode"
+    if mode_path.exists() and mode_path.read_text() not in ("legacy", "legacy\n"):
+        raise ValueError("published flash package must default to legacy USB mode")
 
     files: dict[str, dict[str, int | str]] = {}
     for path in sorted(root.rglob("*")):
@@ -159,7 +167,7 @@ def generate(root: pathlib.Path, *, version: str, device: str, storage: str,
 
     return {
         "schema": SCHEMA,
-        "family": "t234",
+        "family": FAMILY,
         "protocol": PROTOCOL,
         "usb_product_id": USB_PRODUCT_ID,
         "wendyos_version": version,
