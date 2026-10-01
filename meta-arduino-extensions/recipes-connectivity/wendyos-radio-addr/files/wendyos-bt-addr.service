@@ -1,0 +1,13 @@
+[Unit]
+Description=Apply the board's factory Bluetooth address
+BindsTo=sys-subsystem-bluetooth-devices-hci0.device
+After=sys-subsystem-bluetooth-devices-hci0.device bluetooth.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/wendyos-radio-addr.sh bt
+
+[Install]
+# Rerun whenever the controller registers again, not only at boot.
+WantedBy=sys-subsystem-bluetooth-devices-hci0.device
