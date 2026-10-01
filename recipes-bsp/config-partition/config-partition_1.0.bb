@@ -18,8 +18,8 @@ do_compile() {
        bs=1M count=${WENDYOS_CONFIG_PART_SIZE_MB}
     mkfs.fat -F 32 -n "config" ${B}/config-partition.fat32.img
     # Protect cards written by any flashing tool, not only Wendy CLI on macOS.
-    touch ${B}/.metadata_never_index
-    mcopy -i ${B}/config-partition.fat32.img ${B}/.metadata_never_index ::/.metadata_never_index
+    touch "${B}/.metadata_never_index"
+    mcopy -o -i "${B}/config-partition.fat32.img" "${B}/.metadata_never_index" ::/.metadata_never_index
 }
 
 do_deploy() {

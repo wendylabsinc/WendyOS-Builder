@@ -38,6 +38,7 @@ IMAGE_ROOTFS_MAXSIZE = "${WENDYOS_ESP_SIZE}"
 # Upstream oe_mkespfs copies IMAGE_ROOTFS/*, which excludes hidden files.
 # Add the marker explicitly before image conversion/deployment.
 IMAGE_CMD:esp:append() {
-    touch ${WORKDIR}/.metadata_never_index
-    mcopy -i ${IMGDEPLOYDIR}/${IMAGE_NAME}.esp ${WORKDIR}/.metadata_never_index ::/.metadata_never_index
+    touch "${WORKDIR}/.metadata_never_index"
+    # This reserved empty sentinel is safe to replace on incremental builds.
+    mcopy -o -i "${IMGDEPLOYDIR}/${IMAGE_NAME}.esp" "${WORKDIR}/.metadata_never_index" ::/.metadata_never_index
 }

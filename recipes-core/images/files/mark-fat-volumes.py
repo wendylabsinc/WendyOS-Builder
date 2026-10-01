@@ -51,11 +51,14 @@ def mark_image(image):
             os.utime(marker, (epoch, epoch))
         for offset in offsets:
             target = f"{image}@@{offset}"
-            # mtools preserves every other file and does not require loop devices.
+            # Replace only the reserved empty sentinel for idempotence. All
+            # other files are preserved, with no mounts or loop devices.
             subprocess.run(["mcopy", "-m", "-o", "-i", target, str(marker), f"::/{MARKER}"], check=True)
             subprocess.run(["mdir", "-i", target, f"::/{MARKER}"], check=True)
     return len(offsets)
 
 
 if __name__ == "__main__":
+    if len(sys.argv) != 2:
+        sys.exit(f"Usage: {sys.argv[0]} <image.wic>")
     print(f"Marked {mark_image(sys.argv[1])} FAT volumes to disable Spotlight")

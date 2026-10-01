@@ -168,7 +168,10 @@ jobs:
       - name: Run FAT image marker tests
         run: |
           sudo apt-get update
+          # Signed Ubuntu repositories supply ephemeral test tools; log the
+          # selected versions instead of pinning unavailable rolling packages.
           sudo apt-get install -y fdisk mtools
+          dpkg-query -W fdisk mtools
           python3 -m unittest scripts/mark_fat_volumes_test.py -v
 
       - name: Run Jetson raw disk image tests

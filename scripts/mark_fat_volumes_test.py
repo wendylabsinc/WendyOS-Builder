@@ -4,8 +4,8 @@ import importlib.util
 import json
 import pathlib
 import shutil
-import struct
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -50,29 +50,38 @@ class MarkerTests(unittest.TestCase):
                 mark.mark_image(self.image)
             run.assert_not_called()
 
+    def test_usage_without_image(self):
+        result = subprocess.run([sys.executable, str(spec.origin)], capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Usage:", result.stderr)
+
     def test_reject_device(self):
         with self.assertRaises(ValueError):
             mark.mark_image("/dev/null")
 
     @unittest.skipUnless(all(shutil.which(tool) for tool in ("sfdisk", "mformat", "mcopy", "mtype")), "requires native sfdisk and mtools")
-    def test_real_mbr_image_preserves_other_files(self):
-        # Two FAT volumes, no mounts or root privileges. The second represents config.
-        mbr = bytearray(512)
-        for i, p in enumerate(self.table["partitions"]):
-            struct.pack_into("<B3sB3sII", mbr, 446 + i * 16, 0, b"\0" * 3, 6, b"\0" * 3, p["start"], p["size"])
-        mbr[510:] = b"\x55\xaa"
-        with self.image.open("r+b") as image:
-            image.write(mbr)
+    def test_real_images_preserve_other_files(self):
+        # Exercise both layouts shipped by WendyOS, without mounts or root.
         seed = pathlib.Path(self.tmp.name) / "seed"
         seed.write_text("preserve me")
-        targets = [f"{self.image}@@{p['start'] * 512}" for p in self.table["partitions"]]
-        for target in targets:
-            subprocess.run(["mformat", "-i", target, "-T", "4096", "::"], check=True)
-            subprocess.run(["mcopy", "-i", target, str(seed), "::/seed"], check=True)
-        self.assertEqual(mark.mark_image(self.image), 2)
-        for target in targets:
-            self.assertEqual(subprocess.check_output(["mtype", "-i", target, "::/seed"]), b"preserve me")
-            self.assertEqual(subprocess.check_output(["mtype", "-i", target, "::/.metadata_never_index"]), b"")
+        for label in ("dos", "gpt"):
+            with self.subTest(label=label):
+                with self.image.open("wb") as image:
+                    image.truncate(8 * 1024 * 1024)
+                kind = "6" if label == "dos" else "EBD0A0A2-B9E5-4433-87C0-68B6B72699C7"
+                layout = f"label: {label}\nunit: sectors\n\n" + "".join(
+                    f"start={p['start']}, size={p['size']}, type={kind}\n" for p in self.table["partitions"]
+                )
+                subprocess.run(["sfdisk", "--no-reread", str(self.image)], input=layout, text=True, check=True, capture_output=True)
+                targets = [f"{self.image}@@{p['start'] * 512}" for p in self.table["partitions"]]
+                for target in targets:
+                    subprocess.run(["mformat", "-i", target, "-T", "4096", "::"], check=True)
+                    subprocess.run(["mcopy", "-i", target, str(seed), "::/seed"], check=True)
+                self.assertEqual(mark.mark_image(self.image), 2)
+                self.assertEqual(mark.mark_image(self.image), 2)  # idempotent
+                for target in targets:
+                    self.assertEqual(subprocess.check_output(["mtype", "-i", target, "::/seed"]), b"preserve me")
+                    self.assertEqual(subprocess.check_output(["mtype", "-i", target, "::/.metadata_never_index"]), b"")
 
 
 if __name__ == "__main__":
