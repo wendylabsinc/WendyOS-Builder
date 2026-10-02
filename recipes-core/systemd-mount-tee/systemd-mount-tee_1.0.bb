@@ -1,8 +1,11 @@
-SUMMARY = "Systemd mount unit for persistent OP-TEE secure storage"
-DESCRIPTION = "Bind mounts /var/lib/tee from /data/tee so OP-TEE secure storage \
-(PKCS#11 tokens, device keys, certificates) persists across A/B OTA updates. \
-Without this, the default /var/lib/tee on the rootfs would be wiped on every A/B \
-partition switch, destroying the device's OP-TEE-backed cryptographic identity."
+SUMMARY = "Keeps OP-TEE secure storage on /config so it survives A/B updates"
+DESCRIPTION = "Ships var-lib-tee.mount, which bind-mounts /var/lib/tee from /config/tee. \
+/var/lib/tee holds the OP-TEE secure storage: PKCS#11 tokens, device keys and, on a \
+Jetson, the fTPM's own NV. The rootfs copy of that path is replaced by every A/B update, \
+so the storage needs a partition that survives the switch. The home is /config and not \
+/data because an encrypted /data would hold the fTPM NV that has to unlock it. The mount \
+is unconditional. On a board without encryption nothing writes there and the bind is \
+simply empty."
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
 
@@ -10,26 +13,15 @@ inherit systemd
 
 FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
 
-SRC_URI = " \
-    file://var-lib-tee.mount \
-    file://var-lib-tee-tpm.mount \
-    "
+SRC_URI = "file://var-lib-tee.mount"
 S = "${UNPACKDIR}"
 
 SYSTEMD_SERVICE:${PN} = "var-lib-tee.mount"
 SYSTEMD_AUTO_ENABLE = "enable"
 
-# With /data encryption on (WENDYOS_DATA_ENCRYPTED=1), OP-TEE secure storage
-# cannot live on /data -- the fTPM's NV would sit inside the volume the fTPM must
-# unlock (circular, see the -tpm unit header). Install the /config-backed variant
-# AS var-lib-tee.mount in that case; a drop-in cannot do this because the base
-# unit's RequiresMountsFor=/data dependency cannot be removed by drop-ins.
-# An unencrypted /data is not circular, so a TPM-only build keeps /data/tee.
-FTPM_MOUNT_VARIANT = "${@'var-lib-tee-tpm.mount' if d.getVar('WENDYOS_DATA_ENCRYPTED') == '1' else 'var-lib-tee.mount'}"
-
 do_install() {
     install -d ${D}${systemd_system_unitdir}
-    install -m 0644 ${UNPACKDIR}/${FTPM_MOUNT_VARIANT} ${D}${systemd_system_unitdir}/var-lib-tee.mount
+    install -m 0644 ${UNPACKDIR}/var-lib-tee.mount ${D}${systemd_system_unitdir}/var-lib-tee.mount
 }
 
 FILES:${PN} += "${systemd_system_unitdir}/var-lib-tee.mount"
