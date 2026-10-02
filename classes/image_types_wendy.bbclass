@@ -31,6 +31,9 @@ do_image_wendy[depends] += "wendyos-update-native:do_populate_sysroot"
 WENDY_ARTIFACT_VERSION ?= "${DISTRO_VERSION}"
 WENDY_ARTIFACT_NAME ?= "${IMAGE_BASENAME}-${MACHINE}-${WENDY_ARTIFACT_VERSION}"
 WENDY_ARTIFACT_COMPRESSION ?= "zstd"
+# All unencrypted boards, including Raspberry Pi MBR, use plain ext4 /data.
+# Per-machine encrypted builds override this to "1" in their local config.
+WENDYOS_DATA_ENCRYPTED ?= "0"
 
 # Output is ${IMAGE_NAME}.wendy (NOT ${IMAGE_NAME}${IMAGE_NAME_SUFFIX}). Modern
 # oe-core already folds IMAGE_NAME_SUFFIX into IMAGE_NAME (IMAGE_LINK_NAME =
@@ -44,6 +47,11 @@ IMAGE_CMD:wendy () {
     if [ -z "${WENDYOS_BOARD_ID}" ]; then
         bbfatal "image_types_wendy: WENDYOS_BOARD_ID is unset; cannot set the artifact's compatible device"
     fi
+    case "${WENDYOS_DATA_ENCRYPTED}" in
+        0) data_encryption=plain ;;
+        1) data_encryption=luks2 ;;
+        *) bbfatal "image_types_wendy: WENDYOS_DATA_ENCRYPTED must be 0 or 1" ;;
+    esac
     # The payload must be exactly the pinned rootfs size (wendyos-rootfs-size.inc):
     # the on-device A/B slots are sized to it, and nightly/release artifacts must
     # be byte-identical in size (see wendyos-rootfs-size.inc). This catches
@@ -61,6 +69,7 @@ IMAGE_CMD:wendy () {
         --name ${WENDY_ARTIFACT_NAME} \
         --version ${WENDY_ARTIFACT_VERSION} \
         --device ${WENDYOS_BOARD_ID} \
+        --data-encryption "${data_encryption}" \
         --compression ${WENDY_ARTIFACT_COMPRESSION} \
         -o ${IMGDEPLOYDIR}/${IMAGE_NAME}.wendy
 }
@@ -68,4 +77,3 @@ IMAGE_CMD:wendy () {
 # IMAGE_ID embeds a timestamp; excluding it keeps the artifact's signature
 # stable across otherwise-identical rebuilds.
 IMAGE_CMD:wendy[vardepsexclude] += "IMAGE_ID"
-
