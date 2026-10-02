@@ -1,0 +1,38 @@
+From: Wendy Labs <support@wendy.com>
+Subject: [PATCH] Bluetooth: preserve legacy advertising across central connects
+
+A central connection can complete while legacy advertising is enabled.
+Clearing HCI_LE_ADV then makes hci_disable_advertising_sync skip the actual
+controller disable. Legacy advertisement rotation repeatedly programs
+parameters on the still-enabled controller and receives Command Disallowed.
+Preserve the flag for central and failed legacy completions so the next
+parameter update explicitly disables advertising first. Keep successful
+peripheral termination and existing extended-advertising behavior unchanged.
+
+Observed with BCM43455: successful central completion followed by repeated
+0x2006/0x0c responses, while peers continue receiving advertisements.
+
+Upstream-Status: Pending [successful-central legacy variant]
+Signed-off-by: Wendy Labs <support@wendy.com>
+---
+--- a/net/bluetooth/hci_event.c
++++ b/net/bluetooth/hci_event.c
+@@ -5654,10 +5654,15 @@
+ 
+ 	hci_dev_lock(hdev);
+ 
+-	/* All controllers implicitly stop advertising in the event of a
+-	 * connection, so ensure that the state bit is cleared.
++	/* A legacy advertiser stops when it accepts a peripheral connection.
++	 * An outgoing central connection does not terminate advertising, which
++	 * may have been enabled while the connection was pending. Keep the
++	 * flag on failed attempts too: a later restart must explicitly disable
++	 * advertising before changing its parameters. Preserve the existing
++	 * extended-advertising bookkeeping here.
+ 	 */
+-	hci_dev_clear_flag(hdev, HCI_LE_ADV);
++	if (ext_adv_capable(hdev) || (!status && role == HCI_ROLE_SLAVE))
++		hci_dev_clear_flag(hdev, HCI_LE_ADV);
+ 
+ 	/* Check for existing connection:
+ 	 *
