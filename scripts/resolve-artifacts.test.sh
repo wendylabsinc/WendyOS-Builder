@@ -97,10 +97,10 @@ test_thor() {
 # One code path serves every board here, so they share one assertion set -- a
 # per-board copy is how one of them ends up with weaker coverage.
 assert_dragonwing_qcomflash() {
-  local device=$1 M=$2 d
+  local device=$1 M=$2 storage=${3:-ufs} d
   d=$(newdir)
   : >"$d/wendyos-image-$M.rootfs.qcomflash.tar.gz"
-  local out; out=$(run_resolver "$device" ufs "$M" "$d"); local rc=$?
+  local out; out=$(run_resolver "$device" "$storage" "$M" "$d"); local rc=$?
   assert_eq "$device: exits 0" 0 "$rc"
   assert_eq "$device: kind"         qcomflash-bundle "$(field IMAGE_KIND <<<"$out")"
   assert_eq "$device: image"        "$d/wendyos-image-$M.rootfs.qcomflash.tar.gz" "$(field IMAGE_FILE <<<"$out")"
@@ -114,6 +114,7 @@ assert_dragonwing_qcomflash() {
 test_dragonwing_qcomflash() {
   assert_dragonwing_qcomflash dragonwing-iq-8275 iq-8275-evk-wendyos
   assert_dragonwing_qcomflash dragonwing-iq-9075 iq-9075-evk-wendyos
+  assert_dragonwing_qcomflash arduino-uno-q arduino-uno-q-wendyos emmc
 }
 
 # A build that deployed no stable symlink still resolves via the versioned name.
@@ -327,6 +328,7 @@ test_matrix_coverage() {
     vm-x86-64/disk
     dragonwing-iq-8275/ufs
     dragonwing-iq-9075/ufs
+    arduino-uno-q/emmc
   )
   local c
   for c in "${combos[@]}"; do

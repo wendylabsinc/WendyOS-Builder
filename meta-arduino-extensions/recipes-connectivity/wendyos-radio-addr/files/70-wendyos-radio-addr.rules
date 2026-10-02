@@ -1,0 +1,3 @@
+# Runs while udev still holds the event, so NetworkManager only ever sees the
+# factory MAC.
+ACTION=="add", SUBSYSTEM=="net", DRIVERS=="ath10k_snoc", RUN+="/usr/bin/wendyos-radio-addr.sh wlan %k"

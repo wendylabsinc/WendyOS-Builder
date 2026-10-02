@@ -32,8 +32,10 @@ WENDYOS_QCOM_OTA_INSTALL = " \
 IMAGE_INSTALL:append = " kernel-devicetree"
 
 # meta-qcom's kernel builds the Wi-Fi, EEPROM and Ethernet PHY modules but installs
-# none of them, and each absence surfaces only as a missing interface.
-IMAGE_INSTALL:append = " packagegroup-wendyos-qcom"
+# none of them, and each absence surfaces only as a missing interface. A board
+# whose hardware is not an EVK's names its own packagegroup in its machine conf.
+WENDYOS_QCOM_BOARD_PACKAGEGROUP ?= "packagegroup-wendyos-qcom"
+IMAGE_INSTALL:append = " ${WENDYOS_QCOM_BOARD_PACKAGEGROUP}"
 IMAGE_INSTALL:append = "${@' ' + d.getVar('WENDYOS_QCOM_OTA_INSTALL') if d.getVar('WENDYOS_OTA') == 'wendy' else ''}"
 
 # wendyos-data-setup is KEPT, unlike the wic boards (rpi/x86) which create and label

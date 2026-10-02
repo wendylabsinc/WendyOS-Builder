@@ -10,11 +10,18 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/../../files/grub:"
 SRC_URI = "file://grubAB-qcom.cfg"
 S = "${UNPACKDIR}"
 
+# The slot numbers come from the layout the machine flashes.
+DEPENDS = "wendyos-partition-conf"
+
 COMPATIBLE_MACHINE = "qcom-wendyos"
 
-# Machine-scoped, not allarch: do_install bakes WENDYOS_QCOM_DTB into the config,
-# so one machine's grub.cfg would otherwise be reused for the other's DTB.
+# Machine-scoped, not allarch: do_install bakes WENDYOS_QCOM_DTB, the slot numbers
+# and the kernel arguments into the config, so one machine's grub.cfg would
+# otherwise be reused for another's.
 PACKAGE_ARCH = "${MACHINE_ARCH}"
+
+# Extra kernel arguments; grub.cfg is the only place the command line is set.
+WENDYOS_QCOM_KERNEL_ARGS ?= ""
 
 # Take over oe-core's virtual for the ESP grub.cfg. grub-efi RDEPENDS on
 # "virtual-grub-bootconf", not on grub-bootconf directly, precisely so a machine
@@ -41,7 +48,25 @@ do_install() {
         *"/${WENDYOS_QCOM_DTB} "*|*" ${WENDYOS_QCOM_DTB} "*) : ;;
         *) bbfatal "WENDYOS_QCOM_DTB '${WENDYOS_QCOM_DTB}' is not in KERNEL_DEVICETREE" ;;
     esac
-    sed -i -e "s|@WENDYOS_QCOM_DTB@|${WENDYOS_QCOM_DTB}|" ${D}${EFI_FILES_PATH}/grub.cfg
+
+    # GRUB addresses the slots by GPT entry number, which is their position in the
+    # layout: every layout here keeps them in the one GPT the ESP lives in.
+    conf="${RECIPE_SYSROOT}/sysroot-only/wendyos/partitions.conf"
+    slot_a=$(awk '/^--partition /{n++} /^--partition .*--name=rootfsA /{print n; exit}' "${conf}")
+    slot_b=$(awk '/^--partition /{n++} /^--partition .*--name=rootfsB /{print n; exit}' "${conf}")
+    if [ -z "${slot_a}" ] || [ -z "${slot_b}" ]; then
+        bbfatal "wendyos-grub-ab: ${conf} declares no rootfsA/rootfsB"
+    fi
+
+    args="${WENDYOS_QCOM_KERNEL_ARGS}"
+    sed -i -e "s|@WENDYOS_QCOM_DTB@|${WENDYOS_QCOM_DTB}|" \
+        -e "s|@ROOTFSA_PART@|${slot_a}|g" \
+        -e "s|@ROOTFSB_PART@|${slot_b}|g" \
+        -e "s|@WENDYOS_QCOM_KERNEL_ARGS@|${args:+ $args}|g" \
+        ${D}${EFI_FILES_PATH}/grub.cfg
+    if grep -q '@[A-Z_]*@' ${D}${EFI_FILES_PATH}/grub.cfg; then
+        bbfatal "wendyos-grub-ab: grub.cfg still has an unsubstituted placeholder"
+    fi
 
     # Pre-create the GRUB environment block. GRUB requires it to be EXACTLY 1024
     # bytes: a 25-byte header line then '#' padding. Shipping it matters -- with no
