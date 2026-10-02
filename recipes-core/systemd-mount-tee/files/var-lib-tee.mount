@@ -1,31 +1,38 @@
 [Unit]
-Description=Bind mount /var/lib/tee (OP-TEE secure storage) from persistent data partition
+Description=Bind mount /var/lib/tee (OP-TEE secure storage) from /config
 Documentation=man:systemd.mount(5)
 
-# OP-TEE secure storage (PKCS#11 tokens, device keys, certificates) is written
-# by tee-supplicant to /var/lib/tee. By default that path is on the rootfs, which
-# an A/B OTA replaces on every update -> the device's keys would be wiped.
-# Back it with /data/tee (persists across A/B switches), same pattern as
-# /var/lib/containerd -> /data/containerd.
-
-# Ensure data partition is mounted and filesystem is fully expanded
-RequiresMountsFor=/data
-After=data.mount
-
+# OP-TEE secure storage (PKCS#11 tokens, device keys, certificates, and on a
+# Jetson the fTPM's own NV) is written by tee-supplicant to /var/lib/tee. That
+# path is on the rootfs, which an A/B OTA replaces on every update, so it needs
+# a home on a partition that survives the switch.
+#
+# That home is /config, NOT /data. Once the fTPM encrypts /data, /data/tee puts
+# the fTPM's NV inside the very volume the fTPM has to unlock. The unit graph
+# says the same thing and deadlocks on it: data.mount -> wendyos-data.service ->
+# /dev/tpmrm0 -> tee-ftpm-modprobe -> tee-supplicant -> var-lib-tee.mount ->
+# data.mount. /config is mounted early from a partition nothing encrypts, it is
+# independent of /data, and it survives A/B updates just as /data does.
+#
+# A plaintext partition is an acceptable home because OP-TEE encrypts and
+# integrity-protects the REE-FS content itself, under keys derived from the
+# hardware unique key. /config gives persistence, not confidentiality -- nothing
+# else put there inherits that protection.
+DefaultDependencies=no
+RequiresMountsFor=/config
 
 # Must be mounted before tee-supplicant uses /var/lib/tee for secure storage.
 # Assumes source-built OP-TEE (USE_PREBUILT_OPTEE=0, the meta-tegra default and
 # this project's config): provider optee-client, service tee-supplicant.service,
 # CFG_TEE_FS_PARENT_PATH=/var/lib/tee. The prebuilt provider (nvidia-l4t-optee,
 # USE_PREBUILT_OPTEE=1) uses nv-tee-supplicant.service and an NVIDIA-controlled
-# storage path — we order before it too so the ordering is not silently lost if
+# storage path -- we order before it too so the ordering is not silently lost if
 # the provider is ever switched, but the /var/lib/tee path below would then need
 # re-checking.
 Before=tee-supplicant.service nv-tee-supplicant.service
-DefaultDependencies=no
 
 [Mount]
-What=/data/tee
+What=/config/tee
 Where=/var/lib/tee
 Type=none
 Options=bind,nosuid,nodev,x-systemd.mkdir

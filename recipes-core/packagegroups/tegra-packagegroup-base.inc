@@ -25,11 +25,12 @@ RDEPENDS:${PN}:append = " optee-client"
 RDEPENDS:${PN}:append = " optee-os"
 
 # OP-TEE secure-storage persistence:
-# bind-mount /var/lib/tee -> /data/tee so PKCS#11 tokens / device keys
-# survive A/B OTA (the rootfs copy of /var/lib/tee is wiped on
-# every A/B switch). 
+# owns where /var/lib/tee lives, so PKCS#11 tokens, device keys and the fTPM's
+# own NV survive A/B OTA (the rootfs copy of /var/lib/tee is wiped on every A/B
+# switch).
 # Gated on OP-TEE, which is present on every Tegra machine.
 # QEMU/RPi have no OP-TEE.
-# The mount itself self-gates on /data via RequiresMountsFor=/data, so it is
-# inert on any Tegra config that lacks a /data partition.
+# The mount is unconditional: /var/lib/tee is bound from /config/tee on every
+# Tegra board, encrypted or not. /config is the home rather than /data because
+# the fTPM's NV cannot live inside the volume the fTPM unlocks.
 RDEPENDS:${PN}:append = " systemd-mount-tee"
