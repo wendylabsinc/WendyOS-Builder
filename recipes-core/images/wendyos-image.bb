@@ -42,10 +42,20 @@ IMAGE_FEATURES += "${@oe.utils.ifelse(d.getVar('WENDYOS_DEBUG') == '1', d.getVar
 #   serial-getty@<port> (from SERIAL_CONSOLES) -> named serial login
 #                                                 WENDYOS_ENABLE_UART_LOGIN (default 0; CI opts in on PR)
 #   console-getty (login on /dev/console)      -> the LAST console= on the
-#       cmdline: the serial port on Tegra/RPi/qemu, but tty0 (the VT) on x86.
-#       Grouped per board via WENDYOS_CONSOLE_LOGIN_TYPE so the operator's
-#       UART/VT choice governs the login they actually get. (Tegra sets no
-#       SERIAL_CONSOLES, so console-getty *is* its serial login — keep it UART.)
+#       cmdline, which is NOT the serial port everywhere, as this comment
+#       used to claim. Measured on jetson-agx-orin 2026-10-04: Tegra and x86
+#       both end their cmdline console=tty0, so /dev/console is the VT on
+#       both. Grouped per board via WENDYOS_CONSOLE_LOGIN_TYPE so the
+#       operator's UART/VT choice governs the login they actually get.
+#       That grouping is harmless rather than load-bearing on the boards with
+#       a real UART login, because Tegra and RPi both set SERIAL_CONSOLES
+#       (meta-tegra tegra234.inc:9 ttyTCU0 and tegra264.inc:13 ttyUTC0; ttyS0
+#       on rpi3/rpi4 and ttyAMA0 on rpi5), so their serial login comes from
+#       serial-getty@ and not from console-getty. RPi's own /dev/console was
+#       not measured.
+#       The same fact is why a recovery key written to /dev/console on a
+#       Jetson reaches nobody -- see C75 in
+#       docs/plans/configurable-data-encryption.md.
 #
 # The kernel `console=` bootarg (boot + printk output, not a getty) is separate:
 # on RPi it is gated on WENDYOS_DEBUG_UART (rpi-cmdline.bbappend); Tegra emits it
@@ -56,8 +66,12 @@ IMAGE_FEATURES += "${@oe.utils.ifelse(d.getVar('WENDYOS_DEBUG') == '1', d.getVar
 # (a 10- file beats 90-) + drop any enablement symlinks; VT additionally zeroes
 # logind's auto-VTs (stops the autovt@ VT-switch spawns a preset can't reach).
 
-# console-getty logs in on /dev/console, whose identity is board-specific:
-# serial-console boards -> group with UART; x86 (console=tty0) -> group with VT.
+# console-getty logs in on /dev/console, whose identity is board-specific and
+# is NOT always the UART: Qualcomm boots console=ttyMSM0 alone so it really is
+# the serial port, while Tegra and x86 both end their cmdline console=tty0 and
+# so land on the VT (measured 2026-10-04). Tegra is grouped with UART anyway
+# because its real serial login is serial-getty@ from SERIAL_CONSOLES, and the
+# operator's UART choice should govern both together.
 WENDYOS_CONSOLE_LOGIN_TYPE ?= "uart"
 WENDYOS_CONSOLE_LOGIN_TYPE:x86-wendyos = "vt"
 
