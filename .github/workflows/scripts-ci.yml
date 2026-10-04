@@ -132,7 +132,8 @@ jobs:
                      recipes-kernel/wendyos-kernel-devkit/files/setup.sh \
                      meta-qcom-extensions/files/grub/grubAB-qcom.test.sh \
                      scripts/qcom-npu.test.sh \
-                     meta-qcom-extensions/recipes-core/wendyos-config-setup/files/wendyos-config-init.sh
+                     meta-qcom-extensions/recipes-core/wendyos-config-setup/files/wendyos-config-init.sh \
+                     recipes-support/data-device/files/wendyos-data.sh
           shellcheck recipes-core/wendyos-identity/files/wendyos-identity-lib.sh \
                      recipes-core/wendyos-identity/files/update-mdns-uuid.sh \
                      recipes-core/wendyos-identity/files/update-mdns-uuid.test.sh \

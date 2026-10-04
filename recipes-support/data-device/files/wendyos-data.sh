@@ -104,6 +104,7 @@ TOOL_TIMEOUT=120
 # default of PCR 7 applies, and no conversion can reach the enrolment step on
 # such an image anyway.
 TPM_PCRS="7"
+# shellcheck source=/dev/null  # generated at build time, not in the tree
 [ -r /etc/data-crypt.conf ] && . /etc/data-crypt.conf
 PCR_ARG=""
 POLICY="SRK-only"
