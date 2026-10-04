@@ -81,10 +81,6 @@ MARKER="${CONFIG_DIR}/data.enroll.pending"
 RECORD_MNT=/run/wendyos-data-record
 RECORD_NAME=.encryption
 
-# Interim recovery-key escrow (D3), carried over from data-enroll.sh.
-REC_FILE=/run/wendyos/data-recovery-key
-REC_ERR=/run/wendyos-data.recovery-err
-
 # Trailing slack (~4 MiB) tolerated as "fills the disk", the same predicate the
 # two grow programs this one absorbed used.
 END_SLACK=8192
@@ -117,7 +113,7 @@ fi
 # Emit to the console + serial UART only, when present -- never to stdout. This
 # service has no StandardOutput override, so stdout is the journal, and the
 # journal is persisted on /data. A write straight to the device node does not
-# pass through journald. The recovery key uses this and only this.
+# pass through journald.
 console() {
     for con in /dev/console /dev/ttyS0; do
         if [ -w "$con" ]; then
@@ -987,7 +983,7 @@ helper=$(find_cryptsetup_helper)
 # would format it any more: wendyos-data-init.service and grow-data-part both
 # used to catch a blank /data on the next boot, and both are gone (C57).
 # Without the mkfs the flag is still set, the next boot retries the conversion,
-# aborts in the same place, and /data never mounts again. The recovery-key step
+# aborts in the same place, and /data never mounts again. The TPM-seal step
 # makes that easy to reach -- a TPM that is present but unusable fails there on
 # every boot, forever.
 #
@@ -1031,9 +1027,8 @@ abort() {
 }
 
 # Abort after the container exists. It was formatted moments ago and holds
-# nothing of value, which is what makes the rollback obviously safe (O13):
-# erasing it costs nothing and the next boot re-runs the whole conversion
-# cleanly. That property is why the shipped order authors the volume first and
+# nothing of value, which is what makes the rollback obviously safe: erasing it
+# costs nothing and the next boot re-runs the whole conversion cleanly. That property is why the shipped order authors the volume first and
 # manages keys second (C33).
 #
 # Same filesystem rule as abort() above, and for the same reason -- but the
@@ -1049,11 +1044,13 @@ abort_container() {
     rm -f "$BK" 2>/dev/null || true
     # The marker is cleared ONLY when the container is really gone. If the
     # rollback erase fails the container survives, and it is a container with a
-    # usable keyslot and an empty ext4 inside -- at the TPM-seal and
-    # recovery-key doors it even has a working TPM keyslot. Clearing the marker
-    # there would let the NEXT boot take the "LUKS, fills disk, no marker" row,
-    # unlock it and mount an encrypted /data with no recovery key: silently, and
-    # in exactly the state this abort just refused to leave the device in (O13).
+    # usable keyslot and an empty ext4 inside -- past the TPM-seal door it even
+    # has a working TPM keyslot. Clearing the marker there would let the NEXT
+    # boot take the "LUKS, fills disk, no marker" row, unlock it and mount a
+    # half-made volume as if the conversion had finished -- silently, and with
+    # the conversion record and the status file never written. The reason is no
+    # longer the missing recovery key, which is now the normal end state: it is
+    # that this container was abandoned mid-conversion and nothing says so.
     #
     # Keeping the marker instead puts the next boot on the "LUKS + marker"
     # row -- an enrolment died partway, the container holds nothing, erase it
@@ -1178,100 +1175,28 @@ cryptsetup close "$INIT_MAP" 2>/dev/null || true
 systemd-cryptenroll --unlock-key-file="$BK" --tpm2-device=auto $PCR_ARG "$DATA" \
     || abort_container convert_failed "sealing a keyslot to the TPM failed"
 
-# --- Recovery key retrieval (wendy CLI contract) ---
-# The key printed on the console below, and written to
-# /run/wendyos/data-recovery-key, is lost at reboot by design: /run is tmpfs.
-# Under the two-reboot conversion (C4) that reboot is seconds away, so the
-# console print is in practice the only copy -- see D3, the escrow question.
+# --- Recovery key delivery (wendy CLI contract) ---
+# This conversion enrols NO recovery key, so the volume leaves here TPM-only.
+# That is deliberate. The conversion runs at early boot and reboots seconds
+# later: /dev/console is tty0 on Jetson with nothing attached to it, /run is
+# tmpfs that the reboot destroys, and no login prompt happens in between. A key
+# created here reaches nobody.
 #
-# A fresh recovery key can be minted at ANY time on a booted device whose /data
-# is unlocked. Run as root:
+# The key is created after the reboot instead, on a running device, by the wendy
+# CLI calling /usr/sbin/data-recovery-key (shipped by the data-crypt recipe):
+# "enroll" prints a new key on stdout and drops any previous one,
+# "status" says whether one is enrolled yet. This works against a mounted, in-use
+# volume works -- run on an AGX Orin on 2026-10-04. The OS never writes the key
+# to disk and never logs it, so the caller who asked for it is the only one who
+# gets it.
 #
-#     systemd-cryptenroll --unlock-tpm2-device=auto --recovery-key \
-#         --wipe-slot=recovery /dev/disk/by-partlabel/data
-#
-# The TPM authorises the change, a new recovery key is printed on stdout, and
-# --wipe-slot=recovery removes the PREVIOUS recovery slot. Per
-# systemd-cryptenroll(1) the enrollment completes first and the newly added slot
-# is always excluded from the wipe, so there is no window with zero recovery
-# keys. The new key lands on stdout: do not pipe that command into the journal
-# or a log file, for the same reason this script keeps the key off stdout.
-#
-# This ROTATES: any recovery key issued earlier stops working. That is
-# deliberate, so stale printouts cannot stay valid.
-#
-# The TPM keyslot is untouched -- --wipe-slot=recovery only matches slots
-# unlocked by a recovery key. The slot count stays at 2 (tpm2 + recovery)
-# however often this is run, so it can never exhaust the 32 keyslots of a LUKS2
-# header.
-#
-# Keyslots live in the LUKS2 header on the partition, NOT in the TPM, so this
-# consumes no fTPM NV.
-#
-# UNVERIFIED ON HARDWARE: that --unlock-tpm2-device=auto succeeds while the
-# volume is mounted and in use. It operates on the block device and unlocks a
-# keyslot independently of the active dm-crypt mapping, so it is expected to
-# work, but it has not been run on a device.
+# Until the CLI does that, the TPM keyslot is the only way into /data and a TPM
+# state loss makes the volume unopenable. That window is accepted, because the
+# alternative was a key nobody could read.
 
-# 7) Enrol a recovery key. REQUIRED, not best effort (O13): step 8 drops the
-#    bootstrap slot right after, so without a recovery key the TPM keyslot is
-#    the only way into /data and any TPM state loss makes it permanently
-#    unopenable. On failure, roll back: this container was formatted a few lines
-#    above and holds nothing, so erasing it costs nothing and the next boot
-#    re-runs the whole conversion cleanly.
-REC="$(systemd-cryptenroll --unlock-key-file="$BK" --recovery-key "$DATA" 2>"$REC_ERR")"
-rc=$?
-if [ "$rc" -ne 0 ] || [ -z "$REC" ]; then
-    announce "recovery-key enrollment failed (exit status $rc), stderr follows:"
-    # `|| [ -n "$line" ]` also emits a last line that lacks a trailing newline.
-    emitted=0
-    line=""
-    while IFS= read -r line || [ -n "$line" ]; do
-        [ -n "$line" ] || continue
-        announce "    | $line"
-        emitted=1
-    done < "$REC_ERR"
-    [ "$emitted" -eq 1 ] || announce "    | (no stderr output)"
-    rm -f "$REC_ERR" 2>/dev/null || true
-    abort_container convert_failed "no recovery key could be enrolled, and a volume the TPM alone can open is one TPM state loss away from being unopenable"
-fi
-rm -f "$REC_ERR" 2>/dev/null || true
-
-# Convenience copy on tmpfs so a provisioning step can read the key without
-# scraping the console. Best effort: the keyslot is enrolled either way, so a
-# failure here costs a copy, not access to /data. umask 077 in a subshell keeps
-# the file 0600 from creation, as with the bootstrap key above.
-rec_saved=1
-mkdir -p "${REC_FILE%/*}" 2>/dev/null && (
-    umask 077
-    {
-        echo "# VOLATILE -- /run is tmpfs, and this boot ends in a reboot."
-        echo "# To mint a fresh key, see \"Recovery key retrieval (wendy CLI"
-        echo "# contract)\" in /usr/sbin/wendyos-data.sh."
-        echo "# created may be wrong: the clock is not necessarily set yet."
-        echo "# luks_uuid is the field that identifies the volume."
-        echo "recovery_key=$REC"
-        echo "luks_uuid=$(cryptsetup luksUUID "$DATA" 2>/dev/null)"
-        echo "created=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
-    } > "$REC_FILE"
-) || rec_saved=0
-
-announce "=================== /data RECOVERY KEY ==================="
-announce "SAVE THIS -- shown once. Unlocks /data if the TPM cannot."
-console "  $REC"
-announce "  (console only, never the journal -- read $REC_FILE before the"
-announce "   reboot, or mint a fresh key per the retrieval block in this script)"
-announce "INTERIM bring-up only (console + /run, not the journal)."
-if [ "$rec_saved" -eq 1 ]; then
-    announce "Also written to $REC_FILE -- VOLATILE, lost at the reboot below."
-else
-    announce "NOT written to $REC_FILE -- the key above is the ONLY copy, save it now."
-fi
-announce "========================================================="
-
-# 8) Drop the bootstrap slot -- only the TPM and recovery keyslots remain.
-#    --wipe-slot=password spares the recovery slot (type recovery) and the TPM
-#    slot (type tpm2).
+# 8) Drop the bootstrap slot, leaving the TPM keyslot as the only one.
+#    --wipe-slot=password matches password-type slots only, so it spares the
+#    TPM slot (type tpm2). There is no recovery slot here to spare.
 systemd-cryptenroll --unlock-key-file="$BK" --wipe-slot=password "$DATA" \
     || announce "WARN: could not wipe the bootstrap slot"
 rm -f "$BK" 2>/dev/null || true
@@ -1315,7 +1240,7 @@ fi
 #     retry can only ever erase a freshly formatted, still-empty volume.
 clear_marker
 
-write_status encrypted "/data was converted to LUKS2 (TPM $POLICY + recovery key, secure_erase=$erase_method), rebooting into the encrypted state"
+write_status encrypted "/data was converted to LUKS2 (TPM $POLICY, no recovery key yet, secure_erase=$erase_method), rebooting into the encrypted state"
 announce "/data is now LUKS2. Rebooting into the encrypted state."
 
 # The reboot is the second half of the two-reboot conversion (C4). --no-block

@@ -1,0 +1,89 @@
+#!/bin/sh
+# Create or check the LUKS recovery key for /data, on a running device.
+#
+# The conversion in wendyos-data.sh deliberately enrols NO recovery key. It
+# runs at early boot, seconds before a reboot, with no console a user can read
+# and no /run that survives, so a key created there reaches nobody. A volume the
+# TPM alone can open is still correct at that point: the key is not needed to
+# boot, only to recover, and recovery is something an owner asks for later.
+#
+# So the key is created on demand instead, by the wendy CLI calling this script
+# over an authenticated channel. The key goes to STDOUT and nowhere else. It is
+# never written to disk, never logged, never echoed to a console. The caller
+# that asked for it is the only one who gets it, and what they do with it is
+# their business.
+#
+# Every enrol REPLACES the last one: --wipe-slot=recovery drops the previous
+# recovery slot, so there is no "one chance" and no old printout that stays
+# valid. The
+# enrolment completes before the wipe and the new slot is excluded from it, so
+# the volume is never left with zero recovery keys. The TPM slot is untouched:
+# --wipe-slot=recovery matches only slots a recovery key opens, so the slot
+# count never grows past tpm2 plus one recovery and can never exhaust the 32
+# keyslots of a LUKS2 header. --unlock-tpm2-device=auto authorises the change
+# with no password, because a device that can still unlock its own volume is
+# proof enough.
+set -u
+
+# The raw partition, not /dev/mapper/data. Keyslots live in the LUKS2 header on
+# the partition, and cryptenroll edits that header independently of whatever
+# dm-crypt mapping is active, so this works while /data is mounted and in use.
+DEV=/dev/disk/by-partlabel/data
+
+usage() {
+    echo "usage: data-recovery-key status|enroll" >&2
+    echo "  status  exit 0 enrolled, 1 none, 2 cannot tell" >&2
+    echo "  enroll  print a fresh recovery key on stdout, replacing any previous one" >&2
+}
+
+verb="${1:-}"
+
+if [ ! -e "$DEV" ]; then
+    echo "data-recovery-key: $DEV does not exist -- /data is not encrypted on this device" >&2
+    exit 2
+fi
+
+case "$verb" in
+status)
+    # --dump-json-metadata, NOT the plain luksDump report. The human-readable
+    # dump is assembled partly by cryptsetup and partly by systemd's token
+    # plugins, and it SPLITS ACROSS STREAMS: measured on an AGX Orin
+    # 2026-10-04, stdout ended at "Tokens:" plus "0: systemd-tpm2" while the
+    # systemd-recovery line came out on stderr. A parser reading stdout alone
+    # reported "none" on a volume that had a recovery key -- which would have
+    # told the CLI to rotate a key somebody had already saved. The JSON is a
+    # machine interface and carries every token on stdout.
+    #
+    # A failure here means a plain partition, a missing tool or a cryptsetup
+    # too old for the option. All three mean the same thing: not knowable.
+    if ! dump=$(cryptsetup luksDump --dump-json-metadata "$DEV" 2>/dev/null); then
+        echo unknown
+        exit 2
+    fi
+    
+    # Whitespace tolerated around the colon so a future pretty-printed dump
+    # still matches. "systemd-recovery" is systemd's own token type string
+    # (cryptenroll.c:105) and appears nowhere else in LUKS2 metadata.
+    if printf '%s\n' "$dump" | grep -qE '"type"[[:space:]]*:[[:space:]]*"systemd-recovery"'; then
+        echo enrolled
+        exit 0
+    fi
+    
+    echo none
+    exit 1
+    ;;
+
+enroll)
+    # exec, so the key reaches the caller's stdout with nothing in between and
+    # the exit status is cryptenroll's own. Never capture this output.
+    # --wipe-slot=recovery on a volume that has no recovery slot is a clean
+    # no-op, so the first key and every later replacement are the same command.
+    exec systemd-cryptenroll --unlock-tpm2-device=auto --recovery-key \
+        --wipe-slot=recovery "$DEV"
+    ;;
+
+*)
+    usage
+    exit 2
+    ;;
+esac

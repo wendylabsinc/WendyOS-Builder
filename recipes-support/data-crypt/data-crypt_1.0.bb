@@ -1,18 +1,24 @@
 SUMMARY = "Crypt stack and TPM PCR policy for the /data partition"
 DESCRIPTION = "Puts the LUKS2 + TPM userspace on the image and generates \
 /etc/data-crypt.conf, the TPM PCR policy the /data resolver reads when it seals \
-a keyslot. It enrols nothing itself: the resolver (wendyos-data.service, from \
-the data-device recipe) owns the conversion and the boot-time unlock. This \
-recipe exists so the tools that work needs are present, and so the PCR list is \
-a build-time setting rather than something baked into the script. \
-Board-agnostic; pulled into an image by the per-board image include when \
+a keyslot. The resolver (wendyos-data.service, from the data-device recipe) \
+owns the conversion and the boot-time unlock. This recipe exists so the tools \
+that work needs are present, and so the PCR list is a build-time setting \
+rather than something baked into the script. It also ships \
+/usr/sbin/data-recovery-key, which mints a LUKS recovery key on demand after \
+the conversion, because the conversion itself enrols none. Board-agnostic; \
+pulled into an image by the per-board image include when \
 WENDYOS_DATA_ENCRYPTED=1."
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
 
 PR = "r0"
 
-# No SRC_URI: the only file this recipe ships is generated in do_install below.
+SRC_URI = " \
+    file://data-recovery-key \
+    "
+
+# /etc/data-crypt.conf is not here: it is generated in do_install below.
 S = "${UNPACKDIR}"
 
 # Board-agnostic: parsed on every machine but only pulled into an image when
@@ -33,11 +39,19 @@ do_install() {
 # TPM_PCRS: PCR list for systemd-cryptenroll --tpm2-pcrs; empty = SRK-only.
 TPM_PCRS="${WENDYOS_TPM_PCRS}"
 EOF
+
+    # No .sh suffix: this is a command an operator and the wendy CLI invoke by
+    # name, not an implementation detail of a unit.
+    install -d ${D}${sbindir}
+    install -m 0755 ${UNPACKDIR}/data-recovery-key ${D}${sbindir}/data-recovery-key
 }
 
 CONFFILES:${PN} = "${sysconfdir}/data-crypt.conf"
 
-FILES:${PN} = "${sysconfdir}/data-crypt.conf"
+FILES:${PN} = " \
+    ${sysconfdir}/data-crypt.conf \
+    ${sbindir}/data-recovery-key \
+    "
 
 # The crypt stack the resolver looks up at runtime. Without one of these it
 # reports no_support and leaves /data plain, so each entry is named by the call
