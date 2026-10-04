@@ -81,6 +81,36 @@ MARKER="${CONFIG_DIR}/data.enroll.pending"
 RECORD_MNT=/run/wendyos-data-record
 RECORD_NAME=.encryption
 
+# What the conversion carries across the wipe, as paths RELATIVE to /data.
+# A conversion destroys everything on /data, and these few files are what make
+# the device itself: the uuid and the name the fleet knows it by, and the
+# owner's saved network connections. Without them the device comes back a
+# stranger with no way onto the network.
+#
+# They go to /config, which survives the wipe, and setup-etc-binds.sh puts them
+# back on the next boot and then drops the archive. Adding an entry is one line
+# here; the restore reads the list out of the archive and needs no change.
+PRESERVE_ITEMS="etc/wendyos/device-uuid etc/wendyos/device-name etc/NetworkManager/system-connections"
+
+# ONE ARCHIVE, not a mirrored copy of the tree, because /config is FAT32 and
+# FAT can hold neither of the two things that matter here. Measured on a Thor:
+#
+#   install -m 600 /dev/null /config/<dir>/probe   -> the file reads back 755
+#   touch '/config/<dir>/Cafe: Free WiFi.nmconnection' -> Invalid argument
+#
+# The mode is lost silently (fat_setattr in fs/fat/file.c drops the mode change
+# and still returns success), and NetworkManager REFUSES to load a connection
+# file with any of 0077 set, so copied-out profiles would come back ignored. A
+# colon is one of nine characters FAT rejects in a name (vfat_bad_char in
+# fs/fat/namei_vfat.c), and plenty of network names contain one.
+#
+# Inside a tar both are just bytes. The only name FAT ever sees is one we
+# choose. The directory around the archive stays, so a second file can join it
+# later without moving anything.
+PRESERVE_DIR="${CONFIG_DIR}/backup"
+PRESERVE_TAR="${PRESERVE_DIR}/configuration.tar"
+PRESERVE_MNT=/run/wendyos-data-preserve
+
 # Trailing slack (~4 MiB) tolerated as "fills the disk", the same predicate the
 # two grow programs this one absorbed used.
 END_SLACK=8192
@@ -953,7 +983,10 @@ if [ ! -e /dev/tpmrm0 ] && [ ! -e /dev/tpm0 ]; then
 fi
 
 missing=""
-for tool in cryptsetup systemd-cryptenroll mkfs.ext4 wipefs sgdisk parted partprobe; do
+# tar is in the sweep for the same reason as the rest: preserve_identity()
+# needs it, and a missing tar has to report no_support here, before anything is
+# touched, rather than abort a conversion that has already started.
+for tool in cryptsetup systemd-cryptenroll mkfs.ext4 wipefs sgdisk parted partprobe tar; do
     have "$tool" || missing="$missing $tool"
 done
 find_cryptsetup_helper >/dev/null || missing="$missing systemd-cryptsetup"
@@ -1067,6 +1100,110 @@ abort_container() {
     finish "$_result" 1 "$_msg"
 }
 
+# --- carrying the device identity across the wipe ------------------------
+# Pack $PRESERVE_ITEMS off the raw /data partition into $PRESERVE_TAR on
+# /config, so the next boot can put them back into the empty volume. Called
+# while the partition is still pristine: after the marker, so an interruption
+# here is bracketed like the rest of the conversion, and before the grow, so
+# nothing has moved the partition out from under the filesystem yet.
+#
+# FAILS CLOSED. Any failure aborts the conversion and leaves /data plain,
+# because a device that comes back without its uuid is a stranger to the fleet
+# and that is worse than not encrypting at all. Refusing costs only the
+# encryption, which the next boot retries.
+#
+# abort(), not abort_container(): no container exists at this point.
+preserve_identity() {
+    config_mounted \
+        || abort convert_failed "$CONFIG_DIR is not mounted, so the device identity cannot be carried across the wipe. /data stays plain"
+
+    # Ask the partition what it holds BEFORE trying to mount it. Converting a
+    # blank or freshly carved /data is a normal start with nothing to carry,
+    # and the mount exit code cannot tell that apart from a mount that failed
+    # for a real reason.
+    #
+    # probe_fs, not probe_data: probe_data ends the program through finish(),
+    # which does NOT clear the marker, and the marker is already written by
+    # now. A marker left behind keeps data.mount skipped on this boot and on
+    # every boot after it (C38), so every exit from here has to go through
+    # abort().
+    probe_fs "$DATA"
+    [ "$fs_rc" -eq 0 ] || [ "$fs_rc" -eq 2 ] \
+        || abort convert_failed "cannot probe $DATA (blkid exit $fs_rc) to carry the device identity across the wipe. /data stays plain"
+
+    if [ "$fs_type" != "ext4" ]; then
+        announce "nothing to carry across the wipe: $DATA holds ${fs_type:-no filesystem at all}"
+        return 0
+    fi
+
+    # Read-only, and noload: a /data that was not unmounted cleanly has a dirty
+    # ext4 journal, and replaying it needs write access, so a plain `-o ro`
+    # mount of such a partition fails. Nothing here writes to /data and the
+    # next step destroys it anyway, so skipping the replay costs nothing.
+    mkdir -p "$PRESERVE_MNT" 2>/dev/null
+    if ! mount -t ext4 -o ro,noload "$DATA" "$PRESERVE_MNT" 2>/dev/null; then
+        rmdir "$PRESERVE_MNT" 2>/dev/null || true
+        abort convert_failed "cannot mount $DATA read-only to carry the device identity across the wipe. /data stays plain"
+    fi
+
+    # Name only what is really there. Absent is normal: a device may never have
+    # joined a network, so it has no connections to carry, and tar would fail
+    # on a member that does not exist.
+    _why=""
+    _carried=""
+    set --
+    for _item in $PRESERVE_ITEMS; do
+        [ -e "${PRESERVE_MNT}/${_item}" ] || continue
+        set -- "$@" "$_item"
+        _carried="$_carried $_item"
+    done
+
+    # One tar run writes the whole archive, so a leftover from an attempt that
+    # aborted earlier is replaced rather than merged with this one.
+    #
+    # With nothing to carry we write NOTHING and leave any existing archive
+    # alone. That is deliberate: if a restore ever failed and left /data
+    # unmountable, the archive on /config is the only surviving copy of the
+    # identity, and an empty one written over it would lose the device for
+    # good. The restore on the next boot is what consumes a leftover.
+    #
+    # Writing straight to the final name needs no temp-and-rename dance, unlike
+    # the status file (C17). A torn archive can only be left by a power cut,
+    # and a power cut here is before the wipe, so /data is still intact and the
+    # next boot writes the archive again from the original.
+    if [ "$#" -gt 0 ]; then
+        if ! mkdir -p "$PRESERVE_DIR" 2>/dev/null; then
+            _why="could not create $PRESERVE_DIR"
+        # stderr deliberately NOT suppressed: tar says nothing on success, and
+        # when it fails its own message is the only clue why a device was
+        # refused encryption.
+        elif ! tar -C "$PRESERVE_MNT" -cf "$PRESERVE_TAR" "$@"; then
+            _why="could not write $PRESERVE_TAR"
+        fi
+    fi
+
+    if ! umount "$PRESERVE_MNT" 2>/dev/null; then
+        # Only when nothing has failed yet: the first reason is the useful one.
+        [ -n "$_why" ] || _why="could not unmount $PRESERVE_MNT"
+    fi
+    rmdir "$PRESERVE_MNT" 2>/dev/null || true
+
+    # On the disk, not in the page cache: /config has no journal, and the next
+    # thing that runs destroys the original.
+    if [ -z "$_why" ]; then
+        sync 2>/dev/null || _why="could not flush $PRESERVE_TAR to disk"
+    fi
+
+    [ -z "$_why" ] \
+        || abort convert_failed "$_why, so the device identity could not be carried across the wipe. /data stays plain"
+
+    if [ -z "$_carried" ]; then
+        announce "nothing to carry across the wipe: $DATA holds none of $PRESERVE_ITEMS"
+    else
+        announce "carrying$_carried across the wipe in $PRESERVE_TAR"
+    fi
+}
+
 announce "converting /data to LUKS2 (this device was armed through $CONF)"
 
 # 1) The marker brackets the whole conversion and is cleared LAST, immediately
@@ -1088,6 +1225,15 @@ announce "converting /data to LUKS2 (this device was armed through $CONF)"
 #    be left with no filesystem on it.
 write_marker \
     || abort convert_failed "cannot write $MARKER, so the conversion cannot be made safe to interrupt. /data stays plain"
+
+# 1.5) Carry the device identity onto /config before anything touches the
+#      partition. Numbered between the two because its place in the order is
+#      the whole point: after the marker, so it is bracketed like every other
+#      step, and before the grow, so it reads the filesystem the owner has been
+#      using rather than one that has been resized under it. This is the ONLY
+#      caller, and it is on the conversion path alone -- a plain boot returns
+#      through prepare_plain() long before here.
+preserve_identity
 
 # 2) Grow first (C6). On a re-flashed device the region past the old layout
 #    still holds the PREVIOUS installation's /data, so wiping only the pre-grow

@@ -4,6 +4,21 @@ Description=Bind mount persistent /etc files from /data
 DefaultDependencies=no
 Conflicts=shutdown.target
 After=local-fs.target data.mount
+
+# A /data encryption conversion leaves the device identity on /config, and this
+# unit is what puts it back, so /config has to be mounted first.
+# After=local-fs.target does not give us that: /config carries nofail on every
+# board, systemd-fstab-generator writes no Before=local-fs.target for a nofail
+# mount (fstab-generator.c, the target ordering is skipped when MOUNT_NOFAIL is
+# set), and the shipped Qualcomm config.mount only declares
+# WantedBy=local-fs.target.
+#
+# WantsMountsFor=, never RequiresMountsFor=, for the reason wendyos-data.service
+# gives (C31): RequiresMountsFor= adds Requires= as well as After=, so an
+# unmountable /config would take /data's bind mounts down with it. An absent
+# /config only means there is nothing to restore, which the script handles.
+WantsMountsFor=/config
+
 Before=sysinit.target wendyos-uuid-generate.service wendyos-device-name-generate.service
 Requires=data.mount
 

@@ -63,6 +63,16 @@ FILES:${PN} = " \
 #   parted                parted resizepart and partprobe
 #   e2fsprogs-mke2fs      mkfs.ext4, inside the new container
 #   coreutils             basename, readlink, cat, head, date, tr, sync
+#   tar                   the archive preserve_identity() writes to
+#                         /config/backup before the wipe, and that
+#                         setup-etc-binds.sh extracts on the next boot. It is
+#                         here rather than in data-device because data-device
+#                         ships fleet-wide, including RPi, which can never
+#                         encrypt, while this recipe lands exactly where the
+#                         conversion path exists. GNU tar, not busybox's:
+#                         --skip-old-files is GNU-only, and the tar recipe
+#                         wins the alternative at priority 100 against
+#                         busybox's 50
 #   udev                  udevadm settle
 #   util-linux-wipefs     wipefs, for a stale or unfinished LUKS header
 #   util-linux-blkdiscard blkdiscard, which the mandatory zero-fill before
@@ -81,6 +91,7 @@ RDEPENDS:${PN} = " \
     parted \
     e2fsprogs-mke2fs \
     coreutils \
+    tar \
     udev \
     util-linux-wipefs \
     util-linux-blkdiscard \
