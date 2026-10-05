@@ -44,12 +44,30 @@ class MarkerTests(unittest.TestCase):
 
     def test_validate_all_bounds_before_writing(self):
         self.stamp(2048 * 512, b"FAT16   ")
-        self.table["partitions"][1]["size"] = 999999
+        self.table["partitions"][1].update(node="test.wic2", size=999999)
         with mock.patch.object(mark.subprocess, "check_output", return_value=json.dumps({"partitiontable": self.table})), \
                 mock.patch.object(mark.subprocess, "run") as run:
-            with self.assertRaises(ValueError):
+            with self.assertRaises(ValueError) as error:
                 mark.mark_image(self.image)
+            self.assertIn(str(self.image), str(error.exception))
+            self.assertIn("partition test.wic2", str(error.exception))
+            self.assertIn("start=8192, size=999999", str(error.exception))
             run.assert_not_called()
+
+    def test_reject_no_fat_before_writing(self):
+        with mock.patch.object(mark.subprocess, "check_output", return_value=json.dumps({"partitiontable": self.table})), \
+                mock.patch.object(mark.subprocess, "run") as run:
+            with self.assertRaisesRegex(ValueError, "no FAT partitions detected") as error:
+                mark.mark_image(self.image)
+            self.assertIn(str(self.image), str(error.exception))
+            run.assert_not_called()
+
+    def test_unsupported_sector_units_identify_image(self):
+        self.table["unit"] = "bytes"
+        with self.assertRaises(ValueError) as error:
+            mark.fat_offsets(self.image, self.table)
+        self.assertIn(str(self.image), str(error.exception))
+        self.assertIn("unit='bytes'", str(error.exception))
 
     def test_standalone_image_command_append_separators(self):
         # BitBake concatenates function-form :append bodies to string-form
@@ -105,6 +123,9 @@ class MarkerTests(unittest.TestCase):
                     f"start={p['start']}, size={p['size']}, type={kind}\n" for p in self.table["partitions"]
                 )
                 subprocess.run(["sfdisk", "--no-reread", str(self.image)], input=layout, text=True, check=True, capture_output=True)
+                # A real partition table with no FAT filesystems must fail too.
+                with self.assertRaisesRegex(ValueError, "no FAT partitions detected"):
+                    mark.mark_image(self.image)
                 targets = [f"{self.image}@@{p['start'] * 512}" for p in self.table["partitions"]]
                 for target in targets:
                     subprocess.run(["mformat", "-i", target, "-T", "4096", "::"], check=True)

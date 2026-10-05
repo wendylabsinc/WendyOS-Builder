@@ -20,13 +20,17 @@ def fat_offsets(image, table):
     size = image.stat().st_size
     sector = table["sectorsize"]
     if sector not in (512, 1024, 2048, 4096) or table.get("unit") != "sectors":
-        raise ValueError("unsupported partition sector units")
+        raise ValueError(f"{image}: unsupported partition sector units (sector size={sector}, unit={table.get('unit')!r})")
     offsets = []
     with image.open("rb") as src:
         for part in table["partitions"]:
             start, length = part["start"] * sector, part["size"] * sector
             if start < sector or length < 512 or start + length > size:
-                raise ValueError("partition outside image")
+                raise ValueError(
+                    f"{image}: partition {part.get('node', '<unknown>')} "
+                    f"(start={part['start']}, size={part['size']}, sector size={sector}) "
+                    f"outside image ({size} bytes)"
+                )
             src.seek(start)
             boot = src.read(512)
             if boot[510:512] != b"\x55\xaa":
@@ -46,6 +50,10 @@ def mark_image(image):
         raise ValueError("only regular image files are allowed")
     table = json.loads(subprocess.check_output(["sfdisk", "--json", str(image)]))["partitiontable"]
     offsets = fat_offsets(image, table)
+    # All WIC layouts using this hook require FAT boot/config partitions.
+    # Fail closed if a layout or detection regression would ship no markers.
+    if not offsets:
+        raise ValueError(f"{image}: no FAT partitions detected")
     with tempfile.TemporaryDirectory() as tmp:
         marker = pathlib.Path(tmp) / MARKER
         marker.touch()
