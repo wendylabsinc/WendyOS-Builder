@@ -1,3 +1,15 @@
+# Protect every FAT volume in WIC disk images, including boot and config,
+# before image conversion produces compressed files or block maps.
+# Image recipes do not execute do_fetch/do_unpack; use the layer file directly
+# and include its contents in the task signature.
+WENDYOS_FAT_MARKER_SCRIPT := "${THISDIR}/files/mark-fat-volumes.py"
+do_image_wic[file-checksums] += "${WENDYOS_FAT_MARKER_SCRIPT}:True"
+do_image_wic[depends] += "util-linux-native:do_populate_sysroot mtools-native:do_populate_sysroot python3-native:do_populate_sysroot"
+IMAGE_CMD:wic:append() {
+
+    "${STAGING_BINDIR_NATIVE}/python3-native/python3" "${WENDYOS_FAT_MARKER_SCRIPT}" "${IMGDEPLOYDIR}/${IMAGE_NAME}.wic"
+}
+
 # Replace placeholders in the tegraflash rootfs layouts so DTB_FILE, DATAFILE,
 # and APPFILE become real filenames before make-jetson-disk-img.py reads them:
 # external-flash.xml.in for NVMe machines, and flash.xml.in's sdcard device for
