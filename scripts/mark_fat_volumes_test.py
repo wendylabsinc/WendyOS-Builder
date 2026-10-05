@@ -145,6 +145,13 @@ class MarkerTests(unittest.TestCase):
                 # A real partition table with no FAT filesystems must fail too.
                 with self.assertRaisesRegex(ValueError, "no FAT partitions detected"):
                     mark.mark_image(self.image)
+                # Signature strings alone are not authority to write: mtools
+                # must reject an invalid BPB without modifying the image.
+                self.stamp(self.table["partitions"][0]["start"] * 512, b"FAT16   ")
+                before = self.image.read_bytes()
+                with self.assertRaises(subprocess.CalledProcessError):
+                    mark.mark_image(self.image)
+                self.assertEqual(self.image.read_bytes(), before)
                 targets = [f"{self.image}@@{p['start'] * 512}" for p in self.table["partitions"]]
                 for target in targets:
                     subprocess.run(["mformat", "-i", target, "-T", "4096", "::"], check=True)
