@@ -99,6 +99,25 @@ class MarkerTests(unittest.TestCase):
                     mark.mark_image(self.image)
                 run.assert_not_called()
 
+    def test_tool_timeouts_fail_build(self):
+        self.stamp(2048 * 512, b"FAT16   ")
+        for tool in ("sfdisk", "mcopy", "mdir"):
+            with self.subTest(tool=tool), \
+                    mock.patch.object(mark.subprocess, "check_output", return_value=json.dumps({"partitiontable": self.table})) as probe, \
+                    mock.patch.object(mark.subprocess, "run") as run:
+                expired = subprocess.TimeoutExpired(tool, mark.TOOL_TIMEOUT_SECONDS)
+                if tool == "sfdisk":
+                    probe.side_effect = expired
+                elif tool == "mcopy":
+                    run.side_effect = expired
+                else:
+                    run.side_effect = [subprocess.CompletedProcess("mcopy", 0), expired]
+                with self.assertRaises(subprocess.TimeoutExpired):
+                    mark.mark_image(self.image)
+                self.assertEqual(probe.call_args.kwargs["timeout"], mark.TOOL_TIMEOUT_SECONDS)
+                for call in run.call_args_list:
+                    self.assertEqual(call.kwargs["timeout"], mark.TOOL_TIMEOUT_SECONDS)
+
     def test_usage_without_image(self):
         result = subprocess.run([sys.executable, str(spec.origin)], capture_output=True, text=True)
         self.assertNotEqual(result.returncode, 0)

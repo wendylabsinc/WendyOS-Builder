@@ -13,6 +13,7 @@ import sys
 import tempfile
 
 MARKER = ".metadata_never_index"
+TOOL_TIMEOUT_SECONDS = 120
 
 
 def fat_offsets(image, table):
@@ -48,7 +49,7 @@ def mark_image(image):
         raise ValueError("image path contains mtools offset delimiter")
     if not stat.S_ISREG(image.stat().st_mode):
         raise ValueError("only regular image files are allowed")
-    table = json.loads(subprocess.check_output(["sfdisk", "--json", str(image)]))["partitiontable"]
+    table = json.loads(subprocess.check_output(["sfdisk", "--json", str(image)], timeout=TOOL_TIMEOUT_SECONDS))["partitiontable"]
     offsets = fat_offsets(image, table)
     # All WIC layouts using this hook require FAT boot/config partitions.
     # Fail closed if a layout or detection regression would ship no markers.
@@ -68,8 +69,8 @@ def mark_image(image):
             target = f"{image}@@{offset}"
             # Replace only the reserved empty sentinel for idempotence. All
             # other files are preserved, with no mounts or loop devices.
-            subprocess.run(["mcopy", "-m", "-o", "-i", target, str(marker), f"::/{MARKER}"], check=True)
-            subprocess.run(["mdir", "-i", target, f"::/{MARKER}"], check=True)
+            subprocess.run(["mcopy", "-m", "-o", "-i", target, str(marker), f"::/{MARKER}"], check=True, timeout=TOOL_TIMEOUT_SECONDS)
+            subprocess.run(["mdir", "-i", target, f"::/{MARKER}"], check=True, timeout=TOOL_TIMEOUT_SECONDS)
     return len(offsets)
 
 
