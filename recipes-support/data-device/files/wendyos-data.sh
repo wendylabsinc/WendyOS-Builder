@@ -174,6 +174,34 @@ config_mounted() {
     return 1
 }
 
+# The filesystem /config is mounted from, on stdout. Returns 1 and prints
+# nothing when /config is not mounted at all.
+#
+# Read straight out of /proc/mounts, the same way config_mounted() above asks
+# its question, because that needs nothing installed: this program ships on
+# every board and findmnt is a util-linux package this recipe does not depend
+# on. Reading the kernel's own table adds no dependency at all.
+#
+# findmnt would also be easy to ask the wrong question with, and it answers it
+# in silence. A second bare argument is not a second place to look: it makes
+# the pair "this source mounted on this target", so `findmnt -n -o FSTYPE
+# /config <anything>` matches nothing, prints nothing and exits 1 -- measured
+# with util-linux 2.41.5. A path that is not itself a mount point prints
+# nothing too without -T. Either empty answer reads here as "not FAT32", which
+# is the side that lets the encryption through.
+#
+# Last entry wins: a second mount over /config hides the first, so the last one
+# names the filesystem that is really there.
+config_fstype() {
+    _fstype=""
+    while read -r _ _mp _fs _; do
+        [ "$_mp" = "$CONFIG_DIR" ] && _fstype=$_fs
+    done < /proc/mounts
+    
+    [ -n "$_fstype" ] || return 1
+    printf '%s\n' "$_fstype"
+}
+
 _CR=$(printf '\r')
 
 # Read one key from a key=value file. Prints the value and returns 0 when the
@@ -318,6 +346,128 @@ finish() {
     announce "$*"
     write_status "$_result" "$*"
     exit "$_rc"
+}
+
+# --- dropping the encryption flag (C83) ----------------------------------
+# The first line of the note this writes into /config/data.conf. It is matched
+# as well as written: a second refusal replaces the note of the first rather
+# than stacking another copy on top of it, so the file always says why the
+# flag is off NOW.
+DISARM_NOTE="# Turned off by wendyos-data.sh:"
+
+# Turn data_encryption off in /config/data.conf, and leave a note in the file
+# saying this program did it and why.
+#
+# This reverses half of C52, which keeps a device that cannot encrypt failing
+# on every boot until a person removes the flag. That is right for a condition
+# a person has to fix and wrong for one that fixes itself, and here the two
+# would deadlock: a FAT32 /config is converted to ext4 by
+# wendyos-config-convert.service, and that service refuses to run while the
+# flag is set (config_armed() in wendyos-config-convert.sh), so keeping the
+# flag would hold off the very conversion that makes encryption possible.
+#
+# ONLY THE TWO CALLERS BELOW MAY USE THIS, and both of their conditions are
+# certain for the image that is running: the filesystem under /config, and a
+# crypt stack that is not installed. Neither can change on the next boot of the
+# same image.
+#
+# no_tpm is deliberately NOT one of them. On Jetson /dev/tpmrm0 appears a few
+# seconds into boot, and the unit that waits for it (20-tpm-wait.conf in
+# meta-tegra-extensions) is installed only when WENDYOS_DATA_ENCRYPTED is "1",
+# so on any other build this program simply runs first and sees no TPM. That is
+# a race, not a verdict, and clearing the flag there would destroy a valid
+# request over it.
+#
+# The device has to be armed again by hand afterwards, once /config is ext4.
+# That is deliberate: the conversion destroys everything on /data, so the
+# device may not re-enter it on its own.
+#
+# THE FILE IS REWRITTEN, NEVER DELETED. Everything else in it is somebody's
+# setting -- data_secure_erase today -- and none of this program's business.
+# Temp file then rename, exactly as write_status does and for the same reason
+# (C17): /config has no journal, and a torn write must not leave a
+# half-readable file.
+#
+# The note is the durable trace. data.status carries the refusal too, but the
+# next boot overwrites it with that boot's ordinary outcome -- "/data is plain
+# and no encryption was requested", because the flag is gone by then -- so
+# without the note the person who armed the device would find nothing at all.
+# It carries no timestamp: at this point in the boot the clock may still be at
+# 1970, which is what data.status already warns about its own `updated` field.
+#
+# Returns non-zero when nothing was written, having said so. The caller carries
+# on either way: the refusal stands whatever happens here, and a device that
+# could not be disarmed must not be left in a worse state than one that was.
+# It also leaves what happened in disarm_outcome, for the caller's own message
+# to quote, so a refusal never tells the wendy CLI the request was turned off
+# when the write failed (C53 -- that file is a contract, not a comment).
+disarm_outcome=""
+
+disarm_encryption() {
+    _why=$1
+    disarm_outcome="The request could NOT be turned off in $CONF, so this device asks for encryption again on the next boot and is refused again"
+    if ! config_mounted; then
+        announce "WARN: cannot turn data_encryption off in $CONF: $CONFIG_DIR is not mounted"
+        return 1
+    fi
+
+    _tmp="${CONFIG_DIR}/.data.conf.tmp"
+    if ! {
+        if [ -r "$CONF" ]; then
+            while IFS= read -r _line || [ -n "$_line" ]; do
+                # Trimmed only to DECIDE about a line. What gets written is the
+                # original, so an untouched setting comes through byte for
+                # byte. The trim is the one conf_value() does, repeated rather
+                # than shared for the reason wendyos-config-convert.sh repeats
+                # it: the two have to agree on which lines count as settings,
+                # and a line " data_encryption=1" left behind here would be
+                # read as armed by a parser that strips the blank.
+                _trimmed=$_line
+                while :; do
+                    case $_trimmed in
+                        " "*|"	"*)
+                            _trimmed=${_trimmed#?}
+                            ;;
+                        *" "|*"	"|*"$_CR")
+                            _trimmed=${_trimmed%?}
+                            ;;
+                        *)
+                            break
+                            ;;
+                    esac
+                done
+
+                case $_trimmed in
+                    data_encryption=*|"$DISARM_NOTE"*)
+                        continue
+                        ;;
+                esac
+ 
+                printf '%s\n' "$_line"
+            done < "$CONF"
+        fi
+        # ONE line, not two. The filter above drops the old note by matching
+        # this prefix, so anything written on a second line would survive it
+        # and a new copy would stack on top at every refusal.
+        echo "$DISARM_NOTE $_why. Arm the device again once that is fixed."
+        echo "data_encryption=0"
+    } > "$_tmp" 2>/dev/null; then
+        # The redirection creates the file before the write can fail, so the
+        # half-written temp file has to go whatever went wrong with it.
+        rm -f "$_tmp" 2>/dev/null || true
+        announce "WARN: $disarm_outcome"
+        return 1
+    fi
+
+    if ! mv -f "$_tmp" "$CONF" 2>/dev/null; then
+        rm -f "$_tmp" 2>/dev/null || true
+        announce "WARN: $disarm_outcome"
+        return 1
+    fi
+
+    sync 2>/dev/null || true
+    disarm_outcome="The request has been turned off in $CONF"
+    announce "data_encryption has been turned off in $CONF ($_why). Arm the device again once that is fixed"
 }
 
 # --- the conversion marker (C34) -----------------------------------------
@@ -972,15 +1122,50 @@ fi
 # a device that cannot encrypt reports why and starts nothing it cannot finish
 # (C52).
 #
-# It does still prepare /data, because both checks below end with /data plain,
+# It does still prepare /data, because every check below ends with /data plain,
 # and "plain" has to mean the same thing here as on the flag-unset path above:
 # grown, formatted and mountable. Saying "/data stays plain" while leaving it
 # unprepared is how a device armed for encryption whose TPM did not come up
 # ends up with a /data that never mounts at all.
-if [ ! -e /dev/tpmrm0 ] && [ ! -e /dev/tpm0 ]; then
-    prepare_plain
-    finish no_tpm 1 "encryption was requested but this device has no TPM, so nothing can hold the key. /data stays plain"
-fi
+
+# /config has to be ext4 before anything on this device is encrypted. The
+# material that unlocks /data lives there, and FAT32 has no journal: a power
+# cut partway through a write can leave a file half written, and on this
+# partition that is the difference between a device that opens /data and one
+# that never does again. Encrypting onto a FAT32 /config is the state this
+# whole feature exists to avoid.
+#
+# It is insurance, not the main defence. wendyos-config-convert.service
+# converts /config in place a release ahead of encryption, so reaching this
+# line means that conversion failed, or the image was built with
+# WENDYOS_CONFIG_EXT4 = "0".
+#
+# no_support rather than a new result value: the set the wendy CLI parses is a
+# closed contract (C53), and a new reason belongs in the message, so this one
+# needs no CLI release to be understood.
+#
+# The flag goes BEFORE prepare_plain, which is the order abort() announces its
+# reason in and for the same cause: prepare_filesystem can end the program
+# itself through finish, and the flag would then survive a refusal that can
+# never change its mind -- holding off the /config conversion for good.
+#
+# This refusal comes first of the three, so a device that is both FAT32 and
+# TPM-less is answered by the one that clears the flag. The other order leaves
+# the flag set, and with it the /config conversion blocked, over a TPM this
+# program may simply have run too early to see.
+config_fs=$(config_fstype) || config_fs=""
+case $config_fs in
+    # Both names the kernel can mount one FAT partition under. Every board's
+    # fstab says `auto` and that lands on vfat, which is also the only name
+    # wendyos-config-convert.sh converts. msdos is the same partition through
+    # the kernel's other FAT driver, with the same missing journal, so it is
+    # refused here rather than left to slip through.
+    vfat|msdos)
+        disarm_encryption "$CONFIG_DIR carries $config_fs, not ext4"
+        prepare_plain
+        finish no_support 1 "encryption was requested but $CONFIG_DIR carries $config_fs, not ext4, and what unlocks /data must not be kept on a filesystem with no journal. $disarm_outcome. Convert $CONFIG_DIR and arm the device again. /data stays plain"
+        ;;
+esac
 
 missing=""
 # tar is in the sweep for the same reason as the rest: preserve_identity()
@@ -996,12 +1181,45 @@ if [ "$flag_erase" = "1" ]; then
     have blkdiscard || missing="$missing blkdiscard"
 fi
 if [ -n "$missing" ]; then
-    # Prepared first, for the reason above the TPM check. Some of the missing
+    # The flag goes, as on the FAT32 refusal above and for the same reason: a
+    # tool that is not installed cannot install itself, so every boot of this
+    # image answers the request the same way, and an armed device that can
+    # never encrypt also blocks the /config conversion. Dropped BEFORE
+    # prepare_plain, because prepare_filesystem can end the program itself.
+    disarm_encryption "this image has no crypt tools --$missing"
+
+    # Prepared first, for the same reason the FAT32 refusal above gives. Some
+    # of the missing
     # tools are the ones prepare_plain uses, and it reports each failure on its
     # own terms -- an image with no mkfs.ext4 gets format_failed, which is more
     # use than a second copy of this list.
     prepare_plain
-    finish no_support 1 "encryption was requested but this image cannot encrypt /data -- missing:$missing"
+
+    finish no_support 1 "encryption was requested but this image cannot encrypt /data -- missing:$missing. $disarm_outcome"
+fi
+
+# THE TOOL SWEEP ABOVE HAS TO COME FIRST, and the reason is not obvious.
+# Both the crypt tools and the drop-in that makes this program wait for the TPM
+# device are installed on the same condition, WENDYOS_DATA_ENCRYPTED = "1"
+# (conf/distro/include/tegra-image.inc:29 and x86-image.inc:93 for the tools,
+# optee-client_%.bbappend:25 for 20-tpm-wait.conf). So an image with the tools
+# is exactly an image that waits for the TPM, and reaching this line means the
+# wait has already happened. A TPM missing HERE is therefore a real answer
+# about the device, not this program having run before the fTPM came up.
+#
+# With the checks the other way round that was not true, and it mattered: on an
+# image built without encryption -- which is every image in the field today --
+# an armed device answered "no TPM" and kept its flag for ever, when the honest
+# answer was the simpler one below, that the image has no crypt tools at all.
+#
+# THE FLAG STAYS SET HERE, unlike the two refusals around it, and now for a
+# better reason than timing. This is the one condition of the three that a
+# person has to look at: the tools are present, the wait has happened, and the
+# device still has no TPM. C52 keeps such a device failing on every boot until
+# somebody acts, because somebody is exactly what is needed.
+if [ ! -e /dev/tpmrm0 ] && [ ! -e /dev/tpm0 ]; then
+    prepare_plain
+    finish no_tpm 1 "encryption was requested but this device has no TPM, so nothing can hold the key. /data stays plain"
 fi
 
 helper=$(find_cryptsetup_helper)
