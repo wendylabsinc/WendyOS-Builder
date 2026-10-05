@@ -42,6 +42,7 @@ on:
       # No *.sh filter: data-recovery-key is a command and carries no extension.
       - 'recipes-support/data-device/files/*'
       - 'recipes-support/data-crypt/files/*'
+      - 'recipes-support/wendyos-config-convert/files/*'
       - 'recipes-core/wendyos-etc-binds/files/*'
       - 'meta-qcom-extensions/files/grub/*'
       - 'meta-qcom-extensions/recipes-bsp/grub/*'
@@ -98,6 +99,7 @@ on:
       # No *.sh filter: data-recovery-key is a command and carries no extension.
       - 'recipes-support/data-device/files/*'
       - 'recipes-support/data-crypt/files/*'
+      - 'recipes-support/wendyos-config-convert/files/*'
       - 'recipes-core/wendyos-etc-binds/files/*'
       - 'meta-qcom-extensions/files/grub/*'
       - 'meta-qcom-extensions/recipes-bsp/grub/*'
@@ -143,6 +145,7 @@ jobs:
                      meta-qcom-extensions/recipes-core/wendyos-config-setup/files/wendyos-config-init.sh \
                      recipes-support/data-device/files/wendyos-data.sh \
                      recipes-support/data-crypt/files/data-recovery-key \
+                     recipes-support/wendyos-config-convert/files/wendyos-config-convert.sh \
                      recipes-core/wendyos-etc-binds/files/setup-etc-binds.sh
           shellcheck recipes-core/wendyos-identity/files/wendyos-identity-lib.sh \
                      recipes-core/wendyos-identity/files/update-mdns-uuid.sh \

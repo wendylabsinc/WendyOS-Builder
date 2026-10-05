@@ -44,6 +44,13 @@ RDEPENDS:${PN}:append = " \
         'wendyos-user-data-setup systemd-mount-containerd systemd-mount-wendy swapfile-setup wendyos-etc-binds'} \
     "
 
+# The /config FAT32 -> ext4 conversion service. Gated on WENDYOS_CONFIG_EXT4
+# (set in wendyos.conf), and also on WENDYOS_DATA_PART: the conversion stages a
+# copy of /config's contents on /data while it reformats the partition, so a
+# board with no /data partition (WENDYOS_OTA = "none", e.g. QEMU) has nowhere
+# to stage and the service would refuse on every boot.
+RDEPENDS:${PN}:append = " ${@'wendyos-config-convert' if d.getVar('WENDYOS_CONFIG_EXT4') == '1' and d.getVar('WENDYOS_DATA_PART') == '1' else ''}"
+
 RDEPENDS:${PN}:append = " \
     ${@oe.utils.ifelse( \
         d.getVar('WENDYOS_DEBUG') == '1', \
