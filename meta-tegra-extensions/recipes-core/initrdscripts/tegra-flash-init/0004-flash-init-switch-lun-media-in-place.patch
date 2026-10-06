@@ -1,0 +1,230 @@
+From 7e78a4661fcce47a16db3930b0bdc183042ff84a Mon Sep 17 00:00:00 2001
+From: Wendy Labs <engineering@wendy.dev>
+Date: Thu, 24 Sep 2026 09:17:27 +0300
+Subject: [PATCH] flash-init: switch LUN media in place instead of
+ re-enumerating
+
+Every export tears the gadget down and re-imports it, so the host sees a
+full USB unplug/replug per LUN. A hub or a marginal SuperSpeed link can
+miss one of those reconnects, leaving the device exporting a disk the
+host never sees and the flash stalled.
+
+When the flash package carries conf/usb-mode = single, keep the gadget
+bound for the whole flash: the rootfs device is loaded into a second,
+initially empty removable LUN and the final status back into LUN 0, so
+the host only sees media changes. A host eject releases a LUN; a USB
+disconnect only releases the final status LUN, and a disconnect before
+the flash package is released aborts the flash instead of trusting a
+partial package.
+Packages without the marker keep re-exporting per disk (they only gain
+the empty second LUN), so meta-tegra's initrd-flash host script still
+works.
+
+Upstream-Status: Inappropriate [wendy-specific]
+---
+ init-flash.sh          | 112 ++++++++++++++++++++++++++++++++---------
+ initrd-flash.scheme.in |   2 +-
+ 2 files changed, 89 insertions(+), 25 deletions(-)
+
+diff --git a/init-flash.sh b/init-flash.sh
+index 5681feb..432122a 100644
+--- a/init-flash.sh
++++ b/init-flash.sh
+@@ -38,6 +38,10 @@ if [ -z "$UDC" ]; then
+     echo "Error: No UDC found in /sys/class/udc" >&2
+     exit 1
+ fi
++LUNS=/sys/kernel/config/usb_gadget/l4t/functions/mass_storage.l4t_storage
++single_mode=
++host_disconnected=
++untrusted_package=
+ 
+ wait_for_storage() {
+     local file_or_dev="$1"
+@@ -70,10 +74,18 @@ setup_usb_export() {
+     if [ -e /sys/kernel/config/usb_gadget/l4t ]; then
+ 	gadget-vid-pid-remove 1d6b:104
+     fi
+-    sed -e"s,@SERIALNUMBER@,$sernum," -e"s,@STORAGE_EXPORT@,$storage_export," /etc/initrd-flash/initrd-flash.scheme.in > /run/initrd-flash.scheme
++    # flashpkg exports get a second, empty removable LUN that single mode later
++    # loads the rootfs device into. It must be in the scheme: LUNs cannot be
++    # added once the function is linked.
++    local extra_luns=
++    [ "$export_name" != "flashpkg" ] || extra_luns=', { removable = true; }'
++    sed -e"s,@SERIALNUMBER@,$sernum," -e"s,@STORAGE_EXPORT@,$storage_export," -e"s/@EXTRA_LUNS@/$extra_luns/" /etc/initrd-flash/initrd-flash.scheme.in > /run/initrd-flash.scheme
+     chmod 0644 /run/initrd-flash.scheme
+     gadget-import l4t /run/initrd-flash.scheme
+-    printf "%-8s%-16s" "$export_name" "$sernum" > /sys/kernel/config/usb_gadget/l4t/functions/mass_storage.l4t_storage/lun.0/inquiry_string
++    printf "%-8s%-16s" "$export_name" "$sernum" > "$LUNS/lun.0/inquiry_string"
++    if [ -d "$LUNS/lun.1" ]; then
++	printf "%-8s%-16s" rootfs "$sernum" > "$LUNS/lun.1/inquiry_string"
++    fi
+     echo "$UDC" > /sys/kernel/config/usb_gadget/l4t/UDC
+     if [ -e /sys/class/usb_role/usb2-0-role-switch/role ]; then
+ 	echo "device" > /sys/class/usb_role/usb2-0-role-switch/role
+@@ -102,23 +114,38 @@ wait_for_connect() {
+     return 0
+ }
+ 
++# With "keep-bound", the gadget stays bound after the release so the caller
++# can still choose between legacy and single-enumeration mode.
+ wait_for_disconnect() {
+-    local configured
++    wait_for_lun_eject 0 or-disconnect
++    [ "$1" = "keep-bound" ] || echo "" > /sys/kernel/config/usb_gadget/l4t/UDC
++    return 0
++}
++
++# Single-enumeration mode keeps the gadget bound for the whole flash and
++# swaps each LUN's medium in place. Only a host eject releases a LUN; a USB
++# disconnect is ignored, so the host can reconnect and carry on.
++load_lun() {
++    local lun="$1"
++    local storage_export="$2"
++    wait_for_storage "$storage_export" || return 1
++    echo "$storage_export" > "$LUNS/lun.$lun/file" || return 1
++    echo "Loaded $storage_export on LUN $lun"
++    return 0
++}
++
++# A host eject empties the removable LUN's backing file. With "or-disconnect",
++# a host that goes away releases the LUN too and sets host_disconnected.
++wait_for_lun_eject() {
++    local lun="$1"
++    local or_disconnect="$2"
+     local count=0
+-    echo -n "Waiting for host to disconnect..."
+-    while true; do
+-	configured=$(cat /sys/class/udc/$UDC/state)
+-	if [ "$configured" != "configured" ]; then
++    echo -n "Waiting for host to eject LUN $lun..."
++    while [ -n "$(cat "$LUNS/lun.$lun/file" 2>/dev/null)" ]; do
++	if [ "$or_disconnect" = "or-disconnect" ] && [ "$(cat /sys/class/udc/$UDC/state)" != "configured" ]; then
+ 	    echo "[disconnected]"
+-	    break
+-	fi
+-	# A macOS host cannot send the SCSI power-off Linux uses to release a
+-	# LUN; diskutil eject only ejects the medium. The LUN is removable, so
+-	# the gadget clears its backing file on eject — an emptied file means
+-	# the host has finished with this LUN.
+-	if [ -z "$(cat /sys/kernel/config/usb_gadget/l4t/functions/mass_storage.l4t_storage/lun.0/file 2>/dev/null)" ]; then
+-	    echo "[medium ejected]"
+-	    break
++	    host_disconnected=yes
++	    return 0
+ 	fi
+ 	sleep 1
+ 	count=$(expr $count \+ 1)
+@@ -127,10 +154,18 @@ wait_for_disconnect() {
+ 	    count=0
+ 	fi
+     done
+-    echo "" > /sys/kernel/config/usb_gadget/l4t/UDC
++    echo "[ejected]"
+     return 0
+ }
+ 
++# Re-reads and logs the partition table the host wrote to an exported device.
++post_export() {
++    local log=/tmp/flashpkg/flashpkg/logs/export-$1.log
++    partprobe /dev/$1 2>&1 >> $log
++    sgdisk /dev/$1 --verify 2>&1 >> $log
++    sgdisk /dev/$1 --print 2>&1 >> $log
++}
++
+ write_device_identity() {
+     local compatible carrier module carrier_id carrier_sku module_id module_sku
+     # The root compatible is "nvidia,p<carrier-id>-<sku>+p<module-id>-<sku>",
+@@ -178,7 +213,9 @@ get_flash_package() {
+     mke2fs -t ext4 -d /tmp/flashpkg_tree /tmp/flashpkg.ext4 > /dev/null || return 1
+     setup_usb_export /tmp/flashpkg.ext4 flashpkg || return 1
+     wait_for_connect || return 1
+-    wait_for_disconnect || return 1
++    # The flash package decides the USB mode, so stay bound until it has been
++    # read. Legacy hosts get the unbind right after the mount.
++    wait_for_disconnect keep-bound || return 1
+     return 0
+ }
+ 
+@@ -201,11 +238,29 @@ if ! get_flash_package; then
+     echo "Error retrieving flashing package" >&2
+     skip_status_report=yes
+ else
++    # A host that left without ejecting could still write the image; detach
++    # it before mounting.
++    echo 1 > "$LUNS/lun.0/forced_eject" 2>/dev/null
+     mkdir -p /tmp/flashpkg
+     mount -t ext4 /tmp/flashpkg.ext4 /tmp/flashpkg
++    usb_mode=
++    if [ -f /tmp/flashpkg/flashpkg/conf/usb-mode ]; then
++	read -r usb_mode < /tmp/flashpkg/flashpkg/conf/usb-mode || true
++    fi
++    if [ "$usb_mode" = "single" ]; then
++	single_mode=yes
++	echo "USB mode: single enumeration"
++	# The host ejects a package it has written and verified; a disconnect
++	# means it went away mid-transfer, so the package can't be trusted.
++	[ -z "$host_disconnected" ] || untrusted_package=yes
++    else
++	echo "" > /sys/kernel/config/usb_gadget/l4t/UDC
++    fi
+ fi
+ 
+-if [ ! -e /tmp/flashpkg/flashpkg/conf/command_sequence ]; then
++if [ -n "$untrusted_package" ]; then
++    echo "Host disconnected before releasing the flash package; not flashing" >&2
++elif [ ! -e /tmp/flashpkg/flashpkg/conf/command_sequence ]; then
+     echo "No command sequence in flash package, nothing to do"
+ else
+     exit_early=
+@@ -240,12 +295,16 @@ else
+ 		;;
+ 	    export-devices)
+ 		for dev in $args; do
+-		    if setup_usb_export /dev/$dev $dev 2>&1 > /tmp/flashpkg/flashpkg/logs/export-$dev.log; then
++		    if [ -n "$single_mode" ]; then
++			if load_lun 1 /dev/$dev 2>&1 > /tmp/flashpkg/flashpkg/logs/export-$dev.log; then
++			    wait_for_lun_eject 1 2>&1 >> /tmp/flashpkg/flashpkg/logs/export-$dev.log
++			    post_export $dev
++			    continue
++			fi
++		    elif setup_usb_export /dev/$dev $dev 2>&1 > /tmp/flashpkg/flashpkg/logs/export-$dev.log; then
+ 			if wait_for_connect 2>&1 >> /tmp/flashpkg/flashpkg/logs/export-$dev.log; then
+ 			    if wait_for_disconnect 2>&1 >> /tmp/flashpkg/flashpkg/logs/export-$dev.log; then
+-				partprobe /dev/$dev 2>&1 >> /tmp/flashpkg/flashpkg/logs/export-$dev.log
+-				sgdisk /dev/$dev --verify 2>&1 >> /tmp/flashpkg/flashpkg/logs/export-$dev.log
+-				sgdisk /dev/$dev --print 2>&1 >> /tmp/flashpkg/flashpkg/logs/export-$dev.log
++				post_export $dev
+ 				continue
+ 			    fi
+ 			fi
+@@ -290,7 +349,12 @@ if [ -n "$wait_for_bootloader" ]; then
+ fi
+ echo "$final_status" > /tmp/flashpkg/flashpkg/status
+ if [ -z "$skip_status_report" ]; then
+-    umount /tmp/flashpkg && setup_usb_export /tmp/flashpkg.ext4 flashpkg && wait_for_connect && wait_for_disconnect
++    if [ -n "$single_mode" ]; then
++	# Only the reboot waits on this LUN, so a host that went away releases it.
++	umount /tmp/flashpkg && load_lun 0 /tmp/flashpkg.ext4 && wait_for_lun_eject 0 or-disconnect
++    else
++	umount /tmp/flashpkg && setup_usb_export /tmp/flashpkg.ext4 flashpkg && wait_for_connect && wait_for_disconnect
++    fi
+ fi
+ 
+ if [ "$reboot_type" = "forced-recovery" ]; then
+diff --git a/initrd-flash.scheme.in b/initrd-flash.scheme.in
+index cda51b8..986d565 100644
+--- a/initrd-flash.scheme.in
++++ b/initrd-flash.scheme.in
+@@ -39,7 +39,7 @@ functions :
+ 		    nofua = false;
+ 		    removable = true;
+ 		    file = "@STORAGE_EXPORT@";
+-		});
++		}@EXTRA_LUNS@);
+         };
+         os_descs = ( );
+     };
+-- 
+2.43.0
+
