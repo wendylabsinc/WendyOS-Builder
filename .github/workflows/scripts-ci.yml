@@ -22,6 +22,7 @@ on:
       - 'recipes-kernel/linux/game-controller/**'
       - 'recipes-core/packagegroups/packagegroup-wendyos-kernel.bb'
       - 'meta-*/recipes-kernel/linux/linux-*.bbappend'
+      - 'meta-*/conf/layer.conf'
       - 'recipes-core/wendyos-agent/files/*.sh'
       - 'scripts/build-driver.sh'
       - 'scripts/pack-sysext.sh'
@@ -37,9 +38,11 @@ on:
       - 'recipes-kernel/wendyos-kernel-devkit/files/*.sh'
       - 'recipes-core/wendyos-identity/files/*.sh'
       - 'recipes-connectivity/avahi/files/*.sh'
+      - 'meta-arduino-extensions/recipes-connectivity/wendyos-radio-addr/files/*.sh'
       - 'meta-qcom-extensions/files/grub/*'
       - 'meta-qcom-extensions/recipes-bsp/grub/*'
       - 'meta-qcom-extensions/recipes-bsp/partition/files/*'
+      - 'meta-arduino-extensions/recipes-bsp/partition/files/*'
       - 'meta-qcom-extensions/recipes-core/wendyos-config-setup/files/*'
       - 'meta-qcom-extensions/recipes-core/packagegroups/*'
       - 'meta-qcom-extensions/recipes-bsp/hexagon-dsp-binaries/*'
@@ -71,6 +74,7 @@ on:
       - 'recipes-kernel/linux/game-controller/**'
       - 'recipes-core/packagegroups/packagegroup-wendyos-kernel.bb'
       - 'meta-*/recipes-kernel/linux/linux-*.bbappend'
+      - 'meta-*/conf/layer.conf'
       - 'recipes-core/wendyos-agent/files/*.sh'
       - 'scripts/build-driver.sh'
       - 'scripts/pack-sysext.sh'
@@ -86,9 +90,11 @@ on:
       - 'recipes-kernel/wendyos-kernel-devkit/files/*.sh'
       - 'recipes-core/wendyos-identity/files/*.sh'
       - 'recipes-connectivity/avahi/files/*.sh'
+      - 'meta-arduino-extensions/recipes-connectivity/wendyos-radio-addr/files/*.sh'
       - 'meta-qcom-extensions/files/grub/*'
       - 'meta-qcom-extensions/recipes-bsp/grub/*'
       - 'meta-qcom-extensions/recipes-bsp/partition/files/*'
+      - 'meta-arduino-extensions/recipes-bsp/partition/files/*'
       - 'meta-qcom-extensions/recipes-core/wendyos-config-setup/files/*'
       - 'meta-qcom-extensions/recipes-core/packagegroups/*'
       - 'meta-qcom-extensions/recipes-bsp/hexagon-dsp-binaries/*'
@@ -130,7 +136,8 @@ jobs:
           shellcheck recipes-core/wendyos-identity/files/wendyos-identity-lib.sh \
                      recipes-core/wendyos-identity/files/update-mdns-uuid.sh \
                      recipes-core/wendyos-identity/files/update-mdns-uuid.test.sh \
-                     recipes-connectivity/avahi/files/generate-hostname.sh
+                     recipes-connectivity/avahi/files/generate-hostname.sh \
+                     meta-arduino-extensions/recipes-connectivity/wendyos-radio-addr/files/wendyos-radio-addr.sh
 
       - name: Run resolver tests
         run: bash scripts/resolve-artifacts.test.sh

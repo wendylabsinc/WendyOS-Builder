@@ -45,6 +45,9 @@ if [ -z "$DEVICE_SERIAL" ]; then
     DEVICE_SERIAL=$(cat /sys/class/net/eth0/address 2>/dev/null | tr -d ':' || echo "")
 fi
 if [ -z "$DEVICE_SERIAL" ]; then
+    DEVICE_SERIAL=$(cat /sys/devices/soc0/serial_number 2>/dev/null || echo "")
+fi
+if [ -z "$DEVICE_SERIAL" ]; then
     DEVICE_SERIAL="$(date +%s)"
 fi
 

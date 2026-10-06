@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import tempfile
 import sys
 import unittest
@@ -22,6 +23,17 @@ def kernel_bbappends() -> list[Path]:
     """Every kernel bbappend in the tree. A layer with no kernel bbappend is invisible here."""
 
     return sorted(REPO_ROOT.glob("meta-*/recipes-kernel/linux/linux-*.bbappend"))
+
+
+def layer_depends_on(path: Path, other: Path) -> bool:
+    """Whether the layer holding path lists the one holding other in its LAYERDEPENDS."""
+
+    def layer_conf(p: Path) -> str:
+        return (REPO_ROOT / p.relative_to(REPO_ROOT).parts[0] / "conf/layer.conf").read_text(encoding="utf-8")
+
+    collection = re.search(r'^BBFILE_COLLECTIONS\s*\+=\s*"\s*([^"\s]+)', layer_conf(other), re.M)
+    depends = re.search(r'^LAYERDEPENDS_\S+\s*=\s*"([^"]*)"', layer_conf(path), re.M)
+    return bool(collection and depends) and collection.group(1) in depends.group(1).split()
 
 
 class ContractTests(unittest.TestCase):
@@ -144,9 +156,15 @@ class LayerWiringTests(unittest.TestCase):
     def test_every_shipping_kernel_requires_the_contract(self):
         shipping = [p for p in kernel_bbappends() if "meta-qemu-extensions" not in p.parts]
         self.assertTrue(shipping, "no shipping kernel bbappends found")
+        wired = [p for p in shipping if GATED_REQUIRE in p.read_text(encoding="utf-8")]
         for bbappend in shipping:
             with self.subTest(bbappend=str(bbappend.relative_to(REPO_ROOT))):
                 text = bbappend.read_text(encoding="utf-8")
+                # A kernel already wired by a layer this one depends on must not
+                # pull the contract in twice.
+                if any(w.name == bbappend.name and layer_depends_on(bbappend, w) for w in wired):
+                    self.assertNotIn(GATED_REQUIRE, text)
+                    continue
                 self.assertIn(GATED_REQUIRE, text)
                 self.assertIn("WENDYOS_GAME_CONTROLLER", text)
 

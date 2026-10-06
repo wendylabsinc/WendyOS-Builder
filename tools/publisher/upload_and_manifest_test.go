@@ -1061,6 +1061,18 @@ func TestIsEDLFlashBundleCoversEveryDragonwing(t *testing.T) {
 	}
 }
 
+// The UNO Q is published under its board name, without the dragonwing- prefix.
+func TestEDLFlashBundleCoversTheArduinoUNOQ(t *testing.T) {
+	if !isEDLFlashBundle("arduino-uno-q") {
+		t.Fatal("isEDLFlashBundle(\"arduino-uno-q\") = false, want true")
+	}
+	meta := VersionMetadata{}
+	applyEDLFlashBundle(&meta, "arduino-uno-q", "uno-q.qcomflash.tar.gz", 42, "shaunoq")
+	if meta.InstallMode != "edl" || meta.QcomflashPath != "uno-q.qcomflash.tar.gz" || meta.Path != "" {
+		t.Fatalf("bundle not published fail-closed: %+v", meta)
+	}
+}
+
 // The bundle is the only install artifact such a board has, so a promotion that
 // fails to copy it must stop rather than publish an uninstallable version.
 func TestValidateBundlePromotionFailsClosed(t *testing.T) {

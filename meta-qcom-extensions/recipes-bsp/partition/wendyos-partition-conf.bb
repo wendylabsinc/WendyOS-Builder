@@ -21,7 +21,10 @@ COMPATIBLE_MACHINE = "qcom-wendyos"
 # from another's sstate.
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
-do_install[noexec] = "1"
+# Staged for wendyos-grub-ab, which takes the slot numbers from this layout.
+do_install() {
+    install -D -m 0644 ${UNPACKDIR}/partitions.conf ${D}/sysroot-only/wendyos/partitions.conf
+}
 
 # Must match where image_types_qcom looks for these files, or the flash package
 # ships without a GPT.

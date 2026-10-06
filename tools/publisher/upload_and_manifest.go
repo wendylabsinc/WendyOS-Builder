@@ -2446,9 +2446,10 @@ func isRecoveryFirstT234(deviceType string) bool {
 }
 
 // isEDLFlashBundle reports whether a device's install artifact is an EDL flash
-// bundle rather than a writable disk image.
+// bundle rather than a writable disk image. The UNO Q is a Dragonwing SoC whose
+// device type names the board instead.
 func isEDLFlashBundle(deviceType string) bool {
-	return strings.HasPrefix(deviceType, "dragonwing-")
+	return strings.HasPrefix(deviceType, "dragonwing-") || deviceType == "arduino-uno-q"
 }
 
 // keepsLegacyBundleImagePath reports whether a flash-bundle device must also

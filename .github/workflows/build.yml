@@ -26,6 +26,7 @@ on:
           - generic-x86-64
           - dragonwing-iq-8275
           - dragonwing-iq-9075
+          - arduino-uno-q
           - vm-arm64
           - vm-x86-64
       version:
@@ -161,6 +162,9 @@ jobs:
           # dragonwing-iq-9075 sits behind the 8275 rather than beside it: they
           # share a DEFAULTTUNE, so a later wave reuses that tune from sstate
           # instead of compiling it twice. A wave later, not last.
+          #
+          # arduino-uno-q follows, ahead of the Pis: no other board shares its
+          # cortexa53 tune (raspberry-pi-3 is cortexa53-nocrypto), so its sstate is cold.
           ALL_MATRIX='[
             {"device":"jetson-agx-thor","storages":"nvme"},
             {"device":"jetson-agx-orin","storages":"nvme emmc"},
@@ -168,6 +172,7 @@ jobs:
             {"device":"dragonwing-iq-8275","storages":"ufs"},
             {"device":"generic-x86-64","storages":"disk"},
             {"device":"dragonwing-iq-9075","storages":"ufs"},
+            {"device":"arduino-uno-q","storages":"emmc"},
             {"device":"raspberry-pi-5","storages":"nvme sd"},
             {"device":"raspberry-pi-4","storages":"sd"},
             {"device":"raspberry-pi-3","storages":"sd"},
@@ -313,6 +318,7 @@ jobs:
               generic-x86-64:disk)  BOARD=generic-x86-64;       MACHINE=genericx86-64-wendyos ;;
               dragonwing-iq-8275:ufs) BOARD=dragonwing-iq8275;   MACHINE=iq-8275-evk-wendyos ;;
               dragonwing-iq-9075:ufs) BOARD=dragonwing-iq9075;   MACHINE=iq-9075-evk-wendyos ;;
+              arduino-uno-q:emmc)   BOARD=arduino-uno-q;        MACHINE=arduino-uno-q-wendyos ;;
               vm-arm64:disk)        BOARD=vm-arm64;             MACHINE=vm-arm64-wendyos ;;
               vm-x86-64:disk)       BOARD=vm-x86-64;            MACHINE=vm-x86-64-wendyos ;;
               *) echo "Unknown device/storage: $DEVICE/$STORAGE"; exit 1 ;;
@@ -656,6 +662,7 @@ jobs:
           case "$DEVICE" in
             raspberry-pi-*) EXPECTED_KB=8388608 ;;  # 8 GiB, RPi
             vm-*)           EXPECTED_KB=3145728 ;;  # 3 GiB, VM (two A/B slots on a laptop disk)
+            arduino-uno-q)  EXPECTED_KB=4194304 ;;  # 4 GiB, UNO Q (two A/B slots on a 16 GB eMMC)
           esac
           EXPECTED=$((EXPECTED_KB * 1024))
 

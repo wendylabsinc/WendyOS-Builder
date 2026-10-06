@@ -11,6 +11,7 @@
   "generic-x86-64/disk":    { "image_kind": "wic-disk",                   "recovery_bundle_expected": false, "bmap": true,  "flashpack": false, "pass_storage": false },
   "dragonwing-iq-8275/ufs": { "image_kind": "qcomflash-bundle",           "recovery_bundle_expected": false, "bmap": false, "flashpack": false, "pass_storage": false },
   "dragonwing-iq-9075/ufs": { "image_kind": "qcomflash-bundle",           "recovery_bundle_expected": false, "bmap": false, "flashpack": false, "pass_storage": false },
+  "arduino-uno-q/emmc":     { "image_kind": "qcomflash-bundle",           "recovery_bundle_expected": false, "bmap": false, "flashpack": false, "pass_storage": false },
   "vm-arm64/disk":          { "image_kind": "wic-disk",                   "recovery_bundle_expected": false, "bmap": true,  "flashpack": false, "pass_storage": false },
   "vm-x86-64/disk":         { "image_kind": "wic-disk",                   "recovery_bundle_expected": false, "bmap": true,  "flashpack": false, "pass_storage": false }
 }

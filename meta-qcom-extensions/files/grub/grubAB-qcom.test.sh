@@ -58,23 +58,32 @@ printf '%s\n' "$BODY" | grep -qE '^[[:space:]]*load_env'
 check $? "load_env is called (otherwise persisted state is never read)"
 
 # --- 3. slot -> partition mapping matches partitions.conf -------------------
-# The GPT order in meta-qcom-extensions/recipes-bsp/partition/files/
-# partitions.conf is efi, config, rootfsA, rootfsB, data => slots are p3 and p4.
-# GRUB addresses them by NUMBER because an OTA raw-write clobbers a slot's
-# filesystem label, so these two must move together.
-printf '%s\n' "$BODY" | grep -qF 'gpt3' && printf '%s\n' "$BODY" | grep -qF 'gpt4'
-check $? "slots addressed as gpt3/gpt4"
+# GRUB addresses the slots by NUMBER because an OTA raw-write clobbers a slot's
+# filesystem label. wendyos-grub-ab substitutes the numbers from the machine's
+# partitions.conf, so the config must never carry a literal one.
+n_a=$(printf '%s\n' "$BODY" | grep -cF 'gpt@ROOTFSA_PART@')
+n_b=$(printf '%s\n' "$BODY" | grep -cF 'gpt@ROOTFSB_PART@')
+rc=0
+test "$n_a" -ge 2 && test "$n_b" -ge 2 || rc=1
+check "$rc" "slots addressed through the substituted partition numbers (A=$n_a B=$n_b)"
 
-PCONF="$(dirname "$0")/../../recipes-bsp/partition/files/partitions.conf"
-if [ -f "$PCONF" ]; then
-    order="$(grep -oE '^--partition .*--name=[a-zA-Z]+' "$PCONF" \
-        | sed 's/.*--name=//' | tr '\n' ' ')"
+! printf '%s\n' "$BODY" | grep -qE 'gpt[0-9]'
+check $? "no hardcoded gptN partition number"
+
+# Every layout this config boots (this layer's and each board layer's) must end
+# in WendyOS's own partitions, data last so the flash can grow it over the disk.
+ROOT="$(dirname "$0")/../../.."
+found=0
+for PCONF in "$ROOT"/meta-*-extensions/recipes-bsp/partition/files/partitions.conf; do
+    [ -f "$PCONF" ] || continue
+    found=1
+    tail5="$(grep -oE '^--partition .*--name=[a-zA-Z_]+' "$PCONF" \
+        | sed 's/.*--name=//' | tail -n 5 | tr '\n' ' ')"
     rc=0
-    test "$order" = "efi config rootfsA rootfsB data " || rc=1
-    check "$rc" "partitions.conf order is 'efi config rootfsA rootfsB data' (got: $order)"
-else
-    printf '  skip  partitions.conf not found next to the config\n'
-fi
+    test "$tail5" = "efi config rootfsA rootfsB data " || rc=1
+    check "$rc" "${PCONF#"$ROOT"/} ends in 'efi config rootfsA rootfsB data' (got: $tail5)"
+done
+[ "$found" = "1" ] || printf '  skip  no partitions.conf found\n'
 
 # --- 4. no x86 leftovers ----------------------------------------------------
 # This config is a port of meta-x86-extensions' grubAB.cfg. Both x86-isms boot
@@ -133,8 +142,14 @@ check $? "no hardcoded .dtb filename in the config"
 
 # The DTB must come from the SLOT, not the shared ESP: dtb+kernel+rootfs have to
 # travel together or an OTA can boot a new rootfs against a stale device tree.
-! printf '%s\n' "$BODY" | grep -E '(^|[[:space:]])devicetree[[:space:]]' | grep -qvE '\$\{slotdev\}|\(\$\{d\},gpt[34]\)'
+! printf '%s\n' "$BODY" | grep -E '(^|[[:space:]])devicetree[[:space:]]' | grep -qvE '\$\{slotdev\}|\(\$\{d\},gpt@ROOTFS[AB]_PART@\)'
 check $? "device tree is loaded from the rootfs slot, not the ESP"
+
+# The machine's kernel arguments must reach every boot path, manual ones included.
+n_args=$(printf '%s\n' "$BODY" | grep -E '(^|[[:space:]])linux[[:space:]]' | grep -cF '@WENDYOS_QCOM_KERNEL_ARGS@')
+rc=0
+test "$n_args" -eq "$n_linux" || rc=1
+check "$rc" "every 'linux' line carries WENDYOS_QCOM_KERNEL_ARGS (linux=$n_linux with=$n_args)"
 
 # --- 5. commands used must be built into the GRUB image ---------------------
 # grub-mkimage bakes a fixed module set into bootaa64.efi and the ESP carries no
