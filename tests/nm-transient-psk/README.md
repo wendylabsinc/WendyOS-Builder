@@ -1,66 +1,102 @@
-# Stored-key transient handshake regression
+# Stored-key WPA2 handshake recovery
 
-During automatic Wi-Fi activation, a remote reason-15 four-way handshake timeout
-can make NetworkManager clear the applied password and ask for a new one. A
-timeout alone does not establish that the saved password is wrong. On an unattended
-WendyOS device, this can interrupt reconnection after a reboot or OTA despite an
-unchanged password.
+A headless WendyOS device can lose Wi-Fi after a transient WPA2 handshake failure
+although its saved password is correct. The supplicant can emit `PskMismatch`
+before a remote reason-15 disconnect. Upstream NetworkManager interprets that
+heuristic as a request for a replacement password; with no secret agent available,
+activation fails with `NO_SECRETS`, which can also block autoconnect.
 
-The patch skips this false-secret classification once per activation request. It
-requires automatic infrastructure activation, WPA-PSK key management, a running
-association timer, and identical nonempty stored and applied system-owned PSKs
-(secret flags `NONE` on both). It preserves the current credentials and timer so
-the supplicant can continue its existing recovery behavior. It does not explicitly
-launch a retry, extend the timer, reset the radio or bypass WPA authentication.
+The patch retains matching, nonempty, system-owned stored/applied WPA-PSK keys
+(secret flags `NONE` on both) during infrastructure association. It guards both
+notifications, in either order and across repeated failures, while the existing
+association timer runs. It covers autoconnect and explicit `connection up`, since
+first-boot provisioning and unattended services can activate profiles explicitly.
+Individual events neither reset the timer nor consume the retry budget.
 
-The allowance remains consumed across secret-stage reentry. A second handshake
-failure or an explicit PSK-mismatch notification follows the upstream
-credential-request path, which cancels the current timer and can restart
-configuration with another timer after obtaining secrets. Once the allowance has
-been used, any association timeout on that same request fails with
-`SUPPLICANT_TIMEOUT` instead of re-entering authentication retries, including when
-the distro's `auth-retries` default is zero. This is not an immutable deadline
-across all stages of the request, nor a limit on NetworkManager's separate
-autoconnect retry policy. A genuinely new activation request has a new allowance.
+At association timeout, NetworkManager's existing cached-secret recovery path is
+used, with at most two retries per activation request: three association windows
+in total, subject to any smaller configured `auth-retries` budget. The counter
+survives secret-stage reentry. This avoids immediately discarding upstream's
+recovery for previously successful connections, but still bounds a bad-password
+attempt with WendyOS's `auth-retries=0` (unlimited upstream). This is a window
+count, not a wall-clock guarantee across asynchronous activation stages.
+Exhaustion reports `SUPPLICANT_TIMEOUT` with a diagnostic, and normal autoconnect
+retry limits/backoff remain in charge. If the SSID was not seen, the existing
+`SSID_NOT_FOUND` diagnosis is preserved. Cancellation does not start recovery.
 
-Manual activation, enterprise/other key management, other disconnect reasons,
-mesh/AP/ad-hoc modes, and agent-owned, unsaved or absent/changed keys retain
-upstream behavior. Cancellation does not trigger recovery. Prior-success history
-is not required: native OTA can replace the root-local NM timestamp database
-while preserving the profile. Matching stored and applied passwords establishes
-consistency, not validity; even a saved wrong password can receive the allowance,
-and normal WPA authentication still decides success.
+Prior-success timestamps are not required: OTA can replace the root-local NM
+timestamp database while preserving saved profiles. Matching keys establish
+consistency, not validity. `PskMismatch` has no disconnect reason, so its guard
+also covers a genuinely wrong saved password. Such a password fails within the
+bounded windows and must be edited or replaced by the caller. This intentionally
+includes newly saved system-owned passwords. WPA authentication is never bypassed.
+Agent-owned/unsaved keys, absent or changed applied keys, enterprise/other security,
+other modes, and disconnect reasons other than remote reason 15 keep upstream
+behavior. A later, independently meaningful disconnect reason can therefore still
+request new credentials. The patch does not fix the underlying radio fault.
 
-This tests the NetworkManager 1.56.0 recipe source (commit
-`56b51b98fbb8627c4c09a483702e18fd8aee7ce1`). Supply an unmodified source tree:
+## Regression harness
+
+Run on Linux with a C compiler, `patch`, Python, `pkg-config` and GObject development
+files (`libglib2.0-dev` on Debian/Ubuntu). Choose either a local pristine tree or a
+single-file download:
 
 ```sh
 python3 tests/nm-transient-psk/run.py --upstream /path/to/NetworkManager-1.56.0 --output /new/results
+python3 tests/nm-transient-psk/run.py --fetch-upstream --output /new/results
 ```
 
-Run on Linux with a C compiler, `patch`, Python, and GObject development files.
-The output directory must not already exist. No network, real supplicant, or
-device access is used. The harness uses a literal test secret only.
+The runner pins NetworkManager 1.56.0 commit
+`56b51b98fbb8627c4c09a483702e18fd8aee7ce1` and verifies the source file's SHA-256
+before applying the recipe patch. It compiles complete production callback bodies,
+including the shared predicate; it does not copy their decisions into Python.
+GObject request storage is real. Surrounding NM services are recording stubs:
+applied-key clearing is modeled, but cached-secret delivery, real auth-retry
+accounting, D-Bus ordering and timer scheduling require daemon/hardware validation.
+The stubbed authentication helper records whether a new or cached secret was
+requested; tests explicitly model configuration reentry on the same request.
 
-The test applies the recipe patch and compiles the complete production bodies
-of the PSK heuristic, authentication-failure handler, explicit mismatch handler,
-and association-timeout callback. The new helper is extracted unchanged too.
-NM platform and secret-agent functions are recording stubs; GObject request
-storage is real. This is a source-handler regression, not a D-Bus integration
-test or proof of physical reconnect success. Baseline must compile successfully
-and abort on the first expected recovery assertion; the candidate must pass all
-19 groups. The groups check eligibility exclusions, preserved credentials/timer,
-the consumed request allowance, second-failure and explicit-mismatch handling,
-and the fatal timeout path. The reentry case reuses request storage; it does not
-execute the real secret callback or configuration-stage timer scheduling. The
-harness therefore does not prove a fixed request-wide deadline, every possible
-secret-agent sequence, or a global absence of retry loops. A separate historical
-ARM64 recipe compile checked the surrounding daemon APIs and linked the actual
-NetworkManager executable; running this harness does not repeat that build.
+Twelve groups run individually on baseline and candidate. Six recovery groups must
+fail with assertions on upstream and pass with the patch: repeated events in both
+orders, explicit saved-profile activation, all timestamp states, bounded wrong-key
+retries across reentry, a smaller auth budget, and missing-SSID diagnosis after a
+mismatch. Six control groups must pass on both: cancellation, excluded keys, other
+modes/security/disconnect reasons, and already-connected state. Logs and source
+hashes are retained in the new output directory. The harness alone does not prove
+physical reconnection or a global absence of retry loops.
 
-The physical gate remains: a controlled single handshake interruption must
-recover automatically without a new-secret request or radio reset, followed
-by repeated-failure and changed-key negatives. Preserve NAN-only boot behavior
-and verify ordinary user cancellation is respected. This patch mitigates the
-observed false-secret classification; it does not establish the underlying RF
-timeout's cause.
+The path-filtered `nm-transient-psk.yml` workflow runs this check only for changes
+to the NM layer, harness or workflow. It downloads one pinned C file, not a Yocto
+build or a full source archive, and retains failure evidence as a CI artifact.
+
+## Hardware validation
+
+Use a controlled WPA2-only AP with a disposable password and a client managed over
+Ethernet. Establish ordinary connectivity, then suppress AP handshake message 3
+for the client to provoke a real reason-15 timeout with the correct key. Compare
+unpatched and candidate daemon behavior, including mismatch-before-disconnect.
+Test transient and repeated interruptions, explicit activation and autoconnect,
+recovery after an association deadline, wrong-key exhaustion with `auth-retries=0`,
+and cancellation. Check usable connectivity, failure reasons, preservation of
+stored credentials, and restoration of the original radio/service/profile state.
+
+Fresh validation on 2026-10-06 used a Pi5/BE202 as the temporary WPA2-PSK/CCMP AP
+and an AGX Thor as the client, with Ethernet management. Both the daemon and
+Wi-Fi plugin were rebuilt with the recipe's ARM64 toolchain; the exact patched
+source matched the harness source. The client supplicant was left unchanged.
+
+| Hardware case | Result |
+| --- | --- |
+| Unpatched NM, ordinary WPA2 | Connected successfully. |
+| Unpatched NM, correct key with message 3 dropped | Mismatch arrived before disconnect; activation failed with `NO_SECRETS`. |
+| Candidate, explicit saved-profile activation, transient loss | Retained the key on both events, connected in 19.1 s, and passed ping. |
+| Candidate, autoconnect, fresh profile with timestamp 0, repeated loss | Survived three handshake failures and one association deadline; reused the saved key and connected in 41.8 s, then passed ping. |
+| Candidate, genuinely wrong saved key, `auth-retries=0` | Two cached retries, then `SUPPLICANT_TIMEOUT` at 75.4 s; never connected and preserved the stored key. |
+| Candidate, cancel after mismatch | Stayed disconnected beyond the former deadline, without a retry or activation. |
+
+These timings describe this test's 25-second association windows, not a product
+wall-clock guarantee. Hardware exercised the mismatch-first ordering; reversed
+ordering, missing-SSID diagnosis, smaller auth budgets and eligibility exclusions
+are covered by the exact-source harness. Installed binaries and original network
+profiles were preserved. The temporary AP/overrides were removed and normal Wi-Fi
+and NAN operation restored; the Pi5's two NAN apps restarted during restoration.

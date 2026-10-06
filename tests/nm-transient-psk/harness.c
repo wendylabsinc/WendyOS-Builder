@@ -1,6 +1,9 @@
+/* Compile the real callbacks; model only NM's surrounding services. */
 #include <glib-object.h>
-#include <string.h>
+#include <stdarg.h>
 #include <stdio.h>
+#include <string.h>
+
 typedef int NMSupplicantInterfaceState;
 typedef int NMSupplicantInterface;
 typedef struct { const char *key_mgmt, *psk; unsigned flags; } NMSettingWirelessSecurity;
@@ -9,12 +12,19 @@ typedef struct { NMConnection connection; guint64 timestamp; gboolean has_timest
 typedef GObject NMActRequest;
 typedef struct { NMSettingsConnection settings; NMConnection applied; int reason; } Request;
 typedef struct { int mode; guint sup_timeout_id; gboolean ssid_found; } NMDeviceWifiPrivate;
-typedef struct { NMDeviceWifiPrivate priv; NMActRequest *req; int state, reason; unsigned cleanup, clear, secrets, auth; gboolean enterprise; } NMDeviceWifi;
+typedef struct {
+    NMDeviceWifiPrivate priv;
+    NMActRequest *req;
+    int state, reason;
+    unsigned cleanup, clear, secrets, auth;
+    gboolean enterprise, auth_available, new_secrets;
+} NMDeviceWifi;
 typedef NMDeviceWifi NMDevice;
 #define NM_DEVICE_WIFI_GET_PRIVATE(s) (&(s)->priv)
 #define NM_DEVICE(s) (s)
 #define NM_DEVICE_WIFI(s) ((NMDeviceWifi *)(s))
 #define NM_ACTIVE_CONNECTION(r) (r)
+#define NM_ACTIVATION_REASON_AUTOCONNECT 1
 #define NM_SUPPLICANT_INTERFACE_STATE_4WAY_HANDSHAKE 4
 #define NM_SUPPLICANT_INTERFACE_STATE_DISCONNECTED 5
 #define NM_DEVICE_STATE_CONFIG 10
@@ -29,70 +39,255 @@ typedef NMDeviceWifi NMDevice;
 #define _NM_802_11_MODE_ADHOC 2
 #define _NM_802_11_MODE_MESH 3
 #define _NM_802_11_MODE_AP 4
-#define NM_ACTIVATION_REASON_AUTOCONNECT 1
 #define NM_SETTING_SECRET_FLAG_NONE 0
 #define NM_SETTING_WIRELESS_SECURITY_SETTING_NAME "wireless-security"
 #define NM_SECRET_AGENT_GET_SECRETS_FLAG_ALLOW_INTERACTION 1
 #define NM_SECRET_AGENT_GET_SECRETS_FLAG_REQUEST_NEW 2
 #define NM_IN_SET(x,a,b,c) ((x)==(a)||(x)==(b)||(x)==(c))
-#define _LOGI(...) ((void)0)
-#define _LOGW(...) ((void)0)
-static NMDeviceWifi *current;
-static Request *info(NMActRequest *r) { return g_object_get_data(r,"info"); }
-static NMConnection *nm_device_get_applied_connection(NMDevice *d) { return &info(d->req)->applied; }
+#define LOGD_DEVICE 1
+#define LOGD_WIFI 2
+#define _LOGI log_message
+#define _LOGW log_message
+
+static NMDeviceWifi d;
+static Request r;
+static NMSettingWirelessSecurity stored, applied;
+static GString *messages;
+static void log_message(int domain, const char *format, ...) {
+    va_list args;
+    va_start(args, format);
+    g_string_append_vprintf(messages, format, args);
+    g_string_append_c(messages, '\n');
+    va_end(args);
+}
+static Request *info(NMActRequest *req) { return g_object_get_data(req, "info"); }
+static NMConnection *nm_device_get_applied_connection(NMDevice *dev) { return &info(dev->req)->applied; }
 static NMSettingWirelessSecurity *nm_connection_get_setting_wireless_security(NMConnection *c) { return c->security; }
 static const char *nm_setting_wireless_security_get_key_mgmt(NMSettingWirelessSecurity *s) { return s->key_mgmt; }
 static const char *nm_setting_wireless_security_get_psk(NMSettingWirelessSecurity *s) { return s->psk; }
 static unsigned nm_setting_wireless_security_get_psk_flags(NMSettingWirelessSecurity *s) { return s->flags; }
-static int nm_device_get_state(NMDevice *d) { return d->state; }
-static NMActRequest *nm_device_get_act_request(NMDevice *d) { return d->req; }
-static int nm_active_connection_get_activation_reason(NMActRequest *r) { return info(r)->reason; }
-static NMSettingsConnection *nm_act_request_get_settings_connection(NMActRequest *r) { return &info(r)->settings; }
-static NMConnection *nm_act_request_get_applied_connection(NMActRequest *r) { return &info(r)->applied; }
+static int nm_device_get_state(NMDevice *dev) { return dev->state; }
+static NMActRequest *nm_device_get_act_request(NMDevice *dev) { return dev->req; }
+static int nm_active_connection_get_activation_reason(NMActRequest *req) { return info(req)->reason; }
+static NMSettingsConnection *nm_act_request_get_settings_connection(NMActRequest *req) { return &info(req)->settings; }
+static NMConnection *nm_act_request_get_applied_connection(NMActRequest *req) { return &info(req)->applied; }
 static NMConnection *nm_settings_connection_get_connection(NMSettingsConnection *s) { return &s->connection; }
-static gboolean nm_settings_connection_get_timestamp(NMSettingsConnection *s, guint64 *out) { *out=s->timestamp;return s->has_timestamp; }
-static gboolean nm_device_is_activating(NMDevice *d) { return d->state==NM_DEVICE_STATE_CONFIG || d->state==NM_DEVICE_STATE_NEED_AUTH; }
-static void nm_act_request_clear_secrets(NMActRequest *r) { g_assert(r==current->req);current->clear++; }
-static void cleanup_association_attempt(NMDeviceWifi *s, gboolean disconnect) { g_assert(disconnect);s->cleanup++;s->priv.sup_timeout_id=0; }
-static void nm_device_state_changed(NMDevice *d, int state, int reason) { d->state=state;d->reason=reason; }
-static void wifi_secrets_get_secrets(NMDeviceWifi *s, const char *setting, unsigned flags) { g_assert_cmpstr(setting,==,"wireless-security");g_assert(flags&NM_SECRET_AGENT_GET_SECRETS_FLAG_REQUEST_NEW);s->secrets++; }
-static gboolean need_new_8021x_secrets(NMDeviceWifi *s, int old, const char **setting) { if(s->enterprise)*setting="wireless-security";return s->enterprise; }
-static gboolean handle_auth_or_fail(NMDeviceWifi *s, NMActRequest *req, gboolean new_secrets) { s->auth++; return TRUE; }
-/* Exact unmodified function bodies are generated from the recipe-patched source. */
-#include "handlers.inc"
-static NMDeviceWifi d;
-static Request r;
-static NMSettingWirelessSecurity stored, applied;
-static void setup(void) {
- if(d.req)g_object_unref(d.req);
- memset(&d,0,sizeof(d));memset(&r,0,sizeof(r));
- stored=(NMSettingWirelessSecurity){"wpa-psk","test-only-secret",0};applied=stored;
- r.settings=(NMSettingsConnection){{&stored},123,TRUE};r.applied.security=&applied;r.reason=NM_ACTIVATION_REASON_AUTOCONNECT;
- d.req=g_object_new(G_TYPE_OBJECT,NULL);g_object_set_data(d.req,"info",&r);
- d.state=NM_DEVICE_STATE_CONFIG;d.priv.mode=_NM_802_11_MODE_INFRA;d.priv.sup_timeout_id=42;d.priv.ssid_found=TRUE;current=&d;
+static gboolean nm_settings_connection_get_timestamp(NMSettingsConnection *s, guint64 *out) { *out=s->timestamp; return s->has_timestamp; }
+static gboolean nm_device_is_activating(NMDevice *dev) { return dev->state==NM_DEVICE_STATE_CONFIG || dev->state==NM_DEVICE_STATE_NEED_AUTH; }
+static void nm_act_request_clear_secrets(NMActRequest *req) {
+    g_assert_true(req==d.req);
+    d.clear++;
+    applied.psk=NULL;
 }
-static gboolean disconnect_reason(int reason) { return handle_8021x_or_psk_auth_fail(&d,5,4,reason); }
-static void expect_prompt(void) { g_assert_true(disconnect_reason(15));g_assert_cmpuint(d.secrets,==,1);g_assert_cmpuint(d.clear,==,1);g_assert_cmpint(d.state,==,NM_DEVICE_STATE_NEED_AUTH); }
-static void allow(void) { g_assert_false(disconnect_reason(15));g_assert_cmpuint(d.clear,==,0);g_assert_cmpuint(d.secrets,==,0);g_assert_cmpuint(d.cleanup,==,0);g_assert_cmpuint(d.priv.sup_timeout_id,==,42);g_assert_cmpint(d.state,==,NM_DEVICE_STATE_CONFIG); }
-int main(void) {
- setup(); allow();puts("PASS first known-key timeout leaves original timer and secrets intact");
- expect_prompt();puts("PASS second timeout in same request uses original prompt path");
- setup();allow();d.state=NM_DEVICE_STATE_CONFIG;expect_prompt();puts("PASS stage reentry cannot replenish request budget");
- setup();allow();setup();allow();puts("PASS genuinely new request receives new single allowance");
- setup();allow();supplicant_iface_notify_wpa_psk_mismatch_cb(NULL,&d);g_assert_cmpuint(d.secrets,==,1);g_assert_cmpint(d.state,==,NM_DEVICE_STATE_NEED_AUTH);puts("PASS explicit mismatch after allowance still requests new secret");
- setup();supplicant_iface_notify_wpa_psk_mismatch_cb(NULL,&d);g_assert_cmpuint(d.secrets,==,1);g_assert_cmpint(d.state,==,NM_DEVICE_STATE_NEED_AUTH);puts("PASS explicit mismatch before allowance unchanged");
- setup();allow();g_assert_false(supplicant_connection_timeout_cb(&d));g_assert_cmpint(d.state,==,NM_DEVICE_STATE_FAILED);g_assert_cmpint(d.reason,==,NM_DEVICE_STATE_REASON_SUPPLICANT_TIMEOUT);g_assert_cmpuint(d.auth,==,0);g_assert_cmpuint(d.secrets,==,0);puts("PASS original deadline fails without restarting auth-retries loop");
- setup();allow();d.state=NM_DEVICE_STATE_FAILED;g_assert_false(disconnect_reason(15));g_assert_false(supplicant_connection_timeout_cb(&d));g_assert_cmpuint(d.secrets,==,0);g_assert_cmpuint(d.auth,==,0);puts("PASS cancellation cannot trigger recovery");
- setup();r.settings.timestamp=0;allow();setup();r.settings.has_timestamp=FALSE;allow();puts("PASS stored-key profile without prior-success history receives one allowance");
- setup();stored.psk=applied.psk="known-wrong-test-key";allow();expect_prompt();puts("PASS stored wrong key without mismatch signal reaches prompt on second timeout");
- setup();stored.psk=applied.psk="known-wrong-test-key";allow();supplicant_connection_timeout_cb(&d);g_assert_cmpint(d.state,==,NM_DEVICE_STATE_FAILED);g_assert_cmpint(d.reason,==,NM_DEVICE_STATE_REASON_SUPPLICANT_TIMEOUT);g_assert_cmpuint(d.auth,==,0);puts("PASS stored wrong key without mismatch signal fails at original deadline");
- setup();stored.psk=NULL;expect_prompt();setup();stored.psk="";expect_prompt();setup();applied.psk=NULL;expect_prompt();setup();applied.psk="changed";expect_prompt();puts("PASS absent or changed stored/applied secrets rejected");
- for(unsigned flag=1;flag<=4;flag*=2){setup();stored.flags=flag;expect_prompt();setup();applied.flags=flag;expect_prompt();}puts("PASS agent-owned/not-saved/not-required secrets excluded on both copies");
- setup();r.reason=0;expect_prompt();setup();d.priv.sup_timeout_id=0;expect_prompt();puts("PASS user activation and expired association excluded");
- for(int mode=2;mode<=4;mode++){setup();d.priv.mode=mode;expect_prompt();}puts("PASS mesh/AP/adhoc modes excluded");
- setup();g_assert_true(disconnect_reason(-15));setup();g_assert_true(disconnect_reason(2));setup();g_assert_false(disconnect_reason(-4));g_assert_cmpuint(d.clear,==,0);puts("PASS only remote reason15 changes, local inactivity retained");
- setup();d.enterprise=TRUE;expect_prompt();setup();stored.key_mgmt="sae";expect_prompt();setup();applied.key_mgmt="sae";g_assert_false(disconnect_reason(15));puts("PASS enterprise/other key management unchanged");
- setup();r.settings.connection.security=NULL;expect_prompt();setup();d.state=NM_DEVICE_STATE_ACTIVATED;g_assert_false(disconnect_reason(15));puts("PASS missing persistent security or already-connected state excluded");
- setup();supplicant_connection_timeout_cb(&d);g_assert_cmpuint(d.auth,==,1);puts("PASS unrelated association timeout retains upstream behavior");
- g_object_unref(d.req);d.req=NULL;puts("ALL 19 exact-source handler groups PASS");return 0;
+static void cleanup_association_attempt(NMDeviceWifi *self, gboolean disconnect) {
+    g_assert_true(disconnect);
+    self->cleanup++;
+    self->priv.sup_timeout_id=0;
+}
+static void nm_device_state_changed(NMDevice *dev, int state, int reason) { dev->state=state; dev->reason=reason; }
+static void wifi_secrets_get_secrets(NMDeviceWifi *self, const char *setting, unsigned flags) {
+    g_assert_cmpstr(setting, ==, "wireless-security");
+    self->new_secrets=!!(flags & NM_SECRET_AGENT_GET_SECRETS_FLAG_REQUEST_NEW);
+    self->secrets++;
+}
+static gboolean need_new_8021x_secrets(NMDeviceWifi *self, int old, const char **setting) {
+    if (self->enterprise) *setting="wireless-security";
+    return self->enterprise;
+}
+/* Record the requested secret policy. Real async settings/agent delivery and
+ * auth-retries accounting are covered by daemon hardware tests, not this stub. */
+static gboolean handle_auth_or_fail(NMDeviceWifi *self, NMActRequest *req, gboolean new_secrets) {
+    self->auth++;
+    self->new_secrets=new_secrets;
+    if (!self->auth_available) return FALSE;
+    nm_act_request_clear_secrets(req);
+    self->state=NM_DEVICE_STATE_NEED_AUTH;
+    return TRUE;
+}
+#include "handlers.inc"
+
+static void setup(void) {
+    g_clear_object(&d.req);
+    memset(&d, 0, sizeof(d));
+    memset(&r, 0, sizeof(r));
+    if (!messages) messages=g_string_new(NULL);
+    g_string_truncate(messages, 0);
+    stored=(NMSettingWirelessSecurity){"wpa-psk", "test-only-secret", 0};
+    applied=stored;
+    r.settings=(NMSettingsConnection){{&stored}, 123, TRUE};
+    r.applied.security=&applied;
+    r.reason=NM_ACTIVATION_REASON_AUTOCONNECT;
+    d.req=g_object_new(G_TYPE_OBJECT, NULL);
+    g_object_set_data(d.req, "info", &r);
+    d.state=NM_DEVICE_STATE_CONFIG;
+    d.priv=(NMDeviceWifiPrivate){_NM_802_11_MODE_INFRA, 42, TRUE};
+    d.auth_available=TRUE;
+}
+static gboolean disconnect_reason(int reason) {
+    return handle_8021x_or_psk_auth_fail(&d, NM_SUPPLICANT_INTERFACE_STATE_DISCONNECTED,
+                                      NM_SUPPLICANT_INTERFACE_STATE_4WAY_HANDSHAKE, reason);
+}
+static void mismatch(void) { supplicant_iface_notify_wpa_psk_mismatch_cb(NULL, &d); }
+static void expect_retained(void) {
+    g_assert_cmpuint(d.clear, ==, 0);
+    g_assert_cmpuint(d.secrets, ==, 0);
+    g_assert_cmpuint(d.cleanup, ==, 0);
+    g_assert_cmpuint(d.priv.sup_timeout_id, ==, 42);
+    g_assert_cmpint(d.state, ==, NM_DEVICE_STATE_CONFIG);
+    g_assert_cmpstr(applied.psk, ==, stored.psk);
+}
+static void expect_prompt(void) {
+    g_assert_cmpuint(d.clear, ==, 1);
+    g_assert_cmpuint(d.secrets, ==, 1);
+    g_assert_true(d.new_secrets);
+    g_assert_null(applied.psk);
+    g_assert_nonnull(stored.psk); /* applied clearing does not erase the saved key */
+    g_assert_cmpint(d.state, ==, NM_DEVICE_STATE_NEED_AUTH);
+}
+static void both_orders(void) {
+    for (int order=0; order<2; order++) {
+        setup();
+        for (int event=0; event<6; event++) {
+            if (order) mismatch();
+            g_assert_false(disconnect_reason(15));
+            if (!order) mismatch();
+            expect_retained();
+        }
+    }
+}
+static void manual(void) { setup(); r.reason=0; mismatch(); g_assert_false(disconnect_reason(15)); expect_retained(); }
+static void timeout_retry(void) {
+    for (int history=0; history<3; history++) {
+        setup();
+        r.settings.has_timestamp=history!=0;
+        r.settings.timestamp=history==2 ? 123 : 0;
+        mismatch();
+        g_assert_false(supplicant_connection_timeout_cb(&d));
+        g_assert_cmpuint(d.auth, ==, 1);
+        g_assert_false(d.new_secrets);
+        g_assert_cmpint(d.state, ==, NM_DEVICE_STATE_NEED_AUTH);
+        g_assert_nonnull(strstr(messages->str, "retrying association with stored PSK"));
+    }
+}
+static void retry_bound(void) {
+    setup();
+    stored.psk=applied.psk="deliberately-wrong-test-key";
+    for (unsigned window=0; window<3; window++) {
+        g_assert_false(supplicant_connection_timeout_cb(&d));
+        if (window<2) {
+            g_assert_cmpuint(d.auth, ==, window+1);
+            g_assert_false(d.new_secrets);
+            g_assert_cmpint(d.state, ==, NM_DEVICE_STATE_NEED_AUTH);
+            /* Model cached-secret delivery and CONFIG reentry on SAME request. */
+            applied.psk=stored.psk;
+            d.state=NM_DEVICE_STATE_CONFIG;
+            d.priv.sup_timeout_id=42;
+            mismatch();
+            g_assert_false(disconnect_reason(15));
+            g_assert_cmpuint(d.secrets, ==, 0);
+        }
+    }
+    g_assert_cmpuint(d.auth, ==, 2);
+    g_assert_cmpint(d.state, ==, NM_DEVICE_STATE_FAILED);
+    g_assert_cmpint(d.reason, ==, NM_DEVICE_STATE_REASON_SUPPLICANT_TIMEOUT);
+    g_assert_nonnull(strstr(messages->str, "retries exhausted"));
+    setup();
+    supplicant_connection_timeout_cb(&d);
+    g_assert_cmpuint(d.auth, ==, 1); /* new request gets its own retry budget */
+}
+static void lower_auth_budget(void) {
+    setup(); d.auth_available=FALSE;
+    supplicant_connection_timeout_cb(&d);
+    g_assert_cmpuint(d.auth, ==, 1);
+    g_assert_cmpuint(d.clear, ==, 0);
+    g_assert_cmpint(d.state, ==, NM_DEVICE_STATE_FAILED);
+    g_assert_cmpint(d.reason, ==, NM_DEVICE_STATE_REASON_SUPPLICANT_TIMEOUT);
+}
+static void missing_ssid(void) {
+    setup(); mismatch(); expect_retained(); d.priv.ssid_found=FALSE;
+    supplicant_connection_timeout_cb(&d);
+    g_assert_cmpuint(d.auth, ==, 0);
+    g_assert_cmpint(d.state, ==, NM_DEVICE_STATE_FAILED);
+    g_assert_cmpint(d.reason, ==, NM_DEVICE_STATE_REASON_SSID_NOT_FOUND);
+    g_assert_nonnull(strstr(messages->str, "association took too long, failing activation"));
+}
+static void cancelled(void) {
+    setup(); d.state=NM_DEVICE_STATE_FAILED;
+    mismatch(); g_assert_false(disconnect_reason(15));
+    supplicant_connection_timeout_cb(&d);
+    g_assert_cmpuint(d.auth, ==, 0);
+    g_assert_cmpuint(d.secrets, ==, 0);
+    g_assert_cmpuint(d.clear, ==, 0);
+}
+static void excluded_keys(void) {
+    for (int scenario=0; scenario<13; scenario++) {
+        for (int event=0; event<2; event++) {
+            setup();
+            switch (scenario) {
+            case 0: r.settings.connection.security=NULL; break;
+            case 1: stored.psk=NULL; break;
+            case 2: stored.psk=""; break;
+            case 3: applied.psk=NULL; break;
+            case 4: applied.psk="changed-key"; break;
+            case 5: stored.key_mgmt="sae"; break;
+            case 6: stored.flags=1; break;
+            case 7: stored.flags=2; break;
+            case 8: stored.flags=4; break;
+            case 9: applied.flags=1; break;
+            case 10: applied.flags=2; break;
+            case 11: applied.flags=4; break;
+            case 12: d.priv.sup_timeout_id=0; break;
+            }
+            if (event) mismatch(); else g_assert_true(disconnect_reason(15));
+            if (!stored.psk) stored.psk="placeholder-for-saved-key-assert";
+            expect_prompt();
+        }
+    }
+}
+static void other_modes(void) {
+    for (int mode=2; mode<=4; mode++) {
+        setup(); d.priv.mode=mode; mismatch(); expect_prompt();
+        setup(); d.priv.mode=mode; supplicant_connection_timeout_cb(&d);
+        g_assert_cmpuint(d.auth, ==, 0);
+        g_assert_cmpint(d.reason, ==, NM_DEVICE_STATE_REASON_SUPPLICANT_TIMEOUT);
+    }
+}
+static void other_auth(void) {
+    setup(); d.enterprise=TRUE; g_assert_true(disconnect_reason(15)); expect_prompt();
+    setup(); applied.key_mgmt="sae"; g_assert_false(disconnect_reason(15));
+    mismatch(); expect_prompt();
+    setup(); stored.flags=applied.flags=1; r.settings.timestamp=0;
+    supplicant_connection_timeout_cb(&d); g_assert_true(d.new_secrets);
+    setup(); stored.flags=applied.flags=1;
+    supplicant_connection_timeout_cb(&d); g_assert_false(d.new_secrets);
+}
+static void other_reasons(void) {
+    setup(); g_assert_true(disconnect_reason(-15)); expect_prompt();
+    setup(); g_assert_true(disconnect_reason(2)); expect_prompt();
+    setup(); g_assert_false(disconnect_reason(-4)); expect_retained();
+}
+static void activated(void) {
+    setup(); d.state=NM_DEVICE_STATE_ACTIVATED;
+    mismatch(); g_assert_false(disconnect_reason(15));
+    g_assert_cmpuint(d.clear, ==, 0);
+    g_assert_cmpuint(d.secrets, ==, 0);
+}
+int main(int argc, char **argv) {
+    g_test_init(&argc, &argv, NULL);
+    g_test_add_func("/recovery/both-event-orders-repeated", both_orders);
+    g_test_add_func("/recovery/manual-saved-profile", manual);
+    g_test_add_func("/recovery/timeout-all-timestamp-states", timeout_retry);
+    g_test_add_func("/recovery/wrong-key-bounded-across-reentry", retry_bound);
+    g_test_add_func("/recovery/lower-auth-budget", lower_auth_budget);
+    g_test_add_func("/recovery/missing-ssid", missing_ssid);
+    g_test_add_func("/unchanged/cancelled", cancelled);
+    g_test_add_func("/unchanged/excluded-keys", excluded_keys);
+    g_test_add_func("/unchanged/other-modes", other_modes);
+    g_test_add_func("/unchanged/other-auth", other_auth);
+    g_test_add_func("/unchanged/other-disconnect-reasons", other_reasons);
+    g_test_add_func("/unchanged/already-connected", activated);
+    int result=g_test_run();
+    g_clear_object(&d.req);
+    if (messages) g_string_free(messages, TRUE);
+    return result;
 }

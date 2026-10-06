@@ -1,56 +1,53 @@
 From: Wendy Labs <engineering@wendy.dev>
-Subject: [PATCH] wifi: tolerate one stored-key autoconnect handshake timeout
+Subject: [PATCH] wifi: retain stored PSKs across ambiguous WPA2 handshake failures
 
-During automatic Wi-Fi activation, NetworkManager can classify a remote
-reason-15 four-way handshake timeout as a bad password, clear the applied
-credentials and request a new key. A transient timeout does not establish
-that the saved key is wrong; this can interrupt unattended reconnection
-after a reboot or OTA even when the password has not changed.
+A WPA2 handshake timeout can emit PskMismatch before the reason-15 disconnect.
+Neither event proves the password is wrong. Requesting a replacement key can
+leave a headless device in NO_SECRETS, blocking unattended reconnection.
 
-Skip that classification once per activation request, only for an
-infrastructure WPA-PSK profile with identical nonempty stored/applied
-system-owned keys and an association timer already running. Leave the
-supplicant to recover within that timer; do not launch another attempt,
-reset the timer or bypass WPA authentication. No previous-success timestamp
-is required because native OTA can replace the root-local timestamp database.
+For infrastructure WPA-PSK with matching nonempty system-owned stored/applied
+keys, retain credentials on either notification while the association timer
+runs. Cover explicit connection activation as well as autoconnect. Repeated
+events do not reset that timer or consume a one-event allowance. PskMismatch
+has no disconnect reason, so its guard necessarily also covers genuinely
+wrong saved passwords; WPA authentication is still required for success.
 
-Explicit mismatch notifications and subsequent handshake failures still
-take the upstream credential-request path. That path can cancel the timer
-and restart configuration after obtaining secrets, but cannot replenish the
-allowance. Once it has been used, any association timeout on the same request
-fails with SUPPLICANT_TIMEOUT instead of re-entering authentication retries,
-even with auth-retries=0. This does not impose a request-wide original deadline
-or change NetworkManager's separate autoconnect retry policy. Manual activation,
-enterprise/other key management and agent-owned or unsaved keys are excluded.
+On expiry, preserve the upstream cached-secret retry path, including profiles
+without timestamp history after OTA. Allow at most two such retries per
+activation request (three association windows), subject to any smaller NM
+auth-retries budget. This bounds wrong-key activation even with the distro's
+auth-retries=0. Fail with SUPPLICANT_TIMEOUT and a diagnostic, leaving normal
+autoconnect backoff/retry policy in charge. Preserve SSID_NOT_FOUND when the
+network was not seen. Cancellation does not start recovery.
 
-This mitigates false-secret classification, not the underlying RF timeout;
-controlled physical recovery acceptance remains pending.
+This policy intentionally includes newly saved system-owned passwords: a bad
+one fails within the bounded windows and must be edited/replaced by the caller.
+Agent-owned, unsaved, changed applied keys, other security/modes and disconnect
+reasons other than remote reason 15 retain upstream behavior. This addresses
+false credential rejection, not the underlying radio/handshake fault.
 
 Upstream-Status: Pending
 
 --- a/src/core/devices/wifi/nm-device-wifi.c
 +++ b/src/core/devices/wifi/nm-device-wifi.c
-@@ -2392,6 +2392,46 @@
+@@ -2392,6 +2392,38 @@
      return FALSE;
  }
- 
-+/* Keep this allowance on the activation request across secret-stage reentry.
-+ * Granting it preserves the current association timer; it does not start a retry. */
-+#define TRANSIENT_PSK_TIMEOUT_ALLOWED "nm-wifi-transient-psk-timeout-allowed"
+
++/* A supplicant PSK-mismatch notification is a handshake heuristic, not proof
++ * that a stored key is wrong. In particular it can precede reason 15, without
++ * carrying the reason itself. Apply the same credential policy to both paths. */
++#define STORED_PSK_TIMEOUT_RETRIES "nm-wifi-stored-psk-timeout-retries"
++#define STORED_PSK_MAX_TIMEOUT_RETRIES 2
 +
 +static gboolean
-+allow_transient_psk_timeout(NMDeviceWifi *self, NMActRequest *req, int disconnect_reason)
++has_matching_stored_psk(NMDeviceWifi *self, NMActRequest *req)
 +{
-+    NMDeviceWifiPrivate       *priv = NM_DEVICE_WIFI_GET_PRIVATE(self);
 +    NMSettingsConnection      *settings;
 +    NMSettingWirelessSecurity *stored, *applied;
 +    const char                *psk;
 +
-+    if (disconnect_reason != 15 /* WLAN_REASON_4WAY_HANDSHAKE_TIMEOUT */
-+        || priv->mode != _NM_802_11_MODE_INFRA || !priv->sup_timeout_id
-+        || nm_active_connection_get_activation_reason(NM_ACTIVE_CONNECTION(req))
-+               != NM_ACTIVATION_REASON_AUTOCONNECT
-+        || g_object_get_data(G_OBJECT(req), TRANSIENT_PSK_TIMEOUT_ALLOWED))
++    if (NM_DEVICE_WIFI_GET_PRIVATE(self)->mode != _NM_802_11_MODE_INFRA)
 +        return FALSE;
 +
 +    settings = nm_act_request_get_settings_connection(req);
@@ -60,58 +57,100 @@ Upstream-Status: Pending
 +        nm_act_request_get_applied_connection(req));
 +    if (!stored || !applied
 +        || g_strcmp0(nm_setting_wireless_security_get_key_mgmt(stored), "wpa-psk") != 0
++        || g_strcmp0(nm_setting_wireless_security_get_key_mgmt(applied), "wpa-psk") != 0
 +        || nm_setting_wireless_security_get_psk_flags(stored) != NM_SETTING_SECRET_FLAG_NONE
 +        || nm_setting_wireless_security_get_psk_flags(applied) != NM_SETTING_SECRET_FLAG_NONE)
 +        return FALSE;
 +    psk = nm_setting_wireless_security_get_psk(stored);
-+    if (!psk || !psk[0] || g_strcmp0(psk, nm_setting_wireless_security_get_psk(applied)) != 0)
-+        return FALSE;
-+
-+    g_object_set_data(G_OBJECT(req), TRANSIENT_PSK_TIMEOUT_ALLOWED, GINT_TO_POINTER(1));
-+    _LOGI(LOGD_DEVICE | LOGD_WIFI,
-+          "Activation: (wifi) allowing one transient four-way timeout for a stored-key "
-+          "profile within the existing association deadline");
-+    return TRUE;
++    return psk && psk[0]
++           && g_strcmp0(psk, nm_setting_wireless_security_get_psk(applied)) == 0;
 +}
 +
  static gboolean
  handle_8021x_or_psk_auth_fail(NMDeviceWifi              *self,
                                NMSupplicantInterfaceState new_state,
-@@ -2402,6 +2442,7 @@
+@@ -2402,6 +2434,7 @@
      NMActRequest *req;
      const char   *setting_name = NULL;
      gboolean      handled      = FALSE;
 +    gboolean      new_8021x;
- 
+
      g_return_val_if_fail(new_state == NM_SUPPLICANT_INTERFACE_STATE_DISCONNECTED, FALSE);
- 
-@@ -2411,8 +2452,11 @@
+
+@@ -2411,8 +2444,17 @@
      req = nm_device_get_act_request(NM_DEVICE(self));
      g_return_val_if_fail(req != NULL, FALSE);
- 
+
 -    if (need_new_8021x_secrets(self, old_state, &setting_name)
 -        || need_new_wpa_psk(self, old_state, disconnect_reason, &setting_name)) {
 +    new_8021x = need_new_8021x_secrets(self, old_state, &setting_name);
 +    if (new_8021x || need_new_wpa_psk(self, old_state, disconnect_reason, &setting_name)) {
-+        if (!new_8021x && allow_transient_psk_timeout(self, req, disconnect_reason))
++        if (!new_8021x && disconnect_reason == 15 /* WLAN_REASON_4WAY_HANDSHAKE_TIMEOUT */
++            && NM_DEVICE_WIFI_GET_PRIVATE(self)->sup_timeout_id
++            && has_matching_stored_psk(self, req)) {
++            _LOGI(LOGD_DEVICE | LOGD_WIFI,
++                  "Activation: (wifi) handshake timeout with stored PSK; "
++                  "retaining key within the existing association deadline");
 +            return FALSE;
++        }
 +
          nm_act_request_clear_secrets(req);
- 
+
          _LOGI(LOGD_DEVICE | LOGD_WIFI,
-@@ -2910,6 +2954,15 @@
- 
-     connection = nm_act_request_get_applied_connection(req);
-     g_assert(connection);
+@@ -2861,11 +2903,18 @@
+     if (nm_device_get_state(device) != NM_DEVICE_STATE_CONFIG)
+         return;
+
++    req = nm_device_get_act_request(NM_DEVICE(self));
++    g_return_if_fail(req != NULL);
 +
-+    /* Once the allowance is used, an association timeout fails this request
-+     * instead of re-entering authentication retries, even with auth-retries=0. */
-+    if (g_object_get_data(G_OBJECT(req), TRANSIENT_PSK_TIMEOUT_ALLOWED)) {
-+        nm_device_state_changed(device,
-+                                NM_DEVICE_STATE_FAILED,
-+                                NM_DEVICE_STATE_REASON_SUPPLICANT_TIMEOUT);
-+        return FALSE;
++    if (NM_DEVICE_WIFI_GET_PRIVATE(self)->sup_timeout_id && has_matching_stored_psk(self, req)) {
++        _LOGI(LOGD_DEVICE | LOGD_WIFI,
++              "Activation: (wifi) possible PSK mismatch with stored key; "
++              "retaining key within the existing association deadline");
++        return;
 +    }
- 
-     if (NM_IN_SET(priv->mode, _NM_802_11_MODE_ADHOC, _NM_802_11_MODE_MESH, _NM_802_11_MODE_AP)) {
-         /* In Ad-Hoc and AP modes there's nothing to check the encryption key
++
+     _LOGI(LOGD_DEVICE | LOGD_WIFI,
+           "Activation: (wifi) psk mismatch reported by supplicant, asking for new key");
+-
+-    req = nm_device_get_act_request(NM_DEVICE(self));
+-    g_return_if_fail(req != NULL);
+
+     nm_act_request_clear_secrets(req);
+
+@@ -2945,7 +2994,33 @@
+                                                  &timestamp))
+             new_secrets = !timestamp;
+
+-        if (handle_auth_or_fail(self, req, new_secrets))
++        if (has_matching_stored_psk(self, req)) {
++            guint retries = GPOINTER_TO_UINT(g_object_get_data(G_OBJECT(req),
++                                                               STORED_PSK_TIMEOUT_RETRIES));
++
++            /* Keep upstream's cached-secret recovery even without timestamp
++             * history (which an OTA can replace). Count expired association
++             * windows, not mismatch/disconnect events. The request owns this
++             * bound across secret-stage reentry, including auth-retries=0. */
++            if (retries < STORED_PSK_MAX_TIMEOUT_RETRIES) {
++                g_object_set_data(G_OBJECT(req),
++                                  STORED_PSK_TIMEOUT_RETRIES,
++                                  GUINT_TO_POINTER(retries + 1));
++                if (handle_auth_or_fail(self, req, FALSE)) {
++                    _LOGW(LOGD_DEVICE | LOGD_WIFI,
++                          "Activation: (wifi) retrying association with stored PSK (%u/%u)",
++                          retries + 1,
++                          STORED_PSK_MAX_TIMEOUT_RETRIES);
++                    return FALSE;
++                }
++            }
++            _LOGW(LOGD_DEVICE | LOGD_WIFI,
++                  "Activation: (wifi) stored-PSK association retries exhausted; "
++                  "failing activation without requesting a new key");
++            nm_device_state_changed(device,
++                                    NM_DEVICE_STATE_FAILED,
++                                    NM_DEVICE_STATE_REASON_SUPPLICANT_TIMEOUT);
++        } else if (handle_auth_or_fail(self, req, new_secrets))
+             _LOGW(LOGD_DEVICE | LOGD_WIFI, "Activation: (wifi) asking for new secrets");
+         else {
+             nm_device_state_changed(device,
