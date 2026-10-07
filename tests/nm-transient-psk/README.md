@@ -65,5 +65,19 @@ waiting through the full cooldown. Restore the AP during cooldown and confirm
 automatic reconnection without changing the client profile. Test failed first-time
 CLI setup/profile deletion and user cancellation, then restore both devices.
 
-The previous hardware results for custom inner retries do not validate this
-replacement policy patch. Fresh validation of this version is still pending.
+Validated on 2026-10-07 with a Jetson Thor client and a Raspberry Pi 5/BE202 AP,
+using temporary daemon overrides and the same pristine Wi-Fi plugin in both
+variants. Both WPA2 and WPA3-only SAE reproduced upstream's `NO_SECRETS` block.
+The WPA2 baseline stayed disconnected for over five minutes. The candidate made
+four failed activations, waited 300 seconds, then connected automatically and
+passed traffic on both security types. Saved password hashes were unchanged;
+`auth-retries=0` and the default autoconnect budget/cooldown were retained.
+
+A wrong password for a new network failed through the Wendy CLI in about three
+seconds, preserving the original error; the agent deleted the new profile.
+An explicit disconnect prevented further attempts while the saved profile still
+allowed autoconnect. Disabling device autoconnect during cooldown also prevented
+a retry after the timer expired. Both devices were restored and their original
+saved Wi-Fi profiles verified unchanged. These results validate the replacement policy patch, not
+the superseded custom handshake retries. They exercise rebuilt binaries on the
+devices, rather than a newly flashed full image.
