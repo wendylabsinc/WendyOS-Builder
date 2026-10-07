@@ -51,6 +51,10 @@ FREE_SLACK_KB=8192
 tee_supplicant_was_active=0
 tee_mount_was_active=0
 
+# Whether this device had a TPM before the conversion touched anything. Step 11
+# compares it against the state afterwards.
+tpm_was_present=0
+
 # Set when the run did its work but something afterwards did not come back.
 # The conversion is still reported as done. The exit status carries the fault,
 # so the unit shows as failed and the journal says what is missing.
@@ -471,6 +475,13 @@ log "the contents of $CONFIG_DIR are staged at $STAGING"
 # on a Jetson: `umount` on the parent returns success while the device stays
 # listed in /proc/mounts against the bind. So the bind has to go first, and
 # then the unmount has to be CHECKED rather than believed.
+# Was there a TPM before any of this started? Read HERE, before the first stop,
+# because stopping the supplicant is what takes it away. Step 11 uses it to
+# decide whether the conversion has to end in a reboot.
+if [ -e /dev/tpmrm0 ] || [ -e /dev/tpm0 ]; then
+    tpm_was_present=1
+fi
+
 if systemctl is-active --quiet tee-supplicant.service; then
     tee_supplicant_was_active=1
     log "stopping tee-supplicant.service: it writes to /var/lib/tee, and stopping it keeps anything from landing there during the conversion and being lost"
@@ -596,6 +607,38 @@ if [ "$exit_rc" = 0 ]; then
     log "done: $CONFIG_DIR is now ext4 on $CONFIG_DEV with its contents restored"
 else
     log "done: $CONFIG_DIR is now ext4 on $CONFIG_DEV with its contents restored, but something stopped for the conversion did not come back -- see the errors above"
+fi
+
+# On a board with an emulated TPM, the conversion ends in a reboot, and only
+# then. Measured on a Jetson 2026-10-07:
+#
+#   stop the supplicant, start it again        -> the TPM comes back
+#   the same, with the bind stopped and started too -> the TPM comes back
+#   the same, with /config REFORMATTED between them -> the TPM does NOT come back
+#
+# So it is not the units. The TEE itself is never restarted by any of this --
+# only the userspace supplicant is -- and the fTPM keeps state inside the TEE
+# that refers to its own storage. Replace that storage underneath it and the
+# state no longer matches, which nothing in userspace can clear: a supplicant
+# restart, a reload of tpm_ftpm_tee and a manual modprobe cycle were all tried
+# and all failed. A reboot restarts the TEE, and that is the whole reason this
+# is a reboot and not a restart.
+#
+# The test is "was there a TPM, and is it gone now", so a board without one --
+# every board in the field today, and every RPi and x86 -- never reaches it.
+#
+# ONLY ON THE SUCCESS PATH. A failed conversion must not reboot: it would run
+# again, fail again and reboot again, and a device in a loop is worse than one
+# with no TPM until somebody looks at it. The failure paths leave the unit
+# failed and say so, which is visible.
+#
+# Safe here because the conversion is finished: the contents are back, the
+# staging directory is gone and the mounts are up, so an interrupted reboot
+# costs nothing and the next boot finds the work done.
+if [ "$exit_rc" = 0 ] && [ "$tpm_was_present" = 1 ] &&
+   [ ! -e /dev/tpmrm0 ] && [ ! -e /dev/tpm0 ]; then
+    log "the TPM was present before the conversion and is gone now, and only a reboot brings it back. Rebooting."
+    systemctl --no-block reboot
 fi
 
 exit "$exit_rc"
