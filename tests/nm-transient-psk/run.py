@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compile exact NM callbacks and check recovery plus unchanged control cases."""
+"""Compile exact NM policy code and check recovery plus unchanged control cases."""
 import argparse
 import hashlib
 import json
@@ -12,8 +12,8 @@ import sys
 import urllib.request
 
 REVISION = '56b51b98fbb8627c4c09a483702e18fd8aee7ce1'
-SOURCE = Path('src/core/devices/wifi/nm-device-wifi.c')
-SHA256 = 'e83faed72137306c842411d1a28bce9618932d1648c8493b895df3e110b4455b'
+SOURCE = Path('src/core/nm-policy.c')
+SHA256 = 'df18b1c948e2e332bcdcbc8220a9b999b93419f9293bb50386b2d39cbfe674da'
 HERE = Path(__file__).resolve().parent
 
 
@@ -84,7 +84,7 @@ def main():
             results[label]['cases'][case] = result.returncode
         print(f'PASS: {label}, {len(cases)} groups', flush=True)
     (args.output / 'RESULT.json').write_text(json.dumps(results, indent=2) + '\n')
-    print('PASS: six baseline regressions, six unchanged controls, all 12 candidate groups')
+    print('PASS: two baseline regressions, ten unchanged controls, all 12 candidate groups')
 
 
 if __name__ == '__main__':
