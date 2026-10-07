@@ -43,9 +43,23 @@ sed "s|##DEFAULT_INSTALL_DIR##|$OLD_PREFIX|g" "$D/relocate_sdk.py" > "$D/.reloca
 # Rewrites both each binary's PT_INTERP and the loader's own library search path; with only
 # the former the binaries start and then fail to find libc. PT_INTERP is patched in place,
 # so the new path must be no longer than the original — unpack the devkit somewhere short.
+# The relocator opens the loader before its per-file permission handling. Make it
+# writable first, even if find puts it in a later batch.
+chmod u+w "$LOADER"
+
+# Copied sstate executables can be read-only. Upstream normally chmods/restores
+# them, but on a Docker Desktop bind mount we observed os.access() report writable
+# while open("r+b") failed. Normalize owner-write permission without an access
+# check, then relocate the same batch. Only regular owner-executable files are
+# selected; these unpacked SDK copies remain owner-writable after setup.
+# Batched -exec propagates failures from chmod/python and from the traversal.
 find "$D/toolchain" "$D/kernel-build/scripts" "$D/hosttools" "$RUNTIME" \
-        -type f -perm -u+x -print0 2>/dev/null \
-    | xargs -0 -r python3 "$D/.relocate.py" "$RUNTIME" "$LOADER"
+        -type f -perm -u+x -exec sh -c '
+            runtime=$1 loader=$2 relocator=$3
+            shift 3
+            chmod u+w "$@" || exit 1
+            exec python3 "$relocator" "$runtime" "$loader" "$@"
+        ' sh "$RUNTIME" "$LOADER" "$D/.relocate.py" {} +
 rm -f "$D/.relocate.py"
 
 # PATH only. LD_LIBRARY_PATH would apply to every process, so host tools such as python3
