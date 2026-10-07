@@ -42,7 +42,7 @@ def main():
     if hashlib.sha256(source.read_bytes()).hexdigest() != SHA256:
         fail(f'{source}: requires exact NM 1.56.0 source at {REVISION} (SHA256 {SHA256})')
 
-    patch = HERE.parents[1] / 'recipes-connectivity/networkmanager/files/0001-wifi-bound-transient-stored-key-timeout.patch'
+    patch = HERE.parents[1] / 'recipes-connectivity/networkmanager/files/0001-policy-retry-saved-wifi-after-no-secrets.patch'
     patched = args.output / 'patched'
     target = patched / SOURCE
     target.parent.mkdir(parents=True)
@@ -65,8 +65,8 @@ def main():
         listing = subprocess.check_output([str(binary), '-l'], text=True)
         cases = [line.removeprefix('# ') for line in listing.splitlines()
                  if line.removeprefix('# ').startswith('/')]
-        if len(cases) != 12:
-            fail(f'{label}: expected 12 test groups, got {cases}')
+        if len(cases) != 14:
+            fail(f'{label}: expected 14 test groups, got {cases}')
         results[label] = {'source_sha256': hashlib.sha256(path.read_bytes()).hexdigest(), 'cases': {}}
         for case in cases:
             result = subprocess.run([str(binary), '-p', case], capture_output=True, text=True)
@@ -84,7 +84,7 @@ def main():
             results[label]['cases'][case] = result.returncode
         print(f'PASS: {label}, {len(cases)} groups', flush=True)
     (args.output / 'RESULT.json').write_text(json.dumps(results, indent=2) + '\n')
-    print('PASS: two baseline regressions, ten unchanged controls, all 12 candidate groups')
+    print('PASS: four baseline regressions, ten unchanged controls, all 14 candidate groups')
 
 
 if __name__ == '__main__':

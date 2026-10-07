@@ -34,6 +34,7 @@ typedef struct { NMPolicyPrivate priv; unsigned rechecks; } NMPolicy;
 #define nm_assert g_assert
 #define nm_streq(a,b) (strcmp(a,b) == 0)
 #define nm_streq0(a,b) (g_strcmp0(a,b) == 0)
+#define NM_IN_STRSET(s,a,b) (nm_streq0(s,a) || nm_streq0(s,b))
 #define NM_MAX MAX
 #define _LOGD(...) ((void)0)
 #undef g_signal_handlers_disconnect_by_func
@@ -104,10 +105,11 @@ static void expect_blocked(void) {
     g_assert_cmpuint(manager.tries, ==, 4);
     g_assert_null(timeout_callback);
 }
-static void saved_key(void) {
+static void saved_key(gconstpointer key_mgmt) {
     for (int mode = 0; mode < 2; mode++) {
         for (int version = 0; version < 2; version++) {
             setup(); wifi.mode = mode ? "infrastructure" : NULL;
+            security.key_mgmt = key_mgmt;
             saved.agent_version = version;
             no_secrets();
             g_assert_cmpuint(saved.blocked, ==, 0);
@@ -117,8 +119,9 @@ static void saved_key(void) {
         }
     }
 }
-static void cooldown(void) {
+static void cooldown(gconstpointer key_mgmt) {
     setup();
+    security.key_mgmt = key_mgmt;
     for (unsigned cycle = 1; cycle <= 3; cycle++) {
         for (unsigned tries = 4; tries > 0; tries--) {
             no_secrets();
@@ -143,17 +146,23 @@ static void cooldown(void) {
     }
 }
 static void missing_key(void) {
-    setup(); security.psk = NULL; expect_blocked();
-    setup(); security.psk = ""; expect_blocked();
+    const char *types[] = {"wpa-psk", "sae"};
+    for (unsigned i = 0; i < G_N_ELEMENTS(types); i++) {
+        setup(); security.key_mgmt = types[i]; security.psk = NULL; expect_blocked();
+        setup(); security.key_mgmt = types[i]; security.psk = ""; expect_blocked();
+    }
     setup(); saved.connection.security = NULL; expect_blocked();
 }
 static void secret_flags(void) {
-    for (unsigned flags = 1; flags < 8; flags++) {
-        setup(); security.flags = flags; expect_blocked();
+    const char *types[] = {"wpa-psk", "sae"};
+    for (unsigned i = 0; i < G_N_ELEMENTS(types); i++) {
+        for (unsigned flags = 1; flags < 8; flags++) {
+            setup(); security.key_mgmt = types[i]; security.flags = flags; expect_blocked();
+        }
     }
 }
 static void other_security(void) {
-    const char *types[] = {NULL, "none", "sae", "wpa-eap", "ieee8021x", "owe"};
+    const char *types[] = {NULL, "none", "wpa-eap", "ieee8021x", "owe"};
     for (unsigned i = 0; i < G_N_ELEMENTS(types); i++) {
         setup(); security.key_mgmt = types[i]; expect_blocked();
     }
@@ -204,8 +213,10 @@ static void existing_blocks(void) {
 }
 int main(int argc, char **argv) {
     g_test_init(&argc, &argv, NULL);
-    g_test_add_func("/recovery/saved-key", saved_key);
-    g_test_add_func("/recovery/cooldown", cooldown);
+    g_test_add_data_func("/recovery/saved-key", "wpa-psk", saved_key);
+    g_test_add_data_func("/recovery/cooldown", "wpa-psk", cooldown);
+    g_test_add_data_func("/recovery/sae-saved-key", "sae", saved_key);
+    g_test_add_data_func("/recovery/sae-cooldown", "sae", cooldown);
     g_test_add_func("/control/missing-key", missing_key);
     g_test_add_func("/control/secret-flags", secret_flags);
     g_test_add_func("/control/security", other_security);
