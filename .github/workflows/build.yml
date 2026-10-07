@@ -1411,7 +1411,7 @@ jobs:
       device: ${{ needs.detect-changes.outputs.devices }}
       category: ota
       ota_source: pr
-      pr: ${{ github.event.pull_request.number }}
+      pr: "${{ github.event.pull_request.number }}"
       allow_no_device: true
 
   # ---------------------------------------------------------------------------
