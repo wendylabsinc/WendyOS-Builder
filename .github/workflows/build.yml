@@ -1394,6 +1394,25 @@ jobs:
           "$RUNNER_TEMP/publisher" --master-manifest-batch "$RUNNER_TEMP/master-updates.json" --pr "$PR_NUMBER" --access-token "$TOKEN" </dev/null
 
   # ---------------------------------------------------------------------------
+  # device-tests: OTA this PR's image onto real hardware and run the lab suite.
+  # Needs publish-pr, because the device downloads the payload itself and can
+  # only do that once the manifest is live.
+  # ---------------------------------------------------------------------------
+  device-tests:
+    name: Device tests
+    needs: [detect-changes, publish-pr]
+    if: ${{ github.event_name == 'pull_request' && needs.detect-changes.outputs.devices != '' }}
+    uses: wendylabsinc/wendy-lab/.github/workflows/device-test.yml@main
+    with:
+      # Families, not inventory keys; the lab expands them to its storage variants
+      # and passes when it holds no board for one.
+      device: ${{ needs.detect-changes.outputs.devices }}
+      category: ota
+      ota_source: pr
+      pr: ${{ github.event.pull_request.number }}
+      allow_no_device: true
+
+  # ---------------------------------------------------------------------------
   # drivers: rebuild every add-on against the devkit this run published. A kernel
   # change moves uname -r, invalidating every published .raw, so rebuilding here
   # keeps (driver, kernel) coverage complete. No devkit published means no work.
