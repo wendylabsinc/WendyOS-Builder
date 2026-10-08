@@ -3,6 +3,7 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
 
 # Install NetworkManager configuration files
 SRC_URI += " \
+    file://0001-policy-retry-saved-wifi-after-no-secrets.patch \
     file://NetworkManager.conf \
     file://00-manage-usb0.conf \
     file://10-usb-gadget.conf \
