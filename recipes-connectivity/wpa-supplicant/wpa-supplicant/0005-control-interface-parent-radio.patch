@@ -5,11 +5,12 @@ Upstream-Status: Pending
 
 Global INTERFACE_ADD previously used the first interface in the daemon.
 Add an optional parent interface after the optional MAC address, retaining
-legacy behavior when omitted. Use that same parent for failed-add cleanup. Global interface removal
-also retains a surviving driver context on the removed interface's radio.
-Expose phyname and nan_mgmt in global STATUS so controllers can select a
-capable radio, remove only its mutually exclusive P2P management device,
-and refuse a daemon restart while any NAN management interface remains.
+legacy behavior when omitted. Use that same parent for failed-add cleanup.
+Global interface removal retains an independent driver context on the same
+radio that will survive recursive child cleanup. Expose phyname, nan_mgmt
+and nan_data in global STATUS so controllers can select a capable radio,
+validate interface types, remove only its mutually exclusive P2P management
+device, and refuse a daemon restart while any NAN management interface remains.
 
 diff --git a/wpa_supplicant/ctrl_iface.c b/wpa_supplicant/ctrl_iface.c
 --- a/wpa_supplicant/ctrl_iface.c
@@ -102,17 +103,20 @@ diff --git a/wpa_supplicant/ctrl_iface.c b/wpa_supplicant/ctrl_iface.c
  	int ret;
  	unsigned int delete_iface;
  
-@@ -14847,13 +14860,25 @@
+@@ -14847,13 +14860,28 @@
  	if (wpa_s == NULL)
  		return -1;
  	delete_iface = wpa_s->added_vif;
 +	if (delete_iface) {
 +		/* Keep a driver context on this radio alive across unregistering
 +		 * the interface. The global head may belong to another radio or
-+		 * even a wired driver. Refuse before changing state if none survives.
++		 * even a wired driver. Children can be freed recursively during
++		 * removal, so use only another independent (root) interface.
++		 * Refuse before changing state if no such context exists.
 +		 */
 +		for (parent = global->ifaces; parent; parent = parent->next) {
-+			if (parent != wpa_s && parent->radio == wpa_s->radio)
++			if (parent != wpa_s && parent->parent == parent &&
++			    parent->radio == wpa_s->radio)
 +				break;
 +		}
 +		if (!parent)
@@ -129,7 +133,7 @@ diff --git a/wpa_supplicant/ctrl_iface.c b/wpa_supplicant/ctrl_iface.c
  	}
  	return ret;
  }
-@@ -15229,9 +15254,14 @@
+@@ -15229,9 +15257,16 @@
  #endif /* CONFIG_WIFI_DISPLAY */
  
  	for (wpa_s = global->ifaces; wpa_s; wpa_s = wpa_s->next) {
@@ -140,9 +144,11 @@ diff --git a/wpa_supplicant/ctrl_iface.c b/wpa_supplicant/ctrl_iface.c
 -				  wpa_s->ifname, MAC2STR(wpa_s->own_addr));
 +				  "address=" MACSTR "\n"
 +				  "phyname=%s\n"
-+				  "nan_mgmt=%d\n",
++				  "nan_mgmt=%d\n"
++				  "nan_data=%d\n",
 +				  wpa_s->ifname, MAC2STR(wpa_s->own_addr),
-+				  phyname ? phyname : "", wpa_s->nan_mgmt);
++				  phyname ? phyname : "", wpa_s->nan_mgmt,
++				  wpa_s->nan_data);
  		if (os_snprintf_error(end - pos, ret))
  			return pos - buf;
  		pos += ret;

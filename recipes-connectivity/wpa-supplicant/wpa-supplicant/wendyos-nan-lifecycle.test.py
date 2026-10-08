@@ -46,6 +46,7 @@ def mock():
             output = state.get('status_reply', '\n'.join(
                 'ifname=' + n + '\nphyname=' + state.get('radios', {}).get(n, 'phy0')
                 + '\nnan_mgmt=' + str(int(state.get('nan_management', {}).get(n, n == 'nan0')))
+                + '\nnan_data=' + str(int(state.get('nan_data', {}).get(n, n == 'foreign-ndi')))
                 for n in state['ifaces']))
         elif command == 'nan_status':
             if state.get('fail_nan_status'):
@@ -70,6 +71,7 @@ def mock():
             if output == 'OK':
                 state['ifaces'].append(name)
                 state.setdefault('nan_management', {})[name] = args[8] == 'nan'
+                state.setdefault('nan_data', {})[name] = args[8] == 'nan_data'
                 parent = args[10]
                 state.setdefault('radios', {})[name] = state.get('radios', {}).get(parent, 'phy0')
         elif command == 'interface_remove':
@@ -388,6 +390,41 @@ class LifecycleTest(unittest.TestCase):
         mismatch.communicate(timeout=5)
         self.assertNotEqual(mismatch.returncode, 0)
         self.assertIn('foreign-ndi', self.state()['ifaces'])
+
+    def test_ndi_commands_reject_station_and_management_name_collisions(self):
+        for name in ['wlan0', 'nan0']:
+            for command in ['ndi-create', 'ndi-remove']:
+                with self.subTest(name=name, command=command):
+                    self.set_state(started=True)
+                    self.fails_without_mutation(self.start(command, name))
+                    self.assertEqual(self.state()['ifaces'], ['wlan0', 'nan0', 'foreign-ndi'])
+                    self.assertTrue(self.state()['started'])
+
+    def test_management_commands_reject_station_and_data_interfaces(self):
+        for name in ['wlan0', 'foreign-ndi']:
+            for args in [('start',), ('stop',), ('ndi-create', 'new-ndi')]:
+                with self.subTest(name=name, args=args):
+                    self.set_state(started=True)
+                    self.fails_without_mutation(self.start(*args, WENDYOS_NAN_IFACE=name))
+
+    def test_interface_types_must_be_complete_and_unambiguous(self):
+        for kind, name, commands in [
+                ('management', 'nan0', [('start',), ('stop',), ('ndi-create', 'new-ndi')]),
+                ('data', 'foreign-ndi', [('ndi-create', 'foreign-ndi'), ('ndi-remove', 'foreign-ndi')])]:
+            valid = {'nan_mgmt': int(kind == 'management'), 'nan_data': int(kind == 'data')}
+            for field in valid:
+                for bad in ['', field + '=2', field + '=0\n' + field + '=1',
+                            field + '=' + str(valid[field]) + '=unexpected']:
+                    fields = [bad if key == field else key + '=' + str(value)
+                              for key, value in valid.items()]
+                    reply = ('ifname=wlan0\nphyname=phy0\nnan_mgmt=0\nnan_data=0\n'
+                             + ('' if kind == 'management' else
+                                'ifname=nan0\nphyname=phy0\nnan_mgmt=1\nnan_data=0\n')
+                             + 'ifname=' + name + '\nphyname=phy0\n' + '\n'.join(fields))
+                    for args in commands:
+                        with self.subTest(kind=kind, field=field, bad=bad, args=args):
+                            self.set_state(started=True, status_reply=reply)
+                            self.fails_without_mutation(self.start(*args))
 
     def test_existing_cluster_must_match_an_explicit_parent(self):
         self.set_state(started=True, radios={'wlan0': 'phy1', 'nan0': 'phy0'})

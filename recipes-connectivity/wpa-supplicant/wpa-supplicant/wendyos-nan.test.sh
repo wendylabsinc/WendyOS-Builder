@@ -15,7 +15,7 @@ cat >"$MOCK" <<'EOF'
 printf '%s\n' "$*" >>"$WENDYOS_NAN_TEST_LOG"
 case " $* " in
 *" -g "*" status "*)
-    printf 'ifname=nan0\nphyname=phy0\nifname=ndi0\nphyname=phy0\n'
+    printf 'ifname=nan0\nphyname=phy0\nnan_mgmt=1\nnan_data=0\nifname=ndi0\nphyname=phy0\nnan_mgmt=0\nnan_data=1\n'
     ;;
 *)
     printf 'OK\n'

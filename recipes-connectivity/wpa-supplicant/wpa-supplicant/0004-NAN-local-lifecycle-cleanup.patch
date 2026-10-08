@@ -8,6 +8,8 @@ Fix forced cleanup, local NDI matching, same-radio management lookup, and
 separate failed setup from established NDP reference ownership. Stop NAN
 before generic interface cleanup frees the discovery engine used by its
 stop callback; otherwise stopping the shared daemon with NAN running crashes.
+Keep NAN teardown out of the generic root-interface P2P group cleanup, which
+would otherwise disconnect unrelated Wi-Fi Direct sessions on other radios.
 
 diff --git a/src/nan/nan.c b/src/nan/nan.c
 index a62edd1..15ce345 100644
@@ -271,10 +273,21 @@ index f44a7a6..f66aa66 100644
  	}
  
 diff --git a/wpa_supplicant/wpa_supplicant.c b/wpa_supplicant/wpa_supplicant.c
-index d872c1e..20d06fb 100644
+index d872c1e..3d5221b 100644
 --- a/wpa_supplicant/wpa_supplicant.c
 +++ b/wpa_supplicant/wpa_supplicant.c
-@@ -8358,10 +8358,12 @@
+@@ -8320,7 +8320,9 @@
+ 	struct wpa_global *global = wpa_s->global;
+ 	struct wpa_supplicant *iface, *prev;
+ 
+-	if (wpa_s == wpa_s->parent)
++	/* NAN interfaces are independent roots but do not own P2P groups.
++	 * Their removal must not disconnect Wi-Fi Direct on other radios. */
++	if (wpa_s == wpa_s->parent && !wpas_is_nan_iface(wpa_s))
+ 		wpas_p2p_group_remove(wpa_s, "*");
+ 
+ 	iface = global->ifaces;
+@@ -8358,10 +8360,12 @@
  		}
  	}
  
@@ -289,7 +302,7 @@ index d872c1e..20d06fb 100644
  
  	wpas_ctrl_radio_work_flush(wpa_s);
  	radio_remove_interface(wpa_s);
-@@ -8585,18 +8587,27 @@ int wpa_supplicant_remove_iface(struct wpa_global *global,
+@@ -8585,18 +8589,27 @@ int wpa_supplicant_remove_iface(struct wpa_global *global,
  	struct wpa_supplicant *parent = wpa_s->parent;
  #endif /* CONFIG_MESH */
  
