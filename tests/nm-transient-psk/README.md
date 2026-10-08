@@ -50,8 +50,9 @@ keys use ordinary retry accounting, and repeated exhausted budgets schedule
 cooldown/reset/recheck cycles, for both WPA-PSK and SAE. Ten control groups pass
 on both: missing keys, secret flags, security types, modes, device types, activation-state bounds,
 new-agent registration, other failures, zero/infinite budgets and existing blocks.
-Source hashes and individual test logs are retained. The existing path-filtered
-CI workflow runs this small check without a Yocto build.
+Source hashes and individual test logs are retained. A separate job in
+`scripts-ci.yml` runs this small check alongside the other script checks without
+a Yocto build. Its workflow triggers include the NetworkManager recipe and tests.
 
 ## Hardware validation
 

@@ -39,6 +39,8 @@ on:
       - 'recipes-kernel/wendyos-kernel-devkit/files/*.sh'
       - 'recipes-core/wendyos-identity/files/*.sh'
       - 'recipes-connectivity/avahi/files/*.sh'
+      - 'recipes-connectivity/networkmanager/**'
+      - 'tests/nm-transient-psk/**'
       - 'meta-arduino-extensions/recipes-connectivity/wendyos-radio-addr/files/*.sh'
       - 'meta-qcom-extensions/files/grub/*'
       - 'meta-qcom-extensions/recipes-bsp/grub/*'
@@ -92,6 +94,8 @@ on:
       - 'recipes-kernel/wendyos-kernel-devkit/files/*.sh'
       - 'recipes-core/wendyos-identity/files/*.sh'
       - 'recipes-connectivity/avahi/files/*.sh'
+      - 'recipes-connectivity/networkmanager/**'
+      - 'tests/nm-transient-psk/**'
       - 'meta-arduino-extensions/recipes-connectivity/wendyos-radio-addr/files/*.sh'
       - 'meta-qcom-extensions/files/grub/*'
       - 'meta-qcom-extensions/recipes-bsp/grub/*'
@@ -110,6 +114,26 @@ on:
       - '.github/workflows/scripts-ci.yml'
 
 jobs:
+  networkmanager:
+    name: NetworkManager saved-password recovery
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install harness dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc libglib2.0-dev pkg-config patch
+      - name: Test exact pinned NetworkManager policy
+        run: python3 tests/nm-transient-psk/run.py --fetch-upstream --output "$RUNNER_TEMP/nm-transient-psk"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nm-transient-psk-results
+          path: ${{ runner.temp }}/nm-transient-psk
+
   test:
     name: Resolver map + unit tests
     runs-on: ubuntu-latest
