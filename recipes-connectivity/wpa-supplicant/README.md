@@ -87,7 +87,7 @@ sh wpa-supplicant/wendyos-nan.test.sh
 sh wpa-supplicant/wendyos-nan-stop.test.sh
 python3 wpa-supplicant/wendyos-nan-lifecycle.test.py -v
 shellcheck wpa-supplicant/wendyos-nan wpa-supplicant/*.test.sh
-# After applying all five patches to the pinned source:
+# After applying all six patches to the pinned source:
 python3 wpa-supplicant/wendyos-nan-parent.test.py /path/to/wpa_supplicant-2.12
 ```
 
@@ -99,3 +99,42 @@ removal/rollback on the correct radio, context lifetime during recursive child
 removal, and preservation of other-radio Wi-Fi Direct groups during NAN teardown.
 These fixtures do not exercise firmware, actual NDP traffic or
 complete image builds; those require separate target and hardware checks.
+
+## Android connection compatibility
+
+A Pixel 7 could discover a Wendy service but fail to establish the direct Wi-Fi
+connection. Its connection request included a proposed schedule without marking
+it as the chosen schedule, which the supplicant rejected. Patch 0006 accepts
+that proposal and lets Wendy choose a schedule through the existing negotiation.
+Later Response and Confirm messages still require a selected schedule, and
+malformed schedule entries are rejected.
+
+The regression uses the captured Pixel schedule attribute (NDC), not a replay
+of the complete radio exchange. It also checks malformed input and the stricter
+Response/Confirm handling. The patch fixes an inherited cleanup bug in the NAN
+test harness so the full module suite can finish.
+
+To run this regression and the upstream module suite on Linux, apply all six
+patches to a disposable copy of the pinned source. Install a C toolchain,
+pkg-config, Python 3, and the OpenSSL, libnl-3 and libnl-genl-3 development packages
+(`build-essential pkg-config python3 libssl-dev libnl-3-dev libnl-genl-3-dev`
+on Debian/Ubuntu). From this README's directory, run:
+
+```sh
+src=/path/to/wpa_supplicant-2.12
+cp "$src/wpa_supplicant/defconfig" "$src/wpa_supplicant/.config"
+make -C "$src/wpa_supplicant" clean
+make -C "$src/wpa_supplicant" -j4 \
+    CONFIG_NAN=y CONFIG_NAN_USD=y CONFIG_PASN=y \
+    CONFIG_MODULE_TESTS=y CONFIG_EXT_PASSWORD_TEST=y NEED_FIPS186_2_PRF=y
+python3 wpa-supplicant/wendyos-nan-module.test.py \
+    "$src/wpa_supplicant/wpa_supplicant" --log /tmp/nan-module-tests.log
+```
+
+The extra password-test and crypto flags are needed by the upstream module
+suite. These test options are not enabled in the shipped image. The runner
+starts a private supplicant without attaching any radios or registering on
+D-Bus; it needs neither root nor Wi-Fi hardware. It requires both the Android
+regression marker and a successful full-suite result, and retains the log for
+diagnosis. This checks parsing and simulated negotiation; an actual phone
+connection still needs separate hardware validation.
