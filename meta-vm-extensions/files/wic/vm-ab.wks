@@ -31,7 +31,7 @@
 # constant (WENDYOS_ROOTFS_SIZE_KB in conf/distro/include/wendyos-rootfs-size.inc,
 # overridden per VM machine from WENDYOS_VM_ROOTFS_SIZE_KB).
 # Do NOT add expand-rootfs: it would grow rootfsA over rootfsB. The /data grow is
-# a separate first-boot step (grow-data-part).
+# a separate first-boot step (wendyos-data.service).
 bootloader --ptable gpt --configfile="vm-grubAB-x64.cfg" --timeout=3
 
 # --part-type gives p1 the EFI System Partition GPT type GUID. wic does NOT set it

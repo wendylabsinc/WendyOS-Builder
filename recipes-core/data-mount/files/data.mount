@@ -1,0 +1,36 @@
+[Unit]
+Description=WendyOS persistent data partition (/data)
+# The unit that prepares /data before the mount is wendyos-data.service
+# (data-device). That ordering is not declared here: the service pulls itself in
+# through its own [Install] WantedBy=data.mount and orders itself with
+# Before=data.mount.
+#
+# The one line that has to be declared is the blockdev@ ordering below, and it
+# is the line systemd-fstab-generator writes into the data.mount it generates on
+# the boards that do have a /data fstab entry (generator.c:889,
+# generator_write_blockdev_dependency). Writing it keeps this unit the same as
+# the generated one.
+#
+# systemd adds that dependency on its own (mount.c:381), but it does not last.
+# It is tagged MOUNT_FILE before the mount and MOUNTINFO after it, and
+# mount_add_non_exec_dependencies() drops every dependency carrying either tag
+# and builds them again each time /proc/self/mountinfo changes (mount.c:567).
+# The rebuild takes What= from mountinfo, so once /data is mounted the instance
+# is named after the device the kernel resolved (dev-nvme0n1p17 on Thor), not
+# after /dev/wendyos/data. Only a dependency written in the unit file survives
+# the purge: those carry UNIT_DEPENDENCY_FILE (load-fragment.c:300).
+#
+# What it buys is the shutdown ordering C58(b) intends. wendyos-data.service is
+# Before=blockdev@dev-wendyos-data.target and this mount is After= it, so the
+# mount is taken down before the service backing it. Without the line the two
+# name different instances once /data is up and the ordering does nothing.
+After=blockdev@dev-wendyos-data.target
+
+[Mount]
+What=/dev/wendyos/data
+Where=/data
+Type=ext4
+Options=defaults,noatime
+
+[Install]
+WantedBy=local-fs.target

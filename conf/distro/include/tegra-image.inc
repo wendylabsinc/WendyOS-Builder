@@ -16,8 +16,9 @@ EXTRA_IMAGEDEPENDS:append = "${@' tegra-ftpm-overlay' if d.getVar('WENDYOS_ENABL
 
 # TPM2 + LUKS2 userspace for /data encryption (gated on WENDYOS_DATA_ENCRYPTED).
 # Mirrors x86-image.inc: cryptsetup (luksFormat/open), systemd-crypt
-# (systemd-cryptenroll + the boot-time systemd-cryptsetup@data), the shared
-# data-crypt (first-boot enroll + crypttab), and tpm2-tools (on-device debug).
+# (systemd-cryptenroll + the systemd-cryptsetup the resolver unlocks with), the
+# shared data-crypt (the crypt stack plus the TPM PCR policy; the enrolment
+# itself belongs to the resolver), and tpm2-tools (on-device debug).
 # libtss2 arrives as a systemd runtime dependency once the tpm2 PACKAGECONFIG is on.
 WENDYOS_TEGRA_TPM_INSTALL = " \
     cryptsetup \

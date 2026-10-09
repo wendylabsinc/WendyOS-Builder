@@ -13,9 +13,10 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
 #     data.mount's unlock chain (else deadlock: local-fs <-> basic.target).
 #
 # WENDYOS_DATA_ENCRYPTED -- only meaningful when /data is a LUKS volume:
-#   - 20-tpm-wait.conf: make the unlock (systemd-cryptsetup@data) and the
-#     first-boot enroll (data-enroll) wait for dev-tpmrm0.device. Both target
-#     units come from the data-crypt recipe and do not exist otherwise.
+#   - 20-tpm-wait.conf: make the /data resolver (wendyos-data.service) wait for
+#     dev-tpmrm0.device. It both unlocks the volume and, on a conversion boot,
+#     seals the keyslot, so it is the one unit that must not run before the fTPM
+#     is there. The target unit comes from the data-device recipe.
 #
 # Gate off: nothing is installed, stock optee-client behavior. The FILES entries
 # below stay unconditional -- a FILES path that matches nothing is ignored, and no
@@ -34,10 +35,8 @@ do_install:append() {
     fi
 
     if [ "${WENDYOS_DATA_ENCRYPTED}" = "1" ]; then
-        for u in systemd-cryptsetup@data.service data-enroll.service; do
-            install -D -m 0644 ${UNPACKDIR}/20-tpm-wait.conf \
-                ${D}${systemd_system_unitdir}/$u.d/20-tpm-wait.conf
-        done
+        install -D -m 0644 ${UNPACKDIR}/20-tpm-wait.conf \
+            ${D}${systemd_system_unitdir}/wendyos-data.service.d/20-tpm-wait.conf
     fi
 }
 
@@ -45,7 +44,6 @@ FILES:${PN} += " \
     ${sysconfdir}/modprobe.d/ftpm.conf \
     ${systemd_system_unitdir}/tee-supplicant.service.d \
     ${systemd_system_unitdir}/tee-ftpm-modprobe.service.d \
-    ${systemd_system_unitdir}/systemd-cryptsetup@data.service.d \
-    ${systemd_system_unitdir}/data-enroll.service.d \
+    ${systemd_system_unitdir}/wendyos-data.service.d \
     "
 

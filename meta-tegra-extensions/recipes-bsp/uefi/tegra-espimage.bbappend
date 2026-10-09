@@ -6,8 +6,8 @@
 # (`dd ... seek=${IMAGE_ROOTFS_SIZE} bs=1024`) before running mkfs.vfat over it.
 # The filesystem size is therefore fixed at build time. tegraflash writes that
 # image into whatever the BSP flash layout declares for `esp`, and nothing ever
-# grows an ESP afterwards -- unlike /data, which wendyos-data-setup formats and
-# grows on first boot.
+# grows an ESP afterwards -- unlike /data, which wendyos-data.service formats
+# and grows on first boot.
 #
 # Where the partition is larger than the image, the difference is unreachable,
 # not merely unused. On t234 the partition is 67108864 B, so upstream is an exact

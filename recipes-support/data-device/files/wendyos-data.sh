@@ -1,0 +1,1613 @@
+#!/bin/sh
+# Decide what /data is on this boot, and make it so.
+#
+# Three outcomes, one program. A plain partition stays plain. An encrypted one
+# is unlocked onto /dev/mapper/data. A plain one whose owner asked for
+# encryption is converted, and the device reboots into the encrypted state.
+# This supersedes data-enroll.sh and keeps that script's conversion ORDER,
+# which is load-bearing (C33), and its hardening.
+#
+# It ships on EVERY board, including the ones that can never encrypt, because
+# every board now mounts /data through the /dev/wendyos/data alias (C29).
+# Nothing here may assume cryptsetup, systemd-cryptsetup, systemd-cryptenroll
+# or blkdiscard exist: their absence is a reported outcome, not a crash.
+#
+# Exit status is a health signal, never boot control (C51). The unit is pulled
+# in by data.mount with Wants=, so a non-zero exit cannot fail the mount. The
+# rule was one line and C60 widened it to two, because this program now has a
+# second job: fail whenever the device was told to encrypt and did not, and
+# fail whenever /data could not be made mountable. The second half is what the
+# format_failed, fsck_failed and not_ext4 outcomes report, on every board
+# including the ones that can never encrypt.
+#
+# It also PREPARES a plain /data -- grow the partition to fill the disk, then
+# make sure the partition carries a filesystem the kernel can mount. That work
+# comes from grow-data-part.sh and wendyos-data-init.sh, which this program
+# replaces (C57). Three programs ran before data.mount and all three ran
+# `sgdisk -e` then `parted resizepart`, and every /data ordering bug so far has
+# been between two units in that window. One program means the question which
+# device does this one wait on cannot be asked a second time.
+#
+# Two entry points, one program: no argument (or "boot") runs the state machine
+# below, "resize" runs the online resize2fs on the MOUNTED /data and nothing
+# else. The online resize is a separate unit because it is slow and belongs
+# after the mount, not because the boot-time work needed splitting.
+#
+# C-numbers refer to the /data encryption decision register.
+set -u
+
+# boot = the state machine below. resize = the online resize2fs only. The
+# dispatch is in "--- what this run is for" further down, before the first line
+# of the state machine, so the resize can never reach the conversion.
+MODE="${1:-boot}"
+
+# The RAW partition by GPT partition name. It is the only path that survives
+# the conversion: rule 1 of 99-wendyos-data.rules drops the /dev/wendyos/data
+# alias the moment the partition becomes crypto_LUKS, and on an encrypted
+# device that alias points at the unlocked mapper instead.
+#
+# It is not the only path that can name the raw partition, because MBR has no
+# partition names at all. resolve_data_device() below picks between this and
+# the alias, and sets DATA to the winner.
+DATA_BY_PARTLABEL=/dev/disk/by-partlabel/data
+DATA=""
+
+# The unlocked volume. The name is what 99-wendyos-data.rules matches on
+# (DM_NAME=="data") to put the alias back.
+MAP_NAME=data
+MAPPER=/dev/mapper/data
+
+# What /data is actually mounted from, on every board: the raw partition on a
+# plain device and the unlocked mapper on an encrypted one. The resize path
+# addresses it because that one has to reach the filesystem the kernel has
+# mounted rather than the partition underneath it, and resolve_data_device()
+# falls back to it on a board whose table carries no partition names.
+ALIAS=/dev/wendyos/data
+
+# Throwaway mapper and key used to author a new volume. Both are gone by the
+# time the conversion ends.
+INIT_MAP=data_init
+BK=/run/data-bootstrap.key
+
+# /config files. PARSED, NEVER SOURCED (C24): /config is writable by anyone who
+# can reach the disk, and sourcing would run its contents as root at early boot.
+CONFIG_DIR=/config
+CONF="${CONFIG_DIR}/data.conf"
+STATUS="${CONFIG_DIR}/data.status"
+MARKER="${CONFIG_DIR}/data.enroll.pending"
+
+# The conversion record lives inside the encrypted volume (C10), so it is
+# protected by the encryption it describes.
+RECORD_MNT=/run/wendyos-data-record
+RECORD_NAME=.encryption
+
+# What the conversion carries across the wipe, as paths RELATIVE to /data.
+# A conversion destroys everything on /data, and these few files are what make
+# the device itself: the uuid and the name the fleet knows it by, and the
+# owner's saved network connections. Without them the device comes back a
+# stranger with no way onto the network.
+#
+# They go to /config, which survives the wipe, and setup-etc-binds.sh puts them
+# back on the next boot and then drops the archive. Adding an entry is one line
+# here; the restore reads the list out of the archive and needs no change.
+PRESERVE_ITEMS="etc/wendyos/device-uuid etc/wendyos/device-name etc/NetworkManager/system-connections"
+
+# ONE ARCHIVE, not a mirrored copy of the tree, because /config is FAT32 and
+# FAT can hold neither of the two things that matter here. Measured on a Thor:
+#
+#   install -m 600 /dev/null /config/<dir>/probe   -> the file reads back 755
+#   touch '/config/<dir>/Cafe: Free WiFi.nmconnection' -> Invalid argument
+#
+# The mode is lost silently (fat_setattr in fs/fat/file.c drops the mode change
+# and still returns success), and NetworkManager REFUSES to load a connection
+# file with any of 0077 set, so copied-out profiles would come back ignored. A
+# colon is one of nine characters FAT rejects in a name (vfat_bad_char in
+# fs/fat/namei_vfat.c), and plenty of network names contain one.
+#
+# Inside a tar both are just bytes. The only name FAT ever sees is one we
+# choose. The directory around the archive stays, so a second file can join it
+# later without moving anything.
+PRESERVE_DIR="${CONFIG_DIR}/backup"
+PRESERVE_TAR="${PRESERVE_DIR}/configuration.tar"
+PRESERVE_MNT=/run/wendyos-data-preserve
+
+# Trailing slack (~4 MiB) tolerated as "fills the disk", the same predicate the
+# two grow programs this one absorbed used.
+END_SLACK=8192
+
+# Progress step for the wipe. blkdiscard prints nothing without it: the report
+# is gated on `if (verbose && step)` (util-linux sys-utils/blkdiscard.c:321),
+# and a wipe with no output is indistinguishable from a hang (C55).
+WIPE_STEP=1G
+
+# Seconds allowed to each partition-table and filesystem tool on the plain path
+# (C59). grow-data-part.service:32 used the same 120, for the same reason.
+TOOL_TIMEOUT=120
+
+# PCR policy for the TPM keyslot. /etc/data-crypt.conf is generated by the
+# build and lives on the rootfs, so unlike /config/data.conf it is trusted and
+# is sourced. It ships with the crypt stack only. When it is absent the x86
+# default of PCR 7 applies, and no conversion can reach the enrolment step on
+# such an image anyway.
+TPM_PCRS="7"
+# shellcheck source=/dev/null  # generated at build time, not in the tree
+[ -r /etc/data-crypt.conf ] && . /etc/data-crypt.conf
+PCR_ARG=""
+POLICY="SRK-only"
+if [ -n "$TPM_PCRS" ]; then
+    PCR_ARG="--tpm2-pcrs=$TPM_PCRS"
+    POLICY="PCR $TPM_PCRS"
+fi
+
+# --- output ---------------------------------------------------------------
+# Emit to the console + serial UART only, when present -- never to stdout. This
+# service has no StandardOutput override, so stdout is the journal, and the
+# journal is persisted on /data. A write straight to the device node does not
+# pass through journald.
+console() {
+    for con in /dev/console /dev/ttyS0; do
+        if [ -w "$con" ]; then
+            echo "$*" > "$con" 2>/dev/null || true
+        fi
+    done
+}
+
+# Emit to the journal (stdout) only. The resize path uses this for its routine
+# progress: it runs after data.mount, so the journal is there to read it back,
+# and it runs on every boot, so the console would carry the same lines forever.
+journal() {
+    echo "wendyos-data: $*"
+}
+
+# Emit to the journal (stdout) and, when present, the console + serial UART.
+announce() {
+    journal "$*"
+    console "wendyos-data: $*"
+}
+
+# --- /config -------------------------------------------------------------
+# An unmounted /config makes the flag unreadable, which reads as unset (C49).
+config_mounted() {
+    while read -r _ mp _; do
+        [ "$mp" = "$CONFIG_DIR" ] && return 0
+    done < /proc/mounts
+    return 1
+}
+
+# The filesystem /config is mounted from, on stdout. Returns 1 and prints
+# nothing when /config is not mounted at all.
+#
+# Read straight out of /proc/mounts, the same way config_mounted() above asks
+# its question, because that needs nothing installed: this program ships on
+# every board and findmnt is a util-linux package this recipe does not depend
+# on. Reading the kernel's own table adds no dependency at all.
+#
+# findmnt would also be easy to ask the wrong question with, and it answers it
+# in silence. A second bare argument is not a second place to look: it makes
+# the pair "this source mounted on this target", so `findmnt -n -o FSTYPE
+# /config <anything>` matches nothing, prints nothing and exits 1 -- measured
+# with util-linux 2.41.5. A path that is not itself a mount point prints
+# nothing too without -T. Either empty answer reads here as "not FAT32", which
+# is the side that lets the encryption through.
+#
+# Last entry wins: a second mount over /config hides the first, so the last one
+# names the filesystem that is really there.
+config_fstype() {
+    _fstype=""
+    while read -r _ _mp _fs _; do
+        [ "$_mp" = "$CONFIG_DIR" ] && _fstype=$_fs
+    done < /proc/mounts
+    
+    [ -n "$_fstype" ] || return 1
+    printf '%s\n' "$_fstype"
+}
+
+_CR=$(printf '\r')
+
+# Read one key from a key=value file. Prints the value and returns 0 when the
+# key is present, returns 1 otherwise. This is the whole parser: no sourcing,
+# no eval, no shell metacharacter ever reaches an interpreter (C24). Anything
+# that is not "key=value" with a key we know is ignored.
+#
+# Leading and trailing blanks and a trailing CR are stripped. /config is FAT
+# and may be edited from a Windows host, so a CRLF line is an expected shape
+# rather than a corrupt one. Last occurrence wins, as in systemd's own config
+# files.
+conf_value() {
+    _file=$1
+    _key=$2
+    _val=""
+    _line=""
+    _found=1
+    [ -r "$_file" ] || return 1
+    while IFS= read -r _line || [ -n "$_line" ]; do
+        # Trim blanks and CR from both ends.
+        while :; do
+            case $_line in
+                " "*|"	"*)
+                    _line=${_line#?}
+                    ;;
+                *" "|*"	"|*"$_CR")
+                    _line=${_line%?}
+                    ;;
+                *)
+                    break
+                    ;;
+            esac
+        done
+
+        case $_line in
+            "$_key"=*)
+                ;;
+            *)
+                continue
+                ;;
+        esac
+        _val=${_line#*=}
+        _found=0
+    done < "$_file"
+    [ "$_found" -eq 0 ] || return 1
+    printf '%s\n' "$_val"
+}
+
+# systemd's parse_boolean set, case-insensitive (src/basic/parse-util.c:23-46).
+# 0 = true, 1 = false, 2 = not a boolean at all.
+parse_boolean() {
+    case $(printf '%s' "$1" | tr '[:upper:]' '[:lower:]') in
+        1|yes|y|true|t|on)
+            return 0
+            ;;
+        0|no|n|false|f|off)
+            return 1
+            ;;
+        *)
+            return 2
+            ;;
+    esac
+}
+
+# Read a boolean setting into bool_result. $2 is the value taken for absent,
+# empty, malformed, unrecognised or unreadable -- every ambiguous case. Both
+# settings fail safe: data_encryption reads OFF and data_secure_erase reads ON,
+# so the safe behaviour is what a broken file produces.
+#
+# The answer comes back in a global rather than on stdout because this warns,
+# and a command substitution would swallow the warning into the value.
+conf_boolean() {
+    _key=$1
+    _default=$2
+    bool_result=$_default
+    if ! _raw=$(conf_value "$CONF" "$_key"); then
+        return 0
+    fi
+
+    parse_boolean "$_raw"
+    case $? in
+        0)
+            bool_result=1
+            ;;
+        1)
+            bool_result=0
+            ;;
+        *)
+            announce "WARN: $CONF sets $_key to an unrecognised value, so it reads as $_default"
+            ;;
+    esac
+}
+
+# --- /config/data.status (C53) -------------------------------------------
+# FEEDBACK ONLY, AND ONE-WAY. This file is written here and read by the wendy
+# CLI. NOTHING IN THE OS MAY EVER READ IT BACK AS AN INPUT TO A DECISION. The
+# authority for what /data is stays the device itself (C28). The moment any
+# boot logic trusts this file over the disk, we are back to two copies of one
+# fact, on a partition anyone who can reach the disk can edit.
+#
+# The one read below is not an exception to that: it decides whether the
+# content would change, and nothing else.
+write_status() {
+    _result=$1
+    _message=$2
+    if ! config_mounted; then
+        announce "cannot record the outcome ($_result): $CONFIG_DIR is not mounted"
+        return 0
+    fi
+    # Rewritten only when the outcome changed. `updated` is deliberately out of
+    # the comparison: including it would make every steady-state boot a write
+    # to a FAT partition that ends up holding the material unlocking /data.
+    if [ "$(conf_value "$STATUS" result)" = "$_result" ] &&
+       [ "$(conf_value "$STATUS" message)" = "$_message" ]; then
+        return 0
+    fi
+    _tmp="${CONFIG_DIR}/.data.status.tmp"
+    # Temp file then rename (C17): a power cut must never leave a half-readable
+    # file on a partition with no journal.
+    if { echo "# Written by wendyos-data.sh, read by the wendy CLI."
+         echo "# Feedback only -- nothing in the OS reads this back (C53)."
+         echo "# updated is NOT for logic: on an early boot the clock may not"
+         echo "# be set yet."
+         echo "result=$_result"
+         echo "message=$_message"
+         echo "updated=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+       } > "$_tmp" 2>/dev/null && mv -f "$_tmp" "$STATUS" 2>/dev/null; then
+        sync 2>/dev/null || true
+    else
+        rm -f "$_tmp" 2>/dev/null || true
+        announce "WARN: could not write $STATUS"
+    fi
+}
+
+# Every exit goes through here, so the outcome is recorded on EVERY path
+# including success -- absent then means one precise thing, that the image
+# predates the resolver (C53).
+finish() {
+    _result=$1
+    _rc=$2
+    shift 2
+    announce "$*"
+    write_status "$_result" "$*"
+    exit "$_rc"
+}
+
+# --- dropping the encryption flag (C83) ----------------------------------
+# The first line of the note this writes into /config/data.conf. It is matched
+# as well as written: a second refusal replaces the note of the first rather
+# than stacking another copy on top of it, so the file always says why the
+# flag is off NOW.
+DISARM_NOTE="# Turned off by wendyos-data.sh:"
+
+# Turn data_encryption off in /config/data.conf, and leave a note in the file
+# saying this program did it and why.
+#
+# This reverses half of C52, which keeps a device that cannot encrypt failing
+# on every boot until a person removes the flag. That is right for a condition
+# a person has to fix and wrong for one that fixes itself, and here the two
+# would deadlock: a FAT32 /config is converted to ext4 by
+# wendyos-config-convert.service, and that service refuses to run while the
+# flag is set (config_armed() in wendyos-config-convert.sh), so keeping the
+# flag would hold off the very conversion that makes encryption possible.
+#
+# ONLY THE TWO CALLERS BELOW MAY USE THIS, and both of their conditions are
+# certain for the image that is running: the filesystem under /config, and a
+# crypt stack that is not installed. Neither can change on the next boot of the
+# same image.
+#
+# no_tpm is deliberately NOT one of them. On Jetson /dev/tpmrm0 appears a few
+# seconds into boot, and the unit that waits for it (20-tpm-wait.conf in
+# meta-tegra-extensions) is installed only when WENDYOS_DATA_ENCRYPTED is "1",
+# so on any other build this program simply runs first and sees no TPM. That is
+# a race, not a verdict, and clearing the flag there would destroy a valid
+# request over it.
+#
+# The device has to be armed again by hand afterwards, once /config is ext4.
+# That is deliberate: the conversion destroys everything on /data, so the
+# device may not re-enter it on its own.
+#
+# THE FILE IS REWRITTEN, NEVER DELETED. Everything else in it is somebody's
+# setting -- data_secure_erase today -- and none of this program's business.
+# Temp file then rename, exactly as write_status does and for the same reason
+# (C17): /config has no journal, and a torn write must not leave a
+# half-readable file.
+#
+# The note is the durable trace. data.status carries the refusal too, but the
+# next boot overwrites it with that boot's ordinary outcome -- "/data is plain
+# and no encryption was requested", because the flag is gone by then -- so
+# without the note the person who armed the device would find nothing at all.
+# It carries no timestamp: at this point in the boot the clock may still be at
+# 1970, which is what data.status already warns about its own `updated` field.
+#
+# Returns non-zero when nothing was written, having said so. The caller carries
+# on either way: the refusal stands whatever happens here, and a device that
+# could not be disarmed must not be left in a worse state than one that was.
+# It also leaves what happened in disarm_outcome, for the caller's own message
+# to quote, so a refusal never tells the wendy CLI the request was turned off
+# when the write failed (C53 -- that file is a contract, not a comment).
+disarm_outcome=""
+
+disarm_encryption() {
+    _why=$1
+    disarm_outcome="The request could NOT be turned off in $CONF, so this device asks for encryption again on the next boot and is refused again"
+    if ! config_mounted; then
+        announce "WARN: cannot turn data_encryption off in $CONF: $CONFIG_DIR is not mounted"
+        return 1
+    fi
+
+    _tmp="${CONFIG_DIR}/.data.conf.tmp"
+    if ! {
+        if [ -r "$CONF" ]; then
+            while IFS= read -r _line || [ -n "$_line" ]; do
+                # Trimmed only to DECIDE about a line. What gets written is the
+                # original, so an untouched setting comes through byte for
+                # byte. The trim is the one conf_value() does, repeated rather
+                # than shared for the reason wendyos-config-convert.sh repeats
+                # it: the two have to agree on which lines count as settings,
+                # and a line " data_encryption=1" left behind here would be
+                # read as armed by a parser that strips the blank.
+                _trimmed=$_line
+                while :; do
+                    case $_trimmed in
+                        " "*|"	"*)
+                            _trimmed=${_trimmed#?}
+                            ;;
+                        *" "|*"	"|*"$_CR")
+                            _trimmed=${_trimmed%?}
+                            ;;
+                        *)
+                            break
+                            ;;
+                    esac
+                done
+
+                case $_trimmed in
+                    data_encryption=*|"$DISARM_NOTE"*)
+                        continue
+                        ;;
+                esac
+ 
+                printf '%s\n' "$_line"
+            done < "$CONF"
+        fi
+        # ONE line, not two. The filter above drops the old note by matching
+        # this prefix, so anything written on a second line would survive it
+        # and a new copy would stack on top at every refusal.
+        echo "$DISARM_NOTE $_why. Arm the device again once that is fixed."
+        echo "data_encryption=0"
+    } > "$_tmp" 2>/dev/null; then
+        # The redirection creates the file before the write can fail, so the
+        # half-written temp file has to go whatever went wrong with it.
+        rm -f "$_tmp" 2>/dev/null || true
+        announce "WARN: $disarm_outcome"
+        return 1
+    fi
+
+    if ! mv -f "$_tmp" "$CONF" 2>/dev/null; then
+        rm -f "$_tmp" 2>/dev/null || true
+        announce "WARN: $disarm_outcome"
+        return 1
+    fi
+
+    sync 2>/dev/null || true
+    disarm_outcome="The request has been turned off in $CONF"
+    announce "data_encryption has been turned off in $CONF ($_why). Arm the device again once that is fixed"
+}
+
+# --- the conversion marker (C34) -----------------------------------------
+# Present = a conversion died partway and the container holds nothing, so it
+# may be destroyed. Absent = never destroy. A torn, unreadable or unmounted
+# marker therefore reads as absent, which is the safe side.
+#
+# It is also what keeps data.mount skipped for the whole conversion (C38, via
+# the data.mount.d drop-in), so a marker left behind on a device that is NOT
+# mid-conversion would block /data forever. Every path that ends with /data
+# non-LUKS clears it.
+marker_present() {
+    [ -e "$MARKER" ]
+}
+
+write_marker() {
+    # Existence is the entire signal, so a torn write still lands on the safe
+    # side and no rename dance is needed. Contents are for a human who finds
+    # the file, not for logic.
+    { echo "# A /data encryption conversion is in progress or was interrupted."
+      echo "# Present means the LUKS container on this device is unfinished and"
+      echo "# holds nothing, so wendyos-data.sh may erase and retry it."
+      echo "# Written $(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)."
+    } > "$MARKER" 2>/dev/null || return 1
+    sync 2>/dev/null || true
+}
+
+clear_marker() {
+    marker_present || return 0
+    if ! rm -f "$MARKER" 2>/dev/null; then
+        announce "WARN: could not remove $MARKER -- /data will stay unmounted until it is gone"
+        return 1
+    fi
+
+    sync 2>/dev/null || true
+}
+
+# --- the device ----------------------------------------------------------
+sysblk() {
+    cat "/sys/class/block/$1/$2" 2>/dev/null
+}
+
+# Name the RAW /data partition -- the device every step below addresses --
+# and set DATA to it. Returns 1 when there is no /data device at all.
+#
+# The order is load-bearing, not a preference:
+#
+#   GPT, plain      the GPT partition name IS the raw partition. Correct, and
+#                   it is also what the service waits for (10-device.conf).
+#   GPT, encrypted  the GPT partition name is the raw LUKS partition, which is
+#                   what every destructive step here must address. The alias
+#                   deliberately points at the UNLOCKED MAPPER on such a board
+#                   (rule 2 of 99-wendyos-data.rules), so taking the alias
+#                   would aim wipefs, blkdiscard, luksFormat and mkfs at live
+#                   user data. by-partlabel MUST win.
+#   MBR             there is no by-partlabel path at all, because an MBR table
+#                   carries no partition names. The alias is the raw partition
+#                   and nothing else: udev builds it from the ext4 LABEL
+#                   (99-wendyos-data-mbr.rules), and raspberrypi3-64 -- the
+#                   only MBR board -- can never encrypt (C21), so the alias can
+#                   never be a mapper there.
+#
+# Without the fallback raspberrypi3-64 has no /data device by any name this
+# program knows, exits before preparing anything, and never grows /data. The
+# program this one replaced reached it through the fstab, i.e. through the
+# alias.
+resolve_data_device() {
+    if [ -b "$DATA_BY_PARTLABEL" ]; then
+        DATA=$DATA_BY_PARTLABEL
+        return 0
+    fi
+
+    if [ -b "$ALIAS" ]; then
+        DATA=$ALIAS
+        return 0
+    fi
+
+    return 1
+}
+
+# True when the kernel sees the /data PARTITION reaching the disk end within
+# slack. Reads the globals resolved in resolve_device().
+data_fills_disk() {
+    _disk_sz=$(sysblk "$disk_base" size)
+    _disk_sz=${_disk_sz:-0}
+    _start=$(sysblk "$data_base" start)
+    _start=${_start:-0}
+    _sz=$(sysblk "$data_base" size)
+    _sz=${_sz:-0}
+    [ "$_disk_sz" -gt 0 ] && [ $((_start + _sz)) -ge $((_disk_sz - END_SLACK)) ]
+}
+
+# Resolve the partition, its parent disk and its number. Sets data_base,
+# disk_base, DISK and PARTNUM.
+resolve_device() {
+    data_base=$(basename "$(readlink -f "$DATA")")
+    disk_base=$(basename "$(readlink -f "/sys/class/block/$data_base/..")")
+    DISK="/dev/$disk_base"
+    PARTNUM=$(sysblk "$data_base" partition)
+    [ -n "$PARTNUM" ] && [ -b "$DISK" ]
+}
+
+# Probe a block device for a filesystem signature, setting fs_type and fs_rc.
+# -p is a direct low-level probe rather than a cache lookup, which matters
+# because this runs right after the device changed underneath udev.
+#
+# fs_type is the signature blkid found, and it is EMPTY when the device holds
+# no filesystem. That empty string is the ONLY sign of a blank device, because
+# fs_rc cannot give it on a partition. blkid counts every value it probed --
+# for a partition that includes the PART_ENTRY_* fields it reads out of the
+# partition table -- and returns 2 only when that count is zero (util-linux
+# misc-utils/blkid.c:551,593-594). `-s TYPE` filters the printed output inside
+# the loop and never the count (blkid.c:565), so a GPT partition with no
+# filesystem on it exits 0 and prints nothing at all.
+#
+# fs_rc still carries one fact: anything but 0 or 2 means the probe itself
+# failed, and a failed probe must never be mistaken for "blank". probe_data is
+# what refuses those, so after it every caller may trust fs_type alone.
+probe_fs() {
+    fs_type=$(blkid -p -o value -s TYPE "$1" 2>/dev/null)
+    fs_rc=$?
+}
+
+# Probe a block device for a PARTITION TABLE signature, setting pt_type and
+# pt_rc. Same shape as probe_fs, and -p for the same reason.
+#
+# It answers the question an empty fs_type cannot: "no filesystem" is not "no
+# content". A device carrying a partition table and nothing else reports an
+# empty TYPE and a PTTYPE naming the table, so only the two answers together
+# say the device is blank.
+#
+# pt_rc carries the same one fact fs_rc does: anything but 0 or 2 means the
+# probe itself failed, and a failed probe must never be read as "blank". The
+# caller refuses those, exactly as probe_data refuses them for fs_rc.
+probe_pt() {
+    pt_type=$(blkid -p -o value -s PTTYPE "$1" 2>/dev/null)
+    pt_rc=$?
+}
+
+# Probe the raw partition, and refuse to continue on anything but a clear
+# answer. Never guess: reading "no signature" out of a failed probe would let
+# the conversion run over a LUKS container that is merely unreadable.
+probe_data() {
+    probe_fs "$DATA"
+    [ "$fs_rc" -eq 0 ] || [ "$fs_rc" -eq 2 ] \
+        || finish probe_failed 1 "cannot probe $DATA (blkid exit $fs_rc), so nothing is touched"
+}
+
+have() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+# systemd-cryptsetup is a public binary in bindir, so on PATH, since systemd
+# v255 (src/cryptsetup/meson.build), which also keeps a compatibility symlink
+# under libexec. Older releases ship it under libexec only, so look both up
+# rather than hardcode one. No hit at all means the image has no crypt support.
+find_cryptsetup_helper() {
+    if have systemd-cryptsetup; then
+        echo systemd-cryptsetup
+        return 0
+    fi
+    for _p in /usr/lib/systemd/systemd-cryptsetup /lib/systemd/systemd-cryptsetup; do
+        if [ -x "$_p" ]; then
+            echo "$_p"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# --- bounding the plain-path tools (C59) ----------------------------------
+# The unit runs under TimeoutStartSec=infinity, which is right for the wipe and
+# wrong for everything this program absorbed. C55 chose no limit because a low
+# guess does not fail a scrub, it kills it mid-run, so the device retries the
+# whole thing on every boot and never converges. The absorbed work has the
+# opposite character: grow-data-part.service:32 bounded parted and e2fsck at
+# 120 s PRECISELY so a wedged tool failed instead of stalling, and this unit is
+# Before=data.mount, so a tool that hangs now holds /data hostage with nothing
+# in `systemctl --failed` to see.
+#
+# One unit cannot carry two timeouts, so the split lives here: sgdisk, parted,
+# e2fsck and mkfs.ext4 run under `timeout $TOOL_TIMEOUT`, and blkdiscard and
+# the rest of the conversion deliberately do not. grow_partition() is shared
+# with the conversion path, so its parted and sgdisk are bounded there too --
+# that is the intent, not an oversight: a wedged parted on a conversion boot
+# would stall forever under an infinite unit timeout, where failing rolls the
+# conversion back and leaves /data plain (C7).
+#
+# Say why a bounded tool stopped: exit 124 is coreutils timeout(1)'s "the
+# command timed out" (timeout(1) EXIT STATUS), and it must not be reported as
+# just another tool failure. coreutils wins /usr/bin/timeout on our images --
+# ALTERNATIVE_PRIORITY 100 against busybox's 50 -- and it is an RDEPENDS of
+# this recipe, so 124 is the status that actually arrives.
+exit_reason() {
+    if [ "$1" -eq 124 ]; then
+        printf 'timed out after %ss and was killed' "$TOOL_TIMEOUT"
+    else
+        printf 'exit %s' "$1"
+    fi
+}
+
+# --- preparing the partition ---------------------------------------------
+# Extend the /data partition to the end of the disk. /data is the LAST
+# partition on every wendy layout (config sits before it), so it grows into the
+# trailing free space, and this runs while the partition is still unmounted.
+# Idempotent: parted no-ops once the partition is full.
+#
+# Returns 0 when the partition fills the disk afterwards, including when it
+# already did and nothing was done, and non-zero when it does not. THE CALLER
+# DECIDES WHAT THAT MEANS, because the two callers disagree: on the conversion
+# path a failed grow is fatal, since the wipe has to cover the whole device or
+# the previous installation's plaintext stays readable inside the new
+# container; on the plain path it is not, since a /data that is merely smaller
+# than it could be still mounts and works.
+#
+# Reads the globals resolved in resolve_device().
+grow_partition() {
+    if data_fills_disk; then
+        announce "the /data partition already fills $DISK, so no grow is needed"
+        return 0
+    fi
+
+    # One dump, two questions: which partition table this disk carries, and
+    # whether it has an MBR extended container. sfdisk is the only tool here
+    # that answers both.
+    _table=$(sfdisk -d "$DISK" 2>/dev/null)
+
+    # Relocate the GPT backup header to the real disk end (it is stranded
+    # mid-disk after flashing an image onto a larger disk), else resizepart
+    # cannot use the free space.
+    #
+    # Skipped on a table sfdisk positively reports as MBR: sgdisk finds no GPT
+    # there, converts the MBR in memory and then refuses to write ("Non-GPT
+    # disk; not saving changes", exit 3), so it is a guaranteed failure that
+    # would print a WARN on every raspberrypi3-64 first boot. Anything else,
+    # including an unreadable dump, still runs it -- the failure is inert, and
+    # skipping it on a GPT disk by mistake would cost the grow.
+    if [ "$(sb_field label "$_table")" != "dos" ]; then
+        announce "relocating the GPT backup header to the end of $DISK"
+        timeout "$TOOL_TIMEOUT" sgdisk -e "$DISK" >/dev/null 2>&1 \
+            || announce "WARN: sgdisk -e failed ($(exit_reason $?))"
+        partprobe "$DISK" 2>/dev/null || true
+        udevadm settle -t 10 2>/dev/null || true
+    fi
+
+    # MBR only: /data is a LOGICAL partition inside an extended container
+    # (rpi-wendy-ab-mbr.wks -- MBR has four primary slots and the A/B layout
+    # needs six partitions, so wic puts config and data inside an extended
+    # one). A logical partition cannot grow past the container that holds it,
+    # so the container has to be grown first. Carried over from
+    # grow-data-part.sh:95-104, which is where this was learned.
+    #
+    # The awk matches the MBR type code of an extended partition -- 5 or f,
+    # either spelling, either case, 0x0F being the LBA variant -- and stops at
+    # the first hit. It is the only awk in this program; the pattern was
+    # checked against sfdisk -d output under both gawk and busybox awk.
+    #
+    # A failure here is a warning and not a return: the kernel's view at the
+    # end of this function is the authority, and if the container did not grow
+    # then the resizepart below cannot either, which that check will catch.
+    #
+    # awk is the one external this program uses that no recipe declares. Its
+    # absence must not be silent: the probe would just come back empty, the
+    # container would not grow, and the logical /data inside it would stay at
+    # its stock size with nothing in the journal saying why.
+    _ext_dev=""
+    if have awk; then
+        _ext_dev=$(printf '%s\n' "$_table" | awk 'tolower($0) ~ /type=[ ]*0?[5f]([^0-9a-f]|$)/ { print $1; exit }')
+    else
+        announce "WARN: awk is not installed, so an MBR extended container cannot be found. On an MBR board the logical /data inside it cannot grow and /data stays at its stock size"
+    fi
+    if [ -n "$_ext_dev" ]; then
+        _ext_num=$(sysblk "$(basename "$_ext_dev")" partition)
+        if [ -n "$_ext_num" ]; then
+            announce "growing the MBR extended container, partition #$_ext_num on $DISK, so the logical /data inside it can grow"
+            timeout "$TOOL_TIMEOUT" parted -s "$DISK" resizepart "$_ext_num" 100% \
+                || announce "WARN: growing the extended container failed ($(exit_reason $?))"
+            partprobe "$DISK" 2>/dev/null || true
+            udevadm settle -t 10 2>/dev/null || true
+        fi
+    fi
+
+    announce "growing partition #$PARTNUM on $DISK to fill the disk"
+    timeout "$TOOL_TIMEOUT" parted -s "$DISK" resizepart "$PARTNUM" 100% \
+        || announce "WARN: resizepart failed ($(exit_reason $?))"
+    partprobe "$DISK" 2>/dev/null || true
+    udevadm settle -t 10 2>/dev/null || true
+
+    # The kernel's view is the only one that counts: parted can report success
+    # while the new size is not in force yet.
+    data_fills_disk
+}
+
+# Print the value of a "$1:   <value>" line in $2, or nothing when there is no
+# such line. Used on `dumpe2fs -h` output and on the header of `sfdisk -d`.
+# The values read here never contain a space, so the last field is the value.
+# The loop runs in a pipeline subshell and hands its answer back on stdout,
+# which keeps the parse free of temp files.
+sb_field() {
+    printf '%s\n' "$2" | while IFS= read -r _line; do
+        case $_line in
+            "$1:"*)
+                printf '%s\n' "${_line##* }"
+                break
+                ;;
+        esac
+    done
+}
+
+# True when the ext4 superblock on $1 describes a filesystem that physically
+# fits the device. A reflash recreates the /data partition at its small stock
+# size without zeroing it, so the superblock of a previously-grown filesystem
+# is still there: blkid still says ext4, and the kernel then refuses the mount
+# with "bad geometry: block count N exceeds size of device". A dumpe2fs that
+# cannot read the superblock at all counts as "does not fit" -- that is the
+# same case, seen from the tool that overshoots the device.
+#
+# Carried over from wendyos-data-init.sh, which found this the hard way.
+fs_fits_device() {
+    # The superblock is captured in a variable, not through a temp file and not
+    # through a here-doc, so nothing here depends on a writable directory at
+    # this point in the boot. Getting that wrong would be expensive: this
+    # function returning 1 is what triggers `mkfs.ext4 -F`, so a failure to
+    # read the superblock must come from dumpe2fs and from nothing else.
+    _sb=$(dumpe2fs -h "$1" 2>/dev/null)
+    _rc=$?
+    if [ "$_rc" -ne 0 ]; then
+        # The reason ("Filesystem ... larger than the physical size", "short
+        # read") is on stderr, so it is fetched on its own rather than folded
+        # into the capture above: a dumpe2fs that fails partway still prints
+        # most of the superblock on stdout, and fifty lines of it would bury
+        # the one line that says why.
+        announce "dumpe2fs could not read the ext4 superblock on $1 (exit $_rc):"
+        printf '%s\n' "$(dumpe2fs -h "$1" 2>&1 >/dev/null)" | while IFS= read -r _line; do
+            [ -n "$_line" ] && announce "    | $_line"
+        done
+        return 1
+    fi
+
+    _blocks=$(sb_field "Block count" "$_sb")
+    _bsize=$(sb_field "Block size" "$_sb")
+    _bytes=$(blockdev --getsize64 "$1" 2>/dev/null)
+    _bytes=${_bytes:-0}
+    [ -n "$_blocks" ] && [ -n "$_bsize" ] && [ "$_bytes" -gt 0 ] \
+        && [ $((_blocks * _bsize)) -le "$_bytes" ]
+}
+
+# Make sure the raw partition carries a filesystem the kernel can mount, and
+# touch nothing else. Called on the plain path only.
+#
+# Idempotency keys on the FILESYSTEM, never on a stamp file: the rootfs is A/B
+# and swapped by OTA, so a per-rootfs stamp would be absent on the other slot
+# and could trigger a re-format that wipes /data. What the partition carries is
+# slot-independent, and it is C28's rule -- the device is the authority for
+# what /data is.
+prepare_filesystem() {
+    # Re-probe: the partition may have been resized moments ago. probe_data
+    # refuses to continue on anything but a clear answer, so a probe that
+    # FAILED can never be read as "blank" and formatted over -- an unreadable
+    # device is left alone instead.
+    probe_data
+
+    if [ -z "$fs_type" ]; then
+        # No filesystem signature (C35). That on its own is NOT "nothing
+        # here": a device carrying a partition table and no filesystem reports
+        # an empty TYPE too, and formatting it would destroy whatever that
+        # table describes. So ask the second question -- and ask it only here,
+        # because once blkid has named a filesystem the partition table has no
+        # bearing on any branch below and the extra probe is waste.
+        probe_pt "$DATA"
+        [ "$pt_rc" -eq 0 ] || [ "$pt_rc" -eq 2 ] \
+            || finish probe_failed 1 "cannot probe $DATA for a partition table (blkid exit $pt_rc), so nothing is touched"
+
+        if [ -n "$pt_type" ]; then
+            # not_ext4 rather than a new value: the result set is closed (C53)
+            # and already gained one in C64, and "what is there is not the ext4
+            # we manage" covers a partition table as well as it covers a
+            # foreign filesystem.
+            finish not_ext4 1 "$DATA carries a $pt_type partition table and no filesystem, which is not ours to make or to replace, so it is left exactly as it is and /data cannot be mounted"
+        fi
+
+        # Nothing at all, and now proven so: no filesystem and no partition
+        # table. Reachable three ways: a flash layout that carves /data empty,
+        # the stale-LUKS erase above falling through, and a bad flash or a
+        # hand-run wipefs -- which used to need a reflash to recover.
+        #
+        # The line below claims "no signature at all", and that is true only
+        # because of the PTTYPE check above it. Whoever removes that check has
+        # to rewrite this message too, or it starts lying on the one device
+        # where it matters.
+        announce "$DATA carries no signature at all, so making the filesystem"
+        timeout "$TOOL_TIMEOUT" mkfs.ext4 -q -L data "$DATA" \
+            || finish format_failed 1 "$DATA carries no filesystem and mkfs.ext4 failed ($(exit_reason $?)), so /data cannot be mounted"
+        # A filesystem made a moment ago is clean, so no fsck is needed.
+        return 0
+    fi
+
+    if [ "$fs_type" != "ext4" ]; then
+        # Anything else is left strictly alone. Never mkfs over a signature we
+        # do not recognise: whatever it is, somebody put it there, and the only
+        # state this program is allowed to destroy is one it can prove holds
+        # nothing (the unfinished container of C34, the stale header above).
+        #
+        # Leaving it alone also leaves /data unmountable, so this reports a
+        # failure (C60). The refusal is right; calling it success was not.
+        # not_ext4 names exactly what was tested: the branch above already took
+        # the empty case, so blkid named a concrete type here and "unknown"
+        # would be false, and "foreign" would assert an owner we cannot
+        # establish. fs_type cannot be empty here, so it needs no fallback.
+        finish not_ext4 1 "$DATA carries a $fs_type signature, which is not ours to make or to replace, so it is left exactly as it is and /data cannot be mounted"
+    fi
+
+    if ! fs_fits_device "$DATA"; then
+        announce "the ext4 filesystem on $DATA does not fit the partition (a stale superblock from a prior, larger layout), so it is being remade"
+        # -F because blkid still reports a valid ext4 here and mkfs.ext4 would
+        # otherwise refuse; that is the whole point of this branch.
+        timeout "$TOOL_TIMEOUT" mkfs.ext4 -F -L data "$DATA" \
+            || finish format_failed 1 "$DATA carries a filesystem that does not fit it and mkfs.ext4 failed ($(exit_reason $?)), so /data cannot be mounted"
+        return 0
+    fi
+
+    # Repair here while /data is unmounted -- the online resize cannot fsck a
+    # mounted filesystem. `e2fsck -p` without -f honours the clean flag, so it
+    # is near-instant unless the filesystem is dirty. Exit >= 4 means it could
+    # not repair what it found (e2fsck(8) EXIT CODE).
+    timeout "$TOOL_TIMEOUT" e2fsck -p "$DATA"
+    _ec=$?
+    # 124 is timeout's own status and is tested FIRST, because it is also >= 4
+    # and would otherwise be reported as a repair that failed.
+    if [ "$_ec" -eq 124 ]; then
+        finish fsck_failed 1 "the e2fsck of $DATA $(exit_reason "$_ec"), so /data could not be checked before the mount"
+    fi
+
+    if [ "$_ec" -ge 4 ]; then
+        finish fsck_failed 1 "the /data filesystem on $DATA is unclean and e2fsck could not repair it (exit $_ec)"
+    fi
+}
+
+# Everything needed to leave a plain /data mountable, in one place, because it
+# is needed on more than one path.
+#
+# It used to be needed on exactly one, and only because a second unit --
+# wendyos-data-init.service -- formatted /data unconditionally before this
+# program ran. That unit is gone (C57), so a path that ends with "/data stays
+# plain" and does NOT call this leaves the partition ungrown and possibly
+# unformatted, while telling the owner it is plain. That is what "armed but
+# cannot encrypt" did.
+#
+# Clearing the marker is part of the job, not a detail: a marker from a
+# conversion that died before luksFormat keeps data.mount skipped by its
+# ConditionPathExists (C38), so preparing /data without clearing it would
+# produce a perfectly good filesystem that never mounts. The container the
+# marker spoke for is gone -- this path has already established that /data is
+# not LUKS -- so clearing it is what C34 asks for.
+#
+# Reads the globals resolved in resolve_device().
+prepare_plain() {
+    clear_marker
+
+    # Not fatal here, unlike on the conversion path: a /data that did not grow
+    # is smaller than it could be, and still mounts and works.
+    grow_partition \
+        || announce "WARN: the /data partition did not grow to fill $DISK, so /data stays smaller than the disk"
+
+    prepare_filesystem
+}
+
+# --- the online resize ("resize" mode) -----------------------------------
+# resize2fs on the MOUNTED /data, run by wendyos-data-resize.service after
+# data.mount. Idempotent: it no-ops once the filesystem fills its partition.
+do_resize() {
+    _dev=$(readlink -f "$ALIAS" 2>/dev/null)
+    if [ -z "$_dev" ] || [ ! -b "$_dev" ]; then
+        journal "resize: $ALIAS is not a block device, so there is nothing to resize"
+        return 0
+    fi
+
+    # Never resize an unlocked LUKS volume. A device-mapper node here means
+    # /data is encrypted: the container was grown and formatted when it was
+    # created, so there is nothing left to grow (C28).
+    #
+    # The test is on the RESOLVED device being a mapper, not on a signature
+    # probe of the alias: on an encrypted board the alias deliberately points
+    # at the unlocked mapper, where blkid reports ext4, so a signature check
+    # sails straight past. "Is this a mapper" is the only question with a
+    # correct answer in every state.
+    _base=$(basename "$_dev")
+    if [ -e "/sys/class/block/$_base/dm/name" ]; then
+        journal "resize: $_dev is a device-mapper volume (encrypted /data), which was sized when it was created, so there is nothing to resize"
+        return 0
+    fi
+
+    journal "resize: growing the /data filesystem on $_dev to fill its partition"
+    if ! resize2fs "$_dev"; then
+        # Stay failed so the unit retries on the next boot.
+        announce "resize: resize2fs of $_dev failed, and will be retried on the next boot"
+        return 1
+    fi
+
+    journal "resize: the /data filesystem fills $_dev"
+}
+
+# --- what this run is for -------------------------------------------------
+# Dispatch before the state machine starts, so the resize path cannot fall
+# through into the conversion.
+case "$MODE" in
+    boot)
+        ;;
+    resize)
+        do_resize
+        exit $?
+        ;;
+    *)
+        # No write_status here: an unknown argument says nothing about what
+        # /data is, and overwriting the real outcome with it would lie to the
+        # CLI (C53).
+        announce "unknown mode '$MODE' (expected boot or resize), so nothing is done"
+        exit 1
+        ;;
+esac
+
+# --- reading the device --------------------------------------------------
+announce "resolving /data"
+
+if ! config_mounted; then
+    announce "$CONFIG_DIR is not mounted: the encryption flag reads as unset (C49)"
+fi
+
+conf_boolean data_encryption 0
+flag_encrypt=$bool_result
+conf_boolean data_secure_erase 1
+flag_erase=$bool_result
+
+if ! resolve_data_device; then
+    # Neither name resolves, so this board has no /data device on this boot at
+    # all -- not "no GPT partition name", which the alias now covers. There is
+    # nothing to prepare and nothing to encrypt.
+    if [ "$flag_encrypt" = "1" ]; then
+        finish no_support 1 "neither $DATA_BY_PARTLABEL nor $ALIAS exists, so there is no /data device to encrypt on this board"
+    fi
+    finish plain 0 "neither $DATA_BY_PARTLABEL nor $ALIAS exists, so /data is left as it is"
+fi
+
+# The alias fallback is the only way a device-mapper node could ever land in
+# DATA, and a mapper here would point every destructive step below -- wipefs,
+# blkdiscard, luksFormat, mkfs -- at unlocked, LIVE user data. It cannot
+# happen: the only board with no by-partlabel path is the MBR one, and that
+# board can never encrypt (C21), so its alias is always the raw partition.
+# Checked anyway, because the cost of being wrong once is the whole of /data.
+data_real=$(basename "$(readlink -f "$DATA")")
+if [ -e "/sys/class/block/$data_real/dm/name" ]; then
+    finish probe_failed 1 "the raw /data device resolved to $DATA -> /dev/$data_real, which is a device-mapper node and should be impossible here. Nothing was touched"
+fi
+
+announce "the raw /data device is $DATA"
+
+# No parent disk means no grow, but it must not mean nothing at all: the /data
+# device itself exists and is readable here, and this path used to report
+# success having neither grown, formatted nor cleared anything.
+#
+# grow_partition and prepare_plain are both out of reach -- DISK and PARTNUM
+# are what resolve_device sets, so under `set -u` either would abort on an
+# unbound variable. prepare_filesystem needs only $DATA, so the filesystem half
+# of the preparation still runs, and the marker still has to go for the reason
+# prepare_plain clears it (C38). The status stays 0: a /data that mounts but
+# did not grow is smaller than it could be, not broken.
+if ! resolve_device; then
+    # The marker goes only if the partition is not a LUKS container. With the
+    # parent disk unresolvable this program cannot tell an unfinished container
+    # from a live one, and the marker is the only thing that marks the
+    # unfinished kind as disposable (C34). Clearing it blind would strand a
+    # half-made container as permanently unopenable -- every later boot would
+    # try to unlock it and report unlock_failed, with nothing left to say it
+    # could safely have been erased.
+    probe_data
+    if [ "$fs_type" != "crypto_LUKS" ]; then
+        clear_marker
+    fi
+    prepare_filesystem
+    finish plain 0 "cannot resolve the parent disk of $DATA, so no grow was attempted. The filesystem was checked and /data should still mount"
+fi
+
+probe_data
+
+# A marker plus a LUKS container means an enrolment died partway, so the
+# container holds nothing and is disposable (C34). Erase it and fall through to
+# the plaintext logic, which either converts again or leaves /data plain.
+if [ "$fs_type" = "crypto_LUKS" ] && marker_present; then
+    announce "$MARKER is present, so the LUKS container on $DATA is unfinished and holds nothing. Erasing it"
+    wipefs -a "$DATA" >/dev/null 2>&1 || finish convert_failed 1 "could not erase the unfinished LUKS container on $DATA"
+    clear_marker
+    probe_data
+fi
+
+if [ "$fs_type" = "crypto_LUKS" ]; then
+    if data_fills_disk; then
+        # The volume is real. Unlock it or touch nothing (C36): the data is
+        # present but locked, and a recovery key may still open it.
+        helper=$(find_cryptsetup_helper) \
+            || finish unlock_failed 1 "$DATA is encrypted but this image has no systemd-cryptsetup to open it"
+        if ! "$helper" attach "$MAP_NAME" "$DATA" - tpm2-device=auto,headless; then
+            finish unlock_failed 1 "the TPM could not unlock $DATA -- the volume is intact and a recovery key still opens it, but /data cannot be mounted on this boot"
+        fi
+        udevadm settle -t 10 2>/dev/null || true
+
+        # C33: an empty signature on the mapper means the volume was never
+        # finished, so make the filesystem. Any existing signature, even a
+        # corrupt filesystem, is left strictly alone -- which is why this needs
+        # blkid's "nothing at all" exit and not merely an empty TYPE.
+        #
+        # That test is right here and wrong in prepare_filesystem, and the
+        # device is the whole difference. A LUKS mapping's DM UUID starts with
+        # CRYPT, not part (cryptsetup lib/libdevmapper.c:1159), so libblkid
+        # reads the mapper as a whole disk (util-linux lib/sysfs.c:564-592) and
+        # gives it none of the PART_ENTRY_* values a partition always carries.
+        # With no values at all, blkid does exit 2 on a blank mapper. The test
+        # earns its place twice over: this calls probe_fs directly, so nothing
+        # else here rejects a failed probe, and a partition table on the mapper
+        # (values, but no TYPE) has to stay out of this branch.
+        probe_fs "$MAPPER"
+        if [ "$fs_rc" -eq 2 ] && [ -z "$fs_type" ]; then
+            announce "$MAPPER carries no signature at all: the volume was never finished, making the filesystem"
+            mkfs.ext4 -q -L data "$MAPPER" \
+                || finish unlock_failed 1 "$MAPPER has no filesystem and mkfs.ext4 failed"
+        fi
+        finish encrypted 0 "/data is encrypted and unlocked on $MAPPER"
+    fi
+
+    # LUKS on a partition that does not fill the disk is a header left behind
+    # by a previous installation: a reflash recreates the partition at its
+    # stock size without zeroing it, so the old header is still at the start
+    # while its key material went with the install. Erase and fall through.
+    announce "stale LUKS header on $DATA (the partition does not fill $DISK). A previous installation left it behind, so it is being erased"
+    wipefs -a "$DATA" >/dev/null 2>&1 || finish convert_failed 1 "could not erase the stale LUKS header on $DATA"
+    probe_data
+fi
+
+# --- plaintext -----------------------------------------------------------
+# No encryption was asked for, so /data stays plain on this boot: prepare it
+# for the mount (C57, absorbing C35).
+#
+# This is deliberately AFTER the encryption flag is known, and never on the
+# conversion path. A conversion grows and wipes the partition itself, so a mkfs
+# here would be work destroyed moments later.
+if [ "$flag_encrypt" != "1" ]; then
+    prepare_plain
+    finish plain 0 "/data is plain and no encryption was requested"
+fi
+
+# --- the conversion ------------------------------------------------------
+# Everything the conversion needs is checked BEFORE anything is destroyed, so
+# a device that cannot encrypt reports why and starts nothing it cannot finish
+# (C52).
+#
+# It does still prepare /data, because every check below ends with /data plain,
+# and "plain" has to mean the same thing here as on the flag-unset path above:
+# grown, formatted and mountable. Saying "/data stays plain" while leaving it
+# unprepared is how a device armed for encryption whose TPM did not come up
+# ends up with a /data that never mounts at all.
+
+# /config has to be ext4 before anything on this device is encrypted. The
+# material that unlocks /data lives there, and FAT32 has no journal: a power
+# cut partway through a write can leave a file half written, and on this
+# partition that is the difference between a device that opens /data and one
+# that never does again. Encrypting onto a FAT32 /config is the state this
+# whole feature exists to avoid.
+#
+# It is insurance, not the main defence. wendyos-config-convert.service
+# converts /config in place a release ahead of encryption, so reaching this
+# line means that conversion failed, or the image was built with
+# WENDYOS_CONFIG_EXT4 = "0".
+#
+# no_support rather than a new result value: the set the wendy CLI parses is a
+# closed contract (C53), and a new reason belongs in the message, so this one
+# needs no CLI release to be understood.
+#
+# The flag goes BEFORE prepare_plain, which is the order abort() announces its
+# reason in and for the same cause: prepare_filesystem can end the program
+# itself through finish, and the flag would then survive a refusal that can
+# never change its mind -- holding off the /config conversion for good.
+#
+# This refusal comes first of the three, so a device that is both FAT32 and
+# TPM-less is answered by the one that clears the flag. The other order leaves
+# the flag set, and with it the /config conversion blocked, over a TPM this
+# program may simply have run too early to see.
+config_fs=$(config_fstype) || config_fs=""
+case $config_fs in
+    # Both names the kernel can mount one FAT partition under. Every board's
+    # fstab says `auto` and that lands on vfat, which is also the only name
+    # wendyos-config-convert.sh converts. msdos is the same partition through
+    # the kernel's other FAT driver, with the same missing journal, so it is
+    # refused here rather than left to slip through.
+    vfat|msdos)
+        disarm_encryption "$CONFIG_DIR carries $config_fs, not ext4"
+        prepare_plain
+        finish no_support 1 "encryption was requested but $CONFIG_DIR carries $config_fs, not ext4, and what unlocks /data must not be kept on a filesystem with no journal. $disarm_outcome. Convert $CONFIG_DIR and arm the device again. /data stays plain"
+        ;;
+esac
+
+missing=""
+# tar is in the sweep for the same reason as the rest: preserve_identity()
+# needs it, and a missing tar has to report no_support here, before anything is
+# touched, rather than abort a conversion that has already started.
+for tool in cryptsetup systemd-cryptenroll mkfs.ext4 wipefs sgdisk parted partprobe tar; do
+    have "$tool" || missing="$missing $tool"
+done
+find_cryptsetup_helper >/dev/null || missing="$missing systemd-cryptsetup"
+# blkdiscard ships with the crypt stack, so it is missing exactly when the rest
+# is. It is only needed when the erase is enabled (C8).
+if [ "$flag_erase" = "1" ]; then
+    have blkdiscard || missing="$missing blkdiscard"
+fi
+if [ -n "$missing" ]; then
+    # The flag goes, as on the FAT32 refusal above and for the same reason: a
+    # tool that is not installed cannot install itself, so every boot of this
+    # image answers the request the same way, and an armed device that can
+    # never encrypt also blocks the /config conversion. Dropped BEFORE
+    # prepare_plain, because prepare_filesystem can end the program itself.
+    disarm_encryption "this image has no crypt tools --$missing"
+
+    # Prepared first, for the same reason the FAT32 refusal above gives. Some
+    # of the missing
+    # tools are the ones prepare_plain uses, and it reports each failure on its
+    # own terms -- an image with no mkfs.ext4 gets format_failed, which is more
+    # use than a second copy of this list.
+    prepare_plain
+
+    finish no_support 1 "encryption was requested but this image cannot encrypt /data -- missing:$missing. $disarm_outcome"
+fi
+
+# THE TOOL SWEEP ABOVE HAS TO COME FIRST, and the reason is not obvious.
+# Both the crypt tools and the drop-in that makes this program wait for the TPM
+# device are installed on the same condition, WENDYOS_DATA_ENCRYPTED = "1"
+# (conf/distro/include/tegra-image.inc:29 and x86-image.inc:93 for the tools,
+# optee-client_%.bbappend:25 for 20-tpm-wait.conf). So an image with the tools
+# is exactly an image that waits for the TPM, and reaching this line means the
+# wait has already happened. A TPM missing HERE is therefore a real answer
+# about the device, not this program having run before the fTPM came up.
+#
+# With the checks the other way round that was not true, and it mattered: on an
+# image built without encryption -- which is every image in the field today --
+# an armed device answered "no TPM" and kept its flag for ever, when the honest
+# answer was the simpler one below, that the image has no crypt tools at all.
+#
+# THE FLAG STAYS SET HERE, unlike the two refusals around it, and now for a
+# better reason than timing. This is the one condition of the three that a
+# person has to look at: the tools are present, the wait has happened, and the
+# device still has no TPM. C52 keeps such a device failing on every boot until
+# somebody acts, because somebody is exactly what is needed.
+if [ ! -e /dev/tpmrm0 ] && [ ! -e /dev/tpm0 ]; then
+    prepare_plain
+    finish no_tpm 1 "encryption was requested but this device has no TPM, so nothing can hold the key. /data stays plain"
+fi
+
+helper=$(find_cryptsetup_helper)
+
+# Abort the conversion before the container exists, leaving /data plain. The
+# marker is cleared first: the container it spoke for was never made, and a
+# marker left behind would keep data.mount skipped forever (C38).
+#
+# Then the FILESYSTEM is put back, and that half is not optional. Step 3 below
+# zero-fills the partition and wipefs-es it, so every abort from that point on
+# leaves /data carrying no signature at all, and nothing else in the image
+# would format it any more: wendyos-data-init.service and grow-data-part both
+# used to catch a blank /data on the next boot, and both are gone (C57).
+# Without the mkfs the flag is still set, the next boot retries the conversion,
+# aborts in the same place, and /data never mounts again. The TPM-seal step
+# makes that easy to reach -- a TPM that is present but unusable fails there on
+# every boot, forever.
+#
+# Reformatting here is the ROLLBACK, not data loss. Reaching these lines means
+# the owner asked for encryption and the wipe that request authorises has
+# already run, so the old contents of /data are gone by intent. An empty,
+# mountable /data is exactly what C7's "refusing is recoverable" promises;
+# leaving the partition blank is not a rollback at all.
+#
+# grow_partition is deliberately NOT repeated here: step 2 already ran it, so
+# prepare_filesystem alone closes the gap.
+#
+# ONE CALLER SITS BEFORE BOTH OF THOSE, and the two paragraphs above are scoped
+# to the rest. The failed write_marker at step 1 aborts before the wipe and
+# before the grow, so for that caller: nothing has been destroyed, so the
+# "contents are gone by intent" reasoning does not apply and is not needed --
+# prepare_filesystem formats only a device carrying no filesystem AND no
+# partition table, or an ext4 superblock that overruns its partition, so a
+# populated /data gets e2fsck and nothing else. And /data is left MOUNTABLE BUT
+# POSSIBLY UNGROWN, smaller than the disk, because step 2 never ran. That is
+# accepted rather than fixed: it is the same outcome prepare_plain tolerates
+# with a warning, and it self-heals on the next boot that does not attempt a
+# conversion, where prepare_plain grows the partition and
+# wendyos-data-resize.service resizes the filesystem online.
+abort() {
+    _result=$1
+    shift
+    rm -f "$BK" 2>/dev/null || true
+    clear_marker
+    # The reason reaches the journal BEFORE prepare_filesystem, never after.
+    # prepare_filesystem can end the program itself through `finish
+    # format_failed`, `finish fsck_failed` or `finish not_ext4`, and that
+    # would record ITS result and lose why the conversion aborted. Announcing
+    # first puts the original cause in the journal whichever way
+    # prepare_filesystem goes. The price is one repeated line when it returns
+    # normally, because `finish` prints the same text again -- do not "tidy"
+    # this by moving the announce down.
+    announce "$*"
+    prepare_filesystem
+    finish "$_result" 1 "$*"
+}
+
+# Abort after the container exists. It was formatted moments ago and holds
+# nothing of value, which is what makes the rollback obviously safe: erasing it
+# costs nothing and the next boot re-runs the whole conversion cleanly. That property is why the shipped order authors the volume first and
+# manages keys second (C33).
+#
+# Same filesystem rule as abort() above, and for the same reason -- but the
+# order inside is tighter here: the rollback wipefs is itself what leaves the
+# partition blank, so prepare_filesystem has to come AFTER it, while the
+# announce still has to come BEFORE it.
+abort_container() {
+    _result=$1
+    shift
+    # Held in a variable because it is now emitted twice, and the two copies
+    # must not drift apart.
+    _msg="$* -- rolled back to a plain /data, retrying on the next boot"
+    rm -f "$BK" 2>/dev/null || true
+    # The marker is cleared ONLY when the container is really gone. If the
+    # rollback erase fails the container survives, and it is a container with a
+    # usable keyslot and an empty ext4 inside -- past the TPM-seal door it even
+    # has a working TPM keyslot. Clearing the marker there would let the NEXT
+    # boot take the "LUKS, fills disk, no marker" row, unlock it and mount a
+    # half-made volume as if the conversion had finished -- silently, and with
+    # the conversion record and the status file never written. The reason is no
+    # longer the missing recovery key, which is now the normal end state: it is
+    # that this container was abandoned mid-conversion and nothing says so.
+    #
+    # Keeping the marker instead puts the next boot on the "LUKS + marker"
+    # row -- an enrolment died partway, the container holds nothing, erase it
+    # (C34) -- so the failed erase is retried and the device self-heals. The
+    # cost is that data.mount stays skipped (C38) until it succeeds, which is
+    # correct: there is nothing mountable there either way.
+    if wipefs -a "$DATA" >/dev/null 2>&1; then
+        clear_marker
+    else
+        announce "WARN: rollback wipefs failed -- the LUKS container on $DATA is still there. $MARKER is deliberately left in place so the next boot erases it and retries; erase $DATA by hand if that does not clear it"
+    fi
+    announce "$_msg"
+    prepare_filesystem
+    finish "$_result" 1 "$_msg"
+}
+
+# --- carrying the device identity across the wipe ------------------------
+# Pack $PRESERVE_ITEMS off the raw /data partition into $PRESERVE_TAR on
+# /config, so the next boot can put them back into the empty volume. Called
+# while the partition is still pristine: after the marker, so an interruption
+# here is bracketed like the rest of the conversion, and before the grow, so
+# nothing has moved the partition out from under the filesystem yet.
+#
+# FAILS CLOSED. Any failure aborts the conversion and leaves /data plain,
+# because a device that comes back without its uuid is a stranger to the fleet
+# and that is worse than not encrypting at all. Refusing costs only the
+# encryption, which the next boot retries.
+#
+# abort(), not abort_container(): no container exists at this point.
+preserve_identity() {
+    config_mounted \
+        || abort convert_failed "$CONFIG_DIR is not mounted, so the device identity cannot be carried across the wipe. /data stays plain"
+
+    # Ask the partition what it holds BEFORE trying to mount it. Converting a
+    # blank or freshly carved /data is a normal start with nothing to carry,
+    # and the mount exit code cannot tell that apart from a mount that failed
+    # for a real reason.
+    #
+    # probe_fs, not probe_data: probe_data ends the program through finish(),
+    # which does NOT clear the marker, and the marker is already written by
+    # now. A marker left behind keeps data.mount skipped on this boot and on
+    # every boot after it (C38), so every exit from here has to go through
+    # abort().
+    probe_fs "$DATA"
+    [ "$fs_rc" -eq 0 ] || [ "$fs_rc" -eq 2 ] \
+        || abort convert_failed "cannot probe $DATA (blkid exit $fs_rc) to carry the device identity across the wipe. /data stays plain"
+
+    if [ "$fs_type" != "ext4" ]; then
+        announce "nothing to carry across the wipe: $DATA holds ${fs_type:-no filesystem at all}"
+        return 0
+    fi
+
+    # Read-only, and noload: a /data that was not unmounted cleanly has a dirty
+    # ext4 journal, and replaying it needs write access, so a plain `-o ro`
+    # mount of such a partition fails. Nothing here writes to /data and the
+    # next step destroys it anyway, so skipping the replay costs nothing.
+    mkdir -p "$PRESERVE_MNT" 2>/dev/null
+    if ! mount -t ext4 -o ro,noload "$DATA" "$PRESERVE_MNT" 2>/dev/null; then
+        rmdir "$PRESERVE_MNT" 2>/dev/null || true
+        abort convert_failed "cannot mount $DATA read-only to carry the device identity across the wipe. /data stays plain"
+    fi
+
+    # Name only what is really there. Absent is normal: a device may never have
+    # joined a network, so it has no connections to carry, and tar would fail
+    # on a member that does not exist.
+    _why=""
+    _carried=""
+    set --
+    for _item in $PRESERVE_ITEMS; do
+        [ -e "${PRESERVE_MNT}/${_item}" ] || continue
+        set -- "$@" "$_item"
+        _carried="$_carried $_item"
+    done
+
+    # One tar run writes the whole archive, so a leftover from an attempt that
+    # aborted earlier is replaced rather than merged with this one.
+    #
+    # With nothing to carry we write NOTHING and leave any existing archive
+    # alone. That is deliberate: if a restore ever failed and left /data
+    # unmountable, the archive on /config is the only surviving copy of the
+    # identity, and an empty one written over it would lose the device for
+    # good. The restore on the next boot is what consumes a leftover.
+    #
+    # Writing straight to the final name needs no temp-and-rename dance, unlike
+    # the status file (C17). A torn archive can only be left by a power cut,
+    # and a power cut here is before the wipe, so /data is still intact and the
+    # next boot writes the archive again from the original.
+    if [ "$#" -gt 0 ]; then
+        if ! mkdir -p "$PRESERVE_DIR" 2>/dev/null; then
+            _why="could not create $PRESERVE_DIR"
+        # stderr deliberately NOT suppressed: tar says nothing on success, and
+        # when it fails its own message is the only clue why a device was
+        # refused encryption.
+        elif ! tar -C "$PRESERVE_MNT" -cf "$PRESERVE_TAR" "$@"; then
+            _why="could not write $PRESERVE_TAR"
+        fi
+    fi
+
+    if ! umount "$PRESERVE_MNT" 2>/dev/null; then
+        # Only when nothing has failed yet: the first reason is the useful one.
+        [ -n "$_why" ] || _why="could not unmount $PRESERVE_MNT"
+    fi
+    rmdir "$PRESERVE_MNT" 2>/dev/null || true
+
+    # On the disk, not in the page cache: /config has no journal, and the next
+    # thing that runs destroys the original.
+    if [ -z "$_why" ]; then
+        sync 2>/dev/null || _why="could not flush $PRESERVE_TAR to disk"
+    fi
+
+    [ -z "$_why" ] \
+        || abort convert_failed "$_why, so the device identity could not be carried across the wipe. /data stays plain"
+
+    if [ -z "$_carried" ]; then
+        announce "nothing to carry across the wipe: $DATA holds none of $PRESERVE_ITEMS"
+    else
+        announce "carrying$_carried across the wipe in $PRESERVE_TAR"
+    fi
+}
+
+announce "converting /data to LUKS2 (this device was armed through $CONF)"
+
+# 1) The marker brackets the whole conversion and is cleared LAST, immediately
+#    before the reboot (C34).
+#
+#    A FAILED write_marker still leaves the marker behind, which is why this
+#    aborts rather than finishing. `>` opens the file O_CREAT|O_TRUNC before the
+#    redirection can fail, so an ENOSPC on /config leaves a ZERO-BYTE marker --
+#    measured -- and marker_present() tests existence alone (:305), so it reads
+#    that leftover as a conversion in progress. data.mount.d/10-conversion.conf
+#    is ConditionPathExists=!/config/data.enroll.pending, so the leftover skips
+#    the mount on this boot AND on every boot after it, until someone deletes
+#    the file by hand, while the message below says /data stays plain.
+#
+#    abort() is the right primitive twice over: it calls clear_marker, and it
+#    runs prepare_filesystem. The second half is what makes "stays plain" true
+#    at all -- the conversion path deliberately skips prepare_plain (:938), so
+#    /data is NOT prepared when this fires and a blank partition would otherwise
+#    be left with no filesystem on it.
+write_marker \
+    || abort convert_failed "cannot write $MARKER, so the conversion cannot be made safe to interrupt. /data stays plain"
+
+# 1.5) Carry the device identity onto /config before anything touches the
+#      partition. Numbered between the two because its place in the order is
+#      the whole point: after the marker, so it is bracketed like every other
+#      step, and before the grow, so it reads the filesystem the owner has been
+#      using rather than one that has been resized under it. This is the ONLY
+#      caller, and it is on the conversion path alone -- a plain boot returns
+#      through prepare_plain() long before here.
+preserve_identity
+
+# 2) Grow first (C6). On a re-flashed device the region past the old layout
+#    still holds the PREVIOUS installation's /data, so wiping only the pre-grow
+#    extent would leave that readable inside the new container. Fatal here, for
+#    that reason, where the plain path above only warns.
+grow_partition \
+    || abort convert_failed "the /data partition did not grow to fill $DISK, so the wipe would not cover the whole device. /data stays plain"
+
+# 3) Wipe the raw partition BEFORE luksFormat (C5). luksFormat writes a header
+#    and does not touch the payload, so without this every block of the old
+#    filesystem the new one has not overwritten stays physically readable --
+#    which defeats the point of turning encryption on.
+#
+#    Fails closed (C7): a required wipe that fails aborts the conversion and
+#    leaves /data plain. Refusing is recoverable. Encrypting over readable
+#    plaintext is a promise silently broken.
+#
+#    "Skipped" and "failed" never collapse into each other (C9), which is why
+#    erase_method below records which primitive actually ran and why an
+#    explicit false is the only thing that skips.
+erase_method=skipped
+if [ "$flag_erase" = "1" ]; then
+    # blkdiscard -s (BLKSECDISCARD) additionally erases copies the flash made
+    # while garbage collecting. It is a permanent no-op on NVMe and SATA, where
+    # the driver sets no max_secure_erase_sectors and the ioctl returns
+    # EOPNOTSUPP, which blkdiscard maps to exit 2 (EXIT_NOTSUPP). Best effort,
+    # and no claim may rest on it -- but it is free, so we ask.
+    announce "secure discard of $DATA (best effort)"
+    blkdiscard -s -v --step "$WIPE_STEP" "$DATA"
+    secdiscard_rc=$?
+    case $secdiscard_rc in
+        0)
+            erase_method=blkzeroout+blksecdiscard
+            ;;
+        2)
+            announce "this device does not support secure discard, so only the zero-fill will run"
+            ;;
+        *)
+            announce "WARN: secure discard failed (exit $secdiscard_rc), continuing with the zero-fill"
+            ;;
+    esac
+
+    # blkdiscard -z (BLKZEROOUT) is the mandatory one: it is the only primitive
+    # that guarantees the range reads back as zeros. Any failure aborts.
+    announce "zero-filling $DATA (this can take a long time on a large disk)"
+    if ! blkdiscard -z -v --step "$WIPE_STEP" "$DATA"; then
+        abort wipe_failed "the mandatory zero-fill of $DATA failed, so the old plaintext may still be readable. Refusing to encrypt, /data stays plain"
+    fi
+    [ "$erase_method" = "blkzeroout+blksecdiscard" ] || erase_method=blkzeroout
+else
+    # The erase was explicitly turned off, so the old blocks stay as they are.
+    # The old filesystem is destroyed regardless -- a filesystem cannot be
+    # encrypted in place (C37) -- so drop its signature here, which the
+    # zero-fill would otherwise have done.
+    announce "secure erase is switched off in $CONF: the old blocks of $DATA are NOT scrubbed"
+    wipefs -a "$DATA" >/dev/null 2>&1 || abort wipe_failed "could not remove the old filesystem signature from $DATA. /data stays plain"
+fi
+
+# 4) Author the volume with a throwaway bootstrap key on tmpfs.
+if ! (
+    umask 077
+    head -c 64 /dev/urandom > "$BK"
+); then
+    abort convert_failed "cannot create the bootstrap key. /data stays plain"
+fi
+
+cryptsetup luksFormat --type luks2 --batch-mode --key-file="$BK" "$DATA" \
+    || abort convert_failed "luksFormat of $DATA failed. /data stays plain"
+
+# 5) Make the filesystem BEFORE the TPM enrolment, never after (C33). The other
+#    order leaves a brick window: a power cut between the enrolment and the mkfs
+#    gives a container that is LUKS, fills the disk and has a valid TPM keyslot,
+#    which every later boot unlocks onto a mapper with no filesystem.
+cryptsetup open --key-file="$BK" "$DATA" "$INIT_MAP" \
+    || abort_container convert_failed "could not open the new container with the bootstrap key"
+if ! mkfs.ext4 -q -L data "/dev/mapper/$INIT_MAP"; then
+    cryptsetup close "$INIT_MAP" 2>/dev/null || true
+    abort_container convert_failed "mkfs.ext4 inside the new container failed"
+fi
+
+cryptsetup close "$INIT_MAP" 2>/dev/null || true
+
+# 6) Seal a keyslot to the TPM. PCR binding per $PCR_ARG: a PCR list on x86
+#    (Secure Boot state), SRK-only on Jetson until secure boot lands.
+systemd-cryptenroll --unlock-key-file="$BK" --tpm2-device=auto $PCR_ARG "$DATA" \
+    || abort_container convert_failed "sealing a keyslot to the TPM failed"
+
+# --- Recovery key delivery (wendy CLI contract) ---
+# This conversion enrols NO recovery key, so the volume leaves here TPM-only.
+# That is deliberate. The conversion runs at early boot and reboots seconds
+# later: /dev/console is tty0 on Jetson with nothing attached to it, /run is
+# tmpfs that the reboot destroys, and no login prompt happens in between. A key
+# created here reaches nobody.
+#
+# The key is created after the reboot instead, on a running device, by the wendy
+# CLI calling /usr/sbin/data-recovery-key (shipped by the data-crypt recipe):
+# "enroll" prints a new key on stdout and drops any previous one,
+# "status" says whether one is enrolled yet. This works against a mounted, in-use
+# volume works -- run on an AGX Orin on 2026-10-04. The OS never writes the key
+# to disk and never logs it, so the caller who asked for it is the only one who
+# gets it.
+#
+# Until the CLI does that, the TPM keyslot is the only way into /data and a TPM
+# state loss makes the volume unopenable. That window is accepted, because the
+# alternative was a key nobody could read.
+
+# 8) Drop the bootstrap slot, leaving the TPM keyslot as the only one.
+#    --wipe-slot=password matches password-type slots only, so it spares the
+#    TPM slot (type tpm2). There is no recovery slot here to spare.
+systemd-cryptenroll --unlock-key-file="$BK" --wipe-slot=password "$DATA" \
+    || announce "WARN: could not wipe the bootstrap slot"
+rm -f "$BK" 2>/dev/null || true
+
+# 9) The conversion record, inside the volume it describes (C10). Written once,
+#    never updated. It names the METHOD rather than saying yes or no, because
+#    what we may claim differs between them: with secure discard the old data is
+#    gone as far as the device can make it gone, without it the old data cannot
+#    be read back through the block layer but traces may persist in the flash
+#    until it reuses the space. There is no "failed" value -- a failed wipe
+#    aborts the conversion, so no record is ever written for one.
+#
+#    Reaching it means attaching the volume through the TPM, which also proves
+#    on this boot that the keyslot we just sealed actually opens.
+record_written=0
+if "$helper" attach "$MAP_NAME" "$DATA" - tpm2-device=auto,headless; then
+    udevadm settle -t 10 2>/dev/null || true
+    if mkdir -p "$RECORD_MNT" 2>/dev/null && mount -t ext4 "$MAPPER" "$RECORD_MNT" 2>/dev/null; then
+        if { echo "# Written once by wendyos-data.sh when /data was converted."
+             echo "converted=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+             echo "secure_erase=$erase_method"
+             echo "luks_uuid=$(cryptsetup luksUUID "$DATA" 2>/dev/null)"
+           } > "$RECORD_MNT/$RECORD_NAME" 2>/dev/null; then
+            record_written=1
+        fi
+        sync 2>/dev/null || true
+        umount "$RECORD_MNT" 2>/dev/null || true
+    fi
+    rmdir "$RECORD_MNT" 2>/dev/null || true
+    "$helper" detach "$MAP_NAME" 2>/dev/null || true
+fi
+
+if [ "$record_written" -ne 1 ]; then
+    # The volume is finished and enrolled, so this is not a reason to destroy
+    # it. Say so loudly instead: without the record a device that skipped the
+    # scrub is indistinguishable afterwards from one that did it.
+    announce "WARN: could not write the conversion record to /data/$RECORD_NAME (secure_erase=$erase_method)"
+fi
+
+# 10) Clear the marker LAST, immediately before the reboot (C34), so a spurious
+#     retry can only ever erase a freshly formatted, still-empty volume.
+clear_marker
+
+write_status encrypted "/data was converted to LUKS2 (TPM $POLICY, no recovery key yet, secure_erase=$erase_method), rebooting into the encrypted state"
+announce "/data is now LUKS2. Rebooting into the encrypted state."
+
+# The reboot is the second half of the two-reboot conversion (C4). --no-block
+# keeps this oneshot from waiting on a job that stops the unit issuing it.
+systemctl --no-block reboot
+exit 0

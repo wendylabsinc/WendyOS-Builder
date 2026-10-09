@@ -13,9 +13,12 @@
 # grub-editenv. Referenced by LABEL, not a per-build PARTUUID, since OTA writes
 # only the rootfs slot and never re-partitions.
 #
-# /data is grown to fill the disk on first boot. /config is the FAT provisioning
-# partition. All by LABEL, all nofail.
+# /data is grown to fill the disk on first boot. /config is the provisioning
+# partition. It is FAT today, and the type here is `auto` so this entry keeps
+# working after /config is converted to ext4 in place. All nofail. /boot and
+# /config are by label, /data by the udev alias /dev/wendyos/data, the partition
+# or the device-mapper node once encrypted.
 tmpfs                   /var/volatile  tmpfs  defaults              0 0
 LABEL=boot              /boot    vfat  defaults,nofail          0 2
-LABEL=config            /config  vfat  defaults,nofail          0 0
-LABEL=data              /data    ext4  defaults,noatime,nofail  0 2
+LABEL=config            /config  auto  defaults,nofail          0 0
+/dev/wendyos/data       /data    ext4  defaults,noatime,nofail  0 2

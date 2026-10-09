@@ -35,8 +35,9 @@ do_install:append() {
         # wendyos-update A/B layout (RPi3/4/5): nothing else generates the
         # fstab, so install our A/B fstab (no "/" entry — the kernel mounts the
         # slot via boot-ab.cmd.in's root=; /boot stays mounted for fw_setenv's
-        # uboot.env). /boot, /config and /data are all referenced by LABEL, so
-        # there is no placeholder to substitute on this path (WDY-1768).
+        # uboot.env). /boot and /config are referenced by LABEL, /data by the
+        # udev alias /dev/wendyos/data on every RPi variant, so there is no
+        # placeholder to substitute on this path (WDY-1768).
         install -m 0644 ${UNPACKDIR}/${RPI_WENDY_FSTAB_TEMPLATE} ${D}${sysconfdir}/fstab
     elif [ "${WENDYOS_RPI_UBOOT}" = "1" ]; then
         # Legacy single-rootfs MBR layout: boot/A/B/extended{config,data}. The

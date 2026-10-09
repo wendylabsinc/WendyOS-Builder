@@ -9,6 +9,15 @@ DATA_ETC="/data/etc"
 LOG_TAG="wendyos-etc-binds"
 NM_CONNECTIONS="NetworkManager/system-connections"
 
+CONFIG_DIR="/config"
+BACKUP_DIR="${CONFIG_DIR}/backup"
+
+# Written by wendyos-data.sh before it wipes /data for an encryption
+# conversion. Paths inside are relative to /data. What goes in is its business,
+# not ours: the archive carries its own list, so adding a file to it is a
+# one-line change there and no change here.
+BACKUP_TAR="${BACKUP_DIR}/configuration.tar"
+
 log_info() {
     logger -t "${LOG_TAG}" -p user.info "$1"
     echo "[INFO] $1"
@@ -27,6 +36,59 @@ then
 fi
 
 log_info "Setting up persistent /etc bind mounts from /data"
+
+# PHASE 0: put back what a /data encryption conversion carried across the wipe.
+#
+# Converting /data to LUKS destroys it, so wendyos-data.sh copies the device
+# identity and the saved network connections to /config first. Without this the
+# device comes back with a new uuid and a new name, a stranger to the fleet,
+# and with no way onto the network.
+#
+# It has to run here, before Phase 1, and before the uuid and name generators
+# this unit is ordered Before=, so the files are under /data/etc before
+# anything binds them or decides they are missing and makes new ones.
+#
+# --skip-old-files is the whole "never overwrite /data" rule, and it is why the
+# order below it no longer matters as much as it looks: tar decides PER FILE,
+# so Phase 2 creating an empty /etc/NetworkManager/system-connections cannot
+# make a later run conclude the profiles inside it are already there. A check
+# on the directory would have. Not --keep-old-files: that one treats an
+# existing file as an error and would fail an otherwise good restore.
+#
+# -p puts back the modes recorded in the archive, and that is load-bearing for
+# the network profiles: NetworkManager refuses to load a connection file that
+# anyone but root can read. Carrying them in an archive rather than as loose
+# files on /config is what makes those modes survive at all, because /config is
+# FAT and FAT cannot hold them.
+#
+# /config carries nofail on every board, so an absent /config is a state we
+# live with rather than an error. Skip the restore and leave the binds below
+# untouched: /data does not depend on /config.
+if ! mountpoint -q "${CONFIG_DIR}"
+then
+    log_info "Phase 0: ${CONFIG_DIR} is not mounted, so there is nothing to restore from it"
+elif [ -f "${BACKUP_TAR}" ]
+then
+    log_info "Phase 0: restoring ${BACKUP_TAR} into /data"
+
+    # -v so the journal names every file, which is the only record that the
+    # device kept its identity across the conversion.
+    if tar -C /data -xpvf "${BACKUP_TAR}" --skip-old-files
+    then
+        # Only the archive goes. The directory stays for whatever else comes
+        # to live on /config/backup.
+        if rm -f "${BACKUP_TAR}"
+        then
+            log_info "Phase 0: restore complete, removed ${BACKUP_TAR}"
+        else
+            log_error "Phase 0: failed to remove ${BACKUP_TAR} after a complete restore"
+        fi
+    else
+        # Left in place so the next boot tries again, and NOT a reason to fail
+        # this service: the bind mounts below still have to be set up.
+        log_error "Phase 0: failed to extract ${BACKUP_TAR}, keeping it for the next boot"
+    fi
+fi
 
 # PHASE 1: identity files persistence (device-uuid, device-name)
 log_info "Phase 1: Setting up identity files persistence"

@@ -36,9 +36,9 @@
 #   - The kernel is loaded by boot.scr from the SELECTED slot's rootfs /boot
 #     (A/B-safe), so the rootfs must contain /boot/${KERNEL_IMAGETYPE}.
 #   - /data is created as a small ext4 here; the first-boot grow is done by
-#     grow-data-part (wendyos-data-setup's format-trigger does NOT fire on a
-#     wic-preformatted fs). Do NOT add expand-rootfs to an A/B image: it would
-#     grow rootfsA over rootfsB.
+#     wendyos-data.service, which grows the partition before the mount and
+#     leaves the filesystem this wks made in place. Do NOT add expand-rootfs to
+#     an A/B image: it would grow rootfsA over rootfsB.
 #   - Two 8192M rootfs slots + boot + config + data need a >=18 GB card; size
 #     the slots down here if the rpi3 fleet uses smaller media.
 bootloader --ptable msdos

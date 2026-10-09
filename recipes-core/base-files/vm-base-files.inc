@@ -14,8 +14,9 @@ SRC_URI:append = " \
 # update is disabled (WIC_CREATE_EXTRA_ARGS = "--no-fstab-update") because a baked
 # "/" entry would be wrong on the other slot. Install our A/B fstab instead — no
 # "/" entry (GRUB mounts the slot via root=PARTLABEL), /boot stays mounted so the
-# grubenv connector can edit EFI/BOOT/grubenv, and /boot, /config and /data are all
-# referenced by LABEL so there is nothing to substitute.
+# grubenv connector can edit EFI/BOOT/grubenv, /boot and /config are referenced
+# by LABEL and /data by the /dev/wendyos/data alias, so there is nothing to
+# substitute.
 #
 # Installed unconditionally for the VM machines: it describes the disk layout, which
 # the wks always creates, so it is correct whether WENDYOS_OTA is "wendy" or "none".

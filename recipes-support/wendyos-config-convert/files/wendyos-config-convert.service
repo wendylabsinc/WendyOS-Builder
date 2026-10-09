@@ -1,0 +1,52 @@
+[Unit]
+Description=Convert /config from FAT32 to ext4 in place
+
+# Default dependencies are ON, unlike almost every other unit in the /data and
+# /config graph. They are what keeps this unit clear of the early-boot work:
+# an ordinary service is implicitly After=sysinit.target, and
+# wendyos-etc-binds.service is Before=sysinit.target. That one restores the
+# device identity archive out of /config after a /data conversion, and it must
+# have finished reading /config long before this unit unmounts it.
+
+# The staging copy of /config's contents goes on /data, so without /data there
+# is nowhere to stage and the service must not run at all.
+# RequiresMountsFor= gives both halves of that: Requires=data.mount and
+# After=data.mount.
+#
+# Ordering after the mount also means ordering after the /data partition grow,
+# because the grow happens inside wendyos-data.service before the mount. The
+# online resize2fs that runs after the mount (wendyos-data-resize.service) is
+# deliberately NOT waited for: the staging copy needs at most the size of a
+# 256 MB partition, and the filesystem always has that free before the resize.
+RequiresMountsFor=/data
+
+# The agent reads /config. It must not see the partition half-converted.
+Before=wendyos-agent.service
+
+# On Jetson the conversion can end in a reboot, when it takes the emulated TPM
+# away (step 11 of the script). That reboot comes before the OTA update is
+# committed. wendyos-update-verify.service confirms a healthy boot to the
+# Jetson firmware (nvbootctrl verify), even while an update is still pending.
+# A boot that is not confirmed uses up one of the firmware's three boot
+# attempts for that slot. Ordering after the verifier makes sure the boot is
+# confirmed before this unit can reboot. Without it the order is left to
+# chance. Losing the race costs one attempt, not a rollback, so this is
+# hardening rather than a fix.
+#
+# Ordering only. After= on a unit that is absent does nothing, and the verifier
+# ships with wendyos-update on every board that gets this service.
+After=wendyos-update-verify.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# No timeout, for the reason wendyos-data.service gives: a format plus two
+# copies of a 256 MB partition has no honest upper bound, and a guessed timeout
+# that kills the run mid-copy is worse than a long run. The script is written
+# so that an interrupted run is resumed on the next boot, but there is no
+# reason to arrange interruptions.
+TimeoutStartSec=infinity
+ExecStart=/usr/sbin/wendyos-config-convert.sh
+
+[Install]
+WantedBy=multi-user.target

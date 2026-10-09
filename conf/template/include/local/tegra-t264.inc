@@ -13,12 +13,12 @@
 WENDYOS_UPDATE_BOOTLOADER = "1"
 
 # Thor runs the wendyos-update OTA stack (wendyos.conf defaults tegra264 to
-# "none"; override here). This pulls in the client + data-setup + the
+# "none"; override here). This pulls in the client + the data.mount unit + the
 # .wendy artifact (conf/distro/include/wendyos-update.inc) and implies the
 # persistent /data partition (no separate WENDYOS_DATA_PART needed — its
 # default derives "1" from WENDYOS_OTA != "none"). The data partition is
 # allocated empty at flash time and formatted/grown on first boot by
-# wendyos-data-setup. See tegra_partition_config.bbclass.
+# wendyos-data.service. See tegra_partition_config.bbclass.
 WENDYOS_OTA = "wendy"
 
 # Fixed A/B rootfs slot size: 12 GiB per slot on every build, so an OTA rootfs
@@ -63,10 +63,14 @@ WENDYOS_EFI_DEBUG = "0"
 # (Was "0" in the wrynose/r38.4 era when no DeepStream recipe existed for Thor.)
 WENDYOS_DEEPSTREAM = "1"
 
-# LUKS2 encryption of /data, sealed to the fTPM. Default OFF: an image that
-# assumes LUKS leaves an already-provisioned plaintext /data unmounted, and
-# there is no in-place migration yet. Set = "1" in local.conf to build it.
-WENDYOS_DATA_ENCRYPTED ?= "0"
+# The ability to encrypt /data: LUKS2, with the key sealed to the fTPM (OP-TEE).
+# Default ON. It adds the crypt tools to the image (tegra-image.inc), systemd's
+# cryptsetup support, and a wait for the fTPM before the /data service runs. It
+# also turns on the TPM stack below. It encrypts nothing by itself. A device
+# stays plain until /config/data.conf asks for encryption, and the wendy CLI
+# writes that file on a running device. Set WENDYOS_DATA_ENCRYPTED = "0" in
+# local.conf to build without it.
+WENDYOS_DATA_ENCRYPTED ?= "1"
 
 # Master gate for the TPM 2.0 stack itself (fTPM over OP-TEE, plus the Thor
 # DT overlay in tegra-overlays.inc). Encrypting /data needs a TPM at runtime,
