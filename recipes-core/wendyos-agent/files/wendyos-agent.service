@@ -1,7 +1,15 @@
 [Unit]
 Description=Wendy Agent
-After=network.target dbus.service containerd.service gadget-setup.service
-Wants=network.target
+# Give the active network manager's bounded wait-online service a chance to
+# publish DHCP-derived DNS/search configuration before the agent reconciles
+# persisted workloads. An offline device still starts the agent after that
+# bounded wait completes.
+After=network-online.target dbus.service containerd.service gadget-setup.service
+Wants=network-online.target
+# Ordering-only: when systemd-resolved is enabled, make its stable local DNS
+# stub available before the agent chooses resolver wiring. Do not pull the
+# optional service into images that deliberately leave it disabled.
+After=systemd-resolved.service
 Requires=containerd.service
 
 [Service]
