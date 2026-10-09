@@ -1,0 +1,73 @@
+From 6e1930ece855a4c256f1c7e6632d634cfb9888b5 Mon Sep 17 00:00:00 2001
+From: Stig Hornang <stig@hornang.me>
+Date: Fri, 12 Jun 2026 16:24:58 +0200
+Subject: [PATCH] Bluetooth: L2CAP: fix tx ident leak for commands without a response
+
+Commit 6c3ea155e5ee ("Bluetooth: L2CAP: Fix not tracking outstanding
+TX ident") changed ident allocation to use an IDA, releasing idents in
+l2cap_put_ident() when the matching response command is received.
+
+But identifiers allocated for commands that have no response defined
+are never released. In particular L2CAP_LE_CREDITS is sent repeatedly for
+the lifetime of an LE CoC channel, so a peer streaming data to the
+host exhausts the 1-255 ident range after 254 credit packets. From
+then on l2cap_get_ident() fails and every subsequent L2CAP_LE_CREDITS
+packet is sent with ident 0, which is invalid. Remote stacks that
+validate the ident drop these commands and the channel stalls.
+
+Release the ident immediately after sending L2CAP_LE_CREDITS since no
+response will ever release it. Use a local variable instead of
+chan->ident so that an ident an EXT_FLOWCTL channel may be waiting on
+is not overwritten by a credit packet. Also release the ident for an
+outgoing L2CAP_LE_CONN_REQ when its response arrives.
+
+Upstream-Status: Backport [https://kernel.googlesource.com/pub/scm/linux/kernel/git/wireless/wireless/+/6e1930ece855a4c256f1c7e6632d634cfb9888b5]
+Signed-off-by: Stig Hornang <stig@hornang.me>
+Signed-off-by: Luiz Augusto von Dentz <luiz.von.dentz@intel.com>
+---
+ net/bluetooth/l2cap_core.c | 20 +++++++++++++++++---
+ 1 file changed, 17 insertions(+), 3 deletions(-)
+
+diff --git a/net/bluetooth/l2cap_core.c b/net/bluetooth/l2cap_core.c
+index 519cd95..538ae9a 100644
+--- a/net/bluetooth/l2cap_core.c
++++ b/net/bluetooth/l2cap_core.c
+@@ -4879,6 +4879,7 @@ static void l2cap_put_ident(struct l2cap_conn *conn, u8 code, u8 id)
+ 	case L2CAP_ECHO_RSP:
+ 	case L2CAP_INFO_RSP:
+ 	case L2CAP_CONN_PARAM_UPDATE_RSP:
++	case L2CAP_LE_CONN_RSP:
+ 	case L2CAP_ECRED_CONN_RSP:
+ 	case L2CAP_ECRED_RECONF_RSP:
+ 		/* First do a lookup since the remote may send bogus ids that
+@@ -6772,6 +6773,7 @@ static void l2cap_chan_le_send_credits(struct l2cap_chan *chan)
+ 	struct l2cap_conn *conn = chan->conn;
+ 	struct l2cap_le_credits pkt;
+ 	u16 return_credits = l2cap_le_rx_credits(chan);
++	int ident;
+ 
+ 	if (chan->mode != L2CAP_MODE_LE_FLOWCTL &&
+ 	    chan->mode != L2CAP_MODE_EXT_FLOWCTL)
+@@ -6789,9 +6791,18 @@ static void l2cap_chan_le_send_credits(struct l2cap_chan *chan)
+ 	pkt.cid     = cpu_to_le16(chan->scid);
+ 	pkt.credits = cpu_to_le16(return_credits);
+ 
+-	chan->ident = l2cap_get_ident(conn);
++	ident = l2cap_get_ident(conn);
+ 
+-	l2cap_send_cmd(conn, chan->ident, L2CAP_LE_CREDITS, sizeof(pkt), &pkt);
++	l2cap_send_cmd(conn, ident, L2CAP_LE_CREDITS, sizeof(pkt), &pkt);
++
++	/* L2CAP_LE_CREDITS has no response so the ident is never released by
++	 * l2cap_put_ident() - release it right away, otherwise the tx_ida
++	 * range is exhausted after 254 packets and from then on credits are
++	 * sent with the invalid ident 0, which some remote stacks ignore,
++	 * stalling the channel.
++	 */
++	if (ident > 0)
++		ida_free(&conn->tx_ida, ident);
+ }
+ 
+ void l2cap_chan_rx_avail(struct l2cap_chan *chan, ssize_t rx_avail)
+-- 
+2.51.0
