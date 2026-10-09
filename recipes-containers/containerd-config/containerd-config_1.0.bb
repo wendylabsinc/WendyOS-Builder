@@ -9,6 +9,7 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
 
 SRC_URI = "\
     file://containerd-memory-limit.conf \
+    file://containerd-requires-data-mount.conf \
     file://README-memory-limits.md \
 "
 S = "${UNPACKDIR}"
@@ -18,12 +19,17 @@ do_install() {
     install -d ${D}${systemd_system_unitdir}/containerd.service.d
     install -m 0644 ${UNPACKDIR}/containerd-memory-limit.conf ${D}${systemd_system_unitdir}/containerd.service.d/memory-limit.conf
 
+    # Install systemd drop-in requiring the /var/lib/containerd bind mount
+    # before containerd starts (WDY-3127)
+    install -m 0644 ${UNPACKDIR}/containerd-requires-data-mount.conf ${D}${systemd_system_unitdir}/containerd.service.d/requires-data-mount.conf
+
     install -d ${D}${docdir}/${PN}
     install -m 0644 ${UNPACKDIR}/README-memory-limits.md ${D}${docdir}/${PN}/README-memory-limits.md
 }
 
 FILES:${PN} += "\
     ${systemd_system_unitdir}/containerd.service.d/memory-limit.conf \
+    ${systemd_system_unitdir}/containerd.service.d/requires-data-mount.conf \
     ${docdir}/${PN}/README-memory-limits.md \
 "
 
