@@ -19,6 +19,7 @@ SRC_URI += " \
     file://usb-gadget-builtin.cfg \
     file://usb-serial.cfg \
     file://mesh-tproxy.cfg \
+    file://0006-bluetooth-btusb-trust-le-states-by-default.patch \
     file://0001-crypto-scatterwalk-Backport-memcpy_sglist.patch \
     file://0002-crypto-algif_aead-use-memcpy_sglist-instead-of-null-skcipher.patch \
     file://0003-crypto-algif_aead-Revert-to-operating-out-of-place-CVE-2026-31431.patch \
@@ -46,3 +47,6 @@ wendyos_check_mesh_tproxy() {
 # Kept behind the machine opt-in so other JP7 images retain their vendor kernel
 # configuration and task hashes.
 require ${@'recipes-kernel/linux/driver-extensions.inc' if d.getVar('WENDYOS_DRIVER_EXTENSIONS') == '1' else ''}
+
+# Retire the actual failed pending LE connection, including a second queued dial.
+require recipes-kernel/linux/bluetooth-le-pending.inc
