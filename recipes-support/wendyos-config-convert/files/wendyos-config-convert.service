@@ -23,6 +23,20 @@ RequiresMountsFor=/data
 # The agent reads /config. It must not see the partition half-converted.
 Before=wendyos-agent.service
 
+# On Jetson the conversion can end in a reboot, when it takes the emulated TPM
+# away (step 11 of the script). That reboot comes before the OTA update is
+# committed. wendyos-update-verify.service confirms a healthy boot to the
+# Jetson firmware (nvbootctrl verify), even while an update is still pending.
+# A boot that is not confirmed uses up one of the firmware's three boot
+# attempts for that slot. Ordering after the verifier makes sure the boot is
+# confirmed before this unit can reboot. Without it the order is left to
+# chance. Losing the race costs one attempt, not a rollback, so this is
+# hardening rather than a fix.
+#
+# Ordering only. After= on a unit that is absent does nothing, and the verifier
+# ships with wendyos-update on every board that gets this service.
+After=wendyos-update-verify.service
+
 [Service]
 Type=oneshot
 RemainAfterExit=yes

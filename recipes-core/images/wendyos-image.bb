@@ -54,8 +54,7 @@ IMAGE_FEATURES += "${@oe.utils.ifelse(d.getVar('WENDYOS_DEBUG') == '1', d.getVar
 #       serial-getty@ and not from console-getty. RPi's own /dev/console was
 #       not measured.
 #       The same fact is why a recovery key written to /dev/console on a
-#       Jetson reaches nobody -- see C75 in
-#       docs/plans/configurable-data-encryption.md.
+#       Jetson reaches nobody.
 #
 # The kernel `console=` bootarg (boot + printk output, not a getty) is separate:
 # on RPi it is gated on WENDYOS_DEBUG_UART (rpi-cmdline.bbappend); Tegra emits it

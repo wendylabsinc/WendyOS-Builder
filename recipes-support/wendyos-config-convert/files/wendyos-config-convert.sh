@@ -624,8 +624,14 @@ fi
 # and all failed. A reboot restarts the TEE, and that is the whole reason this
 # is a reboot and not a restart.
 #
-# The test is "was there a TPM, and is it gone now", so a board without one --
-# every board in the field today, and every RPi and x86 -- never reaches it.
+# The test is "was there a TPM, and is it gone now". Every Jetson built with
+# /data encryption support (the default) reaches it once. A board with
+# no emulated TPM never does: every RPi, Qualcomm board and VM, and x86, whose
+# TPM is a hardware chip that does not live on /config.
+#
+# The reboot comes before the OTA update is committed. The unit is ordered after
+# wendyos-update-verify.service, so the firmware already counts this boot as
+# good and the reboot costs the update nothing.
 #
 # ONLY ON THE SUCCESS PATH. A failed conversion must not reboot: it would run
 # again, fail again and reboot again, and a device in a loop is worse than one

@@ -49,6 +49,10 @@ RDEPENDS:${PN}:append = " \
 # copy of /config's contents on /data while it reformats the partition, so a
 # board with no /data partition (WENDYOS_OTA = "none", e.g. QEMU) has nowhere
 # to stage and the service would refuse on every boot.
+#
+# The WENDYOS_DATA_PART half currently excludes NO board we ship, and it is kept
+# on purpose. Every machine CI builds resolves WENDYOS_OTA to "wendy" (see
+# .github/workflows/build.yml).
 RDEPENDS:${PN}:append = " ${@'wendyos-config-convert' if d.getVar('WENDYOS_CONFIG_EXT4') == '1' and d.getVar('WENDYOS_DATA_PART') == '1' else ''}"
 
 RDEPENDS:${PN}:append = " \
