@@ -20,7 +20,8 @@ def usb_net_nm_method(d):
         bb.warn("WENDYOS_USB_NET_MODE='%s' is not recognized, falling back to 'link-local'" % mode)
     return mapping.get(mode, 'link-local')
 
-# dnsmasq is only needed for dhcp-server mode (NM spawns it for method=shared)
+# NetworkManager needs dnsmasq for dhcp-server mode (method=shared). The base
+# package group also installs it independently for the agent's mesh sharing.
 RDEPENDS:${PN}-daemon += "${@'dnsmasq' if d.getVar('WENDYOS_USB_NET_MODE') == 'dhcp-server' else ''}"
 
 # Remove dnsmasq from NM's weak recommendations when not in dhcp-server mode

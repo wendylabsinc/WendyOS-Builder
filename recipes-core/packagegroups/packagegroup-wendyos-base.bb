@@ -5,6 +5,8 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 inherit packagegroup
 
 SUMMARY:${PN} = "Base support"
+# Local mesh sharing starts its own scoped dnsmasq proxy when enabled. The
+# system-wide dnsmasq service remains disabled by dnsmasq_%.bbappend.
 RDEPENDS:${PN} = " \
     packagegroup-core-boot \
     bash \
@@ -16,6 +18,7 @@ RDEPENDS:${PN} = " \
     lsof \
     networkmanager \
     networkmanager-nmcli \
+    dnsmasq \
     vim \
     htop \
     usbutils \
