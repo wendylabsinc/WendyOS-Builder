@@ -529,28 +529,64 @@ wifi_nmcli() {
 capture_wifi_state() {
     activation=$1
     restore_state=$2
-    while read -r directive interface extra || [ -n "${directive:-}${interface:-}${extra:-}" ]; do
-        [ "${directive:-}" = restore-wifi-connection ] || continue
-        # On a first install the new driver may create this interface. There
-        # cannot be a connection to preserve if the kernel has no device yet.
-        [ -e "/sys/class/net/$interface" ] || continue
-        if ! command -v nmcli >/dev/null 2>&1; then
-            echo "wendyos-sysext-apply: cannot capture $interface connection: nmcli is unavailable" >&2
-            return 1
-        fi
-        if ! connection_uuid=$(wifi_nmcli 5 -g GENERAL.CON-UUID device show "$interface"); then
-            echo "wendyos-sysext-apply: cannot capture $interface connection; refusing to unload its driver" >&2
-            return 1
-        fi
-        case "$connection_uuid" in
-            ''|--) continue ;; # A successful query found no active connection.
-            *[!A-Fa-f0-9-]*)
-                echo "wendyos-sysext-apply: invalid connection UUID for $interface" >&2
-                return 1 ;;
+    while read -r directive value extra || [ -n "${directive:-}${value:-}${extra:-}" ]; do
+        case "${directive:-}" in
+            restore-wifi-connection)
+                capture_wifi_interface "$value" "$restore_state" || return 1 ;;
+            restore-wifi-pci)
+                for net_path in /sys/class/net/*; do
+                    [ -f "$net_path/device/vendor" ] || continue
+                    [ -f "$net_path/device/device" ] || continue
+                    IFS= read -r vendor < "$net_path/device/vendor" || continue
+                    IFS= read -r device < "$net_path/device/device" || continue
+                    present=$(printf '%s:%s' "${vendor#0x}" "${device#0x}" | tr 'A-F' 'a-f')
+                    [ "$present" = "$value" ] || continue
+                    # Retain this physical card, not just its vendor/model or
+                    # current wlanN name: both radios disappear during reload.
+                    wifi_pci_path=$(readlink -f "$net_path/device") || return 1
+                    [ -n "$wifi_pci_path" ] || return 1
+                    capture_wifi_interface "${net_path##*/}" "$restore_state" "$wifi_pci_path" || return 1
+                done ;;
         esac
-        printf '%s %s\n' "$interface" "$connection_uuid" >> "$restore_state" || return 1
     done < "$activation"
 }
+
+capture_wifi_interface() {
+    interface=$1
+    restore_state=$2
+    # On a first install the new driver may create this interface. There
+    # cannot be a connection to preserve if the kernel has no device yet.
+    [ -e "/sys/class/net/$interface" ] || return 0
+    if ! command -v nmcli >/dev/null 2>&1; then
+        echo "wendyos-sysext-apply: cannot capture $interface connection: nmcli is unavailable" >&2
+        return 1
+    fi
+    if ! connection_uuid=$(wifi_nmcli 5 -g GENERAL.CON-UUID device show "$interface"); then
+        echo "wendyos-sysext-apply: cannot capture $interface connection; refusing to unload its driver" >&2
+        return 1
+    fi
+    case "$connection_uuid" in
+        ''|--) return 0 ;; # A successful query found no active connection.
+        *[!A-Fa-f0-9-]*)
+            echo "wendyos-sysext-apply: invalid connection UUID for $interface" >&2
+            return 1 ;;
+    esac
+    printf '%s %s %s\n' "$interface" "$connection_uuid" "${3:-}" >> "$restore_state" || return 1
+}
+
+wifi_interface_for_device() (
+    # Run in a subshell so scanning cannot overwrite the caller's journal state.
+    selected=""
+    for net_path in /sys/class/net/*; do
+        [ -e "$net_path/device" ] || continue
+        [ "$(readlink -f "$net_path/device")" = "$1" ] || continue
+        # Do not guess if a card exposes multiple network interfaces.
+        [ -z "$selected" ] || return 1
+        selected=${net_path##*/}
+    done
+    [ -n "$selected" ] || return 1
+    printf '%s\n' "$selected"
+)
 
 restore_wifi_state() {
     restore_state=$1
@@ -558,13 +594,24 @@ restore_wifi_state() {
     [ -s "$restore_state" ] || return 0
     wifi_restore_failed=0
     udevadm settle --timeout=5 >/dev/null 2>&1 || true
-    while read -r interface connection_uuid; do
+    while read -r interface connection_uuid wifi_pci_path; do
         [ -n "$interface" ] || continue
+        saved_interface=$interface
         wifi_connected=0
         retries=0
         while [ "$retries" -lt 3 ] && [ "$(date +%s)" -lt "$WIFI_DEADLINE" ]; do
             attempts=0
             while [ "$attempts" -lt 10 ] && [ "$(date +%s)" -lt "$WIFI_DEADLINE" ]; do
+                # Resolve after each rediscovery, including rollback. Never
+                # reconnect an unrelated card that inherited the old name.
+                if [ -n "$wifi_pci_path" ]; then
+                    interface=$(wifi_interface_for_device "$wifi_pci_path") || interface=""
+                    if [ -z "$interface" ]; then
+                        attempts=$((attempts+1))
+                        sleep 1
+                        continue
+                    fi
+                fi
                 nm_state=$(wifi_nmcli 5 -g GENERAL.STATE device show "$interface" 2>/dev/null) || nm_state=""
                 case "${nm_state%% *}" in
                     30|40|50|60|70|80|90|100) break ;;
@@ -572,6 +619,10 @@ restore_wifi_state() {
                 attempts=$((attempts+1))
                 sleep 1
             done
+            if [ -z "$interface" ]; then
+                retries=$((retries+1))
+                continue
+            fi
             # Service restart and NM device rediscovery are asynchronous. Retry
             # only a device that became unavailable during the activation call;
             # authentication/association failures on a ready device still fail.
@@ -585,7 +636,7 @@ restore_wifi_state() {
             sleep 1
         done
         if [ "$wifi_connected" = 0 ]; then
-            echo "wendyos-sysext-apply: could not restore $interface connection" >&2
+            echo "wendyos-sysext-apply: could not restore ${interface:-$saved_interface} connection" >&2
             wifi_restore_failed=1
         fi
     done < "$restore_state"
@@ -702,6 +753,16 @@ for link in "$RUNDIR"/*.raw; do
                     ;;
                 replace|reload) [ -z "${extra:-}" ] && valid_module_name "${value:-}" || activation_bad=1 ;;
                 restore-wifi-connection) [ -z "${extra:-}" ] && valid_interface_name "${value:-}" || activation_bad=1 ;;
+                restore-wifi-pci)
+                    case "${value:-}" in
+                        ????':'????)
+                            hex="${value%:*}${value#*:}"
+                            case "$hex" in *[!0-9a-fA-F]*) activation_bad=1 ;; esac
+                            ;;
+                        *) activation_bad=1 ;;
+                    esac
+                    [ -z "${extra:-}" ] || activation_bad=1
+                    ;;
                 restart-service) [ -z "${extra:-}" ] && valid_service_name "${value:-}" || activation_bad=1 ;;
                 *) activation_bad=1 ;;
             esac
