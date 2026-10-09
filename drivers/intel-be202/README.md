@@ -58,9 +58,10 @@ Wi-Fi interface.
 On Pi, the onboard Broadcom `brcmfmac_cyw` and `brcmfmac` modules must unload
 before the backported `cfg80211` can replace the kernel's wireless stack. While
 the BE202 add-on is active, the onboard Wi-Fi radio is unavailable. A BE202
-connection is restored by PCI identity, whether named `wlan0` or `wlan1`; an
-onboard Wi-Fi connection is intentionally not restored. Keep Ethernet or USB
-gadget management connected for installation and removal.
+connection is restored by its physical PCI identity, even if its interface name
+changes during reload or rollback. Another card of the same model is not a
+substitute. An onboard Wi-Fi connection is intentionally not restored. Keep
+Ethernet or USB gadget management connected for installation and removal.
 
 The package uses WendyOS's existing NetworkManager and wpa_supplicant. It does
 not change either userspace package or configure Wi-Fi Aware, internet sharing,

@@ -68,12 +68,18 @@ case "$cmd" in
                 [ "${FAIL_CAPTURE:-0}" = 0 ] || exit 1
                 printf '%s\\n' "${CONNECTION_UUID-12345678-1234-1234-1234-123456789abc}" ;;
             '-g GENERAL.STATE device show '* )
+                if [ "${CHECK_WIFI_PRESENT:-0}" = 1 ]; then
+                    [ -d "$TEST_NET/$5" ] || exit 1
+                fi
                 if [ "${REDISCOVER_DEVICE:-0}" = 1 ] && [ -e "$TEST_LOG.restore-count" ] && [ ! -e "$TEST_LOG.rediscovered" ]; then
                     touch "$TEST_LOG.rediscovered"; echo '20 (unavailable)'
                 else
                     echo '100 (connected)'
                 fi ;;
             'connection up '* )
+                if [ "${CHECK_WIFI_PRESENT:-0}" = 1 ]; then
+                    [ -d "$TEST_NET/$6" ] || exit 1
+                fi
                 counter="$TEST_LOG.restore-count"
                 n=0; [ ! -f "$counter" ] || n=$(cat "$counter")
                 n=$((n+1)); echo "$n" > "$counter"
@@ -85,6 +91,7 @@ case "$cmd" in
         fi ;;
     rmmod) [ "${2:-}" != "${FAIL_UNLOAD:-}" ] || exit 1 ;;
     modprobe)
+        [ -z "${MODPROBE_HOOK:-}" ] || "$MODPROBE_HOOK" "$@" || exit 1
         if [ "${1:-}" = -- ] && [ "${2:-}" = oldwifi ] && [ -n "${REQUIRE_OLD_MODULE:-}" ]; then
             [ "$(cat "$REQUIRE_OLD_MODULE" 2>/dev/null)" = old-module ] || exit 1
         fi
@@ -422,10 +429,13 @@ exit 0
     def with_pci_wifi(self):
         for name, vendor, device in (("wlan0", "0x14e4", "0x43a0"),
                                      ("wlan1", "0x8086", "0x272b")):
-            pci = self.root / "sys/class/net" / name / "device"
+            pci = self.root / "sys/bus/pci/devices" / ("0000:01:00.0" if name == "wlan1" else "onboard")
             pci.mkdir(parents=True)
             (pci / "vendor").write_text(vendor + "\n")
             (pci / "device").write_text(device + "\n")
+            net = self.root / "sys/class/net" / name
+            net.mkdir(parents=True)
+            (net / "device").symlink_to(pci)
         (self.root / "sys/module/brcmfmac").mkdir()
         (self.root / "sys/module/brcmfmac_cyw").mkdir()
         brcm_holders = self.root / "sys/module/brcmfmac/holders"
@@ -436,7 +446,36 @@ exit 0
         (holders / "brcmfmac").touch()
         (holders / "brcmfmac_cyw").touch()
         self.activation.write_text("pci 8086:272b\nreplace brcmfmac_cyw\nreplace brcmfmac\nreplace cfg80211\n"
-                                   "restore-wifi-pci 8086:272b\n")
+                                   "restart-service wpa_supplicant.service\nrestore-wifi-pci 8086:272b\n")
+
+    def rename_pci_wifi_on_reload(self, *, rollback=False, missing=False):
+        self.with_pci_wifi()
+        hook = self.root / "reload-hook"
+        hook.write_text('''#!/bin/sh
+if [ "$1" = -- ] && [ "$2" = newwifi ]; then
+    rm -rf "$TEST_NET/wlan0"
+    if [ "${CARD_MISSING:-0}" = 1 ]; then
+        rm -rf "$TEST_NET/wlan1"
+    else
+        mv "$TEST_NET/wlan1" "$TEST_NET/wlan0"
+    fi
+    # Another card of the same model takes the old name. Model matching alone
+    # would reconnect the wrong hardware; the saved PCI path must win.
+    mkdir -p "$TEST_NET/wlan1"
+    ln -s "$OTHER_CARD" "$TEST_NET/wlan1/device"
+elif [ "$1" = -- ] && [ "$2" = brcmfmac ] && [ "${RENAME_ROLLBACK:-0}" = 1 ]; then
+    mv "$TEST_NET/wlan0" "$TEST_NET/wlan2"
+fi
+''')
+        hook.chmod(0o755)
+        other = self.root / "sys/bus/pci/devices/0000:02:00.0"
+        other.mkdir()
+        (other / "vendor").write_text("0x8086\n")
+        (other / "device").write_text("0x272b\n")
+        self.env.update(MODPROBE_HOOK=str(hook), TEST_NET=str(self.root / "sys/class/net"),
+                        OTHER_CARD=str(other), CHECK_WIFI_PRESENT="1",
+                        RENAME_ROLLBACK=str(int(rollback)), CARD_MISSING=str(int(missing)),
+                        CLOCK_STEP="1")
 
     def restores(self, calls):
         return [c for c in calls if c.startswith("nmcli --wait") and " connection up " in c]
@@ -485,6 +524,31 @@ exit 0
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("cannot capture wlan1", result.stderr)
         self.assertFalse(any(c.startswith("rmmod") for c in calls))
+
+    def test_pci_wifi_restore_resolves_renamed_card(self):
+        self.rename_pci_wifi_on_reload()
+        result, calls = self.run_apply()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("device show wlan1", next(c for c in calls if "GENERAL.CON-UUID" in c))
+        self.assertEqual(len(self.restores(calls)), 1)
+        self.assertIn("ifname wlan0", self.restores(calls)[0])
+
+    def test_pci_wifi_rollback_resolves_card_again(self):
+        self.rename_pci_wifi_on_reload(rollback=True)
+        self.env["FAIL_SERVICE"] = "1"
+        result, calls = self.run_apply()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("prior modules restored", result.stderr)
+        self.assertNotIn("rollback incomplete", result.stderr)
+        self.assertEqual(len(self.restores(calls)), 1)
+        self.assertIn("ifname wlan2", self.restores(calls)[0])
+
+    def test_missing_pci_wifi_never_restores_another_card(self):
+        self.rename_pci_wifi_on_reload(missing=True)
+        result, calls = self.run_apply()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("could not restore wlan1", result.stderr)
+        self.assertEqual(self.restores(calls), [])
 
     def test_wifi_restored_after_payload_index_failure(self):
         self.with_wifi()
