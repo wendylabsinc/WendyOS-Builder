@@ -29,8 +29,8 @@ SYSTEMD_SERVICE:${PN} += "${@'var-log.mount' if d.getVar('WENDYOS_PERSIST_JOURNA
 SYSTEMD_AUTO_ENABLE:${PN} = "enable"
 
 do_install:append() {
-    # networkd also runs for agent-managed camera links on NM images. The
-    # agent owns its policy rules; retain them across link setup and reloads.
+    # networkd remains available for explicitly configured links on NM images.
+    # Keep externally created policy rules; their creators own their cleanup.
     install -D -m0644 ${UNPACKDIR}/wendyos-agent-policy.conf \
         ${D}${systemd_unitdir}/networkd.conf.d/50-wendyos-agent-policy.conf
 
@@ -50,7 +50,7 @@ do_install:append() {
         install -D -m0644 ${UNPACKDIR}/wendyos-network-online.preset \
             ${D}${systemd_unitdir}/system-preset/15-wendyos-network-online.preset
 
-        # Keep networkd available for explicitly configured camera, NAN and
+        # Keep networkd available for explicitly configured links, including
         # container links, but do not let its broad defaults also run DHCP/RA
         # on NetworkManager's physical, USB or VLAN links and the mesh dummy.
         # Earlier, specific .network files retain their existing precedence.
