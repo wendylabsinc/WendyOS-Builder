@@ -32,6 +32,8 @@ on:
       - 'scripts/driver_manifest_test.py'
       - 'scripts/driver_devkit_test.py'
       - 'scripts/driver_sdk_setup_test.py'
+      - 'scripts/package_local_agent_test.py'
+      - 'tools/mesh/package-local-agent.py'
       - 'scripts/select-driver-devkit.sh'
       - '.github/device-artifacts.json'
       - '.github/workflows/drivers.yml'
@@ -87,6 +89,8 @@ on:
       - 'scripts/driver_manifest_test.py'
       - 'scripts/driver_devkit_test.py'
       - 'scripts/driver_sdk_setup_test.py'
+      - 'scripts/package_local_agent_test.py'
+      - 'tools/mesh/package-local-agent.py'
       - 'scripts/select-driver-devkit.sh'
       - '.github/device-artifacts.json'
       - '.github/workflows/drivers.yml'
@@ -227,3 +231,6 @@ jobs:
 
       - name: Run driver SDK setup tests
         run: python3 -m unittest scripts/driver_sdk_setup_test.py
+
+      - name: Run local agent packaging tests
+        run: python3 -m unittest scripts/package_local_agent_test.py
