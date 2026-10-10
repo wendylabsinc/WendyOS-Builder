@@ -35,12 +35,13 @@ IMAGE_FEATURES += "${@oe.utils.ifelse(d.getVar('WENDYOS_DEBUG') == '1', d.getVar
 # getty is disabled by default and each console type is separately opt-in. No
 # login implies opening root: credentials are a separate concern — root stays
 # locked (root:*: on every image via zap_empty_root_password); log in as the
-# wendy user, which has passwordless sudo.
+# wendy user, which has passwordless sudo. bootstrap.sh --debug and the CI PR
+# profile turn both logins on; nightly and release builds keep both off.
 #
 #   getty@ + autovt@ (+ logind auto-VTs)       -> monitor/keyboard VT login
 #                                                 WENDYOS_ENABLE_VT_LOGIN (default 0)
 #   serial-getty@<port> (from SERIAL_CONSOLES) -> named serial login
-#                                                 WENDYOS_ENABLE_UART_LOGIN (default 0; CI opts in on PR)
+#                                                 WENDYOS_ENABLE_UART_LOGIN (default 0)
 #   console-getty (login on /dev/console)      -> the LAST console= on the
 #       cmdline, which is NOT the serial port everywhere, as this comment
 #       used to claim. Measured on jetson-agx-orin 2026-10-04: Tegra and x86
