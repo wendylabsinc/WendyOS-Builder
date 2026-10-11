@@ -27,6 +27,7 @@ RRECOMMENDS:${PN} = " \
     kernel-module-can-j1939 \
     kernel-module-can-gw \
     kernel-module-vcan \
+    kernel-module-slcan \
     kernel-module-gs-usb \
     kernel-module-usb-8dev \
     kernel-module-ems-usb \
