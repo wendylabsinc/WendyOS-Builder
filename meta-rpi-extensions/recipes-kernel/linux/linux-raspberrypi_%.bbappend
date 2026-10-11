@@ -30,7 +30,5 @@ require recipes-kernel/linux/bluetooth-le-pending.inc
 # Keep legacy active scans from re-enabling expired adverts or retaining stale RPA state.
 SRC_URI += "file://0004-bluetooth-legacy-active-scan-retain-expiry.patch"
 
-# SocketCAN: core, protocols and the USB/SPI adapter drivers. bcm2712_defconfig
-# already builds most of these, so here the fragment pins the set rather than
-# introducing it.
+# SocketCAN: the shared CAN fragment, when WENDYOS_CAN is "1".
 require ${@'recipes-kernel/linux/can.inc' if d.getVar('WENDYOS_CAN') == '1' else ''}
