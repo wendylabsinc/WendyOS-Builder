@@ -6,18 +6,8 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 inherit packagegroup
 
 # SocketCAN core, the transport protocols and every USB/SPI adapter driver.
-#
-# RRECOMMENDS, not RDEPENDS. can.cfg pins every symbol behind this list, so all of
-# these resolve on every board that sets WENDYOS_CAN. The weak form is insurance:
-# whether a kernel-module package exists is decided by the kernel config, so a BSP
-# defconfig change or a board-scoped fragment could drop one, and that should not
-# fail the build. rpm treats them as weak deps and skips a missing one
-# (oe.package_manager.rpm honours dnf Recommends unless NO_RECOMMENDATIONS is set,
-# which this distro does not).
-#
-# Package names follow oe-core kernel-module-split.bbclass: the .ko basename with
-# "_" -> "-", exposed unversioned via RPROVIDES. Verified against
-# drivers/net/can/**/Makefile and against the Orin build's own deploy-rpms.
+# RRECOMMENDS, not RDEPENDS, so a module a kernel does not build does not fail
+# the image. Package names are the module names with "_" turned into "-".
 RRECOMMENDS:${PN} = " \
     kernel-module-can \
     kernel-module-can-raw \

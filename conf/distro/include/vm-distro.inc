@@ -1,27 +1,10 @@
 # WendyOS VM distro configuration.
 # Required from wendyos.conf when MACHINEOVERRIDES contains "vm-wendyos".
 
-# No firmware-update, USB-gadget, GPU or CAN story in a VM.
-# These are read by nothing on the VM path, but they are in BUILDCFG_VARS, so
-# setting them keeps the build banner truthful. WENDYOS_EFI_DEBUG is deliberately
-# NOT set: it is Tegra-only and not in BUILDCFG_VARS, so a value here would be
-# dead text.
-#
-# BUILDCFG_VARS lives in conf/distro/wendyos.conf, not wendyos-image.bb. It is
-# read from the config datastore at BuildStarted, so a recipe-scope append never
-# reached the banner -- for a long time this list printed nothing at all.
-#
-# wendyos.conf declares its base defaults with "??=", a weak default that a later
-# "?=" overrides, so a per-family value set here wins while a machine conf or
-# local.conf still wins over both. That was not always true: while those defaults
-# were "?=" they landed first and made WENDYOS_UPDATE_BOOTLOADER below dead, so
-# the VM resolved to "1" -- the exact thing the comment above says it prevents.
-#
-# Not every line below fires. WENDYOS_UPDATE_BOOTLOADER, WENDYOS_DEEPSTREAM,
-# WENDYOS_NVIDIA_DGPU and WENDYOS_CAN do. WENDYOS_USB_GADGET and
-# WENDYOS_MDNS_INTERFACES do not: conf/template/include/local/vm.inc sets both
-# with a hard "=" at local.conf scope, which wins over a "?=" here. They stay so
-# the VM's position is stated rather than inherited.
+# No firmware-update, USB-gadget, GPU or CAN in a VM.
+# These are set so the build banner shows the right values. A machine conf or
+# local.conf still overrides them. WENDYOS_EFI_DEBUG is not set: it is
+# Tegra-only.
 WENDYOS_UPDATE_BOOTLOADER ?= "0"
 WENDYOS_USB_GADGET ?= "0"
 WENDYOS_DEEPSTREAM ?= "0"

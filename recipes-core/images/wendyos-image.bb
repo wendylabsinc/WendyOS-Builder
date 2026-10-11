@@ -181,12 +181,6 @@ IMAGE_ROOTFS_SIZE ?= "8192"
 # include's :pn- override, hence the gate must live here.
 IMAGE_ROOTFS_EXTRA_SPACE:append = "${@' + 4096' if bb.utils.contains('DISTRO_FEATURES', 'systemd', True, False, d) and not d.getVar('WENDYOS_ROOTFS_SIZE_KB') else ''}"
 
-# The "Build Configuration" banner list lives in conf/distro/wendyos.conf, not
-# here. BUILDCFG_VARS is read from the CONFIG datastore by buildcfg_vars() in
-# oe-core classes-global/base.bbclass, called from base_eventhandler on
-# bb.event.BuildStarted, so an append made during a recipe's parse never reaches
-# it. It sat in this file for a long time and printed nothing.
-
 # Include hardware-specific image configuration
 # These files contain IMAGE_INSTALL modifications and other hardware-specific settings
 require ${@'conf/distro/include/qemu-image.inc' if 'qemuall' in d.getVar('MACHINEOVERRIDES').split(':') else ''}
