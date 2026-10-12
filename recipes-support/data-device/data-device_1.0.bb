@@ -98,9 +98,10 @@ FILES:${PN}:append:raspberrypi3-64 = " \
     "
 
 # What the resolver needs on EVERY board. Reading the device: coreutils
-# (basename, readlink, cat, head, date, tr, sync), util-linux-blkid (the
+# (basename, readlink, cat, cut, head, date, tr, sync), util-linux-blkid (the
 # filesystem probe), util-linux-wipefs (erasing a stale or unfinished LUKS
-# header, which any board can meet) and udev (udevadm settle).
+# header, which any board can meet) and udev (udevadm settle, and udevadm wait
+# for the TPM device, which needs systemd 251 or later).
 #
 # Preparing it, all of which the resolver now does itself (C57) and none of
 # which is optional, because it runs on every board and on every boot:

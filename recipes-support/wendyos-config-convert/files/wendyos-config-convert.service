@@ -23,8 +23,8 @@ RequiresMountsFor=/data
 # The agent reads /config. It must not see the partition half-converted.
 Before=wendyos-agent.service
 
-# On Jetson the conversion can end in a reboot, when it takes the emulated TPM
-# away (step 11 of the script). That reboot comes before the OTA update is
+# On Jetson the conversion ends in a reboot, because it reformats the
+# partition that holds OP-TEE's secure storage (step 11 of the script). That reboot comes before the OTA update is
 # committed. wendyos-update-verify.service confirms a healthy boot to the
 # Jetson firmware (nvbootctrl verify), even while an update is still pending.
 # A boot that is not confirmed uses up one of the firmware's three boot

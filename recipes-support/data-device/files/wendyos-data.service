@@ -24,6 +24,11 @@ After=systemd-udevd.service
 # already reads as unset, which is the safe answer.
 WantsMountsFor=/config
 
+# On Jetson with the TPM on, this unit also runs after the fTPM driver load.
+# That ordering is Before=wendyos-data.service in the optee-client drop-in
+# meta-tegra-extensions/recipes-security/optee/files/10-early.conf, so the
+# /config conversion after /data cannot stop the supplicant mid-load.
+
 # What this unit decides is what data.mount mounts, so it must finish first.
 Before=data.mount
 

@@ -8,10 +8,12 @@ Documentation=man:systemd.mount(5)
 # a home on a partition that survives the switch.
 #
 # That home is /config, NOT /data. Once the fTPM encrypts /data, /data/tee puts
-# the fTPM's NV inside the very volume the fTPM has to unlock. The unit graph
-# says the same thing and deadlocks on it: data.mount -> wendyos-data.service ->
-# /dev/tpmrm0 -> tee-ftpm-modprobe -> tee-supplicant -> var-lib-tee.mount ->
-# data.mount. /config is mounted early from a partition nothing encrypts, it is
+# the fTPM's NV inside the very volume the fTPM has to unlock. The boot order
+# says the same thing: data.mount waits for wendyos-data.service, which waits
+# for /dev/tpmrm0 to unlock an encrypted /data. That needs tee-ftpm-modprobe,
+# tee-supplicant and this mount, and with /data/tee this mount would need
+# data.mount. The unlock would time out and /data would stay locked.
+# /config is mounted early from a partition nothing encrypts, it is
 # independent of /data, and it survives A/B updates just as /data does.
 #
 # A plaintext partition is an acceptable home because OP-TEE encrypts and

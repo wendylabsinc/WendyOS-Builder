@@ -51,13 +51,13 @@ FREE_SLACK_KB=8192
 tee_supplicant_was_active=0
 tee_mount_was_active=0
 
-# Whether this device had a TPM before the conversion touched anything. Step 11
-# compares it against the state afterwards.
-tpm_was_present=0
-
 # Set when the run did its work but something afterwards did not come back.
 # The conversion is still reported as done. The exit status carries the fault,
 # so the unit shows as failed and the journal says what is missing.
+#
+# Every failure path from step 6 on also sets it, before it calls
+# restore_stopped. That is how restore_stopped tells those paths from step 10,
+# which is the only caller that reaches it with exit_rc still 0.
 exit_rc=0
 
 # --- output ---------------------------------------------------------------
@@ -290,8 +290,18 @@ restore_stopped() {
         fi
     fi
 
+    # Not on the run that reboots in step 11: the test below is step 11's own
+    # (nothing failed, and OP-TEE's storage was on /config), and every failure
+    # path has set exit_rc before calling this. If a mount above did not come
+    # back, exit_rc is 1, there is no reboot, and the supplicant starts as
+    # usual. Starting it would also start tee-ftpm-modprobe, and the reboot
+    # would then SIGTERM that load, which can crash or hang the fTPM (see
+    # step 6). The load cannot succeed anyway, because after the reformat the
+    # fTPM only comes back after a reboot. The reboot starts the supplicant.
     if [ "$tee_supplicant_was_active" = 1 ]; then
-        if systemctl start tee-supplicant.service; then
+        if [ "$exit_rc" = 0 ] && [ "$tee_mount_was_active" = 1 ]; then
+            log "tee-supplicant.service is left stopped: the reboot that follows starts it"
+        elif systemctl start tee-supplicant.service; then
             log "tee-supplicant.service is running again"
         else
             log "ERROR: tee-supplicant.service did not start again, so OP-TEE has no secure storage until the next boot"
@@ -475,18 +485,21 @@ log "the contents of $CONFIG_DIR are staged at $STAGING"
 # on a Jetson: `umount` on the parent returns success while the device stays
 # listed in /proc/mounts against the bind. So the bind has to go first, and
 # then the unmount has to be CHECKED rather than believed.
-# Was there a TPM before any of this started? Read HERE, before the first stop,
-# because stopping the supplicant is what takes it away. Step 11 uses it to
-# decide whether the conversion has to end in a reboot.
-if [ -e /dev/tpmrm0 ] || [ -e /dev/tpm0 ]; then
-    tpm_was_present=1
-fi
-
+#
+# This unit runs after /data, and /data is ordered after tee-ftpm-modprobe
+# (see 10-early.conf in the optee-client recipe), so the fTPM driver load is
+# over before this step. That order matters. Stopping the supplicant during
+# the load would make systemd stop tee-ftpm-modprobe first, because that unit
+# is bound to the supplicant, and that sends SIGTERM to its modprobe. The
+# signal aborts the fTPM's storage request. On an Orin Nano 2026-10-13 that
+# crashed or hung the fTPM. With the load over, stopping the supplicant
+# unloads the fTPM driver while the supplicant is still there to serve it.
 if systemctl is-active --quiet tee-supplicant.service; then
     tee_supplicant_was_active=1
     log "stopping tee-supplicant.service: it writes to /var/lib/tee, and stopping it keeps anything from landing there during the conversion and being lost"
     if ! systemctl stop tee-supplicant.service; then
         log "ERROR: could not stop tee-supplicant.service, so $CONFIG_DIR is left as it is"
+        exit_rc=1
         restore_stopped
         exit 1
     fi
@@ -497,6 +510,7 @@ if systemctl is-active --quiet var-lib-tee.mount; then
     log "stopping var-lib-tee.mount: the bind onto /var/lib/tee holds the $CONFIG_DIR filesystem mounted"
     if ! systemctl stop var-lib-tee.mount; then
         log "ERROR: could not stop var-lib-tee.mount, so $CONFIG_DIR is left as it is"
+        exit_rc=1
         restore_stopped
         exit 1
     fi
@@ -505,6 +519,7 @@ fi
 log "unmounting $CONFIG_DIR"
 if ! systemctl stop config.mount; then
     log "ERROR: could not stop config.mount, so $CONFIG_DIR is left as it is"
+    exit_rc=1
     restore_stopped
     exit 1
 fi
@@ -517,6 +532,7 @@ fi
 still=$(mounts_on_device "$CONFIG_DEV")
 if [ -n "$still" ]; then
     log "ERROR: $CONFIG_DEV is still mounted at: $still -- NOTHING WAS FORMATTED. Find what holds it and remove that mount before this can run"
+    exit_rc=1
     restore_stopped
     exit 1
 fi
@@ -527,6 +543,7 @@ fi
 # the bottom.
 if is_mounted "$CONFIG_DIR"; then
     log "ERROR: something is still mounted on $CONFIG_DIR after config.mount stopped -- NOTHING WAS FORMATTED"
+    exit_rc=1
     restore_stopped
     exit 1
 fi
@@ -539,6 +556,7 @@ log "$CONFIG_DEV is no longer mounted anywhere"
 log "formatting $CONFIG_DEV as ext4, label config"
 if ! mkfs.ext4 -q -L config "$CONFIG_DEV"; then
     log "ERROR: mkfs.ext4 failed on $CONFIG_DEV. The contents are safe in $STAGING and the next boot tries again"
+    exit_rc=1
     restore_stopped
     exit 1
 fi
@@ -561,12 +579,14 @@ fi
 log "mounting the new ext4 filesystem on $CONFIG_DIR"
 if ! systemctl start config.mount; then
     log "ERROR: config.mount did not start. The contents are safe in $STAGING and the next boot restores them"
+    exit_rc=1
     restore_stopped
     exit 1
 fi
 
 if ! read_mount "$CONFIG_DIR" || [ "$mount_fstype" != "ext4" ]; then
     log "ERROR: $CONFIG_DIR is not mounted as ext4 after the format. The contents are safe in $STAGING and the next boot restores them"
+    exit_rc=1
     restore_stopped
     exit 1
 fi
@@ -578,6 +598,7 @@ fi
 remounted=$(readlink -f "$mount_source" 2>/dev/null)
 if [ "$remounted" != "$CONFIG_DEV" ]; then
     log "ERROR: $CONFIG_DIR is now mounted from $remounted, not $CONFIG_DEV. Nothing is restored, and the contents stay in $STAGING"
+    exit_rc=1
     restore_stopped
     exit 1
 fi
@@ -586,6 +607,7 @@ fi
 log "restoring the contents of $CONFIG_DIR from $STAGING"
 if ! cp -a "$STAGING/." "$CONFIG_DIR/"; then
     log "ERROR: could not restore $STAGING onto $CONFIG_DIR -- it is left in place and the next boot tries again"
+    exit_rc=1
     restore_stopped
     exit 1
 fi
@@ -600,6 +622,8 @@ if ! rm -rf "$STAGING"; then
 fi
 
 # --- step 10: put back what step 6 stopped --------------------------------
+# When step 11 is going to reboot, this puts back the mounts only and leaves
+# the supplicant to the reboot. restore_stopped says why.
 restore_stopped
 
 # --- step 11: the verdict -------------------------------------------------
@@ -609,8 +633,8 @@ else
     log "done: $CONFIG_DIR is now ext4 on $CONFIG_DEV with its contents restored, but something stopped for the conversion did not come back -- see the errors above"
 fi
 
-# On a board with an emulated TPM, the conversion ends in a reboot, and only
-# then. Measured on a Jetson 2026-10-07:
+# When OP-TEE's secure storage was on /config, the conversion ends in a reboot,
+# and only then. Measured on a Jetson 2026-10-07:
 #
 #   stop the supplicant, start it again        -> the TPM comes back
 #   the same, with the bind stopped and started too -> the TPM comes back
@@ -624,10 +648,18 @@ fi
 # and all failed. A reboot restarts the TEE, and that is the whole reason this
 # is a reboot and not a restart.
 #
-# The test is "was there a TPM, and is it gone now". Every Jetson built with
-# /data encryption support (the default) reaches it once. A board with
-# no emulated TPM never does: every RPi, Qualcomm board and VM, and x86, whose
-# TPM is a hardware chip that does not live on /config.
+# So the test is the cause itself: was OP-TEE's storage bound from /config
+# when step 6 stopped it. It is NOT "was there a TPM, and is it gone now".
+# This unit runs after /data, which is ordered after tee-ftpm-modprobe (see
+# 10-early.conf in the optee-client recipe), so the fTPM driver load is over
+# by now. But a load that failed or was skipped leaves no TPM, and a Jetson
+# built without the fTPM has none. A TPM check would then read "no TPM" and
+# skip the reboot. In both cases the reformat has still put OP-TEE out of step
+# with its storage.
+#
+# Every Jetson reaches this once, because the bind is on every Jetson. A board
+# without OP-TEE storage on /config never does: every RPi, Qualcomm board and
+# VM, and x86, whose TPM is a hardware chip that does not live on /config.
 #
 # The reboot comes before the OTA update is committed. The unit is ordered after
 # wendyos-update-verify.service, so the firmware already counts this boot as
@@ -635,15 +667,15 @@ fi
 #
 # ONLY ON THE SUCCESS PATH. A failed conversion must not reboot: it would run
 # again, fail again and reboot again, and a device in a loop is worse than one
-# with no TPM until somebody looks at it. The failure paths leave the unit
-# failed and say so, which is visible.
+# with broken OP-TEE storage until somebody looks at it. The failure paths
+# leave the unit failed and say so, which is visible.
 #
 # Safe here because the conversion is finished: the contents are back, the
 # staging directory is gone and the mounts are up, so an interrupted reboot
-# costs nothing and the next boot finds the work done.
-if [ "$exit_rc" = 0 ] && [ "$tpm_was_present" = 1 ] &&
-   [ ! -e /dev/tpmrm0 ] && [ ! -e /dev/tpm0 ]; then
-    log "the TPM was present before the conversion and is gone now, and only a reboot brings it back. Rebooting."
+# costs nothing and the next boot finds the work done. The supplicant is
+# still stopped here, on purpose (step 10), and the reboot starts it.
+if [ "$exit_rc" = 0 ] && [ "$tee_mount_was_active" = 1 ]; then
+    log "OP-TEE's secure storage was on $CONFIG_DIR and has been reformatted under it, and only a reboot restarts OP-TEE. Rebooting."
     systemctl --no-block reboot
 fi
 

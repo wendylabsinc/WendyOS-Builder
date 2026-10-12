@@ -1,0 +1,76 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Adrian Bularca <adrian.bularca@gmail.com>
+Date: Tue, 13 Oct 2026 15:49:44 +0300
+Subject: [PATCH] core: poll the single-instance lock wait
+
+A thread waiting for the single-instance TA lock sleeps until the thread
+that drops the lock sends it a wake-up notification through Linux. On
+t234, StMM calls come from UEFI runtime services, and from there OP-TEE
+cannot make RPCs to Linux. So when StMM drops the lock, the wake-up is
+lost and the waiter (for example the fTPM driver probe) never wakes.
+
+NVIDIA already works around this for mutexes with CFG_MUTEX_POLL_INTERVAL
+("Enable mutex polling for StMM" in plat-tegra/conf.mk). Use the same
+interval for the single-instance lock wait, so the waiter checks the lock
+again after each interval. When CFG_MUTEX_POLL_INTERVAL is 0 or not set,
+the code is unchanged.
+
+Also print a wake-up that could not be sent at info level instead of
+debug level. The line is evidence that a wake-up was lost and that only
+polling can recover the waiter. Failed sleeps stay at debug level.
+
+Upstream-Status: Pending
+This should be sent to NVIDIA and to OP-TEE.
+
+Signed-off-by: Adrian Bularca <adrian.bularca@gmail.com>
+---
+--- a/optee_os/core/kernel/tee_ta_manager.c
++++ b/optee_os/core/kernel/tee_ta_manager.c
+@@ -76,9 +76,24 @@
+ {
+ 	/* Requires tee_ta_mutex to be held */
+ 	if (tee_ta_single_instance_thread != thread_get_id()) {
+-		/* Wait until the single-instance lock is available. */
++		/*
++		 * Wait until the single-instance lock is available.
++		 *
++		 * With CFG_MUTEX_POLL_INTERVAL set (t234), wake up at that
++		 * interval and check the lock again. StMM calls come from
++		 * UEFI runtime services, and from there OP-TEE cannot send
++		 * the wake-up notification to Linux. When StMM drops this
++		 * lock, the wake-up is lost, and a thread waiting here would
++		 * sleep forever. NVIDIA polls mutexes on t234 for the same
++		 * reason.
++		 */
+ 		while (tee_ta_single_instance_thread != THREAD_ID_INVALID)
++#if defined(CFG_MUTEX_POLL_INTERVAL) && CFG_MUTEX_POLL_INTERVAL
++			condvar_wait_timeout(&tee_ta_cv, &tee_ta_mutex,
++					     CFG_MUTEX_POLL_INTERVAL);
++#else
+ 			condvar_wait(&tee_ta_cv, &tee_ta_mutex);
++#endif
+ 
+ 		tee_ta_single_instance_thread = thread_get_id();
+ 		assert(tee_ta_single_instance_count == 0);
+--- a/optee_os/core/kernel/wait_queue.c
++++ b/optee_os/core/kernel/wait_queue.c
+@@ -38,7 +38,18 @@
+ 					 timeout_ms);
+ 	else
+ 		res = notif_send_sync(id + NOTIF_SYNC_VALUE_BASE);
+-	if (res)
++	/*
++	 * A wake-up that cannot be sent is lost, and the waiter wakes only
++	 * if its wait polls (CFG_MUTEX_POLL_INTERVAL). This happens when StMM
++	 * (called from UEFI runtime services, where OP-TEE cannot reach Linux)
++	 * releases a lock that a thread waits for. Print it, as evidence of a
++	 * lost wake-up. Failed sleeps stay at debug level: StMM's sleeps
++	 * always fail, and printing them would flood the console.
++	 */
++	if (res && !wait)
++		IMSG("Wake-up for thread %d could not be sent (res %#"PRIx32")",
++		     id, res);
++	else if (res)
+ 		DMSG("%s thread %d res %#"PRIx32, cmd_str, id, res);
+ 
+ 	return res;
