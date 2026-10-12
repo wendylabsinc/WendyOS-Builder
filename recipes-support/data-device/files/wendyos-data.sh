@@ -83,14 +83,29 @@ RECORD_NAME=.encryption
 
 # What the conversion carries across the wipe, as paths RELATIVE to /data.
 # A conversion destroys everything on /data, and these few files are what make
-# the device itself: the uuid and the name the fleet knows it by, and the
-# owner's saved network connections. Without them the device comes back a
-# stranger with no way onto the network.
+# the device itself: the uuid and the name the fleet knows it by, the owner's
+# saved network connections, and the agent's cloud enrollment (device private
+# key, certificates, provisioning.json, and the hostname set by `wendy device
+# rename`). Without them the device comes back a stranger with no way onto the
+# network. Without the enrollment alone it keeps its uuid and name but is no
+# longer enrolled, and its cloud asset is orphaned.
 #
 # They go to /config, which survives the wipe, and setup-etc-binds.sh puts them
 # back on the next boot and then drops the archive. Adding an entry is one line
-# here; the restore reads the list out of the archive and needs no change.
-PRESERVE_ITEMS="etc/wendyos/device-uuid etc/wendyos/device-name etc/NetworkManager/system-connections"
+# here; the restore reads the list out of the archive and needs no change. The
+# list must cover what setup-etc-binds.sh binds from /data: the uuid and name
+# in /etc/wendyos, the NetworkManager connections, and /etc/wendy-agent. A new
+# bind there needs a matching entry here.
+#
+# The archive on /config is not encrypted. The device key and the Wi-Fi
+# passwords sit there in plain form until the next boot restores and deletes
+# it, and deletion does not overwrite the blocks. That is no worse than before
+# the conversion, when the same files sat in plain form on /data. Accepted.
+PRESERVE_ITEMS="\
+etc/wendyos/device-uuid \
+etc/wendyos/device-name \
+etc/NetworkManager/system-connections \
+etc/wendy-agent"
 
 # ONE ARCHIVE, not a mirrored copy of the tree, because /config is FAT32 and
 # FAT can hold neither of the two things that matter here. Measured on a Thor:

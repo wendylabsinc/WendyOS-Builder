@@ -40,9 +40,10 @@ log_info "Setting up persistent /etc bind mounts from /data"
 # PHASE 0: put back what a /data encryption conversion carried across the wipe.
 #
 # Converting /data to LUKS destroys it, so wendyos-data.sh copies the device
-# identity and the saved network connections to /config first. Without this the
-# device comes back with a new uuid and a new name, a stranger to the fleet,
-# and with no way onto the network.
+# identity, the saved network connections and the agent's cloud enrollment to
+# /config first. Without this the device comes back with a new uuid and a new
+# name, a stranger to the fleet, no longer enrolled, and with no way onto the
+# network.
 #
 # It has to run here, before Phase 1, and before the uuid and name generators
 # this unit is ordered Before=, so the files are under /data/etc before
