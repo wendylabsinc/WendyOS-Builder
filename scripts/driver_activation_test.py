@@ -550,6 +550,24 @@ fi
         self.assertFalse(any(c.startswith("rmmod") for c in calls))
         self.assertEqual(self.restores(calls), [])
 
+    def test_pci_capture_ignores_nan_absent_from_networkmanager(self):
+        self.with_pci_wifi()
+        self.additional_pci_interface("wanan0", role="Unknown mode (13)")
+        self.env["FAIL_ROLE"] = "wanan0"
+        result, calls = self.run_apply()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(any(c.startswith("nmcli ") and "wanan0" in c for c in calls))
+        self.assertEqual(len(self.restores(calls)), 1)
+
+    def test_renamed_pci_restore_ignores_nan_absent_from_networkmanager(self):
+        self.rename_pci_wifi_on_reload()
+        self.additional_pci_interface("wanan0", role="Unknown mode (13)", after_reload=True)
+        self.env["FAIL_ROLE"] = "wanan0"
+        result, calls = self.run_apply()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(any(c.startswith("nmcli ") and "wanan0" in c for c in calls))
+        self.assertIn("ifname wlan0", self.restores(calls)[0])
+
     def test_pci_restore_prefers_saved_station_name(self):
         self.with_pci_wifi()
         self.additional_pci_interface("wlan2", uuid="--")

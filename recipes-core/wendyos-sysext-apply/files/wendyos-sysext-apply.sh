@@ -534,16 +534,17 @@ wifi_nmcli() {
 # 0: managed station, 1: another interface role/owner, 2: inspection failed.
 # Wi-Fi device type alone also includes APs. Query the kernel's current role,
 # including before reconnection when there is no active NM profile to inspect.
+# Inspect that role first: NAN data interfaces may have no NM device object.
 wifi_station_interface() (
-    wifi_info=$(wifi_nmcli 5 -g GENERAL.TYPE,GENERAL.NM-MANAGED device show "$1") || return 2
-    [ "$wifi_info" = "$(printf 'wifi\nyes')" ] || return 1
     wifi_remaining=$((WIFI_DEADLINE - $(date +%s)))
     [ "$wifi_remaining" -gt 0 ] || return 2
     [ "$wifi_remaining" -le 5 ] || wifi_remaining=5
     wifi_info=$(timeout --kill-after=1 "$wifi_remaining" iw dev "$1" info) || return 2
     wifi_type=$(printf '%s\n' "$wifi_info" | awk '$1 == "type" { print $2 }')
     [ -n "$wifi_type" ] || return 2
-    [ "$wifi_type" = managed ]
+    [ "$wifi_type" = managed ] || return 1
+    wifi_info=$(wifi_nmcli 5 -g GENERAL.TYPE,GENERAL.NM-MANAGED device show "$1") || return 2
+    [ "$wifi_info" = "$(printf 'wifi\nyes')" ]
 )
 
 capture_wifi_state() {
