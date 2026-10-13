@@ -71,10 +71,6 @@ RDEPENDS:${PN}:append:iq-9075-evk = " \
     kernel-module-hd3ss3220 \
     "
 
-# The PMIC RTC is read-only and volatile, so timesyncd's saved timestamp on /data
-# is the only thing keeping the clock sane across a reboot or an OTA swap.
-RDEPENDS:${PN} += " systemd-mount-timesync"
-
 # Qualcomm AI stack for the on-SoC Hexagon NPU, gated on WENDYOS_QCOM_NPU. fastrpc and
 # the DSP firmware already ship with the kernel.
 #
