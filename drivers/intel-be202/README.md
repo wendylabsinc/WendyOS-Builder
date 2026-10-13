@@ -71,6 +71,13 @@ unload because this mechanism does not recreate virtual stations. An onboard
 Wi-Fi connection is intentionally not restored. Keep Ethernet or USB gadget
 management connected for installation and removal.
 
+The manifest's `activation_by_device` entry for `raspberry-pi-5` supplies the
+complete Pi activation configuration for both SD and NVMe builds. It replaces
+the default Jetson configuration rather than inheriting its `wlan0` restoration.
+The packager reads the device ID from `devkit.json`; when using an older devkit,
+pass `--device raspberry-pi-5` to `pack-sysext.sh` (the driver workflow does this
+automatically). Missing device identity is an error when overrides are present.
+
 The package uses WendyOS's existing NetworkManager and wpa_supplicant. It does
 not change either userspace package or configure Wi-Fi Aware, internet sharing,
 or mesh routing. The backported kernel has NAN capabilities, but using those

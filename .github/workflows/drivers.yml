@@ -221,10 +221,12 @@ jobs:
       - name: Pack the add-on image
         env:
           DRIVER: ${{ matrix.driver }}
+          DEVICE: ${{ matrix.device }}
         run: |
           set -euo pipefail
           scripts/pack-sysext.sh --devkit "$DEVKIT_DIR" --driver "drivers/$DRIVER" \
-            --modules "drivers/$DRIVER/build/modules" --out "$GITHUB_WORKSPACE/$DRIVER.raw"
+            --modules "drivers/$DRIVER/build/modules" --out "$GITHUB_WORKSPACE/$DRIVER.raw" \
+            --device "$DEVICE"
           ls -l "$GITHUB_WORKSPACE/$DRIVER.raw"
 
       - name: Check the devkit matches the manifest

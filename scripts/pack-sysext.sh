@@ -6,19 +6,22 @@
 # pull in glibc, bash and base-files through the module package's dependencies, and each
 # of those would shadow the host's own copy once merged onto /usr.
 #
-#   pack-sysext.sh --devkit <dir> --driver <dir> --modules <dir> [--out <file.raw>]
+#   pack-sysext.sh --devkit <dir> --driver <dir> --modules <dir> [--out <file.raw>] [--device <id>]
+#
+# --device supplies the board ID for older devkits that do not record it.
 #
 set -euo pipefail
 
 err() { echo "pack-sysext: $*" >&2; exit 1; }
 
-DEVKIT="" DRIVER="" MODULES="" OUT=""
+DEVKIT="" DRIVER="" MODULES="" OUT="" DEVICE=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --devkit)  DEVKIT=$2; shift 2 ;;
         --driver)  DRIVER=$2; shift 2 ;;
         --modules) MODULES=$2; shift 2 ;;
         --out)     OUT=$2; shift 2 ;;
+        --device)  DEVICE=$2; shift 2 ;;
         -h|--help) awk 'NR>1 && /^#/{print} NR>1 && !/^#/{exit}' "$0"; exit 0 ;;
         *)         err "unknown argument: $1" ;;
     esac
@@ -47,7 +50,7 @@ PY
 }
 
 devkit_vars=$(read_json "$DEVKIT/devkit.json" \
-    KVER=kernel_version ARCH=arch OS_ID=os_id LEVEL=sysext_level MACHINE=machine) \
+    KVER=kernel_version ARCH=arch OS_ID=os_id LEVEL=sysext_level MACHINE=machine DEVKIT_DEVICE=device) \
     || err "cannot read $DEVKIT/devkit.json"
 eval "$devkit_vars"
 driver_vars=$(read_json "$DRIVER/driver.json" NAME=name) \
@@ -60,6 +63,13 @@ eval "$driver_vars"
 [ -n "$OS_ID" ] || err "devkit.json has no os_id — rebuild the devkit"
 [ -n "$LEVEL" ] || err "devkit.json has no sysext_level — rebuild the devkit"
 [ -n "$MACHINE" ] || err "devkit.json has no machine — rebuild the devkit"
+if [ -n "$DEVICE" ] && [ -n "$DEVKIT_DEVICE" ] && [ "$DEVICE" != "$DEVKIT_DEVICE" ]; then
+    err "--device $DEVICE does not match devkit device $DEVKIT_DEVICE"
+fi
+DEVICE=${DEVICE:-$DEVKIT_DEVICE}
+if [ -n "$DEVICE" ]; then
+    [[ "$DEVICE" =~ ^[A-Za-z0-9_.-]+$ ]] || err "invalid device ID: $DEVICE"
+fi
 
 # The shipped mksquashfs stays executable but cannot run until setup.sh rewrites its ELF
 # interpreter, and then fails naming the binary rather than the missing loader.
@@ -115,8 +125,8 @@ for m in json.load(open(sys.argv[1])).get("modules_load", []):
 [ -s "$CONF" ] || rm -f "$CONF"
 
 # Optional activation metadata lets an add-on replace a base-kernel module stack after
-# the late /data sysext merge. A devkit machine may override the default activation
-# when a board has extra module holders. Keep the on-device format deliberately simple:
+# the late /data sysext merge. A board's device ID selects a complete replacement for
+# the default activation, shared by its storage variants. Keep the on-device format simple:
 # WendyOS does not need a JSON parser in the base image, and every value is validated here.
 #
 #   pci <vendor>:<device>  activate only when any declared PCI ID is present
@@ -127,16 +137,18 @@ for m in json.load(open(sys.argv[1])).get("modules_load", []):
 #   restore-wifi-pci <vendor>:<device>  restore a PCI Wi-Fi interface's profile
 install -d "$STAGE/usr/lib/wendyos-driver-activation.d"
 ACTIVATION_CONF="$STAGE/usr/lib/wendyos-driver-activation.d/$NAME.conf"
-python3 - "$DRIVER/driver.json" "$MACHINE" > "$ACTIVATION_CONF" <<'PY'
+python3 - "$DRIVER/driver.json" "$DEVICE" > "$ACTIVATION_CONF" <<'PY'
 import json, re, sys
 
 manifest = json.load(open(sys.argv[1]))
-overrides = manifest.get("activation_by_machine", {})
+overrides = manifest.get("activation_by_device", {})
 if not isinstance(overrides, dict) or any(
-    not re.fullmatch(r"[A-Za-z0-9_.-]+", machine) or not isinstance(value, dict)
-    for machine, value in overrides.items()
+    not re.fullmatch(r"[A-Za-z0-9_.-]+", device) or not isinstance(value, dict)
+    for device, value in overrides.items()
 ):
-    sys.exit("activation_by_machine must map machine names to activation objects")
+    sys.exit("activation_by_device must map device IDs to activation objects")
+if overrides and not sys.argv[2]:
+    sys.exit("device ID required for activation overrides: rebuild the devkit or pass --device")
 activation = overrides.get(sys.argv[2], manifest.get("activation", {}))
 if not isinstance(activation, dict):
     sys.exit("activation must be an object")
