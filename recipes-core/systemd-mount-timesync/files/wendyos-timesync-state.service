@@ -6,9 +6,9 @@ Documentation=man:systemd.mount(5)
 # as well as the mount point — but creates it root:root, and timesyncd cannot then
 # write the clock file. It fails silently: the mount reads as active either way.
 #
-# Ownership matches what StateDirectory=systemd/timesync would create. timesyncd
-# chowns the directory itself on start, so the recursive chown is the part that
-# matters: it reaches the clock file inside. Yocto allocates system UIDs
+# Ownership matches what StateDirectory=systemd/timesync would create. The
+# timesyncd drop-in prepares the directory on start, but the recursive chown
+# here also repairs the clock file inside. Yocto allocates system UIDs
 # dynamically, so systemd-timesync has a different numeric UID in each slot's
 # image, and after an A/B switch the file carries the other slot's UID; timesyncd
 # cannot write it, silently declines to restore the clock, and the device boots at
