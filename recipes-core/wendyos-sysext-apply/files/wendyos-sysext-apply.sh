@@ -219,14 +219,19 @@ module_sysname() {
     printf '%s' "$1" | tr '-' '_'
 }
 
+# Accept either a PCI bus entry or a network interface's device link. Keep
+# scratch variables in a subshell so callers retain their activation state.
+pci_id_of() (
+    [ -f "$1/vendor" ] && [ -f "$1/device" ] || return 1
+    IFS= read -r vendor < "$1/vendor" || return 1
+    IFS= read -r device < "$1/device" || return 1
+    printf '%s:%s' "${vendor#0x}" "${device#0x}" | tr 'A-F' 'a-f'
+)
+
 pci_device_present() {
     wanted=$1
     for device_path in /sys/bus/pci/devices/*; do
-        [ -f "$device_path/vendor" ] || continue
-        [ -f "$device_path/device" ] || continue
-        IFS= read -r vendor < "$device_path/vendor" || continue
-        IFS= read -r device < "$device_path/device" || continue
-        present=$(printf '%s:%s' "${vendor#0x}" "${device#0x}" | tr 'A-F' 'a-f')
+        present=$(pci_id_of "$device_path") || continue
         [ "$present" = "$wanted" ] && return 0
     done
     return 1
@@ -551,11 +556,7 @@ capture_wifi_state() {
             restore-wifi-pci)
                 value=$(printf '%s' "$value" | tr 'A-F' 'a-f')
                 for net_path in /sys/class/net/*; do
-                    [ -f "$net_path/device/vendor" ] || continue
-                    [ -f "$net_path/device/device" ] || continue
-                    IFS= read -r vendor < "$net_path/device/vendor" || continue
-                    IFS= read -r device < "$net_path/device/device" || continue
-                    present=$(printf '%s:%s' "${vendor#0x}" "${device#0x}" | tr 'A-F' 'a-f')
+                    present=$(pci_id_of "$net_path/device") || continue
                     [ "$present" = "$value" ] || continue
                     # Retain this physical card, not just its vendor/model or
                     # current wlanN name: both radios disappear during reload.
