@@ -34,4 +34,6 @@ FILES:${PN} += " \
     ${systemd_system_unitdir}/wendyos-timesync-state.service \
     ${systemd_system_unitdir}/systemd-timesyncd.service.d/persist-clock.conf \
 "
-RDEPENDS:${PN} = "systemd systemd-timesyncd coreutils"
+# OE ships timesyncd in systemd (enabled by its default PACKAGECONFIG), not a
+# separate systemd-timesyncd package.
+RDEPENDS:${PN} = "systemd coreutils"
