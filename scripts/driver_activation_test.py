@@ -64,9 +64,26 @@ case "$cmd" in
     nmcli)
         shift 2 # --wait seconds
         case "$*" in
+            '-g GENERAL.TYPE,GENERAL.NM-MANAGED device show '* )
+                [ "$5" != "${FAIL_ROLE:-}" ] || exit 1
+                if [ "$5" = "${DELAY_ROLE:-}" ] && [ ! -e "$TEST_LOG.role-delayed" ]; then
+                    touch "$TEST_LOG.role-delayed"; exit 1
+                fi
+                if [ -f "$TEST_NET/$5/nm-info" ]; then
+                    cat "$TEST_NET/$5/nm-info"
+                else
+                    printf 'wifi\\nyes\\n'
+                fi ;;
             '-g GENERAL.CON-UUID device show '* )
                 [ "${FAIL_CAPTURE:-0}" = 0 ] || exit 1
-                printf '%s\\n' "${CONNECTION_UUID-12345678-1234-1234-1234-123456789abc}" ;;
+                if [ -f "$TEST_NET/$5/uuid" ]; then
+                    cat "$TEST_NET/$5/uuid"
+                else
+                    printf '%s\\n' "${CONNECTION_UUID-12345678-1234-1234-1234-123456789abc}"
+                fi ;;
+            '-g connection.interface-name,match.interface-name connection show uuid '* )
+                [ "${FAIL_BINDING_QUERY:-0}" = 0 ] || exit 1
+                printf '%s\\n%s\\n' "${PROFILE_INTERFACE_NAME:-}" "${PROFILE_MATCH_INTERFACE_NAME:-}" ;;
             '-g GENERAL.STATE device show '* )
                 if [ "${CHECK_WIFI_PRESENT:-0}" = 1 ]; then
                     [ -d "$TEST_NET/$5" ] || exit 1
@@ -77,6 +94,10 @@ case "$cmd" in
                     echo '100 (connected)'
                 fi ;;
             'connection up '* )
+                if [ -n "${PROFILE_INTERFACE_NAME:-}" ] && [ "$6" != "$PROFILE_INTERFACE_NAME" ]; then
+                    echo 'device not compatible: mismatching interface name' >&2
+                    exit 1
+                fi
                 if [ "${CHECK_WIFI_PRESENT:-0}" = 1 ]; then
                     [ -d "$TEST_NET/$6" ] || exit 1
                 fi
@@ -85,6 +106,13 @@ case "$cmd" in
                 n=$((n+1)); echo "$n" > "$counter"
                 case " ${FAIL_RESTORE:-} " in *" $n "*) exit 1 ;; esac ;;
         esac ;;
+    iw)
+        [ "$2" != "${FAIL_IW:-}" ] || exit 1
+        if [ -f "$TEST_NET/$2/iw-type" ]; then
+            printf 'type '; cat "$TEST_NET/$2/iw-type"
+        else
+            echo 'type managed'
+        fi ;;
     systemctl)
         if [ "${FAIL_SERVICE:-0}" != 0 ] && [ ! -e "$TEST_LOG.service-failed" ]; then
             touch "$TEST_LOG.service-failed"; exit 1
@@ -112,12 +140,13 @@ esac
 exit 0
 '''
         for name in ("uname", "mountpoint", "systemd-sysext", "depmod", "udevadm", "modprobe",
-                     "systemctl", "timeout", "nmcli", "date", "sleep", "rmmod"):
+                     "systemctl", "timeout", "nmcli", "iw", "date", "sleep", "rmmod"):
             path = self.root / "bin" / name
             path.write_text(mock)
             path.chmod(0o755)
         self.env = dict(os.environ, PATH=str(self.root / "bin") + os.pathsep + os.environ["PATH"],
-                        TEST_LOG=str(self.log), WENDYOS_SYSEXT_APPLY_LOCKED="1")
+                        TEST_LOG=str(self.log), TEST_NET=str(self.root / "sys/class/net"),
+                        WENDYOS_SYSEXT_APPLY_LOCKED="1")
 
     def run_apply(self, subject="card"):
         result = subprocess.run(["sh", str(self.script), subject], env=self.env,
@@ -477,6 +506,142 @@ fi
                         RENAME_ROLLBACK=str(int(rollback)), CARD_MISSING=str(int(missing)),
                         CLOCK_STEP="1")
 
+    def additional_pci_interface(self, name, *, role="managed", nm_type="wifi",
+                                 managed="yes", uuid="aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+                                 after_reload=False):
+        parent = self.root / ("interface-fixtures" if after_reload else "sys/class/net")
+        net = parent / name
+        net.mkdir(parents=True)
+        (net / "device").symlink_to(self.root / "sys/bus/pci/devices/0000:01:00.0")
+        (net / "nm-info").write_text(f"{nm_type}\n{managed}\n")
+        (net / "iw-type").write_text(role + "\n")
+        (net / "uuid").write_text(uuid + "\n")
+        if after_reload:
+            hook = self.root / "reload-hook"
+            source = hook.read_text() if hook.exists() else "#!/bin/sh\n"
+            hook.write_text(source + '''
+if [ "$1" = -- ] && [ "$2" = newwifi ]; then
+    cp -R "$EXTRA_INTERFACE" "$TEST_NET/$EXTRA_NAME"
+fi
+''')
+            hook.chmod(0o755)
+            self.env.update(MODPROBE_HOOK=str(hook), EXTRA_INTERFACE=str(net), EXTRA_NAME=name)
+        return net
+
+    def test_pci_capture_ignores_nonstation_and_unmanaged_profiles(self):
+        self.with_pci_wifi()
+        self.additional_pci_interface("wnanndi0", nm_type="generic", managed="no", role="NAN")
+        self.additional_pci_interface("ap0", role="AP")
+        self.additional_pci_interface("mon0", role="monitor")
+        self.additional_pci_interface("unmanaged0", managed="no")
+        result, calls = self.run_apply()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        captures = [c for c in calls if c.startswith("nmcli ") and "GENERAL.CON-UUID" in c]
+        self.assertEqual(captures, ["nmcli --wait 5 -g GENERAL.CON-UUID device show wlan1"])
+        self.assertEqual(len(self.restores(calls)), 1)
+        self.assertIn("ifname wlan1", self.restores(calls)[0])
+
+    def test_pci_capture_rejects_multiple_active_stations_before_unload(self):
+        self.with_pci_wifi()
+        self.additional_pci_interface("wlan2")
+        result, calls = self.run_apply()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("multiple active stations", result.stderr)
+        self.assertFalse(any(c.startswith("rmmod") for c in calls))
+        self.assertEqual(self.restores(calls), [])
+
+    def test_pci_restore_prefers_saved_station_name(self):
+        self.with_pci_wifi()
+        self.additional_pci_interface("wlan2", uuid="--")
+        result, calls = self.run_apply()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(self.restores(calls)), 1)
+        self.assertIn("ifname wlan1", self.restores(calls)[0])
+
+    def test_pci_restore_ignores_virtual_interface_recreated_after_reload(self):
+        self.with_pci_wifi()
+        self.additional_pci_interface("wnanndi0", nm_type="generic", managed="no",
+                                      role="NAN", after_reload=True)
+        result, calls = self.run_apply()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(self.restores(calls)), 1)
+        self.assertIn("ifname wlan1", self.restores(calls)[0])
+
+    def test_renamed_pci_restore_ignores_recreated_ap(self):
+        self.rename_pci_wifi_on_reload()
+        self.additional_pci_interface("ap0", role="AP", after_reload=True)
+        result, calls = self.run_apply()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(self.restores(calls)), 1)
+        self.assertIn("ifname wlan0", self.restores(calls)[0])
+
+    def test_pci_restore_does_not_prefer_saved_name_reused_by_ap_on_same_card(self):
+        self.rename_pci_wifi_on_reload()
+        hook = self.root / "reload-hook"
+        hook.write_text(hook.read_text() + '''
+if [ "$1" = -- ] && [ "$2" = newwifi ]; then
+    rm "$TEST_NET/wlan1/device"
+    ln -s "$TEST_NET/wlan0/device" "$TEST_NET/wlan1/device"
+    echo AP > "$TEST_NET/wlan1/iw-type"
+fi
+''')
+        result, calls = self.run_apply()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(self.restores(calls)), 1)
+        self.assertIn("ifname wlan0", self.restores(calls)[0])
+
+    def test_renamed_pci_restore_retries_station_inspection_during_rediscovery(self):
+        self.rename_pci_wifi_on_reload()
+        self.env["DELAY_ROLE"] = "wlan0"
+        result, calls = self.run_apply()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((self.root / "commands.log.role-delayed").exists())
+        self.assertEqual(len(self.restores(calls)), 1)
+        self.assertIn("ifname wlan0", self.restores(calls)[0])
+
+    def test_renamed_pci_rollback_ignores_recreated_nan(self):
+        self.rename_pci_wifi_on_reload(rollback=True)
+        self.additional_pci_interface("wnanndi0", nm_type="generic", managed="no",
+                                      role="NAN", after_reload=True)
+        self.env["FAIL_SERVICE"] = "1"
+        result, calls = self.run_apply()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("prior modules restored", result.stderr)
+        self.assertNotIn("rollback incomplete", result.stderr)
+        self.assertEqual(len(self.restores(calls)), 1)
+        self.assertIn("ifname wlan2", self.restores(calls)[0])
+
+    def test_renamed_pci_restore_rejects_ambiguous_stations(self):
+        self.rename_pci_wifi_on_reload()
+        self.additional_pci_interface("wlan2", uuid="--", after_reload=True)
+        result, calls = self.run_apply()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("could not restore wlan1", result.stderr)
+        self.assertEqual(self.restores(calls), [])
+
+    def test_pci_restore_never_substitutes_nonstation_interface(self):
+        self.rename_pci_wifi_on_reload(missing=True)
+        self.additional_pci_interface("ap0", role="AP", after_reload=True)
+        result, calls = self.run_apply()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.restores(calls), [])
+
+    def test_pci_capture_nm_inspection_failure_prevents_unload(self):
+        self.with_pci_wifi()
+        self.env["FAIL_ROLE"] = "wlan1"
+        result, calls = self.run_apply()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("cannot inspect wlan1", result.stderr)
+        self.assertFalse(any(c.startswith("rmmod") for c in calls))
+
+    def test_pci_capture_kernel_inspection_failure_prevents_unload(self):
+        self.with_pci_wifi()
+        self.env["FAIL_IW"] = "wlan1"
+        result, calls = self.run_apply()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("cannot inspect wlan1", result.stderr)
+        self.assertFalse(any(c.startswith("rmmod") for c in calls))
+
     def restores(self, calls):
         return [c for c in calls if c.startswith("nmcli --wait") and " connection up " in c]
 
@@ -524,6 +689,53 @@ fi
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("cannot capture wlan1", result.stderr)
         self.assertFalse(any(c.startswith("rmmod") for c in calls))
+
+    def test_pci_capture_rejects_name_bound_profile_before_rename(self):
+        self.rename_pci_wifi_on_reload()
+        self.env["PROFILE_INTERFACE_NAME"] = "wlan1"
+        result, calls = self.run_apply()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("restricted by interface name", result.stderr)
+        self.assertFalse(any(c.startswith("rmmod") for c in calls))
+        self.assertEqual(self.restores(calls), [])
+        self.assertTrue((self.root / "sys/class/net/wlan1").exists())
+        self.assertFalse(any("connection modify" in c for c in calls))
+
+    def test_pci_capture_rejects_name_match_profile_before_unload(self):
+        self.with_pci_wifi()
+        self.env["PROFILE_MATCH_INTERFACE_NAME"] = "wlan1"
+        result, calls = self.run_apply()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("restricted by interface name", result.stderr)
+        self.assertFalse(any(c.startswith("rmmod") for c in calls))
+        self.assertEqual(self.restores(calls), [])
+
+    def test_pci_capture_binding_query_failure_prevents_unload(self):
+        self.with_pci_wifi()
+        self.env["FAIL_BINDING_QUERY"] = "1"
+        result, calls = self.run_apply()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("cannot inspect wlan1 profile binding", result.stderr)
+        self.assertFalse(any(c.startswith("rmmod") for c in calls))
+        self.assertEqual(self.restores(calls), [])
+
+    def test_named_interface_restore_keeps_name_bound_profile_support(self):
+        self.with_wifi()
+        self.env["PROFILE_INTERFACE_NAME"] = "wlan0"
+        result, calls = self.run_apply()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(self.restores(calls)), 1)
+        self.assertIn("ifname wlan0", self.restores(calls)[0])
+        self.assertFalse(any("connection.interface-name" in c for c in calls))
+
+    def test_pci_wifi_restore_accepts_uppercase_pci_id(self):
+        self.with_pci_wifi()
+        self.activation.write_text(self.activation.read_text().replace(
+            "restore-wifi-pci 8086:272b", "restore-wifi-pci 8086:272B"))
+        result, calls = self.run_apply()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(self.restores(calls)), 1)
+        self.assertIn("ifname wlan1", self.restores(calls)[0])
 
     def test_pci_wifi_restore_resolves_renamed_card(self):
         self.rename_pci_wifi_on_reload()

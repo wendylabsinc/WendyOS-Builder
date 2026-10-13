@@ -526,6 +526,21 @@ wifi_nmcli() {
     timeout --kill-after=1 "$wifi_wait" nmcli --wait "$wifi_wait" "$@"
 }
 
+# 0: managed station, 1: another interface role/owner, 2: inspection failed.
+# Wi-Fi device type alone also includes APs. Query the kernel's current role,
+# including before reconnection when there is no active NM profile to inspect.
+wifi_station_interface() (
+    wifi_info=$(wifi_nmcli 5 -g GENERAL.TYPE,GENERAL.NM-MANAGED device show "$1") || return 2
+    [ "$wifi_info" = "$(printf 'wifi\nyes')" ] || return 1
+    wifi_remaining=$((WIFI_DEADLINE - $(date +%s)))
+    [ "$wifi_remaining" -gt 0 ] || return 2
+    [ "$wifi_remaining" -le 5 ] || wifi_remaining=5
+    wifi_info=$(timeout --kill-after=1 "$wifi_remaining" iw dev "$1" info) || return 2
+    wifi_type=$(printf '%s\n' "$wifi_info" | awk '$1 == "type" { print $2 }')
+    [ -n "$wifi_type" ] || return 2
+    [ "$wifi_type" = managed ]
+)
+
 capture_wifi_state() {
     activation=$1
     restore_state=$2
@@ -534,6 +549,7 @@ capture_wifi_state() {
             restore-wifi-connection)
                 capture_wifi_interface "$value" "$restore_state" || return 1 ;;
             restore-wifi-pci)
+                value=$(printf '%s' "$value" | tr 'A-F' 'a-f')
                 for net_path in /sys/class/net/*; do
                     [ -f "$net_path/device/vendor" ] || continue
                     [ -f "$net_path/device/device" ] || continue
@@ -561,6 +577,18 @@ capture_wifi_interface() {
         echo "wendyos-sysext-apply: cannot capture $interface connection: nmcli is unavailable" >&2
         return 1
     fi
+    if [ -n "${3:-}" ]; then
+        if wifi_station_interface "$interface"; then
+            :
+        else
+            case "$?" in
+                1) return 0 ;; # NAN, AP and other interfaces belong to their creators.
+                *)
+                    echo "wendyos-sysext-apply: cannot inspect $interface station role; refusing to unload its driver" >&2
+                    return 1 ;;
+            esac
+        fi
+    fi
     if ! connection_uuid=$(wifi_nmcli 5 -g GENERAL.CON-UUID device show "$interface"); then
         echo "wendyos-sysext-apply: cannot capture $interface connection; refusing to unload its driver" >&2
         return 1
@@ -571,16 +599,55 @@ capture_wifi_interface() {
             echo "wendyos-sysext-apply: invalid connection UUID for $interface" >&2
             return 1 ;;
     esac
+    if [ -n "${3:-}" ]; then
+        # ifname on `connection up` selects a device; it does not override a
+        # profile's name restrictions. A reload can rename this card, so reject
+        # such profiles before unloading rather than rewrite the user's policy.
+        if ! name_binding=$(wifi_nmcli 5 -g connection.interface-name,match.interface-name connection show uuid "$connection_uuid"); then
+            echo "wendyos-sysext-apply: cannot inspect $interface profile binding; refusing to unload its driver" >&2
+            return 1
+        fi
+        name_binding=$(printf '%s\n' "$name_binding" | sed '/^$/d; /^--$/d')
+        if [ -n "$name_binding" ]; then
+            echo "wendyos-sysext-apply: $interface connection $connection_uuid is restricted by interface name; PCI Wi-Fi restoration requires a profile without name restrictions; refusing to unload its driver" >&2
+            return 1
+        fi
+        # A driver reload recreates the basic station, not arbitrary virtual
+        # stations. Never collapse two saved connections onto that one target.
+        while read -r prior_interface _prior_uuid prior_pci_path; do
+            if [ "$prior_pci_path" = "$3" ]; then
+                echo "wendyos-sysext-apply: multiple active stations on $3 ($prior_interface, $interface); refusing to unload its driver" >&2
+                return 1
+            fi
+        done < "$restore_state"
+    fi
     printf '%s %s %s\n' "$interface" "$connection_uuid" "${3:-}" >> "$restore_state" || return 1
 }
 
 wifi_interface_for_device() (
     # Run in a subshell so scanning cannot overwrite the caller's journal state.
+    # Preserve the saved station name when it still belongs to this card.
+    # Another card (or an AP/NAN interface) may have taken the old name.
+    if [ -e "/sys/class/net/$2/device" ] &&
+       [ "$(readlink -f "/sys/class/net/$2/device")" = "$1" ] &&
+       wifi_station_interface "$2"; then
+        printf '%s\n' "$2"
+        return 0
+    fi
     selected=""
     for net_path in /sys/class/net/*; do
         [ -e "$net_path/device" ] || continue
         [ "$(readlink -f "$net_path/device")" = "$1" ] || continue
-        # Do not guess if a card exposes multiple network interfaces.
+        if wifi_station_interface "${net_path##*/}"; then
+            :
+        else
+            case "$?" in
+                1) continue ;;
+                *) return 1 ;; # Retry when NM/kernel rediscovery is incomplete.
+            esac
+        fi
+        # Additional NAN/AP interfaces are harmless; multiple possible stations
+        # after a rename are genuinely ambiguous and must not be guessed.
         [ -z "$selected" ] || return 1
         selected=${net_path##*/}
     done
@@ -605,7 +672,7 @@ restore_wifi_state() {
                 # Resolve after each rediscovery, including rollback. Never
                 # reconnect an unrelated card that inherited the old name.
                 if [ -n "$wifi_pci_path" ]; then
-                    interface=$(wifi_interface_for_device "$wifi_pci_path") || interface=""
+                    interface=$(wifi_interface_for_device "$wifi_pci_path" "$saved_interface") || interface=""
                     if [ -z "$interface" ]; then
                         attempts=$((attempts+1))
                         sleep 1
