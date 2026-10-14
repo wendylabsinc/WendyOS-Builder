@@ -1565,6 +1565,7 @@ if ! (
     abort convert_failed "cannot create the bootstrap key. /data stays plain"
 fi
 
+announce "creating the LUKS2 container on $DATA"
 cryptsetup luksFormat --type luks2 --batch-mode --key-file="$BK" "$DATA" \
     || abort convert_failed "luksFormat of $DATA failed. /data stays plain"
 
@@ -1572,9 +1573,20 @@ cryptsetup luksFormat --type luks2 --batch-mode --key-file="$BK" "$DATA" \
 #    order leaves a brick window: a power cut between the enrolment and the mkfs
 #    gives a container that is LUKS, fills the disk and has a valid TPM keyslot,
 #    which every later boot unlocks onto a mapper with no filesystem.
+announce "opening the new container"
 cryptsetup open --key-file="$BK" "$DATA" "$INIT_MAP" \
     || abort_container convert_failed "could not open the new container with the bootstrap key"
-if ! mkfs.ext4 -q -L data "/dev/mapper/$INIT_MAP"; then
+# lazy_journal_init=1 (C96). By default mkfs.ext4 writes zeros over the whole
+# journal, 1 GB on a filesystem over 128 GB. Through dm-crypt it cannot ask the
+# device to zero the range, so every block is encrypted and written. On an Orin
+# Nano that was about 72 s of the conversion (measured 2026-10-14). The mke2fs
+# manual's risk: a crash before the journal is overwritten once could replay
+# old journal blocks left on the disk. That cannot happen here. The container
+# was just made with a new random key, so the old blocks read back as noise,
+# not as journal records. Only this mkfs. The one that finishes an unfinished
+# volume in the unlock path keeps the default.
+announce "making the ext4 filesystem inside the new container"
+if ! mkfs.ext4 -q -E lazy_journal_init=1 -L data "/dev/mapper/$INIT_MAP"; then
     cryptsetup close "$INIT_MAP" 2>/dev/null || true
     abort_container convert_failed "mkfs.ext4 inside the new container failed"
 fi
@@ -1583,6 +1595,7 @@ cryptsetup close "$INIT_MAP" 2>/dev/null || true
 
 # 6) Seal a keyslot to the TPM. PCR binding per $PCR_ARG: a PCR list on x86
 #    (Secure Boot state), SRK-only on Jetson until secure boot lands.
+announce "sealing a keyslot to the TPM ($POLICY)"
 systemd-cryptenroll --unlock-key-file="$BK" --tpm2-device=auto $PCR_ARG "$DATA" \
     || abort_container convert_failed "sealing a keyslot to the TPM failed"
 
@@ -1608,6 +1621,7 @@ systemd-cryptenroll --unlock-key-file="$BK" --tpm2-device=auto $PCR_ARG "$DATA" 
 # 8) Drop the bootstrap slot, leaving the TPM keyslot as the only one.
 #    --wipe-slot=password matches password-type slots only, so it spares the
 #    TPM slot (type tpm2). There is no recovery slot here to spare.
+announce "removing the bootstrap keyslot"
 systemd-cryptenroll --unlock-key-file="$BK" --wipe-slot=password "$DATA" \
     || announce "WARN: could not wipe the bootstrap slot"
 rm -f "$BK" 2>/dev/null || true
@@ -1623,6 +1637,7 @@ rm -f "$BK" 2>/dev/null || true
 #    Reaching it means attaching the volume through the TPM, which also proves
 #    on this boot that the keyslot we just sealed actually opens.
 record_written=0
+announce "opening the volume through the TPM to write the conversion record"
 if "$helper" attach "$MAP_NAME" "$DATA" - tpm2-device=auto,headless; then
     udevadm settle -t 10 2>/dev/null || true
     if mkdir -p "$RECORD_MNT" 2>/dev/null && mount -t ext4 "$MAPPER" "$RECORD_MNT" 2>/dev/null; then
