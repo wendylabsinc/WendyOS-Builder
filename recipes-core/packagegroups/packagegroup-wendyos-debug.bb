@@ -6,6 +6,7 @@ inherit packagegroup
 
 # ss(8) for socket/port inspection
 # getent(1) for NSS/DNS lookups
+# systemd-analyze(1) for boot timing and unit ordering
 SUMMARY:${PN} = "Debugging package group"
 RDEPENDS:${PN} = " \
     ${@oe.utils.ifelse( \
@@ -23,6 +24,7 @@ RDEPENDS:${PN} = " \
             ldd \
             bc  \
             iproute2-ss \
+            systemd-analyze \
         ', \
         '' \
         )} \
