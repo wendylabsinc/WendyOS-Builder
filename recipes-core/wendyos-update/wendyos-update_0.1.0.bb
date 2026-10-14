@@ -22,7 +22,7 @@ GO_IMPORT = "github.com/wendylabsinc/wendyos-update"
 # on any tree. ?= defers to go.bbclass where it already sets this.
 GO_SRCURI_DESTSUFFIX ?= "${@os.path.join(os.path.basename(d.getVar('S')), 'src', d.getVar('GO_IMPORT')) + '/'}"
 
-SRC_URI = "git://${GO_IMPORT};protocol=https;branch=main;destsuffix=${GO_SRCURI_DESTSUFFIX}"
+SRC_URI = "git://${GO_IMPORT};protocol=https;nobranch=1;destsuffix=${GO_SRCURI_DESTSUFFIX}"
 # 2ef50a95 (main): add the grubenv connector (generic x86-64 GRUB-EFI A/B) — the
 # third connector, wiring up x86 A/B OTA Phase 2. Jetson
 # (tegrauefi) and RPi (ubootenv) are unaffected and each board still selects its
@@ -95,7 +95,10 @@ SRC_URI = "git://${GO_IMPORT};protocol=https;branch=main;destsuffix=${GO_SRCURI_
 # when the ESP has no room for one; and add the `check` verb, which reports
 # whether the device could take an install at all (exit 5 when not).
 # `check` fails with exit 5 on a deliberately filled ESP.
-SRCREV = "dc8c82e997b7ea43a8de6c9977f0f215de87103f"
+# Resolve Tegra rootfs slots and ESP on the running root disk, and reject
+# unsettled capsule boot-chain state. The exact pin can be built before the
+# updater PR merges; nobranch avoids requiring it to be an ancestor of main.
+SRCREV = "c6c272dde7d881b0520eb301cc76ef968aab601d"
 
 inherit go-mod systemd
 
