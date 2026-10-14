@@ -32,7 +32,8 @@ disk_sys=$(dirname "$root_sys")
 
 esp=
 for partition in "$disk_sys"/*; do
-    [ -f "$partition/partition" ] && [ -r "$partition/uevent" ] || continue
+    [ -f "$partition/partition" ] || continue
+    [ -r "$partition/uevent" ] || continue
     label=$(sed -n 's/^PARTNAME=//p' "$partition/uevent")
     case "$label" in
         esp|UEFI-ESP) ;;
