@@ -96,12 +96,16 @@ echo "wendyos: booting slot ${wendyos_boot_slot} (rootfs partition ${wendyos_roo
 # with StateDirectory= (timesyncd, rfkill). Every other WendyOS RPi fstab mounts
 # / with "defaults" (= rw); this is the per-slot-safe equivalent for A/B.
 @@BOOTDEV@@#
-@@BOOTDEV@@# root= by PARTUUID, read from the boot device's GPT, because the kernel's
-@@BOOTDEV@@# name for a USB disk (sdX) is not knowable here. The kernel resolves
-@@BOOTDEV@@# PARTUUID natively (no initramfs). An unreadable table resets.
+@@BOOTDEV@@# The build-time device keeps its fixed root= path: a PARTUUID would also
+@@BOOTDEV@@# match any disk cloned from it. Other boot devices pass the PARTUUID from
+@@BOOTDEV@@# their GPT, since the kernel's name for a USB disk (sdX) is not knowable
+@@BOOTDEV@@# here; the kernel resolves it without an initramfs. An unreadable table
+@@BOOTDEV@@# resets.
 fdt addr ${fdt_addr} && fdt get value bootargs /chosen bootargs
 @@FIXED@@setenv bootargs "${bootargs} root=@@WENDYOS_ROOT_DEV_BASE@@${wendyos_root_part} rootwait rw"
-@@BOOTDEV@@if part uuid ${wendyos_if} ${wendyos_dev}:${wendyos_root_part} wendyos_root_uuid; then
+@@BOOTDEV@@if test "${wendyos_if} ${wendyos_dev}" = "@@WENDYOS_UBOOT_IF@@ @@WENDYOS_UBOOT_DEV@@"; then
+@@BOOTDEV@@    setenv bootargs "${bootargs} root=@@WENDYOS_ROOT_DEV_BASE@@${wendyos_root_part} rootwait rw"
+@@BOOTDEV@@elif part uuid ${wendyos_if} ${wendyos_dev}:${wendyos_root_part} wendyos_root_uuid; then
 @@BOOTDEV@@    setenv bootargs "${bootargs} root=PARTUUID=${wendyos_root_uuid} rootwait rw"
 @@BOOTDEV@@else
 @@BOOTDEV@@    echo "wendyos: cannot read PARTUUID of ${wendyos_if} ${wendyos_dev}:${wendyos_root_part}; resetting"
