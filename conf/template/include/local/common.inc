@@ -66,12 +66,12 @@ CONF_VERSION = "2"
 # USB gadget function ordering (only effective when WENDYOS_USB_GADGET = "1")
 #GADGET_FUNC_ORDER="ecm ncm"
 
-# Debug/SSH defaults — off for production; opt in via auto.conf (bootstrap.sh
-# --debug), local.conf, or board config. Uses ??= so bootstrap-generated
-# auto.conf (parsed before local.conf per bitbake.conf) is not clobbered.
-WENDYOS_DEBUG ??= "0"
+# DO NOT MERGE: retained development-image branch with debug tools and SSH.
+# Keep this PR open and merge main into the branch to refresh published images.
+# Uses ??= so explicit auto.conf/local.conf settings still take precedence.
+WENDYOS_DEBUG ??= "1"
 WENDYOS_DEBUG_UART ??= "0"
-WENDYOS_SSHD ??= "0"
+WENDYOS_SSHD ??= "1"
 
 # Local interactive login, split by console type — both default OFF on every
 # image (a login prompt is pure attack surface). CI opts UART login in on PR
