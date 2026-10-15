@@ -11,14 +11,15 @@ SRC_URI += " \
 # --- network-online.target provider hygiene (net-manager aware) ---
 # Only one wait-online service should gate network-online.target. We pick it
 # based on the active net manager so a future switch flips the policy
-# automatically (see the shipped wendyos-network-online.preset /
-# networkd-wait-online-any.conf for the full rationale):
-#   - networkmanager:    disable systemd-networkd-wait-online (NM provides it)
+# automatically (see the shipped *-wait-online-*.conf drop-ins for the full
+# rationale):
+#   - networkmanager:    skip systemd-networkd-wait-online (NM provides it) and
+#                        make NM's wait-online succeed on any connection
 #   - systemd-networkd:  make networkd's wait-online succeed on --any link
 WENDYOS_NET_MANAGER ?= "${@d.getVar('VIRTUAL-RUNTIME_net_manager') or ''}"
 
 SRC_URI += " \
-    ${@'file://wendyos-network-online.preset' if d.getVar('WENDYOS_NET_MANAGER') == 'networkmanager' else ''} \
+    ${@'file://networkd-wait-online-skip.conf file://networkmanager-wait-online-any.conf' if d.getVar('WENDYOS_NET_MANAGER') == 'networkmanager' else ''} \
     ${@'file://networkd-wait-online-any.conf' if d.getVar('WENDYOS_NET_MANAGER') == 'systemd-networkd' else ''} \
     "
 
@@ -40,8 +41,10 @@ do_install:append() {
 
     # network-online.target provider hygiene (see the shipped files)
     if [ "${WENDYOS_NET_MANAGER}" = "networkmanager" ]; then
-        install -D -m0644 ${UNPACKDIR}/wendyos-network-online.preset \
-            ${D}${systemd_unitdir}/system-preset/15-wendyos-network-online.preset
+        install -D -m0644 ${UNPACKDIR}/networkd-wait-online-skip.conf \
+            ${D}${systemd_system_unitdir}/systemd-networkd-wait-online.service.d/10-wendyos-skip.conf
+        install -D -m0644 ${UNPACKDIR}/networkmanager-wait-online-any.conf \
+            ${D}${systemd_system_unitdir}/NetworkManager-wait-online.service.d/10-wendyos-any.conf
     elif [ "${WENDYOS_NET_MANAGER}" = "systemd-networkd" ]; then
         install -D -m0644 ${UNPACKDIR}/networkd-wait-online-any.conf \
             ${D}${systemd_system_unitdir}/systemd-networkd-wait-online.service.d/10-wendyos-any.conf
@@ -51,6 +54,6 @@ do_install:append() {
 # Package the net-online policy files (paths absent for the other manager are
 # harmless to list).
 FILES:${PN} += " \
-    ${systemd_unitdir}/system-preset/15-wendyos-network-online.preset \
     ${systemd_system_unitdir}/systemd-networkd-wait-online.service.d \
+    ${systemd_system_unitdir}/NetworkManager-wait-online.service.d \
     "
