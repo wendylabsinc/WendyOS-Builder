@@ -1,4 +1,5 @@
-# Both supported vendor kernels can leave a second rejected LE connection in
-# BT_CONNECT. Share the upstream fix so Pi and Jetson do not diverge.
+# Pi, Jetson, Dragonwing and Arduino kernels can leave a second rejected LE
+# connection in BT_CONNECT. Share the upstream fix across those vendor kernels.
 FILESEXTRAPATHS:prepend := "${THISDIR}/bluetooth-le-pending:"
-SRC_URI += "file://0001-bluetooth-clean-up-rejected-pending-le-connection.patch"
+BLUETOOTH_LE_PENDING_PATCH ?= "0001-bluetooth-clean-up-rejected-pending-le-connection.patch"
+SRC_URI += "file://${BLUETOOTH_LE_PENDING_PATCH}"

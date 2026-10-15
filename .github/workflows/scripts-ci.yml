@@ -36,6 +36,9 @@ on:
       - 'conf/distro/include/game-controller.inc'
       - 'recipes-kernel/linux/game-controller.inc'
       - 'recipes-kernel/linux/game-controller/**'
+      - 'recipes-kernel/linux/bluetooth-le-pending*'
+      - 'recipes-kernel/linux/bluetooth-le-pending/**'
+      - 'tests/bluetooth-le-pending/**'
       - 'recipes-core/packagegroups/packagegroup-wendyos-kernel.bb'
       - 'meta-*/recipes-kernel/linux/linux-*.bbappend'
       - 'meta-*/conf/layer.conf'
@@ -110,6 +113,9 @@ on:
       - 'conf/distro/include/game-controller.inc'
       - 'recipes-kernel/linux/game-controller.inc'
       - 'recipes-kernel/linux/game-controller/**'
+      - 'recipes-kernel/linux/bluetooth-le-pending*'
+      - 'recipes-kernel/linux/bluetooth-le-pending/**'
+      - 'tests/bluetooth-le-pending/**'
       - 'recipes-core/packagegroups/packagegroup-wendyos-kernel.bb'
       - 'meta-*/recipes-kernel/linux/linux-*.bbappend'
       - 'meta-*/conf/layer.conf'
@@ -196,6 +202,9 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+
+      - name: Test pending Bluetooth connection cleanup on pinned kernels
+        run: python3 tests/bluetooth-le-pending/run.py
 
       - name: Validate device-artifacts.json
         run: jq empty .github/device-artifacts.json
