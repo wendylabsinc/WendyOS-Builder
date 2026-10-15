@@ -535,16 +535,70 @@ wifi_nmcli() {
 # Wi-Fi device type alone also includes APs. Query the kernel's current role,
 # including before reconnection when there is no active NM profile to inspect.
 # Inspect that role first: NAN data interfaces may have no NM device object.
-wifi_station_interface() (
-    wifi_remaining=$((WIFI_DEADLINE - $(date +%s)))
+wifi_kernel_station_interface() (
+    wifi_remaining=$((${2:-$WIFI_DEADLINE} - $(date +%s)))
     [ "$wifi_remaining" -gt 0 ] || return 2
     [ "$wifi_remaining" -le 5 ] || wifi_remaining=5
     wifi_info=$(timeout --kill-after=1 "$wifi_remaining" iw dev "$1" info) || return 2
     wifi_type=$(printf '%s\n' "$wifi_info" | awk '$1 == "type" { print $2 }')
     [ -n "$wifi_type" ] || return 2
-    [ "$wifi_type" = managed ] || return 1
+    [ "$wifi_type" = managed ]
+)
+
+wifi_station_interface() (
+    wifi_kernel_station_interface "$1" || return "$?"
     wifi_info=$(wifi_nmcli 5 -g GENERAL.TYPE,GENERAL.NM-MANAGED device show "$1") || return 2
     [ "$wifi_info" = "$(printf 'wifi\nyes')" ]
+)
+
+# Record physical cards even when their driver has not created an interface yet.
+# Requiring each captured card avoids accepting another BE202 after hot removal
+# or partial probe failure on a system with multiple cards.
+capture_wifi_cards() (
+    while read -r directive value extra || [ -n "${directive:-}${value:-}${extra:-}" ]; do
+        [ "${directive:-}" = restore-wifi-pci ] || continue
+        value=$(printf '%s' "$value" | tr 'A-F' 'a-f')
+        matched=0
+        for device_path in /sys/bus/pci/devices/*; do
+            present=$(pci_id_of "$device_path") || continue
+            [ "$present" = "$value" ] || continue
+            readlink -f "$device_path" || return 1
+            matched=1
+        done
+        if [ "$matched" = 0 ]; then
+            echo "wendyos-sysext-apply: no Wi-Fi PCI device $value; refusing to unload drivers" >&2
+            return 1
+        fi
+    done < "$1"
+)
+
+wait_wifi_cards() (
+    [ -s "$1" ] || return 0
+    # Share a short readiness budget across all cards and retain the outer
+    # capture/reconnect deadline. Association and NM policy are not prerequisites.
+    readiness_deadline=$(($(date +%s) + 10))
+    [ "$readiness_deadline" -le "$WIFI_DEADLINE" ] || readiness_deadline=$WIFI_DEADLINE
+    attempts=0
+    while [ "$attempts" -lt 10 ] && [ "$(date +%s)" -lt "$readiness_deadline" ]; do
+        missing=""
+        while IFS= read -r card; do
+            ready=0
+            for net_path in /sys/class/net/*; do
+                [ -e "$net_path/device" ] || continue
+                [ "$(readlink -f "$net_path/device")" = "$card" ] || continue
+                if wifi_kernel_station_interface "${net_path##*/}" "$readiness_deadline"; then
+                    ready=1
+                    break
+                fi
+            done
+            [ "$ready" = 1 ] || { missing=$card; break; }
+        done < "$1"
+        [ -n "$missing" ] || return 0
+        attempts=$((attempts+1))
+        sleep 1
+    done
+    echo "wendyos-sysext-apply: no station interface appeared on Wi-Fi PCI card ${missing:-within readiness deadline}" >&2
+    return 1
 )
 
 capture_wifi_state() {
@@ -883,7 +937,9 @@ for link in "$RUNDIR"/*.raw; do
 
     module_conf "$name" "$payload"
     if [ -f "$activation" ] && [ "$activate_now" = 1 ]; then
-        if ! preflight_unload "$name" "$activation" || ! capture_wifi_state "$activation" "$restore_state"; then
+        if ! preflight_unload "$name" "$activation" ||
+           ! capture_wifi_cards "$activation" > "$PLAN/$name.wifi-cards" ||
+           ! capture_wifi_state "$activation" "$restore_state"; then
             if ! restore_previous "$name" || ! depmod -a "$KVER"; then
                 echo "wendyos-sysext-apply: could not restore previous exposure for $name" >&2
             fi
@@ -927,6 +983,9 @@ for link in "$RUNDIR"/*.raw; do
 
     if [ "$package_failed" = 0 ] && [ -f "$activation" ] && [ "$activate_now" = 1 ]; then
         restart_services "$activation" || package_failed=1
+        if [ "$package_failed" = 0 ]; then
+            wait_wifi_cards "$PLAN/$name.wifi-cards" || package_failed=1
+        fi
         if [ "$package_failed" = 0 ]; then
             restore_wifi_state "$restore_state" || package_failed=1
         fi

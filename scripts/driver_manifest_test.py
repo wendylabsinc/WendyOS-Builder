@@ -63,6 +63,7 @@ class DriverManifestTests(unittest.TestCase):
         marker = 'python3 - "$DRIVER/driver.json" "$DEVICE" > "$ACTIVATION_CONF" <<\'PY\'\n'
         result = self.validate("pack-sysext.sh", marker, manifest, "raspberry-pi-5")
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("pci 8086:272b\n", result.stdout)
         self.assertIn("replace brcmfmac_cyw\n", result.stdout)
         self.assertIn("replace brcmfmac\n", result.stdout)
         self.assertIn("restore-wifi-pci 8086:272b\n", result.stdout)
@@ -74,6 +75,21 @@ class DriverManifestTests(unittest.TestCase):
                 self.assertNotIn("brcmfmac", jetson.stdout)
                 self.assertIn("restore-wifi-connection wlan0\n", jetson.stdout)
         self.assertNotIn("raspberry-pi-4", manifest["devices"])
+
+    def test_device_overrides_unloading_modules_keep_pci_guard(self):
+        for path in sorted((ROOT / "drivers").glob("*/driver.json")):
+            manifest = json.loads(path.read_text())
+            for device, activation in manifest.get("activation_by_device", {}).items():
+                with self.subTest(driver=path.parent.name, device=device):
+                    if activation.get("modules_replace") or activation.get("modules_reload"):
+                        self.assertTrue(activation.get("pci_devices"),
+                                        "unloading device overrides must declare their PCI hardware guard")
+                        result = self.validate("pack-sysext.sh",
+                            'python3 - "$DRIVER/driver.json" "$DEVICE" > "$ACTIVATION_CONF" <<\'PY\'\n',
+                            manifest, device)
+                        self.assertEqual(result.returncode, 0, result.stderr)
+                        for pci_id in activation["pci_devices"]:
+                            self.assertIn(f"pci {pci_id}\n", result.stdout)
 
     def test_device_overrides_require_device_identity(self):
         manifest = json.loads((ROOT / "drivers/intel-be202/driver.json").read_text())
