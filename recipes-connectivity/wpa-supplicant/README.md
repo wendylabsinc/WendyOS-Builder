@@ -120,7 +120,7 @@ test harness so the full module suite can finish.
 To run this regression and the upstream module suite on Linux, apply all six
 patches to a disposable copy of the pinned source. Install a C toolchain,
 pkg-config, Python 3, and the OpenSSL, libnl-3 and libnl-genl-3 development packages
-(`build-essential pkg-config python3 libssl-dev libnl-3-dev libnl-genl-3-dev`
+(`build-essential pkg-config python3 libssl-dev libnl-3-dev libnl-genl-3-dev libnl-route-3-dev libdbus-1-dev`
 on Debian/Ubuntu). From this README's directory, run:
 
 ```sh

@@ -124,6 +124,10 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+      - name: Install supplicant build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential patch libssl-dev libnl-3-dev libnl-genl-3-dev libnl-route-3-dev libdbus-1-dev pkg-config
       - name: Check helper shell scripts
         run: shellcheck recipes-connectivity/wpa-supplicant/wpa-supplicant/wendyos-nan recipes-connectivity/wpa-supplicant/wpa-supplicant/*.test.sh
       - name: Test checksum-pinned supplicant patch queue and lifecycle

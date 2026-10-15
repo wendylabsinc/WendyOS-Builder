@@ -2,6 +2,7 @@
 """Fetch checksum-pinned recipe source, apply its patch queue, run NAN regressions."""
 import argparse
 import hashlib
+import os
 from pathlib import Path
 import re
 import shutil
@@ -52,6 +53,23 @@ def main():
         subprocess.run(['python3', str(files / 'wendyos-nan-lifecycle.test.py'), '-v'], check=True)
         for name in ('wendyos-nan-parent.test.py', 'wendyos-nan-peer.test.py'):
             subprocess.run(['python3', str(files / name), str(source)], check=True)
+        module_runner = files / 'wendyos-nan-module.test.py'
+        if module_runner.exists():
+            supplicant = source / 'wpa_supplicant'
+            config = (supplicant / 'defconfig').read_text()
+            config += '\nCONFIG_LIBNL32=y\nCONFIG_NAN_USD=y\nCONFIG_NAN=y\nCONFIG_PASN=y\n'
+            (supplicant / '.config').write_text(config)
+            subprocess.run(['make', '-j', str(min(os.cpu_count() or 1, 8)),
+                            'CONFIG_MODULE_TESTS=y', 'CONFIG_EXT_PASSWORD_TEST=y',
+                            'NEED_FIPS186_2_PRF=y', 'wpa_supplicant'], cwd=supplicant, check=True)
+            log = tmp / 'module-tests.log'
+            try:
+                subprocess.run(['python3', str(module_runner), str(supplicant / 'wpa_supplicant'),
+                                '--log', str(log)], check=True)
+            except subprocess.CalledProcessError:
+                if log.exists():
+                    print(log.read_text(), flush=True)
+                raise
 
 
 if __name__ == '__main__':
