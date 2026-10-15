@@ -41,6 +41,8 @@ on:
       - 'recipes-connectivity/avahi/files/*.sh'
       - 'recipes-connectivity/networkmanager/**'
       - 'recipes-connectivity/wpa-supplicant/**'
+      - 'recipes-core/systemd-conf/**'
+      - 'scripts/network_manager_ownership_test.py'
       - 'tests/nm-transient-psk/**'
       - 'meta-arduino-extensions/recipes-connectivity/wendyos-radio-addr/files/*.sh'
       - 'meta-qcom-extensions/files/grub/*'
@@ -97,6 +99,8 @@ on:
       - 'recipes-connectivity/avahi/files/*.sh'
       - 'recipes-connectivity/networkmanager/**'
       - 'recipes-connectivity/wpa-supplicant/**'
+      - 'recipes-core/systemd-conf/**'
+      - 'scripts/network_manager_ownership_test.py'
       - 'tests/nm-transient-psk/**'
       - 'meta-arduino-extensions/recipes-connectivity/wendyos-radio-addr/files/*.sh'
       - 'meta-qcom-extensions/files/grub/*'
@@ -183,6 +187,9 @@ jobs:
                      recipes-core/wendyos-identity/files/update-mdns-uuid.test.sh \
                      recipes-connectivity/avahi/files/generate-hostname.sh \
                      meta-arduino-extensions/recipes-connectivity/wendyos-radio-addr/files/wendyos-radio-addr.sh
+
+      - name: Verify network ownership and wait-online recipe installation
+        run: python3 -m unittest scripts/network_manager_ownership_test.py -v
 
       - name: Run resolver tests
         run: bash scripts/resolve-artifacts.test.sh
