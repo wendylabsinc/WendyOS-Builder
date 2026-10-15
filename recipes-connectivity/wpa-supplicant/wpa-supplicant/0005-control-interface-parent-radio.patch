@@ -103,10 +103,13 @@ diff --git a/wpa_supplicant/ctrl_iface.c b/wpa_supplicant/ctrl_iface.c
  	int ret;
  	unsigned int delete_iface;
  
-@@ -14847,13 +14860,28 @@
+@@ -14847,13 +14860,34 @@
  	if (wpa_s == NULL)
  		return -1;
- 	delete_iface = wpa_s->added_vif;
+-	delete_iface = wpa_s->added_vif;
++	/* NAN management interfaces are removed by driver deinit itself. They
++	 * need no surviving station context (NM may have disabled Wi-Fi). */
++	delete_iface = wpa_s->added_vif && !wpa_s->nan_mgmt;
 +	if (delete_iface) {
 +		/* Keep a driver context on this radio alive across unregistering
 +		 * the interface. The global head may belong to another radio or
@@ -119,8 +122,12 @@ diff --git a/wpa_supplicant/ctrl_iface.c b/wpa_supplicant/ctrl_iface.c
 +			    parent->radio == wpa_s->radio)
 +				break;
 +		}
-+		if (!parent)
++		if (!parent) {
++			wpa_printf(MSG_INFO,
++				   "INTERFACE_REMOVE %s refused: no independent driver context on the same radio",
++				   cmd);
 +			return -1;
++		}
 +	}
  	ret = wpa_supplicant_remove_iface(global, wpa_s, 0);
  	if (!ret && delete_iface) {
@@ -133,7 +140,7 @@ diff --git a/wpa_supplicant/ctrl_iface.c b/wpa_supplicant/ctrl_iface.c
  	}
  	return ret;
  }
-@@ -15229,9 +15257,16 @@
+@@ -15229,9 +15263,16 @@
  #endif /* CONFIG_WIFI_DISPLAY */
  
  	for (wpa_s = global->ifaces; wpa_s; wpa_s = wpa_s->next) {

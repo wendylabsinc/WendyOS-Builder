@@ -58,8 +58,10 @@ wendyos-nan events
 ```
 
 Use the returned peer NMI and publication/subscription handle with
-`ndp-request`; the peer accepts with `ndp-respond`. `ndp-terminate` and
-`wendyos-nan stop` release the data path. `wendyos-nan command` exposes the
+`ndp-request`; the peer accepts with `ndp-respond`. Use `ndp-terminate`, then
+`ndi-remove` for each data interface, before `wendyos-nan stop`. Stop refuses
+while any data interface remains on its radio, checking under the lifecycle
+lock so a concurrent app cannot lose its newly created link. `wendyos-nan command` exposes the
 underlying control interface for diagnostics.
 
 Normal `stop` preserves station Wi-Fi and leaves P2P restoration deferred. Use
@@ -83,6 +85,7 @@ it does not resolve the rare lower-layer NDP data-plane stall documented in
 Local validation, from this directory:
 
 ```sh
+python3 run-tests.py # Linux: fetch pinned source and run every regression
 sh wpa-supplicant/wendyos-nan.test.sh
 sh wpa-supplicant/wendyos-nan-stop.test.sh
 python3 wpa-supplicant/wendyos-nan-lifecycle.test.py -v

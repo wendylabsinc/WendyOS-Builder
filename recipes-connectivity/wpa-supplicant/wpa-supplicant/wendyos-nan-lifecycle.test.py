@@ -163,6 +163,43 @@ class LifecycleTest(unittest.TestCase):
         self.succeeds(first)
         self.succeeds(second)
 
+    def test_stop_refuses_data_interfaces_on_its_radio(self):
+        self.replace_state(started=True)
+        child = self.start('stop')
+        out, err = child.communicate(timeout=5)
+        self.assertNotEqual(child.returncode, 0, (out, err))
+        self.assertIn('foreign-ndi', err)
+        self.assertTrue(self.state()['started'])
+        self.assertFalse(any(c[1] in ('nan_stop', 'interface_remove')
+                             for c in self.state()['calls']))
+
+    def test_stop_preserves_data_interfaces_on_another_radio(self):
+        self.replace_state(started=True, radios={'foreign-ndi': 'phy1'})
+        self.succeeds(self.start('stop'))
+        self.assertEqual(self.state()['ifaces'], ['wlan0', 'foreign-ndi'])
+
+    def test_stop_refuses_unknown_data_radio(self):
+        self.replace_state(started=True, radios={'foreign-ndi': ''})
+        child = self.start('stop')
+        child.communicate(timeout=5)
+        self.assertNotEqual(child.returncode, 0)
+        self.assertTrue(self.state()['started'])
+
+    def test_stop_rechecks_after_waiting_for_app_creation(self):
+        self.replace_state(ifaces=['wlan0', 'nan0'], started=True)
+        first = self.start('ndi-create', 'app-ndi', ACTOR='first', GATE_COMMAND='status')
+        wait_for(lambda: (self.root / 'first-snapshot').exists())
+        second = self.start('stop', ACTOR='second')
+        wait_for(lambda: (self.root / 'second-lock-wait').exists())
+        (self.root / 'release-first').touch()
+        self.succeeds(first)
+        out, err = second.communicate(timeout=5)
+        self.assertNotEqual(second.returncode, 0, (out, err))
+        self.assertIn('app-ndi', err)
+        self.assertTrue(self.state()['started'])
+        self.assertIn('app-ndi', self.state()['ifaces'])
+        self.assertFalse(any(c[1] == 'nan_stop' for c in self.state()['calls']))
+
     def test_concurrent_start_is_idempotent_and_does_not_stop_winner(self):
         self.concurrent('start', 'nan_status')
         state = self.state()

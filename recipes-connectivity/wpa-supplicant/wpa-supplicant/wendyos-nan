@@ -363,6 +363,32 @@ stop_nan() {
     fi
 
     require_iface_type "$NAN_IFACE" management
+    # NDI creation uses this same lifecycle lock. Check the fresh snapshot
+    # here, not in the agent before invoking the helper: an app may have
+    # acquired a link while stop was waiting. Other radios remain independent.
+    nan_radio=$(iface_radio "$NAN_IFACE")
+    [ -n "$nan_radio" ] || {
+        echo "Cannot identify NAN radio for $NAN_IFACE" >&2
+        return 1
+    }
+    for stop_iface in $(list_ifaces); do
+        data=$(printf '%s\n' "$GLOBAL_STATUS" | awk -F= -v iface="$stop_iface" '
+            $1 == "ifname" { selected = ($2 == iface) }
+            selected && $1 == "nan_data" { print $2 }
+        ')
+        case "$data" in
+        0) continue ;;
+        1)
+            data_radio=$(iface_radio "$stop_iface")
+            if [ -z "$data_radio" ] || [ "$data_radio" = "$nan_radio" ]; then
+                echo "Remove NAN data interface $stop_iface before stopping $NAN_IFACE" >&2
+                return 1
+            fi ;;
+        *)
+            echo "Cannot verify NAN data interface type for $stop_iface" >&2
+            return 1 ;;
+        esac
+    done
     # A failed NAN_STOP should not leave the management interface behind.
     iface_cli nan_stop >/dev/null 2>&1 || true
     expect_ok global_cli interface_remove "$NAN_IFACE"

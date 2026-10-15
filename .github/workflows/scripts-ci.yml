@@ -40,6 +40,7 @@ on:
       - 'recipes-core/wendyos-identity/files/*.sh'
       - 'recipes-connectivity/avahi/files/*.sh'
       - 'recipes-connectivity/networkmanager/**'
+      - 'recipes-connectivity/wpa-supplicant/**'
       - 'tests/nm-transient-psk/**'
       - 'meta-arduino-extensions/recipes-connectivity/wendyos-radio-addr/files/*.sh'
       - 'meta-qcom-extensions/files/grub/*'
@@ -95,6 +96,7 @@ on:
       - 'recipes-core/wendyos-identity/files/*.sh'
       - 'recipes-connectivity/avahi/files/*.sh'
       - 'recipes-connectivity/networkmanager/**'
+      - 'recipes-connectivity/wpa-supplicant/**'
       - 'tests/nm-transient-psk/**'
       - 'meta-arduino-extensions/recipes-connectivity/wendyos-radio-addr/files/*.sh'
       - 'meta-qcom-extensions/files/grub/*'
@@ -114,6 +116,19 @@ on:
       - '.github/workflows/scripts-ci.yml'
 
 jobs:
+  nan:
+    name: Host NAN lifecycle regressions
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check helper shell scripts
+        run: shellcheck recipes-connectivity/wpa-supplicant/wpa-supplicant/wendyos-nan recipes-connectivity/wpa-supplicant/wpa-supplicant/*.test.sh
+      - name: Test checksum-pinned supplicant patch queue and lifecycle
+        run: python3 recipes-connectivity/wpa-supplicant/run-tests.py
+
   networkmanager:
     name: NetworkManager saved-password recovery
     runs-on: ubuntu-latest

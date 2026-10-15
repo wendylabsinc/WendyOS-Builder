@@ -20,6 +20,7 @@ typedef unsigned char u8;
 #define ETH_ALEN 6
 #define MSG_DEBUG 0
 #define MSG_ERROR 1
+#define MSG_INFO 2
 #define MACSTR "%02x:%02x:%02x:%02x:%02x:%02x"
 #define MAC2STR(a) (a)[0], (a)[1], (a)[2], (a)[3], (a)[4], (a)[5]
 #define os_snprintf snprintf
@@ -32,6 +33,9 @@ enum wpa_driver_if_type { WPA_IF_STATION, WPA_IF_AP_BSS, WPA_IF_NAN,
 struct wpa_interface {
     char *ifname, *confname, *driver, *ctrl_interface, *driver_param, *bridge_ifname;
     bool nan_mgmt, nan_data;
+    int disconnected;
+    void *drv_priv;
+    struct wpa_config *conf;
 };
 struct wpa_supplicant {
     const char *ifname;
@@ -162,7 +166,7 @@ int main(void)
     /* Removal must retain the right radio after unregistering the VIF,
      * even when the remaining list starts with the other radio. */
     assert(wpa_supplicant_global_iface_remove(&g, created_name) == 0);
-    assert(remove_parent == &wanted && g.ifaces == &wrong);
+    assert(!remove_parent && g.ifaces == &wrong); /* NAN driver deinit owns removal. */
     g = reset();
     wanted.ifname = "nan0";
     assert(add(&g, "nan_data", "", "nan0") == 0);
@@ -186,8 +190,8 @@ int main(void)
     /* Without a surviving driver context, refuse before unregistering. */
     wrong.radio = &phy0;
     wanted.radio = &phy0;
-    assert(wpa_supplicant_global_iface_remove(&g, created_name) == -1);
-    assert(g.ifaces == &created && !remove_parent);
+    assert(wpa_supplicant_global_iface_remove(&g, created_name) == 0);
+    assert(created.removed && !remove_parent); /* Wi-Fi disabled: no other radio context. */
     g = reset();
     /* The first same-radio candidate can be a child removed by teardown. */
     assert(add(&g, "sta", "", "wlan0") == 0);
@@ -242,6 +246,7 @@ P2P_HARNESS = r'''
 #define MSG_DEBUG 0
 #define NOT_P2P_GROUP_INTERFACE 0
 struct wpa_ssid { bool p2p_group; };
+struct wpa_config { bool wowlan_disconnect_on_deinit; };
 struct wpa_global;
 struct wpa_supplicant {
     struct wpa_global *global;
@@ -250,6 +255,9 @@ struct wpa_supplicant {
     int radio, p2p_group_interface;
     struct wpa_ssid *current_ssid;
     bool nan_mgmt, nan_data;
+    int disconnected;
+    void *drv_priv;
+    struct wpa_config *conf;
 };
 struct wpa_global { struct wpa_supplicant *ifaces; };
 static unsigned int disconnects;
@@ -269,7 +277,34 @@ static int wpa_supplicant_remove_iface(struct wpa_global *g,
 }
 #include "is-nan.inc"
 #include "p2p-group-remove.inc"
+static bool discovery_alive;
+static bool nan_deinitialized;
+#define WLAN_REASON_DEAUTH_LEAVING 3
+#define MSG_INFO 2
+#define wpa_msg(...) ((void)0)
+static int wpa_drv_get_wowlan(struct wpa_supplicant *s) { (void)s; return 0; }
+static void wpa_supplicant_deauthenticate(struct wpa_supplicant *s, int r) { (void)s; (void)r; }
+static void wpa_drv_set_countermeasures(struct wpa_supplicant *s, int v) { (void)s; (void)v; }
+static void wpa_clear_keys(struct wpa_supplicant *s, void *v) { (void)s; (void)v; }
+static void wpas_nan_deinit(struct wpa_supplicant *s) {
+    (void)s;
+    /* The real NAN stop callback uses the discovery engine. */
+    assert(discovery_alive);
+    nan_deinitialized = true;
+}
+static void wpa_supplicant_cleanup(struct wpa_supplicant *s) {
+    (void)s;
+    assert(nan_deinitialized);
+    discovery_alive = false;
+}
+static void wpas_p2p_deinit_iface(struct wpa_supplicant *s) { (void)s; }
 #include "deinit-entry.inc"
+static void deinit(struct wpa_supplicant *s) {
+    discovery_alive = true;
+    nan_deinitialized = false;
+    wpa_supplicant_deinit_iface(s, 1, 0);
+    assert(nan_deinitialized && !discovery_alive);
+}
 int main(void)
 {
     struct wpa_global g;
@@ -291,15 +326,15 @@ int main(void)
         disconnects = 0;
         removed.nan_mgmt = true;
         assert(wpas_is_nan_iface(&removed));
-        wpa_supplicant_deinit_iface(&removed, 1, 0);
+        deinit(&removed);
         assert(disconnects == 0);
         removed.nan_mgmt = false;
         removed.nan_data = true;
-        wpa_supplicant_deinit_iface(&removed, 1, 0);
+        deinit(&removed);
         assert(disconnects == 0);
         /* Preserve the existing cleanup for ordinary root interfaces. */
         removed.nan_data = false;
-        wpa_supplicant_deinit_iface(&removed, 1, 0);
+        deinit(&removed);
         assert(disconnects == 1);
     }
     puts("NAN teardown preserves other-radio P2P; ordinary teardown unchanged");
@@ -317,9 +352,9 @@ def main():
     status_end = source.index('\n\n#ifdef CONFIG_FST', status_start)
     core = (source_dir / 'wpa_supplicant.c').read_text()
     deinit_start = core.index('static void wpa_supplicant_deinit_iface(struct wpa_supplicant *wpa_s,\n')
-    deinit_end = core.index('\n\twpa_s->disconnected = 1;', deinit_start)
-    # Compile the real cleanup entry and child-removal loop, stopping before
-    # unrelated driver/state-machine teardown. Protocol I/O remains stubbed.
+    deinit_end = core.index('\n\twpas_ctrl_radio_work_flush(wpa_s);', deinit_start)
+    # Compile the real cleanup entry through NAN and generic cleanup.
+    # Lifetime-aware stubs fail if the discovery engine is freed before NAN.
     deinit = core[deinit_start:deinit_end] + '\n (void)notify;\n}\n'
     p2p = (source_dir / 'p2p_supplicant.c').read_text()
     p2p_start = p2p.index('int wpas_p2p_group_remove(')
