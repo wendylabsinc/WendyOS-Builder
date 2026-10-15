@@ -43,10 +43,6 @@ RDEPENDS:${PN} += " \
     linux-firmware-qcom-venus-6.0 \
     "
 
-# The PMIC RTC keeps time only with a coin cell on VCOIN, so timesyncd's saved
-# timestamp on /data is what keeps the clock sane across a reboot or an OTA swap.
-RDEPENDS:${PN} += " systemd-mount-timesync"
-
 # The factory Wi-Fi and Bluetooth addresses, which the slot's devicetree lacks.
 RDEPENDS:${PN} += " wendyos-radio-addr"
 

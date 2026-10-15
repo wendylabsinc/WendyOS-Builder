@@ -9,4 +9,5 @@ RDEPENDS:${PN}:remove = " \
     swapfile-setup \
     systemd-mount-containerd \
     systemd-mount-wendy \
+    systemd-mount-timesync \
     "
