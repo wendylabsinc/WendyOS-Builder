@@ -10,6 +10,7 @@ from pathlib import Path
 import re
 import subprocess
 import tarfile
+import tempfile
 
 
 SERVICE_FILES = (
@@ -28,10 +29,8 @@ def run(*args, **kwargs):
 def clean_revision(repository):
     if run('git', '-C', repository, 'status', '--porcelain', '--untracked-files=all'):
         raise ValueError(f'checkout must be committed and clean: {repository}')
-    return (
-        run('git', '-C', repository, 'rev-parse', 'HEAD'),
-        run('git', '-C', repository, 'rev-parse', 'HEAD^{tree}'),
-    )
+    commit = run('git', '-C', repository, 'rev-parse', 'HEAD')
+    return commit, run('git', '-C', repository, 'rev-parse', f'{commit}^{{tree}}')
 
 
 def package_agent(source, out, go, version, builder):
@@ -67,8 +66,22 @@ def package_agent(source, out, go, version, builder):
                GOWORK='off', GOENV='off', GOFLAGS='')
     flags = '-s -w -X github.com/wendylabsinc/wendy/go/internal/shared/version.Version=' + version
     build_flags = ['-mod=readonly', '-trimpath', '-ldflags', flags]
-    subprocess.run([go, 'build', *build_flags, '-o', str(binary), './go/cmd/wendy-agent'],
-                   cwd=source, env=env, check=True)
+    # A clean checkout can contain ignored Go files, and its tracked files can
+    # change while the compiler reads them. Export the pinned commit into a
+    # private directory so neither can influence the packaged binary.
+    with tempfile.TemporaryDirectory(prefix='wendy-agent-source-') as temporary:
+        snapshot = Path(temporary) / 'source'
+        snapshot.mkdir()
+        source_archive = Path(temporary) / 'source.tar'
+        with source_archive.open('wb') as raw:
+            subprocess.run(['git', '-C', str(source), 'archive', '--format=tar', commit],
+                           stdout=raw, check=True)
+        subprocess.run(['tar', '-xf', str(source_archive), '-C', str(snapshot)], check=True)
+        subprocess.run([go, 'build', *build_flags, '-o', str(binary), './go/cmd/wendy-agent'],
+                       cwd=snapshot, env=env, check=True)
+
+        # Resolve automatic toolchain selection against the same exported module.
+        build_info = run(go, 'version', '-m', binary, cwd=snapshot, env=env).splitlines()
     if clean_revision(source) != (commit, tree):
         raise ValueError('source revision changed during the build')
     data = binary.read_bytes()
@@ -78,7 +91,6 @@ def package_agent(source, out, go, version, builder):
     # The binary reports the compiler that actually built it, including an
     # automatically selected Go toolchain. A bare `go version` may report the
     # launcher instead, particularly outside the source module's directory.
-    build_info = run(go, 'version', '-m', binary, cwd=source, env=env).splitlines()
     prefix = f'{binary}: '
     if not build_info or not build_info[0].startswith(prefix):
         raise ValueError('could not read the binary Go compiler version')

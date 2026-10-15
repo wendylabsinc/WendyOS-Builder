@@ -19,7 +19,11 @@ timer. Remove the layer to return to the normal release selection.
 `BUILD-PROVENANCE.json` records the source and Builder commits, hashes of the
 committed Builder inputs, the compiler read from the finished binary, and the
 binary/archive checksums. The build ignores an ambient Go workspace and
-persistent Go flags; it does not modify module dependencies. `--go` can select
+persistent Go flags; it does not modify module dependencies. The compiler reads
+a private export of the recorded source commit, excluding ignored and untracked
+working-directory files. Changes to the original checkout during compilation
+cannot change the exported sources and still fail the final cleanliness check.
+`--go` can select
 a particular Go executable. Go may select a newer toolchain required by the
 source checkout; the manifest records the compiler actually used.
 

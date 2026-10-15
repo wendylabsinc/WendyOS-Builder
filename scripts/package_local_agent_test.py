@@ -28,6 +28,7 @@ class LocalAgentTests(unittest.TestCase):
         self.source.mkdir()
         self.builder.mkdir()
         (self.source / 'main.go').write_text('package main\n')
+        (self.source / '.gitignore').write_text('ignored.go\n')
         for path in ['conf/layer.conf', 'tools/mesh/package-local-agent.py'] + [
             f'recipes-core/wendyos-agent/files/{name}' for name in PACKAGE.SERVICE_FILES
         ]:
@@ -42,9 +43,16 @@ class LocalAgentTests(unittest.TestCase):
         self.go = self.root / 'go'
         self.go.write_text(f'#!{sys.executable}\n' + '''import json, os, pathlib, sys
 args = sys.argv[1:]
+mutated = os.environ.get('TRANSIENT_SOURCE_CHANGE') if args[0] == 'build' else None
+if mutated:
+    original = pathlib.Path(mutated).read_bytes()
+    pathlib.Path(mutated).write_text('uncommitted source during build')
 with open(os.environ['GO_CALL_LOG'], 'a') as f:
     f.write(json.dumps({'args': args, 'cwd': os.getcwd(), 'gowork': os.environ.get('GOWORK'),
-                        'goflags': os.environ.get('GOFLAGS')}) + '\\n')
+                        'goflags': os.environ.get('GOFLAGS'),
+                        'sources': {str(p): p.read_text() for p in pathlib.Path('.').glob('*.go')}}) + '\\n')
+if mutated:
+    pathlib.Path(mutated).write_bytes(original)
 if args[0] == 'build':
     data = bytearray(64)
     data[:4] = b'\\x7fELF'
@@ -81,7 +89,10 @@ else:
             self.assertEqual(digest, hashlib.sha256((self.builder / path).read_bytes()).hexdigest())
         calls = [json.loads(line) for line in self.log.read_text().splitlines()]
         self.assertEqual(calls[1]['args'][:2], ['version', '-m'])
-        self.assertEqual(calls[0]['cwd'], str(self.source.resolve()))
+        self.assertNotEqual(calls[0]['cwd'], str(self.source.resolve()))
+        self.assertEqual(calls[0]['cwd'], calls[1]['cwd'])
+        self.assertEqual(calls[0]['sources'], {'main.go': 'package main\n'})
+        self.assertFalse(Path(calls[0]['cwd']).exists())
         self.assertEqual(calls[0]['gowork'], 'off')
         self.assertEqual(calls[0]['goflags'], '')
         self.assertIn('-mod=readonly', calls[0]['args'])
@@ -110,6 +121,26 @@ else:
         self.assertFalse(self.log.exists())
         self.assertFalse((self.root / 'output').exists())
 
+    def test_excludes_ignored_go_sources_from_build(self):
+        (self.source / 'ignored.go').write_text('this must never reach the compiler\n')
+        self.assertEqual(self.git(self.source, 'status', '--porcelain'), '')
+        manifest = self.package()
+        call = json.loads(self.log.read_text().splitlines()[0])
+        self.assertEqual(call['sources'], {'main.go': 'package main\n'})
+        self.assertEqual(manifest['source_commit'], self.git(self.source, 'rev-parse', 'HEAD'))
+
+    def test_original_source_edits_cannot_influence_compilation(self):
+        with patch.dict(os.environ, TRANSIENT_SOURCE_CHANGE=str(self.source / 'main.go')):
+            self.package()
+        call = json.loads(self.log.read_text().splitlines()[0])
+        self.assertEqual(call['sources'], {'main.go': 'package main\n'})
+
+    def test_rejects_untracked_source_before_building(self):
+        (self.source / 'untracked.go').write_text('package main\n')
+        with self.assertRaisesRegex(ValueError, 'committed and clean'):
+            self.package()
+        self.assertFalse(self.log.exists())
+
     def test_copies_recorded_builder_revision_if_checkout_changes_during_build(self):
         path = 'recipes-core/wendyos-agent/files/wendyos-agent.service'
         expected = (self.builder / path).read_bytes()
@@ -124,6 +155,8 @@ else:
             with self.assertRaisesRegex(ValueError, 'committed and clean'):
                 self.package()
         self.assertFalse((self.root / 'output/BUILD-PROVENANCE.json').exists())
+        call = json.loads(self.log.read_text().splitlines()[0])
+        self.assertFalse(Path(call['cwd']).exists())
 
     def test_checks_are_not_disabled_by_python_optimization(self):
         (self.source / 'main.go').write_text('dirty source')
