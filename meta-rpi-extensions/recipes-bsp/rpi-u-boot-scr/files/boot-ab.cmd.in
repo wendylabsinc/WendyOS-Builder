@@ -59,7 +59,12 @@ if test "${bootcount}" = ""; then setenv bootcount 0; fi
 if test "${wendyos_upgrade_available}" = "1"; then
     setexpr bootcount ${bootcount} + 1
 @@FIXED@@    saveenv
-@@BOOTDEV@@    run wendyos_saveenv
+@@BOOTDEV@@    # A count that cannot be persisted never reaches bootlimit, so give up the
+@@BOOTDEV@@    # trial now instead of looping in an unproven slot.
+@@BOOTDEV@@    if run wendyos_saveenv; then true; else
+@@BOOTDEV@@        echo "wendyos: cannot save bootcount; abandoning trial slot ${wendyos_boot_slot}"
+@@BOOTDEV@@        setexpr bootcount ${bootlimit} + 1
+@@BOOTDEV@@    fi
     if test ${bootcount} -gt ${bootlimit}; then
         echo "wendyos: trial slot ${wendyos_boot_slot} exhausted (bootcount=${bootcount} > bootlimit=${bootlimit}); falling back"
         if test "${wendyos_boot_slot}" = "0"; then
