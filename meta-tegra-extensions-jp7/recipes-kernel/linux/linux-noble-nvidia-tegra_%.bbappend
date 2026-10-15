@@ -25,6 +25,7 @@ SRC_URI += " \
     file://0004-crypto-algif_aead-snapshot-IV-for-async-AEAD-requests.patch \
     file://0005-crypto-algif_aead-Fix-minimum-RX-size-check-for-decryption.patch \
     file://0006-bluetooth-btusb-trust-le-states-by-default.patch \
+    file://0007-bluetooth-mark-scan-interrupted-before-disable.patch \
     file://cve-2026-46333-ptrace.patch \
     "
 

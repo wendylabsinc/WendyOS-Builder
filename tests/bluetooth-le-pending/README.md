@@ -12,3 +12,24 @@ cases, and all seven patched paths must pass. `--sources DIR` accepts cached
 Update the source URLs with the corresponding vendor recipe pins when kernels
 are upgraded. This checks callback behavior, not radio or full-kernel behavior;
 image builds and hardware BLE validation remain required.
+
+Jetson scan-interruption ordering
+--------------------------------
+
+`python3 tests/bluetooth-le-pending/run-scan-order.py` applies the Jetson-only
+backport to checksum-pinned NVIDIA source and executes its actual create,
+scan-disable, and scan-completion functions. The mock controller delivers
+completion during the synchronous call. Twelve cases cover discovery state,
+no redundant advertising work, one existing advertising-resume call,
+legacy/extended creation,
+no-scan/suspend no-op, disable errors/cancellation, and real create timeout.
+The original source must fail and the patched source must pass.
+
+The no-premature-cancel assertion covers the direct create function only;
+downstream pending-connection teardown remains governed by the existing
+callback. Hardware HCI capture still verifies actual advertising and traffic.
+
+Upstream ordering fix: Linux `2cabe7ff1001b7a197009cf50ba71701f9cbd354`.
+Pi and Qualcomm pins already have that ordering; this backport targets Jetson.
+The local adaptation clears an unconsumed interruption flag on failed/skipped
+disable and exits through advertising restoration below create cancellation.

@@ -39,6 +39,7 @@ on:
       - 'recipes-kernel/linux/bluetooth-le-pending*'
       - 'recipes-kernel/linux/bluetooth-le-pending/**'
       - 'tests/bluetooth-le-pending/**'
+      - 'meta-tegra-extensions-jp7/recipes-kernel/linux/linux-noble-nvidia-tegra/*.patch'
       - 'recipes-core/packagegroups/packagegroup-wendyos-kernel.bb'
       - 'meta-*/recipes-kernel/linux/linux-*.bbappend'
       - 'meta-*/conf/layer.conf'
@@ -116,6 +117,7 @@ on:
       - 'recipes-kernel/linux/bluetooth-le-pending*'
       - 'recipes-kernel/linux/bluetooth-le-pending/**'
       - 'tests/bluetooth-le-pending/**'
+      - 'meta-tegra-extensions-jp7/recipes-kernel/linux/linux-noble-nvidia-tegra/*.patch'
       - 'recipes-core/packagegroups/packagegroup-wendyos-kernel.bb'
       - 'meta-*/recipes-kernel/linux/linux-*.bbappend'
       - 'meta-*/conf/layer.conf'
@@ -204,7 +206,9 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Test pending Bluetooth connection cleanup on pinned kernels
-        run: python3 tests/bluetooth-le-pending/run.py
+        run: |
+          python3 tests/bluetooth-le-pending/run.py
+          python3 tests/bluetooth-le-pending/run-scan-order.py
 
       - name: Validate device-artifacts.json
         run: jq empty .github/device-artifacts.json
