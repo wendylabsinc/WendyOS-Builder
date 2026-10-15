@@ -5,7 +5,12 @@ Run `python3 tests/bluetooth-advertising/run.py` (Python 3, a C compiler and
 Pi kernel revision and applies the shared LE pending fix followed by the actual
 advertising patch. `--sources DIR` accepts a cached unpatched kernel tree.
 
-The harness compiles the actual cleanup, removal and scheduling function bodies.
+The harness compiles the actual cleanup, removal, scheduling and scan-expiry
+function bodies. Nine additional expiry checks cover queued-work authority via
+the retained marker, allocation retry, future/due/zero-delay deadlines, unrelated
+markers, unlimited advertising, and both cancellation paths. The expiry harness
+intentionally provides no work-list or queue mutex: device-owned expiry state
+must answer the predicate without depending on cancellation-held locks.
 It checks both expiry cleanup entry points, removal after selection changes or
 clears, expiry with lifetime remaining, unrelated expiry markers, a live
 replacement's timer ownership, and subsequent scheduling. Removing the new

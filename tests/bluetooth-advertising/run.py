@@ -42,6 +42,20 @@ def main():
             if name == "mgmt_cancel_adv_timeout":
                 body = body.replace("cancel_adv_timeout", name)
             code = code.replace("/* BODY: " + name + " */", body)
+        # Deliberately provide no command-work queue or mutex in this harness:
+        # the actual expiry predicate must use its device-lock-owned state only.
+        expiry = Path(__file__).with_name("expiry.c").read_text()
+        for name in re.findall(r"/\* BODY: (\w+) \*/", expiry):
+            file = "mgmt" if name == "mgmt_cancel_adv_timeout" else "hci_sync"
+            body = function((work / ("net/bluetooth/" + file + ".c")).read_text(), "cancel_adv_timeout" if name == "mgmt_cancel_adv_timeout" else name)
+            if name == "mgmt_cancel_adv_timeout":
+                body = body.replace("cancel_adv_timeout", name)
+            expiry = expiry.replace("/* BODY: " + name + " */", body)
+        c = work / "expiry.c"
+        c.write_text(expiry)
+        binary = c.with_suffix("")
+        subprocess.run([os.environ.get("CC", "cc"), "-std=gnu11", "-Wall", "-Wextra", "-Werror", str(c), "-o", str(binary)], check=True)
+        subprocess.run([str(binary)], check=True)
         # Mutation check: the prior cleanup only retired expiry when still selected.
         # Removing the new independent clear must reproduce the scheduling failure.
         independent = "\n\tif (hdev->expired_adv_instance == instance)\n\t\thdev->expired_adv_instance = 0;"

@@ -10,6 +10,9 @@ Commit explicit armed/deadline ownership under the device lock so canceled
 callbacks cannot truncate a pending replacement or consume a fresh slice.
 Retire a completed instance's expiry marker even when selection has changed,
 without canceling the replacement instance's timer.
+Use the owned marker/deadline for scan expiry checks without acquiring the
+command work-list mutex under hdev->lock; cancellation callbacks can take
+the device lock while holding that mutex.
 
 Changes internal hci_dev state: build the complete matching kernel and all
 modules, then export the matching SDK and image. This is not a claim to fix
@@ -318,7 +321,7 @@ Upstream-Status: Pending
  	}
  
  	err = hci_dev_shutdown(hdev);
-@@ -5944,8 +6047,221 @@
+@@ -5944,8 +6047,210 @@
  				     sizeof(cp), &cp, HCI_CMD_TIMEOUT);
  }
  
@@ -336,30 +339,19 @@ Upstream-Status: Pending
 + */
 +static bool hci_legacy_scan_adv_expired(struct hci_dev *hdev, u8 instance)
 +{
-+	struct hci_cmd_sync_work_entry *entry;
-+	bool expired = false;
-+
++	/* The timer publishes this marker under hdev->lock before queueing
++	 * expiry and retains it until cleanup or explicit cancellation. The
++	 * marker therefore covers queued work without taking the work-list
++	 * mutex (whose cancellation callbacks may take hdev->lock).
++	 */
 +	if (hdev->expired_adv_instance == instance)
 +		return true;
 +
 +	/* delay==0 queues work without rewriting timer.expires. The owned
 +	 * slice deadline also survives a later allocation-retry timer date.
 +	 */
-+	if (hdev->adv_instance_expire_armed &&
-+	    time_after_eq(jiffies, hdev->adv_instance_expire_deadline))
-+		return true;
-+
-+	mutex_lock(&hdev->cmd_sync_work_lock);
-+	list_for_each_entry(entry, &hdev->cmd_sync_work_list, list) {
-+		if (entry->func == adv_timeout_expire_sync && entry->data &&
-+		    *(u8 *)entry->data == instance) {
-+			expired = true;
-+			break;
-+		}
-+	}
-+	mutex_unlock(&hdev->cmd_sync_work_lock);
-+
-+	return expired;
++	return hdev->adv_instance_expire_armed &&
++	       time_after_eq(jiffies, hdev->adv_instance_expire_deadline);
 +}
 +
 +/* A scan address update must not reschedule advertising or spend another
@@ -540,7 +532,7 @@ Upstream-Status: Pending
  	u8 own_addr_type;
  	/* Accept list is not used for discovery */
  	u8 filter_policy = 0x00;
-@@ -5955,6 +6271,10 @@
+@@ -5955,6 +6260,10 @@
  
  	bt_dev_dbg(hdev, "");
  
@@ -551,7 +543,7 @@ Upstream-Status: Pending
  	/* If controller is scanning, it means the passive scanning is
  	 * running. Thus, we should temporarily stop it in order to set the
  	 * discovery scanning parameters.
-@@ -5967,21 +6287,39 @@
+@@ -5967,21 +6276,39 @@
  
  	cancel_interleave_scan(hdev);
  
@@ -598,7 +590,7 @@ Upstream-Status: Pending
  
  	if (hci_is_adv_monitoring(hdev) ||
  	    (hci_test_quirk(hdev, HCI_QUIRK_STRICT_DUPLICATE_FILTER) &&
-@@ -6006,9 +6344,17 @@
+@@ -6006,9 +6333,17 @@
  		return err;
  
  failed:
