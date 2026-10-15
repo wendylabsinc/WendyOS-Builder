@@ -21,7 +21,10 @@ committed Builder inputs, the compiler read from the finished binary, and the
 binary/archive checksums. The build ignores an ambient Go workspace and
 persistent Go flags; it does not modify module dependencies. The compiler reads
 a private export of the recorded source commit, excluding ignored and untracked
-working-directory files. Changes to the original checkout during compilation
+working-directory files. It copies raw Git blobs, so export attributes and
+checkout filters cannot omit or rewrite committed input files. Submodule entries
+are rejected because their contents are not part of the recorded source tree.
+Changes to the original checkout during compilation
 cannot change the exported sources and still fail the final cleanliness check.
 `--go` can select
 a particular Go executable. Go may select a newer toolchain required by the

@@ -135,9 +135,64 @@ else:
         call = json.loads(self.log.read_text().splitlines()[0])
         self.assertEqual(call['sources'], {'main.go': 'package main\n'})
 
+    def test_export_attributes_cannot_omit_or_rewrite_committed_sources(self):
+        original = 'package main\n// $Format:%H$\n'
+        (self.source / 'main.go').write_text(original)
+        (self.source / 'optional.go').write_text('package main\nfunc init() {}\n')
+        self.git(self.source, 'add', '.')
+        self.git(self.source, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+                 'commit', '-qm', 'export fixture')
+        attributes = 'optional.go export-ignore\nmain.go export-subst\n'
+        for location in ('repository', 'global', 'committed'):
+            with self.subTest(location=location):
+                path = {'repository': self.source / '.git/info/attributes',
+                        'global': self.root / 'global-attributes',
+                        'committed': self.source / '.gitattributes'}[location]
+                path.write_text(attributes)
+                config = self.root / 'global-gitconfig'
+                config.write_text('[core]\n\tattributesFile = ' + str(path) + '\n'
+                                  if location == 'global' else '')
+                if location == 'committed':
+                    self.git(self.source, 'add', '.gitattributes')
+                    self.git(self.source, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+                             'commit', '-qm', 'committed export attributes')
+                with patch.dict(os.environ, GIT_CONFIG_GLOBAL=str(config)):
+                    self.package(location)
+                call = json.loads(self.log.read_text().splitlines()[-2])
+                self.assertEqual(call['sources'], {'main.go': original,
+                                 'optional.go': 'package main\nfunc init() {}\n'})
+                if location != 'committed':
+                    path.unlink()
+
+    def test_raw_export_preserves_file_modes_and_symlinks(self):
+        executable = self.source / 'tool'
+        executable.write_bytes(b'#!/bin/sh\n')
+        executable.chmod(0o755)
+        (self.source / 'link').symlink_to('main.go')
+        self.git(self.source, 'add', '.')
+        self.git(self.source, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+                 'commit', '-qm', 'tree modes')
+        target = self.root / 'export'
+        target.mkdir()
+        PACKAGE.export_revision(self.source, self.git(self.source, 'rev-parse', 'HEAD'),
+                                target, self.root / 'objects')
+        self.assertEqual((target / 'tool').stat().st_mode & 0o777, 0o755)
+        self.assertEqual((target / 'main.go').stat().st_mode & 0o777, 0o644)
+        self.assertTrue((target / 'link').is_symlink())
+        self.assertEqual(os.readlink(target / 'link'), 'main.go')
+
     def test_rejects_untracked_source_before_building(self):
         (self.source / 'untracked.go').write_text('package main\n')
         with self.assertRaisesRegex(ValueError, 'committed and clean'):
+            self.package()
+        self.assertFalse(self.log.exists())
+
+    def test_rejects_source_symlinks_outside_recorded_tree(self):
+        (self.source / 'outside.go').symlink_to('../unrecorded.go')
+        self.git(self.source, 'add', '.')
+        self.git(self.source, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+                 'commit', '-qm', 'external symlink')
+        with self.assertRaisesRegex(ValueError, 'symlink escapes'):
             self.package()
         self.assertFalse(self.log.exists())
 

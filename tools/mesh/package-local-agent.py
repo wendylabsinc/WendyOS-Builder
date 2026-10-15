@@ -33,6 +33,46 @@ def clean_revision(repository):
     return commit, run('git', '-C', repository, 'rev-parse', f'{commit}^{{tree}}')
 
 
+def export_revision(repository, commit, destination, objects):
+    # Read raw tree/blob objects: git archive honors export-ignore/export-subst
+    # from committed, repository-local and global attributes. A build must keep
+    # every recorded source byte regardless of those distribution preferences.
+    destination = destination.resolve()
+    listing = subprocess.check_output([
+        'git', '-C', str(repository), 'ls-tree', '-rz', '--full-tree', commit,
+    ])
+    entries = []
+    for entry in listing.split(b'\0'):
+        if not entry:
+            continue
+        metadata, name = entry.split(b'\t', 1)
+        mode, kind, oid = metadata.split()
+        if kind != b'blob' or mode not in (b'100644', b'100755', b'120000'):
+            raise ValueError(f'unsupported source tree entry: {os.fsdecode(name)}')
+        entries.append((mode, oid, destination / os.fsdecode(name)))
+    with objects.open('wb') as raw:
+        subprocess.run(['git', '-C', str(repository), 'cat-file', '--batch'],
+                       input=b''.join(oid + b'\n' for _, oid, _ in entries),
+                       stdout=raw, check=True)
+    with objects.open('rb') as raw:
+        for mode, oid, path in entries:
+            actual_oid, kind, length = raw.readline().split()
+            if actual_oid != oid or kind != b'blob':
+                raise ValueError('unexpected source object')
+            data = raw.read(int(length))
+            if len(data) != int(length) or raw.read(1) != b'\n':
+                raise ValueError('truncated source object')
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if mode == b'120000':
+                path.symlink_to(os.fsdecode(data))
+            else:
+                path.write_bytes(data)
+                path.chmod(0o755 if mode == b'100755' else 0o644)
+    for mode, _, path in entries:
+        if mode == b'120000' and not path.resolve().is_relative_to(destination):
+            raise ValueError(f'source symlink escapes the recorded tree: {path}')
+
+
 def package_agent(source, out, go, version, builder):
     source, out, builder = source.resolve(), out.resolve(), builder.resolve()
     if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9.-]*', version):
@@ -72,11 +112,7 @@ def package_agent(source, out, go, version, builder):
     with tempfile.TemporaryDirectory(prefix='wendy-agent-source-') as temporary:
         snapshot = Path(temporary) / 'source'
         snapshot.mkdir()
-        source_archive = Path(temporary) / 'source.tar'
-        with source_archive.open('wb') as raw:
-            subprocess.run(['git', '-C', str(source), 'archive', '--format=tar', commit],
-                           stdout=raw, check=True)
-        subprocess.run(['tar', '-xf', str(source_archive), '-C', str(snapshot)], check=True)
+        export_revision(source, commit, snapshot, Path(temporary) / 'objects')
         subprocess.run([go, 'build', *build_flags, '-o', str(binary), './go/cmd/wendy-agent'],
                        cwd=snapshot, env=env, check=True)
 
@@ -139,6 +175,7 @@ FILES:${{PN}}:append = " ${{sysconfdir}}/systemd/system/wendyos-agent-updater.ti
         'kind': 'unpublished-local-agent-layer',
         'source_commit': commit,
         'source_tree': tree,
+        'source_export': 'raw-git-tree-blobs',
         'builder_commit': builder_commit,
         'builder_tree': builder_tree,
         'builder_files_sha256': {path: hashlib.sha256(content).hexdigest() for path, content in inputs.items()},
