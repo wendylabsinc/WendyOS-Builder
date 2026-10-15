@@ -40,6 +40,8 @@ on:
       - 'recipes-kernel/linux/bluetooth-le-pending/**'
       - 'tests/bluetooth-le-pending/**'
       - 'meta-tegra-extensions-jp7/recipes-kernel/linux/linux-noble-nvidia-tegra/*.patch'
+      - 'meta-rpi-extensions/recipes-kernel/linux/linux-raspberrypi/*.patch'
+      - 'tests/bluetooth-advertising/**'
       - 'recipes-core/packagegroups/packagegroup-wendyos-kernel.bb'
       - 'meta-*/recipes-kernel/linux/linux-*.bbappend'
       - 'meta-*/conf/layer.conf'
@@ -118,6 +120,8 @@ on:
       - 'recipes-kernel/linux/bluetooth-le-pending/**'
       - 'tests/bluetooth-le-pending/**'
       - 'meta-tegra-extensions-jp7/recipes-kernel/linux/linux-noble-nvidia-tegra/*.patch'
+      - 'meta-rpi-extensions/recipes-kernel/linux/linux-raspberrypi/*.patch'
+      - 'tests/bluetooth-advertising/**'
       - 'recipes-core/packagegroups/packagegroup-wendyos-kernel.bb'
       - 'meta-*/recipes-kernel/linux/linux-*.bbappend'
       - 'meta-*/conf/layer.conf'
@@ -209,6 +213,8 @@ jobs:
         run: |
           python3 tests/bluetooth-le-pending/run.py
           python3 tests/bluetooth-le-pending/run-scan-order.py
+      - name: Test legacy advertising expiry on pinned Raspberry Pi kernel
+        run: python3 tests/bluetooth-advertising/run.py
 
       - name: Validate device-artifacts.json
         run: jq empty .github/device-artifacts.json

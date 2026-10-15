@@ -8,6 +8,8 @@ with the existing public scan fallback and RPA cache. Retain elapsed expiry
 authority across timer allocation/submit failures with bounded retry.
 Commit explicit armed/deadline ownership under the device lock so canceled
 callbacks cannot truncate a pending replacement or consume a fresh slice.
+Retire a completed instance's expiry marker even when selection has changed,
+without canceling the replacement instance's timer.
 
 Changes internal hci_dev state: build the complete matching kernel and all
 modules, then export the matching SDK and image. This is not a claim to fix
@@ -16,7 +18,6 @@ controller Hardware Error 0x00.
 Base: Raspberry Pi Linux 95b85bebbedcaedfa7ca79116ed38b7376fba412.
 Apply after the existing four WendyOS Raspberry Pi recipe patches.
 Upstream-Status: Pending
-Frozen raw patch SHA256: f335dd20b1ad9fe1c3079819278ff65bca330e59c8e61eaaba01f382dde76d81
 
 ---
 --- a/net/bluetooth/hci_sync.c
@@ -34,7 +35,21 @@ Frozen raw patch SHA256: f335dd20b1ad9fe1c3079819278ff65bca330e59c8e61eaaba01f38
  		cancel_delayed_work(&hdev->adv_instance_expire);
  	}
  }
-@@ -553,6 +556,7 @@
+@@ -491,6 +494,13 @@
+ 	if (!instance || hdev->cur_adv_instance == instance)
+ 		cancel_adv_timeout(hdev);
+ 
++	/* Expiry belongs to the completed slice, even if a disconnect has
++	 * already changed the selected instance. Retire only that marker;
++	 * a replacement instance keeps its own timer and armed authority.
++	 */
++	if (hdev->expired_adv_instance == instance)
++		hdev->expired_adv_instance = 0;
++
+ 	/* Get the next instance to advertise BEFORE we remove
+ 	 * the current one. This can be the same instance again
+ 	 * if there is only one instance.
+@@ -553,6 +563,7 @@
  static void adv_timeout_expire(struct work_struct *work)
  {
  	u8 *inst_ptr;
@@ -42,7 +57,7 @@ Frozen raw patch SHA256: f335dd20b1ad9fe1c3079819278ff65bca330e59c8e61eaaba01f38
  	struct hci_dev *hdev = container_of(work, struct hci_dev,
  					    adv_instance_expire.work);
  
-@@ -560,17 +564,51 @@
+@@ -560,17 +571,51 @@
  
  	hci_dev_lock(hdev);
  
@@ -100,7 +115,7 @@ Frozen raw patch SHA256: f335dd20b1ad9fe1c3079819278ff65bca330e59c8e61eaaba01f38
  
  unlock:
  	hci_dev_unlock(hdev);
-@@ -1825,7 +1863,8 @@
+@@ -1825,7 +1870,8 @@
  	return hci_enable_advertising_sync(hdev);
  }
  
@@ -110,7 +125,7 @@ Frozen raw patch SHA256: f335dd20b1ad9fe1c3079819278ff65bca330e59c8e61eaaba01f38
  {
  	struct adv_info *adv_instance;
  	struct hci_cp_le_set_adv_param cp;
-@@ -1833,7 +1872,7 @@
+@@ -1833,7 +1879,7 @@
  	bool connectable;
  	u16 adv_min_interval, adv_max_interval;
  	u32 flags;
@@ -119,7 +134,7 @@ Frozen raw patch SHA256: f335dd20b1ad9fe1c3079819278ff65bca330e59c8e61eaaba01f38
  
  	if (ext_adv_capable(hdev))
  		return hci_enable_ext_advertising_sync(hdev,
-@@ -1907,8 +1946,17 @@
+@@ -1907,8 +1953,17 @@
  	if (status)
  		return status;
  
@@ -137,7 +152,7 @@ Frozen raw patch SHA256: f335dd20b1ad9fe1c3079819278ff65bca330e59c8e61eaaba01f38
  }
  
  static int enable_advertising_sync(struct hci_dev *hdev, void *data)
-@@ -1961,18 +2009,35 @@
+@@ -1961,18 +2016,35 @@
  int hci_schedule_adv_instance_sync(struct hci_dev *hdev, u8 instance,
  				   bool force)
  {
@@ -182,7 +197,7 @@ Frozen raw patch SHA256: f335dd20b1ad9fe1c3079819278ff65bca330e59c8e61eaaba01f38
  
  	/* A zero timeout means unlimited advertising. As long as there is
  	 * only one instance, duration should be ignored. We still set a timeout
-@@ -1987,31 +2052,45 @@
+@@ -1987,31 +2059,45 @@
  	else
  		timeout = adv->remaining_time;
  
@@ -249,7 +264,21 @@ Frozen raw patch SHA256: f335dd20b1ad9fe1c3079819278ff65bca330e59c8e61eaaba01f38
  }
  
  static int hci_clear_adv_sets_sync(struct hci_dev *hdev, struct sock *sk)
-@@ -2629,7 +2708,8 @@
+@@ -2105,6 +2191,13 @@
+ 	if (!instance || hdev->cur_adv_instance == instance)
+ 		cancel_adv_timeout(hdev);
+ 
++	/* Expiry belongs to the completed slice, even if a disconnect has
++	 * already changed the selected instance. Retire only that marker;
++	 * a replacement instance keeps its own timer and armed authority.
++	 */
++	if (hdev->expired_adv_instance == instance)
++		hdev->expired_adv_instance = 0;
++
+ 	/* Get the next instance to advertise BEFORE we remove
+ 	 * the current one. This can be the same instance again
+ 	 * if there is only one instance.
+@@ -2629,7 +2722,8 @@
  	return err;
  }
  
@@ -259,7 +288,7 @@ Frozen raw patch SHA256: f335dd20b1ad9fe1c3079819278ff65bca330e59c8e61eaaba01f38
  {
  	int err;
  
-@@ -2664,8 +2744,14 @@
+@@ -2664,8 +2758,14 @@
  	if (!err && scan_use_rpa(hdev))
  		return 0;
  
@@ -275,7 +304,7 @@ Frozen raw patch SHA256: f335dd20b1ad9fe1c3079819278ff65bca330e59c8e61eaaba01f38
  }
  
  struct sk_buff *hci_read_local_oob_data_sync(struct hci_dev *hdev,
-@@ -5263,9 +5349,12 @@
+@@ -5263,9 +5363,12 @@
  
  	cancel_interleave_scan(hdev);
  
@@ -289,7 +318,7 @@ Frozen raw patch SHA256: f335dd20b1ad9fe1c3079819278ff65bca330e59c8e61eaaba01f38
  	}
  
  	err = hci_dev_shutdown(hdev);
-@@ -5944,8 +6033,221 @@
+@@ -5944,8 +6047,221 @@
  				     sizeof(cp), &cp, HCI_CMD_TIMEOUT);
  }
  
@@ -511,7 +540,7 @@ Frozen raw patch SHA256: f335dd20b1ad9fe1c3079819278ff65bca330e59c8e61eaaba01f38
  	u8 own_addr_type;
  	/* Accept list is not used for discovery */
  	u8 filter_policy = 0x00;
-@@ -5955,6 +6257,10 @@
+@@ -5955,6 +6271,10 @@
  
  	bt_dev_dbg(hdev, "");
  
@@ -522,7 +551,7 @@ Frozen raw patch SHA256: f335dd20b1ad9fe1c3079819278ff65bca330e59c8e61eaaba01f38
  	/* If controller is scanning, it means the passive scanning is
  	 * running. Thus, we should temporarily stop it in order to set the
  	 * discovery scanning parameters.
-@@ -5967,21 +6273,39 @@
+@@ -5967,21 +6287,39 @@
  
  	cancel_interleave_scan(hdev);
  
@@ -569,7 +598,7 @@ Frozen raw patch SHA256: f335dd20b1ad9fe1c3079819278ff65bca330e59c8e61eaaba01f38
  
  	if (hci_is_adv_monitoring(hdev) ||
  	    (hci_test_quirk(hdev, HCI_QUIRK_STRICT_DUPLICATE_FILTER) &&
-@@ -6006,9 +6330,17 @@
+@@ -6006,9 +6344,17 @@
  		return err;
  
  failed:
@@ -592,7 +621,7 @@ Frozen raw patch SHA256: f335dd20b1ad9fe1c3079819278ff65bca330e59c8e61eaaba01f38
  	hci_update_passive_scan_sync(hdev);
 --- a/net/bluetooth/hci_core.c
 +++ b/net/bluetooth/hci_core.c
-@@ -1642,9 +1642,12 @@
+@@ -1642,13 +1642,19 @@
  	BT_DBG("%s removing %dMR", hdev->name, instance);
  
  	if (hdev->cur_adv_instance == instance) {
@@ -606,7 +635,14 @@ Frozen raw patch SHA256: f335dd20b1ad9fe1c3079819278ff65bca330e59c8e61eaaba01f38
  		}
  		hdev->cur_adv_instance = 0x00;
  	}
-@@ -1672,9 +1675,12 @@
+ 
++	if (hdev->expired_adv_instance == instance)
++		hdev->expired_adv_instance = 0;
++
+ 	cancel_delayed_work_sync(&adv_instance->rpa_expired_cb);
+ 
+ 	list_del(&adv_instance->list);
+@@ -1672,9 +1678,12 @@
  {
  	struct adv_info *adv_instance, *n;
  
@@ -620,7 +656,7 @@ Frozen raw patch SHA256: f335dd20b1ad9fe1c3079819278ff65bca330e59c8e61eaaba01f38
  	}
  
  	list_for_each_entry_safe(adv_instance, n, &hdev->adv_instances, list) {
-@@ -2465,6 +2471,9 @@
+@@ -2465,6 +2474,9 @@
  	hdev->adv_instance_cnt = 0;
  	hdev->cur_adv_instance = 0x00;
  	hdev->adv_instance_timeout = 0;

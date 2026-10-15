@@ -1,0 +1,15 @@
+# Legacy advertising expiry regression
+
+Run `python3 tests/bluetooth-advertising/run.py` (Python 3, a C compiler and
+`patch`). The runner downloads the four affected files at the shipped Raspberry
+Pi kernel revision and applies the shared LE pending fix followed by the actual
+advertising patch. `--sources DIR` accepts a cached unpatched kernel tree.
+
+The harness compiles the actual cleanup, removal and scheduling function bodies.
+It checks both expiry cleanup entry points, removal after selection changes or
+clears, expiry with lifetime remaining, unrelated expiry markers, a live
+replacement's timer ownership, and subsequent scheduling. Removing the new
+independent expiry clears must reproduce the stuck-advertising failures.
+Kernel workqueue/controller operations are modeled; this test does not replace
+full image builds or hardware validation. Update the pinned source revision
+when the Raspberry Pi recipe moves.
