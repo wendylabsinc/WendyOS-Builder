@@ -466,6 +466,12 @@ rollback_modules() {
     while IFS= read -r mod; do
         operation_failed=0
         if [ -n "$action" ]; then
+            # Owned payload modules were already removed by name. Repeating
+            # modprobe -r could also remove a nonreplaced, preexisting dependency.
+            if [ -f "$PLAN/$name.new-payload-modules" ] &&
+               grep -Fqx "$(module_sysname "$mod")" "$PLAN/$name.new-payload-modules"; then
+                continue
+            fi
             modprobe "$action" -- "$mod" || operation_failed=1
         else
             modprobe -- "$mod" || operation_failed=1
@@ -780,10 +786,95 @@ restart_services() (
     [ "$services_failed" = 0 ]
 )
 
+# Snapshot after old targets have been unloaded, before any candidate module
+# can load. Only this payload's absent modules belong to the new transaction;
+# unrelated modules and preexisting, nonreplaced modules are never collected.
+capture_new_payload_modules() (
+    : > "$PLAN/$name.new-payload-modules" || return 1
+    while IFS= read -r claim; do
+        case "$claim" in module:*) mod=${claim#module:} ;; *) continue ;; esac
+        [ -d "/sys/module/$mod" ] || printf '%s\n' "$mod" >> "$PLAN/$name.new-payload-modules" || return 1
+    done < "$PLAN/$name.claims"
+)
+
+# request_module_nowait waits for the helper's exec, not its exit. Once the
+# producing driver is unloaded, already-started helpers remain observable here.
+# Wait for all kmod aliases conservatively; never signal an unrelated process.
+module_helpers_active() (
+    helper_path=$(cat /proc/sys/kernel/modprobe 2>/dev/null) || return 0
+    helper_name=${helper_path##*/}
+    helper_name=$(printf '%s' "$helper_name" | cut -c1-15) # Linux TASK_COMM_LEN
+    for comm_file in /proc/[0-9]*/comm; do
+        [ -r "$comm_file" ] || continue
+        IFS= read -r comm < "$comm_file" || continue
+        case "$comm" in modprobe|kmod|"$helper_name") return 0 ;; esac
+    done
+    return 1
+)
+
+rollback_new_payload_modules() (
+    candidates="$PLAN/$name.new-payload-modules"
+    [ -f "$candidates" ] || return 0 # Failure preceded candidate loading.
+    attempts=0
+    while [ "$attempts" -lt 10 ]; do
+        pending=0
+        while IFS= read -r mod; do
+            [ -d "/sys/module/$mod" ] || continue
+            pending=1
+            held=0
+            for holder in "/sys/module/$mod/holders"/*; do
+                [ ! -e "$holder" ] || held=1
+            done
+            # Holders are removed on their own iteration only if they are also
+            # transaction-owned. Never unload a foreign holder or force removal.
+            [ "$held" = 0 ] || continue
+            rmmod -- "$mod" || true
+        done < "$candidates"
+        if [ "$pending" = 0 ] && ! module_helpers_active; then
+            # The last helper can finish loading between our module scan and
+            # process scan. Recheck after it has exited, before restoring base.
+            clean=1
+            while IFS= read -r mod; do
+                [ ! -d "/sys/module/$mod" ] || clean=0
+            done < "$candidates"
+            [ "$clean" = 1 ] && return 0
+        fi
+        # Candidate lookup paths are already hidden. A helper that opened a .ko
+        # earlier can still finish loading it; wait for that helper and rescan.
+        attempts=$((attempts+1))
+        sleep 1
+    done
+    while IFS= read -r mod; do
+        if [ -d "/sys/module/$mod" ]; then
+            echo "wendyos-sysext-apply: rollback could not unload candidate module $mod" >&2
+        fi
+    done < "$candidates"
+    if module_helpers_active; then
+        echo "wendyos-sysext-apply: module helpers did not quiesce during rollback" >&2
+    fi
+    return 1
+)
+
 rollback_package() {
     rollback_incomplete=0
+    # Close future candidate lookups first. rmmod below only needs loaded names,
+    # including modules whose .ko was already opened by an asynchronous helper.
+    if ! hide_payload "$PLAN/$name.exposed" || ! depmod -a "$KVER"; then
+        echo "wendyos-sysext-apply: could not rebuild module index during rollback for $name" >&2
+        echo "wendyos-sysext-apply: activation rollback incomplete for $name; reboot required" >&2
+        return 1
+    fi
+    if ! rollback_new_payload_modules; then
+        # A surviving backport graph cannot coexist with the base Wi-Fi ABI.
+        # Restore the candidate's search paths for the surviving graph, without
+        # claiming activation success or loading the old ABI underneath it.
+        if ! expose_payload "$name" "$payload" || ! depmod -a "$KVER"; then
+            echo "wendyos-sysext-apply: could not preserve failed candidate exposure for $name" >&2
+        fi
+        echo "wendyos-sysext-apply: activation rollback incomplete for $name; reboot required" >&2
+        return 1
+    fi
     rollback_modules "$inserted" -r || rollback_incomplete=1
-    hide_payload "$PLAN/$name.exposed" || rollback_incomplete=1
     rm -rf "${STATEDIR:?}/$name" || rollback_incomplete=1
     restore_previous "$name" || rollback_incomplete=1
     if ! depmod -a "$KVER"; then
@@ -953,6 +1044,12 @@ for link in "$RUNDIR"/*.raw; do
         fi
     fi
 
+    if ! capture_new_payload_modules; then
+        echo "wendyos-sysext-apply: could not snapshot candidate module ownership for $name" >&2
+        rollback_package || true
+        rc=$((rc|fail))
+        continue
+    fi
     if ! expose_payload "$name" "$payload" || ! depmod -a "$KVER"; then
         echo "wendyos-sysext-apply: could not expose payload for $name" >&2
         rollback_package || true

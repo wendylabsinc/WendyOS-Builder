@@ -36,8 +36,10 @@ class ActivationTests(unittest.TestCase):
                                    "reload btusb\nrestart-service wpa_supplicant.service\n")
         source = APPLY.read_text()
         for prefix in ("/data/extensions", "/run/", "/usr/lib/", "/sys/module/",
-                       "/sys/bus/pci/devices/", "/sys/class/net/"):
+                       "/sys/bus/pci/devices/", "/sys/class/net/", "/proc/"):
             source = source.replace(prefix, str(self.root) + prefix)
+        (self.root / "proc/sys/kernel").mkdir(parents=True)
+        (self.root / "proc/sys/kernel/modprobe").write_text("/sbin/modprobe\n")
         self.script = self.root / "apply.sh"
         self.script.write_text(source)
         self.log = self.root / "commands.log"
@@ -336,6 +338,8 @@ exit 0
         self.assertIn("systemctl try-restart -- wpa_supplicant.service", calls)
 
     def test_load_failure_unexposes_payload_and_restores_old_stack(self):
+        self.backport_dependency_graph()
+        self.activation.write_text(self.activation.read_text()+"reload btusb\n")
         (self.payload / "firmware").mkdir()
         (self.payload / "firmware/card.bin").write_text("replacement")
         firmware = self.root / "usr/lib/firmware/card.bin"
@@ -345,8 +349,8 @@ exit 0
         result, calls = self.run_apply()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("activation rolled back", result.stderr)
-        self.assertIn("modprobe -r -- newwifi", calls)
-        self.assertLess(calls.index("modprobe -- cfg80211"), calls.index("modprobe -- oldwifi"))
+        self.assertIn("rmmod -- newwifi", calls)
+        self.assertLess(calls.index("modprobe -- cfg80211"), calls.index("modprobe -- brcmfmac"))
         self.assertFalse((self.root / "usr/lib/modules/test-kernel/updates/wendyos/card/newwifi.ko").exists())
         self.assertEqual(firmware.read_text(), "base")
 
@@ -360,8 +364,9 @@ exit 0
         self.assertFalse(any(line.startswith(("rmmod", "modprobe -r")) for line in calls))
 
     def test_failed_rollback_reports_reboot_requirement(self):
+        self.backport_dependency_graph(BUSY_ATTEMPTS=100)
+        self.activation.write_text(self.activation.read_text()+"reload btusb\n")
         self.env["FAIL_LOAD"] = "btusb"
-        self.env["FAIL_UNLOAD"] = "newwifi"
         result, _ = self.run_apply()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("rollback incomplete", result.stderr)
@@ -557,6 +562,168 @@ fi
 ''')
             sleeper.chmod(0o755)
             self.env["SLEEP_HOOK"] = str(sleeper)
+
+    def backport_dependency_graph(self, **flags):
+        """Model observed kmod implicit loads and sysfs holder ownership."""
+        self.first_pci_activation(ready=False)
+        for mod in ('backdep', 'cfg80211', 'compat', 'lateleaf'):
+            (self.payload / f'modules/test-kernel/{mod}.ko').touch()
+        model = self.root / 'module-model.py'
+        model.write_text(r"""#!/usr/bin/env python3
+import os, shutil, sys
+from pathlib import Path
+root=Path(os.environ['MODEL_ROOT']); modules=root/'sys/module'; net=root/'sys/class/net'
+mode,*args=sys.argv[1:]
+def add(name, deps=(), backport=False):
+    path=modules/name; path.mkdir(exist_ok=True); (path/'holders').mkdir(exist_ok=True)
+    if backport: (path/'backport').touch()
+    for dep in deps:
+        (modules/dep/'holders').mkdir(parents=True,exist_ok=True)
+        (modules/dep/'holders'/name).touch()
+def remove(name):
+    path=modules/name
+    if list((path/'holders').glob('*')): return 1
+    if name=='backdep':
+        counter=root/'busy'; n=int(counter.read_text()) if counter.exists() else 0
+        if n<int(os.environ.get('BUSY_ATTEMPTS','0')):
+            counter.write_text(str(n+1)); return 1
+    shutil.rmtree(path,ignore_errors=True)
+    for holder in modules.glob('*/holders/'+name): holder.unlink()
+    return 0
+def deps():
+    add('compat'); add('cfg80211',('compat',),True); add('backdep',('cfg80211',))
+if mode=='rmmod':
+    sys.exit(remove(args[-1]))
+if mode=='helper-race':
+    if not (root/'helper-raced').exists():
+        deps(); add('lateleaf',('backdep',)); (root/'helper-raced').touch()
+    sys.exit(0)
+if mode=='tick':
+    if os.environ.get('ASYNC_LEAF') and not (root/'late-loaded').exists():
+        if (root/'usr/lib/modules/test-kernel/updates/wendyos/card/cfg80211.ko').exists(): sys.exit(0)
+        counter=root/'helper-ticks'; n=int(counter.read_text()) if counter.exists() else 0
+        counter.write_text(str(n+1))
+        if n>=4:
+            exposed=root/'usr/lib/modules/test-kernel/updates/wendyos/card/cfg80211.ko'
+            assert not exposed.exists(), 'candidate lookup still exposed'
+            deps(); add('lateleaf',('backdep',)); (root/'late-loaded').touch()
+            (root/'proc/333/comm').unlink()
+    sys.exit(0)
+if not args or args[0]=='--dry-run': sys.exit(0)
+if args[0]=='-r':
+    # kmod removes the requested leaf, but may leave the implicit backport core.
+    if remove(args[-1]): sys.exit(1)
+    if args[-1]=='newwifi': remove('backdep')
+    sys.exit(0)
+name=args[-1]
+if name==os.environ.get('FAIL_LOAD'): sys.exit(1)
+if name=='newwifi':
+    shutil.rmtree(net/'wlan0',ignore_errors=True)
+    deps()
+    if os.environ.get('FOREIGN_HOLDER'):
+        add('foreign',('cfg80211',))
+    if os.environ.get('FAIL_AFTER_DEPS'): sys.exit(1)
+    add(name,('backdep',))
+    if os.environ.get('ASYNC_LEAF'):
+        (root/'proc/333').mkdir(exist_ok=True)
+        (root/'proc/333/comm').write_text('kmod\n')
+elif name in ('brcmfmac','brcmfmac_cyw'):
+    if (modules/'cfg80211/backport').exists(): sys.exit(1)
+    add(name)
+    if name=='brcmfmac': (net/'wlan0').mkdir(exist_ok=True)
+else:
+    add(name)
+""")
+        model.chmod(0o755)
+        hook=self.root/'dependency-hook'
+        hook.write_text(f'#!/bin/sh\nexec python3 "{model}" modprobe "$@"\n')
+        hook.chmod(0o755)
+        rmmod=self.root/'bin/rmmod'
+        rmmod.write_text(f'#!/bin/sh\nprintf "rmmod %s\\n" "$*" >> "$TEST_LOG"\nexec python3 "{model}" rmmod "$@"\n')
+        tick=self.root/'dependency-tick'
+        tick.write_text(f'#!/bin/sh\nexec python3 "{model}" tick\n')
+        tick.chmod(0o755)
+        self.env.update(MODEL_ROOT=str(self.root), MODPROBE_HOOK=str(hook), SLEEP_HOOK=str(tick),
+                        **{key:str(value) for key,value in flags.items()})
+
+    def assert_dependency_rollback(self, result, calls):
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('activation rolled back and prior modules restored', result.stderr)
+        self.assertNotIn('rollback incomplete', result.stderr)
+        self.assertFalse((self.root/'sys/module/cfg80211/backport').exists())
+        self.assertTrue((self.root/'sys/class/net/wlan0').exists())
+        for module in ('newwifi','backdep','lateleaf'):
+            self.assertFalse((self.root/'sys/module'/module).exists())
+
+    def test_readiness_rollback_unloads_implicit_backport_dependencies(self):
+        self.backport_dependency_graph()
+        result,calls=self.run_apply()
+        self.assert_dependency_rollback(result,calls)
+        self.assertIn('rmmod -- cfg80211',calls)
+        self.assertIn('rmmod -- compat',calls)
+        self.assertFalse((self.root/'sys/module/compat').exists())
+
+    def test_partial_modprobe_failure_unloads_unjournalled_dependencies(self):
+        self.backport_dependency_graph(FAIL_AFTER_DEPS=1)
+        result,calls=self.run_apply()
+        self.assert_dependency_rollback(result,calls)
+        self.assertIn('modprobe newwifi failed',result.stderr)
+        self.assertNotIn('modprobe -r -- newwifi',calls)
+
+    def test_rollback_retries_transient_busy_candidate(self):
+        self.backport_dependency_graph(BUSY_ATTEMPTS=2)
+        result,calls=self.run_apply()
+        self.assert_dependency_rollback(result,calls)
+        self.assertGreaterEqual(calls.count('rmmod -- backdep'),3)
+
+    def test_rollback_rescans_late_autoloaded_payload_leaf(self):
+        self.backport_dependency_graph(ASYNC_LEAF=1)
+        result,calls=self.run_apply()
+        self.assert_dependency_rollback(result,calls)
+        self.assertTrue((self.root/'late-loaded').exists())
+        self.assertIn('rmmod -- lateleaf',calls)
+
+    def test_rollback_rechecks_modules_after_last_helper_exits(self):
+        self.backport_dependency_graph()
+        model=self.root/'module-model.py'
+        self.script.write_text(self.script.read_text().replace(
+            'module_helpers_active() (',
+            f'module_helpers_active() (\n    python3 "{model}" helper-race'))
+        result,calls=self.run_apply()
+        self.assert_dependency_rollback(result,calls)
+        self.assertTrue((self.root/'helper-raced').exists())
+        self.assertIn('rmmod -- lateleaf',calls)
+
+    def test_rollback_preserves_preexisting_nonreplaced_payload_module(self):
+        self.backport_dependency_graph()
+        (self.root/'sys/module/compat').mkdir()
+        result,calls=self.run_apply()
+        self.assert_dependency_rollback(result,calls)
+        self.assertTrue((self.root/'sys/module/compat').exists())
+        self.assertNotIn('rmmod -- compat',calls)
+
+    def test_rollback_waits_for_configured_helper_alias_and_fails_closed(self):
+        self.backport_dependency_graph()
+        (self.root/'proc/sys/kernel/modprobe').write_text('/usr/sbin/custom-module-loader\n')
+        (self.root/'proc/444').mkdir()
+        (self.root/'proc/444/comm').write_text('custom-module-l\n')
+        result,calls=self.run_apply()
+        self.assertNotEqual(result.returncode,0)
+        self.assertIn('module helpers did not quiesce during rollback',result.stderr)
+        self.assertIn('rollback incomplete',result.stderr)
+        self.assertNotIn('modprobe -- brcmfmac',calls)
+        self.assertTrue((self.root/'proc/444/comm').exists())
+
+    def test_rollback_never_unloads_foreign_holder_or_restores_incompatible_base(self):
+        self.backport_dependency_graph(FOREIGN_HOLDER=1)
+        result,calls=self.run_apply()
+        self.assertNotEqual(result.returncode,0)
+        self.assertIn('rollback could not unload candidate module cfg80211',result.stderr)
+        self.assertIn('activation rollback incomplete',result.stderr)
+        self.assertNotIn('modprobe -- brcmfmac',calls)
+        self.assertNotIn('rmmod -- foreign',calls)
+        self.assertTrue((self.root/'sys/module/foreign').exists())
+        self.assertTrue((self.root/'usr/lib/modules/test-kernel/updates/wendyos/card/cfg80211.ko').exists())
 
     def test_first_pci_activation_requires_station_without_association_or_nm_ownership(self):
         self.first_pci_activation()
@@ -982,7 +1149,8 @@ fi
                 self.assertIn("could not rebuild module index during rollback", result.stderr)
                 self.assertIn("rollback incomplete", result.stderr)
                 self.assertNotIn("activation rolled back", result.stderr)
-                self.assertIn("modprobe -- oldwifi", calls)
+                # A failed index closure cannot safely restore the base graph.
+                self.assertNotIn("modprobe -- oldwifi", calls)
 
     def test_signals_exit_without_claiming_rollback(self):
         for signal, status in (("HUP", 129), ("INT", 130), ("TERM", 143)):
