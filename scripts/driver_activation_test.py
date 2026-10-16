@@ -87,6 +87,7 @@ case "$cmd" in
                 [ "${FAIL_BINDING_QUERY:-0}" = 0 ] || exit 1
                 printf '%s\\n%s\\n' "${PROFILE_INTERFACE_NAME:-}" "${PROFILE_MATCH_INTERFACE_NAME:-}" ;;
             '-g GENERAL.STATE device show '* )
+                [ -z "${STATE_HOOK:-}" ] || "$STATE_HOOK" "$5"
                 if [ "${CHECK_WIFI_PRESENT:-0}" = 1 ]; then
                     [ -d "$TEST_NET/$5" ] || exit 1
                 fi
@@ -1037,6 +1038,32 @@ fi
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(len(self.restores(calls)), 1)
         self.assertIn("ifname wlan1", self.restores(calls)[0])
+
+    def test_pci_restore_rechecks_identity_after_nm_readiness(self):
+        self.with_pci_wifi()
+        other = self.root / "sys/bus/pci/devices/onboard"
+        hook = self.root / "swap-after-readiness"
+        hook.write_text(f"#!/bin/sh\n[ \"$1\" != wlan1 ] || ln -sfn '{other}' '{self.root}/sys/class/net/wlan1/device'\n")
+        hook.chmod(0o755)
+        self.env["STATE_HOOK"] = str(hook)
+        result, calls = self.run_apply()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("could not restore", result.stderr)
+        self.assertEqual(self.restores(calls), [])
+
+    def test_oversized_metadata_fails_before_module_changes(self):
+        self.activation.write_text("#" + "x" * 65536)
+        result, calls = self.run_apply()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("oversized activation metadata", result.stderr)
+        self.assertFalse(any(c.startswith(("modprobe ", "rmmod ")) for c in calls))
+
+    def test_excessive_metadata_lines_fail_before_module_changes(self):
+        self.activation.write_text("replace oldwifi\n" * 257)
+        result, calls = self.run_apply()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("malformed activation metadata", result.stderr)
+        self.assertFalse(any(c.startswith(("modprobe ", "rmmod ")) for c in calls))
 
     def test_pci_wifi_restore_resolves_renamed_card(self):
         self.rename_pci_wifi_on_reload()

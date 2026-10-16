@@ -752,6 +752,16 @@ restore_wifi_state() {
                 retries=$((retries+1))
                 continue
             fi
+            # NM readiness queries can race a rename/reprobe. Recheck the
+            # captured physical device and station role at the activation edge.
+            # This narrows the race; shell checks and NM activation are not atomic.
+            if [ -n "$wifi_pci_path" ] && {
+                ! wifi_station_interface "$interface" ||
+                [ "$(readlink -f "/sys/class/net/$interface/device")" != "$wifi_pci_path" ];
+            }; then
+                retries=$((retries+1))
+                continue
+            fi
             # Service restart and NM device rediscovery are asynchronous. Retry
             # only a device that became unavailable during the activation call;
             # authentication/association failures on a ready device still fail.
@@ -946,10 +956,25 @@ for link in "$RUNDIR"/*.raw; do
     [ -n "$SUBJECT" ] && [ "$SUBJECT" != "$name" ] && fail=0
     activation="$ACTIVATIONDIR/$name.conf"
     if [ -f "$activation" ]; then
+        # Trusted package metadata still needs bounded parsing/work before
+        # any module is removed. Reject oversized inputs, never truncate them.
+        activation_bytes=$(wc -c < "$activation") || activation_bytes=65537
+        if [ "$activation_bytes" -gt 65536 ]; then
+            echo "wendyos-sysext-apply: oversized activation metadata for $name" >&2
+            restore_skipped_previous "$name" || rc=1
+            rc=$((rc|fail))
+            continue
+        fi
+        activation_lines=0
         pci_declared=0
         pci_matched=0
         activation_bad=0
         while read -r directive value extra || [ -n "${directive:-}${value:-}${extra:-}" ]; do
+            activation_lines=$((activation_lines+1))
+            if [ "$activation_lines" -gt 256 ]; then
+                activation_bad=1
+                break
+            fi
             case "${directive:-}" in
                 ''|\#*) continue ;;
                 pci)
