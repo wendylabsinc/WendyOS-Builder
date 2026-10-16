@@ -219,14 +219,19 @@ module_sysname() {
     printf '%s' "$1" | tr '-' '_'
 }
 
+# Accept either a PCI bus entry or a network interface's device link. Keep
+# scratch variables in a subshell so callers retain their activation state.
+pci_id_of() (
+    [ -f "$1/vendor" ] && [ -f "$1/device" ] || return 1
+    IFS= read -r vendor < "$1/vendor" || return 1
+    IFS= read -r device < "$1/device" || return 1
+    printf '%s:%s' "${vendor#0x}" "${device#0x}" | tr 'A-F' 'a-f'
+)
+
 pci_device_present() {
     wanted=$1
     for device_path in /sys/bus/pci/devices/*; do
-        [ -f "$device_path/vendor" ] || continue
-        [ -f "$device_path/device" ] || continue
-        IFS= read -r vendor < "$device_path/vendor" || continue
-        IFS= read -r device < "$device_path/device" || continue
-        present=$(printf '%s:%s' "${vendor#0x}" "${device#0x}" | tr 'A-F' 'a-f')
+        present=$(pci_id_of "$device_path") || continue
         [ "$present" = "$wanted" ] && return 0
     done
     return 1
@@ -461,6 +466,12 @@ rollback_modules() {
     while IFS= read -r mod; do
         operation_failed=0
         if [ -n "$action" ]; then
+            # Owned payload modules were already removed by name. Repeating
+            # modprobe -r could also remove a nonreplaced, preexisting dependency.
+            if [ -f "$PLAN/$name.new-payload-modules" ] &&
+               grep -Fqx "$(module_sysname "$mod")" "$PLAN/$name.new-payload-modules"; then
+                continue
+            fi
             modprobe "$action" -- "$mod" || operation_failed=1
         else
             modprobe -- "$mod" || operation_failed=1
@@ -526,31 +537,185 @@ wifi_nmcli() {
     timeout --kill-after=1 "$wifi_wait" nmcli --wait "$wifi_wait" "$@"
 }
 
+# 0: managed station, 1: another interface role/owner, 2: inspection failed.
+# Wi-Fi device type alone also includes APs. Query the kernel's current role,
+# including before reconnection when there is no active NM profile to inspect.
+# Inspect that role first: NAN data interfaces may have no NM device object.
+wifi_kernel_station_interface() (
+    wifi_remaining=$((${2:-$WIFI_DEADLINE} - $(date +%s)))
+    [ "$wifi_remaining" -gt 0 ] || return 2
+    [ "$wifi_remaining" -le 5 ] || wifi_remaining=5
+    wifi_info=$(timeout --kill-after=1 "$wifi_remaining" iw dev "$1" info) || return 2
+    wifi_type=$(printf '%s\n' "$wifi_info" | awk '$1 == "type" { print $2 }')
+    [ -n "$wifi_type" ] || return 2
+    [ "$wifi_type" = managed ]
+)
+
+wifi_station_interface() (
+    wifi_kernel_station_interface "$1" || return "$?"
+    wifi_info=$(wifi_nmcli 5 -g GENERAL.TYPE,GENERAL.NM-MANAGED device show "$1") || return 2
+    [ "$wifi_info" = "$(printf 'wifi\nyes')" ]
+)
+
+# Record physical cards even when their driver has not created an interface yet.
+# Requiring each captured card avoids accepting another BE202 after hot removal
+# or partial probe failure on a system with multiple cards.
+capture_wifi_cards() (
+    while read -r directive value extra || [ -n "${directive:-}${value:-}${extra:-}" ]; do
+        [ "${directive:-}" = restore-wifi-pci ] || continue
+        value=$(printf '%s' "$value" | tr 'A-F' 'a-f')
+        matched=0
+        for device_path in /sys/bus/pci/devices/*; do
+            present=$(pci_id_of "$device_path") || continue
+            [ "$present" = "$value" ] || continue
+            readlink -f "$device_path" || return 1
+            matched=1
+        done
+        if [ "$matched" = 0 ]; then
+            echo "wendyos-sysext-apply: no Wi-Fi PCI device $value; refusing to unload drivers" >&2
+            return 1
+        fi
+    done < "$1"
+)
+
+wait_wifi_cards() (
+    [ -s "$1" ] || return 0
+    # Share a short readiness budget across all cards and retain the outer
+    # capture/reconnect deadline. Association and NM policy are not prerequisites.
+    readiness_deadline=$(($(date +%s) + 10))
+    [ "$readiness_deadline" -le "$WIFI_DEADLINE" ] || readiness_deadline=$WIFI_DEADLINE
+    attempts=0
+    while [ "$attempts" -lt 10 ] && [ "$(date +%s)" -lt "$readiness_deadline" ]; do
+        missing=""
+        while IFS= read -r card; do
+            ready=0
+            for net_path in /sys/class/net/*; do
+                [ -e "$net_path/device" ] || continue
+                [ "$(readlink -f "$net_path/device")" = "$card" ] || continue
+                if wifi_kernel_station_interface "${net_path##*/}" "$readiness_deadline"; then
+                    ready=1
+                    break
+                fi
+            done
+            [ "$ready" = 1 ] || { missing=$card; break; }
+        done < "$1"
+        [ -n "$missing" ] || return 0
+        attempts=$((attempts+1))
+        sleep 1
+    done
+    echo "wendyos-sysext-apply: no station interface appeared on Wi-Fi PCI card ${missing:-within readiness deadline}" >&2
+    return 1
+)
+
 capture_wifi_state() {
     activation=$1
     restore_state=$2
-    while read -r directive interface extra || [ -n "${directive:-}${interface:-}${extra:-}" ]; do
-        [ "${directive:-}" = restore-wifi-connection ] || continue
-        # On a first install the new driver may create this interface. There
-        # cannot be a connection to preserve if the kernel has no device yet.
-        [ -e "/sys/class/net/$interface" ] || continue
-        if ! command -v nmcli >/dev/null 2>&1; then
-            echo "wendyos-sysext-apply: cannot capture $interface connection: nmcli is unavailable" >&2
-            return 1
-        fi
-        if ! connection_uuid=$(wifi_nmcli 5 -g GENERAL.CON-UUID device show "$interface"); then
-            echo "wendyos-sysext-apply: cannot capture $interface connection; refusing to unload its driver" >&2
-            return 1
-        fi
-        case "$connection_uuid" in
-            ''|--) continue ;; # A successful query found no active connection.
-            *[!A-Fa-f0-9-]*)
-                echo "wendyos-sysext-apply: invalid connection UUID for $interface" >&2
-                return 1 ;;
+    while read -r directive value extra || [ -n "${directive:-}${value:-}${extra:-}" ]; do
+        case "${directive:-}" in
+            restore-wifi-connection)
+                capture_wifi_interface "$value" "$restore_state" || return 1 ;;
+            restore-wifi-pci)
+                value=$(printf '%s' "$value" | tr 'A-F' 'a-f')
+                for net_path in /sys/class/net/*; do
+                    present=$(pci_id_of "$net_path/device") || continue
+                    [ "$present" = "$value" ] || continue
+                    # Retain this physical card, not just its vendor/model or
+                    # current wlanN name: both radios disappear during reload.
+                    wifi_pci_path=$(readlink -f "$net_path/device") || return 1
+                    [ -n "$wifi_pci_path" ] || return 1
+                    capture_wifi_interface "${net_path##*/}" "$restore_state" "$wifi_pci_path" || return 1
+                done ;;
         esac
-        printf '%s %s\n' "$interface" "$connection_uuid" >> "$restore_state" || return 1
     done < "$activation"
 }
+
+capture_wifi_interface() {
+    interface=$1
+    restore_state=$2
+    # On a first install the new driver may create this interface. There
+    # cannot be a connection to preserve if the kernel has no device yet.
+    [ -e "/sys/class/net/$interface" ] || return 0
+    if ! command -v nmcli >/dev/null 2>&1; then
+        echo "wendyos-sysext-apply: cannot capture $interface connection: nmcli is unavailable" >&2
+        return 1
+    fi
+    if [ -n "${3:-}" ]; then
+        if wifi_station_interface "$interface"; then
+            :
+        else
+            case "$?" in
+                1) return 0 ;; # NAN, AP and other interfaces belong to their creators.
+                *)
+                    echo "wendyos-sysext-apply: cannot inspect $interface station role; refusing to unload its driver" >&2
+                    return 1 ;;
+            esac
+        fi
+    fi
+    if ! connection_uuid=$(wifi_nmcli 5 -g GENERAL.CON-UUID device show "$interface"); then
+        echo "wendyos-sysext-apply: cannot capture $interface connection; refusing to unload its driver" >&2
+        return 1
+    fi
+    case "$connection_uuid" in
+        ''|--) return 0 ;; # A successful query found no active connection.
+        *[!A-Fa-f0-9-]*)
+            echo "wendyos-sysext-apply: invalid connection UUID for $interface" >&2
+            return 1 ;;
+    esac
+    if [ -n "${3:-}" ]; then
+        # ifname on `connection up` selects a device; it does not override a
+        # profile's name restrictions. A reload can rename this card, so reject
+        # such profiles before unloading rather than rewrite the user's policy.
+        if ! name_binding=$(wifi_nmcli 5 -g connection.interface-name,match.interface-name connection show uuid "$connection_uuid"); then
+            echo "wendyos-sysext-apply: cannot inspect $interface profile binding; refusing to unload its driver" >&2
+            return 1
+        fi
+        name_binding=$(printf '%s\n' "$name_binding" | sed '/^$/d; /^--$/d')
+        if [ -n "$name_binding" ]; then
+            echo "wendyos-sysext-apply: $interface connection $connection_uuid is restricted by interface name; PCI Wi-Fi restoration requires a profile without name restrictions; refusing to unload its driver" >&2
+            return 1
+        fi
+        # A driver reload recreates the basic station, not arbitrary virtual
+        # stations. Never collapse two saved connections onto that one target.
+        while read -r prior_interface _prior_uuid prior_pci_path; do
+            if [ "$prior_pci_path" = "$3" ]; then
+                echo "wendyos-sysext-apply: multiple active stations on $3 ($prior_interface, $interface); refusing to unload its driver" >&2
+                return 1
+            fi
+        done < "$restore_state"
+    fi
+    printf '%s %s %s\n' "$interface" "$connection_uuid" "${3:-}" >> "$restore_state" || return 1
+}
+
+wifi_interface_for_device() (
+    # Run in a subshell so scanning cannot overwrite the caller's journal state.
+    # Preserve the saved station name when it still belongs to this card.
+    # Another card (or an AP/NAN interface) may have taken the old name.
+    if [ -e "/sys/class/net/$2/device" ] &&
+       [ "$(readlink -f "/sys/class/net/$2/device")" = "$1" ] &&
+       wifi_station_interface "$2"; then
+        printf '%s\n' "$2"
+        return 0
+    fi
+    selected=""
+    for net_path in /sys/class/net/*; do
+        [ -e "$net_path/device" ] || continue
+        [ "$(readlink -f "$net_path/device")" = "$1" ] || continue
+        if wifi_station_interface "${net_path##*/}"; then
+            :
+        else
+            case "$?" in
+                1) continue ;;
+                *) return 1 ;; # Retry when NM/kernel rediscovery is incomplete.
+            esac
+        fi
+        # Additional NAN/AP interfaces are harmless; multiple possible stations
+        # after a rename are genuinely ambiguous and must not be guessed.
+        [ -z "$selected" ] || return 1
+        selected=${net_path##*/}
+    done
+    [ -n "$selected" ] || return 1
+    printf '%s\n' "$selected"
+)
 
 restore_wifi_state() {
     restore_state=$1
@@ -558,13 +723,24 @@ restore_wifi_state() {
     [ -s "$restore_state" ] || return 0
     wifi_restore_failed=0
     udevadm settle --timeout=5 >/dev/null 2>&1 || true
-    while read -r interface connection_uuid; do
+    while read -r interface connection_uuid wifi_pci_path; do
         [ -n "$interface" ] || continue
+        saved_interface=$interface
         wifi_connected=0
         retries=0
         while [ "$retries" -lt 3 ] && [ "$(date +%s)" -lt "$WIFI_DEADLINE" ]; do
             attempts=0
             while [ "$attempts" -lt 10 ] && [ "$(date +%s)" -lt "$WIFI_DEADLINE" ]; do
+                # Resolve after each rediscovery, including rollback. Never
+                # reconnect an unrelated card that inherited the old name.
+                if [ -n "$wifi_pci_path" ]; then
+                    interface=$(wifi_interface_for_device "$wifi_pci_path" "$saved_interface") || interface=""
+                    if [ -z "$interface" ]; then
+                        attempts=$((attempts+1))
+                        sleep 1
+                        continue
+                    fi
+                fi
                 nm_state=$(wifi_nmcli 5 -g GENERAL.STATE device show "$interface" 2>/dev/null) || nm_state=""
                 case "${nm_state%% *}" in
                     30|40|50|60|70|80|90|100) break ;;
@@ -572,6 +748,20 @@ restore_wifi_state() {
                 attempts=$((attempts+1))
                 sleep 1
             done
+            if [ -z "$interface" ]; then
+                retries=$((retries+1))
+                continue
+            fi
+            # NM readiness queries can race a rename/reprobe. Recheck the
+            # captured physical device and station role at the activation edge.
+            # This narrows the race; shell checks and NM activation are not atomic.
+            if [ -n "$wifi_pci_path" ] && {
+                ! wifi_station_interface "$interface" ||
+                [ "$(readlink -f "/sys/class/net/$interface/device")" != "$wifi_pci_path" ];
+            }; then
+                retries=$((retries+1))
+                continue
+            fi
             # Service restart and NM device rediscovery are asynchronous. Retry
             # only a device that became unavailable during the activation call;
             # authentication/association failures on a ready device still fail.
@@ -585,7 +775,7 @@ restore_wifi_state() {
             sleep 1
         done
         if [ "$wifi_connected" = 0 ]; then
-            echo "wendyos-sysext-apply: could not restore $interface connection" >&2
+            echo "wendyos-sysext-apply: could not restore ${interface:-$saved_interface} connection" >&2
             wifi_restore_failed=1
         fi
     done < "$restore_state"
@@ -606,10 +796,95 @@ restart_services() (
     [ "$services_failed" = 0 ]
 )
 
+# Snapshot after old targets have been unloaded, before any candidate module
+# can load. Only this payload's absent modules belong to the new transaction;
+# unrelated modules and preexisting, nonreplaced modules are never collected.
+capture_new_payload_modules() (
+    : > "$PLAN/$name.new-payload-modules" || return 1
+    while IFS= read -r claim; do
+        case "$claim" in module:*) mod=${claim#module:} ;; *) continue ;; esac
+        [ -d "/sys/module/$mod" ] || printf '%s\n' "$mod" >> "$PLAN/$name.new-payload-modules" || return 1
+    done < "$PLAN/$name.claims"
+)
+
+# request_module_nowait waits for the helper's exec, not its exit. Once the
+# producing driver is unloaded, already-started helpers remain observable here.
+# Wait for all kmod aliases conservatively; never signal an unrelated process.
+module_helpers_active() (
+    helper_path=$(cat /proc/sys/kernel/modprobe 2>/dev/null) || return 0
+    helper_name=${helper_path##*/}
+    helper_name=$(printf '%s' "$helper_name" | cut -c1-15) # Linux TASK_COMM_LEN
+    for comm_file in /proc/[0-9]*/comm; do
+        [ -r "$comm_file" ] || continue
+        IFS= read -r comm < "$comm_file" || continue
+        case "$comm" in modprobe|kmod|"$helper_name") return 0 ;; esac
+    done
+    return 1
+)
+
+rollback_new_payload_modules() (
+    candidates="$PLAN/$name.new-payload-modules"
+    [ -f "$candidates" ] || return 0 # Failure preceded candidate loading.
+    attempts=0
+    while [ "$attempts" -lt 10 ]; do
+        pending=0
+        while IFS= read -r mod; do
+            [ -d "/sys/module/$mod" ] || continue
+            pending=1
+            held=0
+            for holder in "/sys/module/$mod/holders"/*; do
+                [ ! -e "$holder" ] || held=1
+            done
+            # Holders are removed on their own iteration only if they are also
+            # transaction-owned. Never unload a foreign holder or force removal.
+            [ "$held" = 0 ] || continue
+            rmmod -- "$mod" || true
+        done < "$candidates"
+        if [ "$pending" = 0 ] && ! module_helpers_active; then
+            # The last helper can finish loading between our module scan and
+            # process scan. Recheck after it has exited, before restoring base.
+            clean=1
+            while IFS= read -r mod; do
+                [ ! -d "/sys/module/$mod" ] || clean=0
+            done < "$candidates"
+            [ "$clean" = 1 ] && return 0
+        fi
+        # Candidate lookup paths are already hidden. A helper that opened a .ko
+        # earlier can still finish loading it; wait for that helper and rescan.
+        attempts=$((attempts+1))
+        sleep 1
+    done
+    while IFS= read -r mod; do
+        if [ -d "/sys/module/$mod" ]; then
+            echo "wendyos-sysext-apply: rollback could not unload candidate module $mod" >&2
+        fi
+    done < "$candidates"
+    if module_helpers_active; then
+        echo "wendyos-sysext-apply: module helpers did not quiesce during rollback" >&2
+    fi
+    return 1
+)
+
 rollback_package() {
     rollback_incomplete=0
+    # Close future candidate lookups first. rmmod below only needs loaded names,
+    # including modules whose .ko was already opened by an asynchronous helper.
+    if ! hide_payload "$PLAN/$name.exposed" || ! depmod -a "$KVER"; then
+        echo "wendyos-sysext-apply: could not rebuild module index during rollback for $name" >&2
+        echo "wendyos-sysext-apply: activation rollback incomplete for $name; reboot required" >&2
+        return 1
+    fi
+    if ! rollback_new_payload_modules; then
+        # A surviving backport graph cannot coexist with the base Wi-Fi ABI.
+        # Restore the candidate's search paths for the surviving graph, without
+        # claiming activation success or loading the old ABI underneath it.
+        if ! expose_payload "$name" "$payload" || ! depmod -a "$KVER"; then
+            echo "wendyos-sysext-apply: could not preserve failed candidate exposure for $name" >&2
+        fi
+        echo "wendyos-sysext-apply: activation rollback incomplete for $name; reboot required" >&2
+        return 1
+    fi
     rollback_modules "$inserted" -r || rollback_incomplete=1
-    hide_payload "$PLAN/$name.exposed" || rollback_incomplete=1
     rm -rf "${STATEDIR:?}/$name" || rollback_incomplete=1
     restore_previous "$name" || rollback_incomplete=1
     if ! depmod -a "$KVER"; then
@@ -681,10 +956,25 @@ for link in "$RUNDIR"/*.raw; do
     [ -n "$SUBJECT" ] && [ "$SUBJECT" != "$name" ] && fail=0
     activation="$ACTIVATIONDIR/$name.conf"
     if [ -f "$activation" ]; then
+        # Trusted package metadata still needs bounded parsing/work before
+        # any module is removed. Reject oversized inputs, never truncate them.
+        activation_bytes=$(wc -c < "$activation") || activation_bytes=65537
+        if [ "$activation_bytes" -gt 65536 ]; then
+            echo "wendyos-sysext-apply: oversized activation metadata for $name" >&2
+            restore_skipped_previous "$name" || rc=1
+            rc=$((rc|fail))
+            continue
+        fi
+        activation_lines=0
         pci_declared=0
         pci_matched=0
         activation_bad=0
         while read -r directive value extra || [ -n "${directive:-}${value:-}${extra:-}" ]; do
+            activation_lines=$((activation_lines+1))
+            if [ "$activation_lines" -gt 256 ]; then
+                activation_bad=1
+                break
+            fi
             case "${directive:-}" in
                 ''|\#*) continue ;;
                 pci)
@@ -702,6 +992,16 @@ for link in "$RUNDIR"/*.raw; do
                     ;;
                 replace|reload) [ -z "${extra:-}" ] && valid_module_name "${value:-}" || activation_bad=1 ;;
                 restore-wifi-connection) [ -z "${extra:-}" ] && valid_interface_name "${value:-}" || activation_bad=1 ;;
+                restore-wifi-pci)
+                    case "${value:-}" in
+                        ????':'????)
+                            hex="${value%:*}${value#*:}"
+                            case "$hex" in *[!0-9a-fA-F]*) activation_bad=1 ;; esac
+                            ;;
+                        *) activation_bad=1 ;;
+                    esac
+                    [ -z "${extra:-}" ] || activation_bad=1
+                    ;;
                 restart-service) [ -z "${extra:-}" ] && valid_service_name "${value:-}" || activation_bad=1 ;;
                 *) activation_bad=1 ;;
             esac
@@ -753,7 +1053,9 @@ for link in "$RUNDIR"/*.raw; do
 
     module_conf "$name" "$payload"
     if [ -f "$activation" ] && [ "$activate_now" = 1 ]; then
-        if ! preflight_unload "$name" "$activation" || ! capture_wifi_state "$activation" "$restore_state"; then
+        if ! preflight_unload "$name" "$activation" ||
+           ! capture_wifi_cards "$activation" > "$PLAN/$name.wifi-cards" ||
+           ! capture_wifi_state "$activation" "$restore_state"; then
             if ! restore_previous "$name" || ! depmod -a "$KVER"; then
                 echo "wendyos-sysext-apply: could not restore previous exposure for $name" >&2
             fi
@@ -767,6 +1069,12 @@ for link in "$RUNDIR"/*.raw; do
         fi
     fi
 
+    if ! capture_new_payload_modules; then
+        echo "wendyos-sysext-apply: could not snapshot candidate module ownership for $name" >&2
+        rollback_package || true
+        rc=$((rc|fail))
+        continue
+    fi
     if ! expose_payload "$name" "$payload" || ! depmod -a "$KVER"; then
         echo "wendyos-sysext-apply: could not expose payload for $name" >&2
         rollback_package || true
@@ -797,6 +1105,9 @@ for link in "$RUNDIR"/*.raw; do
 
     if [ "$package_failed" = 0 ] && [ -f "$activation" ] && [ "$activate_now" = 1 ]; then
         restart_services "$activation" || package_failed=1
+        if [ "$package_failed" = 0 ]; then
+            wait_wifi_cards "$PLAN/$name.wifi-cards" || package_failed=1
+        fi
         if [ "$package_failed" = 0 ]; then
             restore_wifi_state "$restore_state" || package_failed=1
         fi

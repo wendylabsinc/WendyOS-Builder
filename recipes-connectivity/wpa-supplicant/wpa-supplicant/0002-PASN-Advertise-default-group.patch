@@ -1,0 +1,33 @@
+From 9cd28d865e70b20bb115a70a81ba3d3611e40c3f Mon Sep 17 00:00:00 2001
+From: Sai Pratyusha Magam <sai.magam@oss.qualcomm.com>
+Date: Thu, 20 Aug 2026 05:39:08 +0530
+Subject: [PATCH 2/3] PASN: Advertise default group
+
+Upstream-Status: Backport [9cd28d865e70b20bb115a70a81ba3d3611e40c3f]
+
+---
+ src/common/wpa_common.c | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/src/common/wpa_common.c b/src/common/wpa_common.c
+index 959da36..f065b01 100644
+--- a/src/common/wpa_common.c
++++ b/src/common/wpa_common.c
+@@ -4799,10 +4799,14 @@ bool rsn_is_snonce_cookie(const u8 *snonce)
+ void wpa_add_supported_groups(struct wpabuf *buf, const int *groups)
+ {
+ 	unsigned int count, i;
++	static const int default_groups[] = { 19, 0 };
+ 
+-	if (!buf || !groups)
++	if (!buf)
+ 		return;
+ 
++	if (!groups)
++		groups = default_groups;
++
+ 	count = int_array_len(groups);
+ 	if (wpabuf_tailroom(buf) < 2 + 1 + count * 2)
+ 		return;
+-- 
+2.51.0

@@ -20,3 +20,6 @@ KMACHINE:qemuarm64-wendyos = "qemuarm64"
 # moved to blacksail. If a future kernel ever regresses, re-add a patch under
 # recipes-kernel/linux/linux-yocto/, a SRC_URI line for it and the
 # FILESEXTRAPATHS:prepend line that puts that directory on the file search path.
+
+require recipes-kernel/linux/mesh-local.inc
+require recipes-kernel/linux/mesh-internet.inc

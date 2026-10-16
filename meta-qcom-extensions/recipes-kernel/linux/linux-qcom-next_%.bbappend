@@ -40,3 +40,11 @@ SRC_URI:append:qcom-wendyos = " file://0004-Revert-usb-dwc3-qcom-skip-phy-manage
 # it: setlocalversion checks with `git status -uno`, which ignores untracked
 # files. A machine override, so it reaches the devupstream variant as well.
 PATCHTOOL:qcom-wendyos = "git"
+
+require recipes-kernel/linux/mesh-local.inc
+require recipes-kernel/linux/mesh-internet.inc
+
+# Arduino Uno Q also includes this layer and uses the same pinned kernel.
+# The newer callback releases its reference after the unlock label.
+BLUETOOTH_LE_PENDING_PATCH = "0001-bluetooth-clean-up-rejected-pending-le-connection-qcom.patch"
+require recipes-kernel/linux/bluetooth-le-pending.inc
