@@ -46,3 +46,5 @@ wendyos_check_mesh_tproxy() {
 # Kept behind the machine opt-in so other JP7 images retain their vendor kernel
 # configuration and task hashes.
 require ${@'recipes-kernel/linux/driver-extensions.inc' if d.getVar('WENDYOS_DRIVER_EXTENSIONS') == '1' else ''}
+
+require recipes-kernel/linux/mesh-local.inc

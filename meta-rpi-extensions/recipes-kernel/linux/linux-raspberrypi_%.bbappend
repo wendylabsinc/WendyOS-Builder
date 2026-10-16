@@ -15,3 +15,4 @@ SRC_URI += "file://0001-dwc2-force-g_dma-false-for-BCM2712-in-peripheral-mod.pat
 # other board's kernel bbappend enables the same thing with this one line.
 require ${@'recipes-kernel/linux/driver-extensions.inc' if d.getVar('WENDYOS_DRIVER_EXTENSIONS') == '1' else ''}
 
+require recipes-kernel/linux/mesh-local.inc

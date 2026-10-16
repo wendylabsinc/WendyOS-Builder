@@ -20,3 +20,5 @@ WENDYOS_X86_DEBUG_KCFG = " \
     file://pstore.cfg \
     "
 SRC_URI:append:x86-wendyos = " ${@bb.utils.contains('WENDYOS_DEBUG', '1', d.getVar('WENDYOS_X86_DEBUG_KCFG'), '', d)}"
+
+require recipes-kernel/linux/mesh-local.inc
