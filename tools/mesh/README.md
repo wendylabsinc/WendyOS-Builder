@@ -17,18 +17,22 @@ The layer supplies the local archive and masks the agent's automatic updater
 timer. Remove the layer to return to the normal release selection.
 
 `BUILD-PROVENANCE.json` records the source and Builder commits, hashes of the
-committed Builder inputs, the compiler read from the finished binary, and the
+committed Builder inputs, the selected Go launcher path and SHA-256, the compiler
+read from the finished binary, and the
 binary/archive checksums. The build ignores an ambient Go workspace and
 persistent Go flags; it does not modify module dependencies. The compiler reads
 a private export of the recorded source commit, excluding ignored and untracked
 working-directory files. It copies raw Git blobs, so export attributes and
-checkout filters cannot omit or rewrite committed input files. Submodule entries
+checkout filters cannot omit or rewrite committed input files. Git replacement refs are disabled and raw blob object hashes are verified.
+Case/Unicode path aliases and escaping symlinks are rejected before compilation;
+regular files are written before any symlinks are created. Submodule entries
 are rejected because their contents are not part of the recorded source tree.
 Changes to the original checkout during compilation
 cannot change the exported sources and still fail the final cleanliness check.
 `--go` can select
 a particular Go executable. Go may select a newer toolchain required by the
-source checkout; the manifest records the compiler actually used.
+source checkout; the manifest records the compiler actually used. The launcher
+hash identifies the selected executable, not every toolchain it may delegate to.
 
 Packaging does not validate the resulting image or hardware behavior. The
 manifest leaves those checks pending. Regression tests run in Scripts CI and

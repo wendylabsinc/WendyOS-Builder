@@ -6,11 +6,14 @@ import hashlib
 import io
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+import posixpath
 import re
+import shutil
 import subprocess
 import tarfile
 import tempfile
+import unicodedata
 
 
 SERVICE_FILES = (
@@ -26,11 +29,16 @@ def run(*args, **kwargs):
     return subprocess.check_output(list(map(str, args)), text=True, **kwargs).strip()
 
 
+def git_env():
+    # Replacement refs can change bytes without changing the reported object ID.
+    return dict(os.environ, GIT_NO_REPLACE_OBJECTS='1')
+
+
 def clean_revision(repository):
-    if run('git', '-C', repository, 'status', '--porcelain', '--untracked-files=all'):
+    if run('git', '-C', repository, 'status', '--porcelain', '--untracked-files=all', env=git_env()):
         raise ValueError(f'checkout must be committed and clean: {repository}')
-    commit = run('git', '-C', repository, 'rev-parse', 'HEAD')
-    return commit, run('git', '-C', repository, 'rev-parse', f'{commit}^{{tree}}')
+    commit = run('git', '-C', repository, 'rev-parse', 'HEAD', env=git_env())
+    return commit, run('git', '-C', repository, 'rev-parse', f'{commit}^{{tree}}', env=git_env())
 
 
 def export_revision(repository, commit, destination, objects):
@@ -38,10 +46,13 @@ def export_revision(repository, commit, destination, objects):
     # from committed, repository-local and global attributes. A build must keep
     # every recorded source byte regardless of those distribution preferences.
     destination = destination.resolve()
+    if any(destination.iterdir()):
+        raise ValueError('source export requires an empty private directory')
     listing = subprocess.check_output([
         'git', '-C', str(repository), 'ls-tree', '-rz', '--full-tree', commit,
-    ])
+    ], env=git_env())
     entries = []
+    paths = {}
     for entry in listing.split(b'\0'):
         if not entry:
             continue
@@ -49,27 +60,65 @@ def export_revision(repository, commit, destination, objects):
         mode, kind, oid = metadata.split()
         if kind != b'blob' or mode not in (b'100644', b'100755', b'120000'):
             raise ValueError(f'unsupported source tree entry: {os.fsdecode(name)}')
-        entries.append((mode, oid, destination / os.fsdecode(name)))
+        relative = PurePosixPath(os.fsdecode(name))
+        if relative.is_absolute() or any(part in ('', '.', '..') for part in os.fsdecode(name).split('/')):
+            raise ValueError(f'unsafe source path: {relative}')
+        # Git is case-sensitive; the export filesystem may not be. Reject
+        # aliases (including Unicode normalization) before creating anything.
+        for index in range(1, len(relative.parts) + 1):
+            prefix = relative.parts[:index]
+            key = tuple(unicodedata.normalize('NFC', part).casefold() for part in prefix)
+            directory = index < len(relative.parts)
+            if '.git' in key or (key in paths and paths[key] != (prefix, True)):
+                raise ValueError(f'colliding or reserved source path: {relative}')
+            if key in paths and not directory:
+                raise ValueError(f'colliding source path: {relative}')
+            paths[key] = (prefix, directory)
+        entries.append((mode, oid, destination.joinpath(*relative.parts)))
     with objects.open('wb') as raw:
         subprocess.run(['git', '-C', str(repository), 'cat-file', '--batch'],
                        input=b''.join(oid + b'\n' for _, oid, _ in entries),
-                       stdout=raw, check=True)
+                       stdout=raw, check=True, env=git_env())
+    blobs = []
+    links = []
     with objects.open('rb') as raw:
         for mode, oid, path in entries:
             actual_oid, kind, length = raw.readline().split()
             if actual_oid != oid or kind != b'blob':
                 raise ValueError('unexpected source object')
+            offset = raw.tell()
             data = raw.read(int(length))
             if len(data) != int(length) or raw.read(1) != b'\n':
                 raise ValueError('truncated source object')
-            path.parent.mkdir(parents=True, exist_ok=True)
+            algorithm = 'sha1' if len(oid) == 40 else 'sha256'
+            digest = hashlib.new(algorithm, b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest()
+            if digest.encode() != oid:
+                raise ValueError('source blob does not match its recorded object ID')
             if mode == b'120000':
-                path.symlink_to(os.fsdecode(data))
+                target = os.fsdecode(data)
+                resolved = posixpath.normpath(str(path.relative_to(destination).parent / target))
+                if not target or '\0' in target or target.startswith('/') or resolved == '..' or resolved.startswith('../'):
+                    raise ValueError(f'source symlink escapes the recorded tree: {path}')
+                links.append((path, target))
             else:
-                path.write_bytes(data)
+                blobs.append((mode, path, offset, len(data)))
+        # No symlink exists while regular files are written. Exclusive creation
+        # also refuses aliases not covered by our portable-name checks.
+        for mode, path, offset, length in blobs:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            raw.seek(offset)
+            with path.open('xb') as output:
+                output.write(raw.read(length))
                 path.chmod(0o755 if mode == b'100755' else 0o644)
-    for mode, _, path in entries:
-        if mode == b'120000' and not path.resolve().is_relative_to(destination):
+    for path, target in links:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.symlink_to(target)
+    for path, _ in links:
+        try:
+            resolved = path.resolve()
+        except (RuntimeError, OSError) as error:
+            raise ValueError(f'invalid source symlink: {path}') from error
+        if not resolved.is_relative_to(destination):
             raise ValueError(f'source symlink escapes the recorded tree: {path}')
 
 
@@ -89,7 +138,7 @@ def package_agent(source, out, go, version, builder):
     paths = [f'recipes-core/wendyos-agent/files/{name}' for name in SERVICE_FILES]
     paths += ['conf/layer.conf', 'tools/mesh/package-local-agent.py']
     inputs = {
-        path: subprocess.check_output(['git', '-C', str(builder), 'show', f'{builder_commit}:{path}'])
+        path: subprocess.check_output(['git', '-C', str(builder), 'show', f'{builder_commit}:{path}'], env=git_env())
         for path in paths
     }
     compatibility = next(
@@ -100,6 +149,11 @@ def package_agent(source, out, go, version, builder):
 
     out.mkdir(parents=True)
     binary = out / 'wendy-agent'
+    go_path = shutil.which(str(go))
+    if go_path is None:
+        raise ValueError(f'Go executable not found: {go}')
+    go = str(Path(go_path).resolve())
+    go_launcher_sha = hashlib.sha256(Path(go).read_bytes()).hexdigest()
     # A developer's surrounding go.work or persistent GOFLAGS must not select
     # extra source or flags outside the recorded checkout/build invocation.
     env = dict(os.environ, CGO_ENABLED='0', GOOS='linux', GOARCH='arm64',
@@ -118,6 +172,8 @@ def package_agent(source, out, go, version, builder):
 
         # Resolve automatic toolchain selection against the same exported module.
         build_info = run(go, 'version', '-m', binary, cwd=snapshot, env=env).splitlines()
+    if hashlib.sha256(Path(go).read_bytes()).hexdigest() != go_launcher_sha:
+        raise ValueError('Go launcher changed during the build')
     if clean_revision(source) != (commit, tree):
         raise ValueError('source revision changed during the build')
     data = binary.read_bytes()
@@ -180,6 +236,10 @@ FILES:${{PN}}:append = " ${{sysconfdir}}/systemd/system/wendyos-agent-updater.ti
         'builder_tree': builder_tree,
         'builder_files_sha256': {path: hashlib.sha256(content).hexdigest() for path, content in inputs.items()},
         'go_version': go_version,
+        # Automatic toolchain selection may use a different compiler; its
+        # version is recorded above. This hash identifies only the launcher.
+        'go_launcher_path': go,
+        'go_launcher_sha256': go_launcher_sha,
         'go_build_info': '\n'.join(build_info[1:]),
         'version': version,
         'binary_sha256': hashlib.sha256(data).hexdigest(),

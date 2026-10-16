@@ -73,8 +73,8 @@ else:
         env.start()
         self.addCleanup(env.stop)
 
-    def git(self, repo, *args):
-        return subprocess.check_output(['git', '-C', str(repo), *args], text=True).strip()
+    def git(self, repo, *args, input=None):
+        return subprocess.check_output(['git', '-C', str(repo), *args], input=input, text=True).strip()
 
     def package(self, output='output'):
         return PACKAGE.package_agent(self.source, self.root / output, str(self.go),
@@ -84,6 +84,8 @@ else:
         manifest = self.package()
         self.assertEqual(manifest['go_version'], 'go1.27.0')
         self.assertIn('GOARCH=arm64', manifest['go_build_info'])
+        self.assertEqual(manifest['go_launcher_path'], str(self.go.resolve()))
+        self.assertEqual(manifest['go_launcher_sha256'], hashlib.sha256(self.go.read_bytes()).hexdigest())
         self.assertEqual(manifest['builder_commit'], self.git(self.builder, 'rev-parse', 'HEAD'))
         for path, digest in manifest['builder_files_sha256'].items():
             self.assertEqual(digest, hashlib.sha256((self.builder / path).read_bytes()).hexdigest())
@@ -180,6 +182,83 @@ else:
         self.assertEqual((target / 'main.go').stat().st_mode & 0o777, 0o644)
         self.assertTrue((target / 'link').is_symlink())
         self.assertEqual(os.readlink(target / 'link'), 'main.go')
+
+    def test_replacement_refs_cannot_change_source_or_builder_bytes(self):
+        commit, tree = PACKAGE.clean_revision(self.source)
+        service = 'recipes-core/wendyos-agent/files/wendyos-agent.service'
+        original_service = (self.builder / service).read_bytes()
+        for repo, path, replacement in [(self.source, 'main.go', 'package replaced\n'),
+                                         (self.builder, service, 'replaced service\n')]:
+            original = self.git(repo, 'rev-parse', 'HEAD:' + path)
+            substitute = self.git(repo, 'hash-object', '-w', '--stdin', input=replacement)
+            self.git(repo, 'replace', original, substitute)
+        # The caller cannot re-enable replacements through its environment.
+        with patch.dict(os.environ, GIT_NO_REPLACE_OBJECTS='0'):
+            manifest = self.package()
+        call = json.loads(self.log.read_text().splitlines()[0])
+        self.assertEqual(call['sources'], {'main.go': 'package main\n'})
+        self.assertEqual((manifest['source_commit'], manifest['source_tree']), (commit, tree))
+        self.assertEqual((self.root / 'output/layer' / service).read_bytes(), original_service)
+
+    def test_replacement_tree_cannot_change_recorded_tree(self):
+        commit, tree = PACKAGE.clean_revision(self.source)
+        empty = self.git(self.source, 'mktree', input='')
+        self.git(self.source, 'replace', tree, empty)
+        self.assertEqual(PACKAGE.clean_revision(self.source), (commit, tree))
+        self.package()
+        call = json.loads(self.log.read_text().splitlines()[0])
+        self.assertEqual(call['sources'], {'main.go': 'package main\n'})
+
+    def test_case_colliding_symlink_cannot_write_outside_export(self):
+        outside = self.root / 'outside'
+        outside.mkdir()
+        link = self.git(self.source, 'hash-object', '-w', '--stdin', input='../outside')
+        blob = self.git(self.source, 'hash-object', '-w', '--stdin', input='escaped\n')
+        subtree = self.git(self.source, 'mktree', input=f'100644 blob {blob}\tpayload\n')
+        tree = self.git(self.source, 'mktree',
+                        input=f'120000 blob {link}\tA\n040000 tree {subtree}\ta\n')
+        target = self.root / 'export'
+        target.mkdir()
+        with self.assertRaisesRegex(ValueError, 'colliding'):
+            PACKAGE.export_revision(self.source, tree, target, self.root / 'objects')
+        self.assertEqual(list(target.iterdir()), [])
+        self.assertEqual(list(outside.iterdir()), [])
+
+    def test_rejects_unicode_aliases_before_writing(self):
+        blob = self.git(self.source, 'rev-parse', 'HEAD:main.go')
+        for names in [('File', 'file'), ('caf\u00e9', 'cafe\u0301')]:
+            with self.subTest(names=names):
+                tree = self.git(self.source, 'mktree',
+                                input=''.join(f'100644 blob {blob}\t{name}\n' for name in names))
+                target = self.root / ('export-' + names[0])
+                target.mkdir()
+                with self.assertRaisesRegex(ValueError, 'colliding'):
+                    PACKAGE.export_revision(self.source, tree, target, self.root / 'objects')
+                self.assertEqual(list(target.iterdir()), [])
+
+    def test_rejects_corrupted_blob_before_writing(self):
+        target = self.root / 'export'
+        target.mkdir()
+        original_run = subprocess.run
+        def corrupt(args, **kwargs):
+            result = original_run(args, **kwargs)
+            if 'cat-file' in args:
+                raw = Path(kwargs['stdout'].name)
+                raw.write_bytes(raw.read_bytes().replace(b'package main\n', b'package evil\n'))
+            return result
+        with patch.object(PACKAGE.subprocess, 'run', side_effect=corrupt):
+            with self.assertRaisesRegex(ValueError, 'recorded object ID'):
+                PACKAGE.export_revision(self.source, self.git(self.source, 'rev-parse', 'HEAD'),
+                                        target, self.root / 'objects')
+        self.assertEqual(list(target.iterdir()), [])
+
+    def test_rejects_existing_export_contents(self):
+        target = self.root / 'export'
+        target.mkdir()
+        (target / 'main.go').symlink_to(self.source / 'main.go')
+        with self.assertRaisesRegex(ValueError, 'empty private directory'):
+            PACKAGE.export_revision(self.source, self.git(self.source, 'rev-parse', 'HEAD'),
+                                    target, self.root / 'objects')
 
     def test_rejects_untracked_source_before_building(self):
         (self.source / 'untracked.go').write_text('package main\n')
