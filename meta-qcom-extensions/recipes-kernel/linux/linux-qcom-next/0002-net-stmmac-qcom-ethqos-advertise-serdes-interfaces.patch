@@ -1,4 +1,5 @@
 From: Thomas Karpiniec <tom.karpiniec@outlook.com>
+Date: Mon, 14 Sep 2026 13:26:25 +1000
 Subject: [PATCH] net: stmmac: qcom-ethqos: advertise supported SerDes interfaces
 
 With a QCA8081 and phy-mode = "2500base-x", phylink currently validates
