@@ -4,7 +4,8 @@
 # BlueZ expresses this parameter in 10 ms units; 200 gives the tested 2 s.
 do_install:append() {
     sed -i 's/^#ConnectionSupervisionTimeout=$/ConnectionSupervisionTimeout=200/' \
-        ${D}${sysconfdir}/bluetooth/main.conf
+        "${D}${sysconfdir}/bluetooth/main.conf"
     grep -qx 'ConnectionSupervisionTimeout=200' \
-        ${D}${sysconfdir}/bluetooth/main.conf
+        "${D}${sysconfdir}/bluetooth/main.conf" || \
+        bbfatal "BlueZ main.conf did not accept ConnectionSupervisionTimeout=200; check the upstream template"
 }
