@@ -140,3 +140,6 @@ INSANE_SKIP:${PN} += "already-stripped buildpaths ldflags"
 # Runtime dependencies
 # curl/wget needed for auto-updater, tar for extraction
 RDEPENDS:${PN} = "bash curl tar"
+
+# Host policy required by core mesh UDP, regardless of Internet-sharing settings.
+RDEPENDS:${PN}:append = " wendyos-mesh-policy"

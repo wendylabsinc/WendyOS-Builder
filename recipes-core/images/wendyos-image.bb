@@ -3,6 +3,7 @@ DESCRIPTION = "WendyOS Image"
 LICENSE = "MIT"
 
 inherit core-image
+inherit mesh-local-policy-check
 
 DISTRO_FEATURES:append = " systemd"
 VIRTUAL-RUNTIME_init_manager = "systemd"

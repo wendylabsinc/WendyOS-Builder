@@ -1,0 +1,2 @@
+# sysctl.d(5): apply module-owned keys when they appear after early boot.
+ACTION=="add", SUBSYSTEM=="module", KERNEL=="br_netfilter", RUN+="@SYSTEMD_SYSCTL@ --prefix=/net/bridge/bridge-nf-call-iptables"
