@@ -5,7 +5,8 @@ Pause only the legacy shared-address advertising transaction while preparing
 an active scan. Restore management intent and wall-clock expiry without
 spending another rotation slice, and reconcile final shared random address
 with the existing public scan fallback and RPA cache. Retain elapsed expiry
-authority across timer allocation/submit failures with bounded retry.
+authority across timer allocation/submit failures, backing off from 100 ms to
+3.2 seconds between retries without dropping cleanup.
 Commit explicit armed/deadline ownership under the device lock so canceled
 callbacks cannot truncate a pending replacement or consume a fresh slice.
 Retire a completed instance's expiry marker even when selection has changed,
@@ -52,7 +53,23 @@ Upstream-Status: Pending
  	/* Get the next instance to advertise BEFORE we remove
  	 * the current one. This can be the same instance again
  	 * if there is only one instance.
-@@ -553,6 +563,7 @@
+@@ -550,9 +560,23 @@
+ 	return 0;
+ }
+ 
++/* Back off allocation/queue failures, retaining expiry authority until cleanup
++ * succeeds. A fresh advertising slice resets the retry count.
++ */
++static unsigned long adv_timeout_retry_delay(struct hci_dev *hdev)
++{
++	unsigned int delay = 100U << hdev->adv_instance_expire_retries;
++
++	if (hdev->adv_instance_expire_retries < 5)
++		hdev->adv_instance_expire_retries++;
++
++	return msecs_to_jiffies(delay);
++}
++
  static void adv_timeout_expire(struct work_struct *work)
  {
  	u8 *inst_ptr;
@@ -60,7 +77,7 @@ Upstream-Status: Pending
  	struct hci_dev *hdev = container_of(work, struct hci_dev,
  					    adv_instance_expire.work);
  
-@@ -560,17 +571,51 @@
+@@ -560,17 +584,51 @@
  
  	hci_dev_lock(hdev);
  
@@ -114,11 +131,11 @@ Upstream-Status: Pending
 +	    !hci_dev_test_flag(hdev, HCI_UNREGISTER))
 +		queue_delayed_work(hdev->req_workqueue,
 +				   &hdev->adv_instance_expire,
-+				   msecs_to_jiffies(100));
++				   adv_timeout_retry_delay(hdev));
  
  unlock:
  	hci_dev_unlock(hdev);
-@@ -1825,7 +1870,8 @@
+@@ -1825,7 +1883,8 @@
  	return hci_enable_advertising_sync(hdev);
  }
  
@@ -128,7 +145,7 @@ Upstream-Status: Pending
  {
  	struct adv_info *adv_instance;
  	struct hci_cp_le_set_adv_param cp;
-@@ -1833,7 +1879,7 @@
+@@ -1833,7 +1892,7 @@
  	bool connectable;
  	u16 adv_min_interval, adv_max_interval;
  	u32 flags;
@@ -137,7 +154,7 @@ Upstream-Status: Pending
  
  	if (ext_adv_capable(hdev))
  		return hci_enable_ext_advertising_sync(hdev,
-@@ -1907,8 +1953,17 @@
+@@ -1907,8 +1966,17 @@
  	if (status)
  		return status;
  
@@ -155,7 +172,7 @@ Upstream-Status: Pending
  }
  
  static int enable_advertising_sync(struct hci_dev *hdev, void *data)
-@@ -1961,18 +2016,35 @@
+@@ -1961,18 +2029,35 @@
  int hci_schedule_adv_instance_sync(struct hci_dev *hdev, u8 instance,
  				   bool force)
  {
@@ -200,7 +217,7 @@ Upstream-Status: Pending
  
  	/* A zero timeout means unlimited advertising. As long as there is
  	 * only one instance, duration should be ignored. We still set a timeout
-@@ -1987,31 +2059,45 @@
+@@ -1987,31 +2072,46 @@
  	else
  		timeout = adv->remaining_time;
  
@@ -221,6 +238,7 @@ Upstream-Status: Pending
 +		hdev->adv_instance_timeout = timeout;
 +		hdev->adv_instance_expire_deadline =
 +			jiffies + secs_to_jiffies(timeout);
++		hdev->adv_instance_expire_retries = 0;
 +		hdev->adv_instance_expire_armed = true;
 +	}
 +
@@ -267,7 +285,7 @@ Upstream-Status: Pending
  }
  
  static int hci_clear_adv_sets_sync(struct hci_dev *hdev, struct sock *sk)
-@@ -2105,6 +2191,13 @@
+@@ -2105,6 +2205,13 @@
  	if (!instance || hdev->cur_adv_instance == instance)
  		cancel_adv_timeout(hdev);
  
@@ -281,7 +299,7 @@ Upstream-Status: Pending
  	/* Get the next instance to advertise BEFORE we remove
  	 * the current one. This can be the same instance again
  	 * if there is only one instance.
-@@ -2629,7 +2722,8 @@
+@@ -2629,7 +2736,8 @@
  	return err;
  }
  
@@ -291,7 +309,7 @@ Upstream-Status: Pending
  {
  	int err;
  
-@@ -2664,8 +2758,14 @@
+@@ -2664,8 +2772,14 @@
  	if (!err && scan_use_rpa(hdev))
  		return 0;
  
@@ -307,7 +325,7 @@ Upstream-Status: Pending
  }
  
  struct sk_buff *hci_read_local_oob_data_sync(struct hci_dev *hdev,
-@@ -5263,9 +5363,12 @@
+@@ -5263,9 +5377,12 @@
  
  	cancel_interleave_scan(hdev);
  
@@ -321,7 +339,7 @@ Upstream-Status: Pending
  	}
  
  	err = hci_dev_shutdown(hdev);
-@@ -5944,8 +6047,210 @@
+@@ -5944,8 +6061,210 @@
  				     sizeof(cp), &cp, HCI_CMD_TIMEOUT);
  }
  
@@ -532,7 +550,7 @@ Upstream-Status: Pending
  	u8 own_addr_type;
  	/* Accept list is not used for discovery */
  	u8 filter_policy = 0x00;
-@@ -5955,6 +6260,10 @@
+@@ -5955,6 +6274,10 @@
  
  	bt_dev_dbg(hdev, "");
  
@@ -543,7 +561,7 @@ Upstream-Status: Pending
  	/* If controller is scanning, it means the passive scanning is
  	 * running. Thus, we should temporarily stop it in order to set the
  	 * discovery scanning parameters.
-@@ -5967,21 +6276,39 @@
+@@ -5967,21 +6290,39 @@
  
  	cancel_interleave_scan(hdev);
  
@@ -590,7 +608,7 @@ Upstream-Status: Pending
  
  	if (hci_is_adv_monitoring(hdev) ||
  	    (hci_test_quirk(hdev, HCI_QUIRK_STRICT_DUPLICATE_FILTER) &&
-@@ -6006,9 +6333,17 @@
+@@ -6006,9 +6347,17 @@
  		return err;
  
  failed:
@@ -611,6 +629,21 @@ Upstream-Status: Pending
  
  	/* Resume passive scanning */
  	hci_update_passive_scan_sync(hdev);
+--- a/net/bluetooth/mgmt.c
++++ b/net/bluetooth/mgmt.c
+@@ -1284,8 +1284,11 @@
+ 
+ static void cancel_adv_timeout(struct hci_dev *hdev)
+ {
+-	if (hdev->adv_instance_timeout) {
++	if (hdev->adv_instance_timeout || hdev->expired_adv_instance ||
++	    hdev->adv_instance_expire_armed) {
+ 		hdev->adv_instance_timeout = 0;
++		hdev->expired_adv_instance = 0;
++		hdev->adv_instance_expire_armed = false;
+ 		cancel_delayed_work(&hdev->adv_instance_expire);
+ 	}
+ }
 --- a/net/bluetooth/hci_core.c
 +++ b/net/bluetooth/hci_core.c
 @@ -1642,13 +1642,19 @@
@@ -658,30 +691,16 @@ Upstream-Status: Pending
  
  	hdev->advmon_allowlist_duration = 300;
  	hdev->advmon_no_filter_duration = 500;
---- a/net/bluetooth/mgmt.c
-+++ b/net/bluetooth/mgmt.c
-@@ -1284,8 +1284,11 @@
- 
- static void cancel_adv_timeout(struct hci_dev *hdev)
- {
--	if (hdev->adv_instance_timeout) {
-+	if (hdev->adv_instance_timeout || hdev->expired_adv_instance ||
-+	    hdev->adv_instance_expire_armed) {
- 		hdev->adv_instance_timeout = 0;
-+		hdev->expired_adv_instance = 0;
-+		hdev->adv_instance_expire_armed = false;
- 		cancel_delayed_work(&hdev->adv_instance_expire);
- 	}
- }
 --- a/include/net/bluetooth/hci_core.h
 +++ b/include/net/bluetooth/hci_core.h
-@@ -600,6 +600,11 @@
+@@ -600,6 +600,12 @@
  	struct list_head	adv_instances;
  	unsigned int		adv_instance_cnt;
  	__u8			cur_adv_instance;
 +	/* Expired legacy slice retained across fallible queueing/retry. */
 +	__u8			expired_adv_instance;
 +	/* Timer authority is independent of zero duration and retry dates. */
++	u8			adv_instance_expire_retries;
 +	bool			adv_instance_expire_armed;
 +	unsigned long		adv_instance_expire_deadline;
  	__u16			adv_instance_timeout;

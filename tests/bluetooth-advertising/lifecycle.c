@@ -10,7 +10,8 @@ typedef uint8_t u8;typedef uint16_t u16;
 struct list_head {struct list_head *next,*prev;};
 struct delayed_work {bool pending;unsigned long expires;};
 struct adv_info {struct list_head list;u8 instance;u16 timeout,duration,remaining_time;struct delayed_work rpa_expired_cb;};
-struct hci_dev {struct list_head adv_instances;u8 cur_adv_instance,expired_adv_instance;bool adv_instance_expire_armed;unsigned long adv_instance_expire_deadline;u16 adv_instance_timeout;struct delayed_work adv_instance_expire;unsigned int adv_instance_cnt;unsigned flags;void *req_workqueue;int now,cancels,sync_cancels,disables,freed,starts,queued;};
+struct hci_dev {struct list_head adv_instances;u8 cur_adv_instance,expired_adv_instance;u8 adv_instance_expire_retries;
+    bool adv_instance_expire_armed;unsigned long adv_instance_expire_deadline;u16 adv_instance_timeout;struct delayed_work adv_instance_expire;unsigned int adv_instance_cnt;unsigned flags;void *req_workqueue;int now,cancels,sync_cancels,disables,freed,starts,queued;};
 enum {HCI_ADVERTISING,HCI_LE_ADV};
 #define BT_DBG(...) ((void)0)
 #define container_of(p,t,m) ((t *)((char *)(p)-offsetof(t,m)))
@@ -102,7 +103,9 @@ int main(void) {
         CHECK(h.adv_instance_expire_deadline==5000 && h.adv_instance_expire.expires==5000);
         CHECK(h.cancels==1); /* Only the removed instance's RPA callback. */
     } else if (which!=4 && which!=7) {
+        h.adv_instance_expire_retries=5;
         CHECK(hci_schedule_adv_instance_sync(&h,2,true)==0);
+        CHECK(h.adv_instance_expire_retries==0);
         CHECK(h.cur_adv_instance==2 && h.adv_instance_expire_armed);
         CHECK(h.adv_instance_expire.pending && h.starts==1);
         CHECK(hci_find_adv_instance(&h,2)->remaining_time==6);

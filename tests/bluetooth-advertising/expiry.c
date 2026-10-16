@@ -8,6 +8,7 @@ typedef uint8_t u8;
 struct delayed_work { bool pending; };
 struct hci_dev {
     u8 expired_adv_instance;
+    u8 adv_instance_expire_retries;
     bool adv_instance_expire_armed;
     unsigned long adv_instance_expire_deadline;
     unsigned adv_instance_timeout;
@@ -16,6 +17,8 @@ struct hci_dev {
 static unsigned long jiffies;
 #define time_after_eq(a,b) ((long)((a)-(b)) >= 0)
 static bool cancel_delayed_work(struct delayed_work *w) { bool p=w->pending; w->pending=false; return p; }
+#define msecs_to_jiffies(ms) (ms)
+/* BODY: adv_timeout_retry_delay */
 /* BODY: hci_legacy_scan_adv_expired */
 /* BODY: cancel_adv_timeout */
 /* BODY: mgmt_cancel_adv_timeout */
@@ -23,6 +26,10 @@ static bool cancel_delayed_work(struct delayed_work *w) { bool p=w->pending; w->
 int main(void) {
     int failures=0;
     struct hci_dev h={0};
+    unsigned expected[]={100,200,400,800,1600,3200,3200,3200};
+    for (unsigned i=0;i<sizeof(expected)/sizeof(expected[0]);i++)
+        CHECK(adv_timeout_retry_delay(&h)==expected[i]);
+    for (int i=0;i<1000;i++) CHECK(adv_timeout_retry_delay(&h)==3200);
     jiffies=3000;
     CHECK(!hci_legacy_scan_adv_expired(&h,1)); /* unlimited/unarmed */
     h.expired_adv_instance=1;
@@ -46,6 +53,6 @@ int main(void) {
         CHECK(!h.expired_adv_instance && !h.adv_instance_expire_armed);
         CHECK(!h.adv_instance_timeout && !h.adv_instance_expire.pending);
     }
-    printf("9 expiry authority scenarios: %d failed assertions\n",failures);
+    printf("9 expiry authority scenarios and capped retry backoff: %d failed assertions\n",failures);
     return failures ? 86 : 0;
 }

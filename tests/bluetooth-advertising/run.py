@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Compile actual patched kernel lifecycle functions and exercise expiry retirement."""
 import argparse
+import hashlib
 import os
 from pathlib import Path
 import re
@@ -10,10 +11,21 @@ import urllib.request
 
 ROOT = Path(__file__).resolve().parents[2]
 PIN = "95b85bebbedcaedfa7ca79116ed38b7376fba412"
-FILES = ["net/bluetooth/hci_sync.c", "net/bluetooth/hci_core.c", "net/bluetooth/mgmt.c", "include/net/bluetooth/hci_core.h"]
+FILES = {
+    "net/bluetooth/hci_sync.c": "2612da3e70d44cd1db5f6bf43ea861d3fba4e167c0436be7fb5941f339409362",
+    "net/bluetooth/hci_core.c": "6d0ca82f4ac6f5db31322ba2be3a540f006498db400f225f1f26aa5acd9d8900",
+    "net/bluetooth/mgmt.c": "d9ccb164f68dbe4621398438226a4d2b097020dbf9e0450b39226ace25eab387",
+    "include/net/bluetooth/hci_core.h": "a5eb5072841f8a619bf787c64b52bc213dcd763010209560938fe421283ee248",
+}
+
+
+def verify_source(name, source):
+    if hashlib.sha256(source).hexdigest() != FILES[name]:
+        raise ValueError(f"SHA-256 mismatch for {name} at {PIN}")
+
 
 def function(source, name):
-    m = re.search(r"(?:static )?(?:int|void|bool|u8) " + name + r"\([^;]*?\)\s*\{", source)
+    m = re.search(r"(?:static )?(?:int|void|bool|u8|unsigned long) " + name + r"\([^;]*?\)\s*\{", source)
     assert m, name
     p, depth = m.end(), 1
     while depth:
@@ -31,6 +43,7 @@ def main():
             target = work / name
             target.parent.mkdir(parents=True, exist_ok=True)
             source = (args.sources / name).read_bytes() if args.sources else urllib.request.urlopen("https://raw.githubusercontent.com/raspberrypi/linux/" + PIN + "/" + name, timeout=120).read()
+            verify_source(name, source)
             target.write_bytes(source)
         patches = [ROOT / "recipes-kernel/linux/bluetooth-le-pending/0001-bluetooth-clean-up-rejected-pending-le-connection.patch", ROOT / "meta-rpi-extensions/recipes-kernel/linux/linux-raspberrypi/0004-bluetooth-legacy-active-scan-retain-expiry.patch"]
         for patch in patches:
