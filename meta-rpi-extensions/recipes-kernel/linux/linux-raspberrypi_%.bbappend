@@ -16,3 +16,8 @@ SRC_URI += "file://0001-dwc2-force-g_dma-false-for-BCM2712-in-peripheral-mod.pat
 require ${@'recipes-kernel/linux/driver-extensions.inc' if d.getVar('WENDYOS_DRIVER_EXTENSIONS') == '1' else ''}
 
 require recipes-kernel/linux/mesh-local.inc
+require recipes-kernel/linux/mesh-internet.inc
+
+# Config changes alter exported kernel symbols. Give kernels and driver add-ons
+# a new release key so an old sysext cannot masquerade as a matching build.
+KERNEL_LOCALVERSION:append = "-wendy-mesh2"

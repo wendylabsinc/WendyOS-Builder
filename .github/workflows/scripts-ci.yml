@@ -27,6 +27,12 @@ on:
       - 'recipes-core/wendyos-agent/wendyos-agent_1.0.bb'
       - 'recipes-core/wendyos-agent/files/wendyos-agent.service'
       - 'recipes-core/images/wendyos-image.bb'
+      - 'scripts/check_mesh_kernel_support*'
+      - 'scripts/mesh_local_contract_test.py'
+      - 'classes/mesh-kernel-check.bbclass'
+      - 'conf/distro/include/mesh-*.inc'
+      - 'recipes-kernel/linux/mesh-*'
+      - 'recipes-kernel/linux/mesh-*/**'
       - 'conf/distro/include/game-controller.inc'
       - 'recipes-kernel/linux/game-controller.inc'
       - 'recipes-kernel/linux/game-controller/**'
@@ -95,6 +101,12 @@ on:
       - 'recipes-core/wendyos-agent/wendyos-agent_1.0.bb'
       - 'recipes-core/wendyos-agent/files/wendyos-agent.service'
       - 'recipes-core/images/wendyos-image.bb'
+      - 'scripts/check_mesh_kernel_support*'
+      - 'scripts/mesh_local_contract_test.py'
+      - 'classes/mesh-kernel-check.bbclass'
+      - 'conf/distro/include/mesh-*.inc'
+      - 'recipes-kernel/linux/mesh-*'
+      - 'recipes-kernel/linux/mesh-*/**'
       - 'conf/distro/include/game-controller.inc'
       - 'recipes-kernel/linux/game-controller.inc'
       - 'recipes-kernel/linux/game-controller/**'
@@ -261,6 +273,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y systemd udev
           sudo env WENDY_TEST_SYSTEMD_POLICY=1 python3 -m unittest scripts/mesh_local_policy_test.py -v
+
+      - name: Run mesh kernel image acceptance tests
+        run: python3 -m unittest scripts/check_mesh_kernel_support_test.py scripts/mesh_local_contract_test.py
 
       - name: Verify reproducible kernel patch commit identities
         run: python3 -m unittest scripts/kernel_patch_dates_test.py

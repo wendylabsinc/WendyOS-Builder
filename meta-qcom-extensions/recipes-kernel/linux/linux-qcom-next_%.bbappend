@@ -42,3 +42,4 @@ SRC_URI:append:qcom-wendyos = " file://0004-Revert-usb-dwc3-qcom-skip-phy-manage
 PATCHTOOL:qcom-wendyos = "git"
 
 require recipes-kernel/linux/mesh-local.inc
+require recipes-kernel/linux/mesh-internet.inc

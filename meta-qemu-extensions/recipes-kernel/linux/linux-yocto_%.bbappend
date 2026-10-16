@@ -22,3 +22,4 @@ KMACHINE:qemuarm64-wendyos = "qemuarm64"
 # FILESEXTRAPATHS:prepend line that puts that directory on the file search path.
 
 require recipes-kernel/linux/mesh-local.inc
+require recipes-kernel/linux/mesh-internet.inc

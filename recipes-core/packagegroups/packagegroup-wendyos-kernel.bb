@@ -27,3 +27,12 @@ python __anonymous() {
     packages = ' '.join(e.split(':', 1)[1] for e in entries if ':' in e)
     d.appendVar('RRECOMMENDS:%s' % d.getVar('PN'), ' ' + packages)
 }
+
+# Modules may resolve built-in on some BSPs. The final image gate checks the
+# actual files and dependency closure, so recommendations cannot fail silently.
+python __anonymous() {
+    entries = (d.getVar('WENDYOS_MESH_INTERNET_MODULES') or '').split()
+    packages = ['kernel-module-' + entry.split(':', 1)[1].replace('_', '-').lower()
+                for entry in entries]
+    d.appendVar('RRECOMMENDS:%s' % d.getVar('PN'), ' ' + ' '.join(packages))
+}
