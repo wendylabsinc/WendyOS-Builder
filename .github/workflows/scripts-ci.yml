@@ -17,6 +17,9 @@ on:
       - 'scripts/make-jetson-disk-img.py'
       - 'scripts/make_jetson_disk_img_test.py'
       - 'scripts/check_game_controller_support*'
+      - 'scripts/kernel_patch_dates_test.py'
+      - 'meta-qcom-extensions/recipes-kernel/linux/**'
+      - 'meta-arduino-extensions/recipes-kernel/linux/**'
       - 'scripts/check_mesh_local_policy.py'
       - 'scripts/mesh_local_policy_test.py'
       - 'classes/mesh-local-policy-check.bbclass'
@@ -82,6 +85,9 @@ on:
       - 'scripts/make-jetson-disk-img.py'
       - 'scripts/make_jetson_disk_img_test.py'
       - 'scripts/check_game_controller_support*'
+      - 'scripts/kernel_patch_dates_test.py'
+      - 'meta-qcom-extensions/recipes-kernel/linux/**'
+      - 'meta-arduino-extensions/recipes-kernel/linux/**'
       - 'scripts/check_mesh_local_policy.py'
       - 'scripts/mesh_local_policy_test.py'
       - 'classes/mesh-local-policy-check.bbclass'
@@ -255,6 +261,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y systemd udev
           sudo env WENDY_TEST_SYSTEMD_POLICY=1 python3 -m unittest scripts/mesh_local_policy_test.py -v
+
+      - name: Verify reproducible kernel patch commit identities
+        run: python3 -m unittest scripts/kernel_patch_dates_test.py
 
       - name: Run game-controller support validator tests
         run: python3 -m unittest scripts/check_game_controller_support_test.py
