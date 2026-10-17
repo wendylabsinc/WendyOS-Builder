@@ -9,7 +9,9 @@ DESCRIPTION = "Owns the whole life of the /data device up to the mount: naming i
     on. Beside the rules it holds the /data resolver, which decides on every boot \
     whether /data is plain, encrypted or about to be converted, grows the \
     partition to fill the disk and makes sure a plain one carries a filesystem \
-    the kernel can mount; the online resize2fs that finishes the grow after the \
+    the kernel can mount; root-disk-part, which names the partition called data \
+    on the disk / is mounted from, so the rules and the resolver never pick a \
+    second disk's /data; the online resize2fs that finishes the grow after the \
     mount; and the data.mount drop-in that keeps the mount out of the way while a \
     conversion runs. All of it ships on every board, so it cannot live in \
     data-crypt, which is installed only when WENDYOS_DATA_ENCRYPTED is 1, nor in \
@@ -20,6 +22,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda
 SRC_URI = " \
     file://99-wendyos-data.rules \
     file://wendyos-data.sh \
+    file://root-disk-part \
     file://wendyos-data.service \
     file://wendyos-data-resize.service \
     file://10-conversion.conf \
@@ -59,6 +62,7 @@ do_install() {
 
     install -d ${D}${sbindir}
     install -m 0755 ${UNPACKDIR}/wendyos-data.sh ${D}${sbindir}/wendyos-data.sh
+    install -m 0755 ${UNPACKDIR}/root-disk-part ${D}${sbindir}/root-disk-part
 
     install -d ${D}${systemd_system_unitdir}
     install -m 0644 ${UNPACKDIR}/wendyos-data.service ${D}${systemd_system_unitdir}/wendyos-data.service
@@ -87,6 +91,7 @@ do_install:append:raspberrypi3-64() {
 FILES:${PN} = " \
     ${sysconfdir}/udev/rules.d/99-wendyos-data.rules \
     ${sbindir}/wendyos-data.sh \
+    ${sbindir}/root-disk-part \
     ${systemd_system_unitdir}/wendyos-data.service \
     ${systemd_system_unitdir}/wendyos-data-resize.service \
     ${systemd_system_unitdir}/data.mount.d/10-conversion.conf \
@@ -136,6 +141,15 @@ FILES:${PN}:append:raspberrypi3-64 = " \
 # absence shows up in the journal instead of as a /data that quietly stays
 # small.
 #
+# util-linux-findmnt is for root-disk-part, which every /data lookup goes
+# through: the resolver, the alias rule in 99-wendyos-data.rules and
+# data-recovery-key. findmnt is how it learns which device / is mounted from.
+# busybox has no findmnt, so nothing else can stand in for it. It usually
+# arrives anyway, as an RRECOMMENDS of the util-linux metapackage (see
+# blkdiscard below), but without it the GPT boards lose the /data alias and
+# /data no longer mounts, so it is declared rather than left to a
+# recommendation.
+#
 # The crypt stack is deliberately NOT here. cryptsetup and systemd-crypt are
 # installed only where WENDYOS_DATA_ENCRYPTED is 1, through the per-board image
 # includes, while this recipe ships fleet-wide including RPi, which can never
@@ -165,6 +179,7 @@ RDEPENDS:${PN} = " \
     udev \
     util-linux-blkid \
     util-linux-blockdev \
+    util-linux-findmnt \
     util-linux-sfdisk \
     util-linux-wipefs \
     "

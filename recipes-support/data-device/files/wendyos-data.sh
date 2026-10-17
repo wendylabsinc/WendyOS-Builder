@@ -41,15 +41,15 @@ set -u
 # of the state machine, so the resize can never reach the conversion.
 MODE="${1:-boot}"
 
-# The RAW partition by GPT partition name. It is the only path that survives
-# the conversion: rule 1 of 99-wendyos-data.rules drops the /dev/wendyos/data
-# alias the moment the partition becomes crypto_LUKS, and on an encrypted
-# device that alias points at the unlocked mapper instead.
+# The RAW partition is found by its GPT partition name, on the disk / is
+# mounted from: root-disk-part (this recipe) answers that. The name is the only
+# handle that survives the conversion: rule 1 of 99-wendyos-data.rules drops
+# the /dev/wendyos/data alias the moment the partition becomes crypto_LUKS, and
+# on an encrypted device that alias points at the unlocked mapper instead.
 #
-# It is not the only path that can name the raw partition, because MBR has no
-# partition names at all. resolve_data_device() below picks between this and
-# the alias, and sets DATA to the winner.
-DATA_BY_PARTLABEL=/dev/disk/by-partlabel/data
+# It is not the only way to name the raw partition, because MBR has no
+# partition names at all. resolve_data_device() below picks between the root
+# disk's `data` partition and the alias, and sets DATA to the winner.
 DATA=""
 
 # The unlocked volume. The name is what 99-wendyos-data.rules matches on
@@ -198,12 +198,12 @@ config_mounted() {
 # nothing when /config is not mounted at all.
 #
 # Read straight out of /proc/mounts, the same way config_mounted() above asks
-# its question, because that needs nothing installed: this program ships on
-# every board and findmnt is a util-linux package this recipe does not depend
-# on. Reading the kernel's own table adds no dependency at all.
+# its question, because that needs no tool at all. findmnt is installed on
+# every board now -- root-disk-part needs it -- but that is not a reason to use
+# it here.
 #
-# findmnt would also be easy to ask the wrong question with, and it answers it
-# in silence. A second bare argument is not a second place to look: it makes
+# findmnt would be easy to ask the wrong question with, and it answers it in
+# silence. A second bare argument is not a second place to look: it makes
 # the pair "this source mounted on this target", so `findmnt -n -o FSTYPE
 # /config <anything>` matches nothing, prints nothing and exits 1 -- measured
 # with util-linux 2.41.5. A path that is not itself a mount point prints
@@ -530,19 +530,29 @@ sysblk() {
 # Name the RAW /data partition -- the device every step below addresses --
 # and set DATA to it. Returns 1 when there is no /data device at all.
 #
+# ONLY ON THE ROOT DISK. The partition is the one named `data` on the disk / is
+# mounted from, as root-disk-part reports it, never /dev/disk/by-partlabel/data.
+# A GPT name is unique on one disk, not on the machine: a device that once ran
+# WendyOS from another disk -- an AGX Orin moved from eMMC to NVMe -- carries a
+# `data` partition on both, and the by-partlabel link points at whichever one
+# udev handled last. Every step after this one is destructive: grow, wipe,
+# luksFormat, mkfs. Picking the other disk's partition would destroy an old
+# installation's data, or convert a disk the device does not even boot from.
+# Every WendyOS layout puts /data on the same disk as the root slots, so the
+# root disk is the right one.
+#
 # The order is load-bearing, not a preference:
 #
-#   GPT, plain      the GPT partition name IS the raw partition. Correct, and
-#                   it is also what the service waits for (10-device.conf).
-#   GPT, encrypted  the GPT partition name is the raw LUKS partition, which is
-#                   what every destructive step here must address. The alias
-#                   deliberately points at the UNLOCKED MAPPER on such a board
-#                   (rule 2 of 99-wendyos-data.rules), so taking the alias
-#                   would aim wipefs, blkdiscard, luksFormat and mkfs at live
-#                   user data. by-partlabel MUST win.
-#   MBR             there is no by-partlabel path at all, because an MBR table
-#                   carries no partition names. The alias is the raw partition
-#                   and nothing else: udev builds it from the ext4 LABEL
+#   GPT, plain      the partition named `data` IS the raw partition.
+#   GPT, encrypted  the partition named `data` is the raw LUKS partition,
+#                   which is what every destructive step here must address.
+#                   The alias deliberately points at the UNLOCKED MAPPER on
+#                   such a board (rule 2 of 99-wendyos-data.rules), so taking
+#                   the alias would aim wipefs, blkdiscard, luksFormat and mkfs
+#                   at live user data. The partition name MUST win.
+#   MBR             root-disk-part finds nothing, because an MBR table carries
+#                   no partition names. The alias is the raw partition and
+#                   nothing else: udev builds it from the ext4 LABEL
 #                   (99-wendyos-data-mbr.rules), and raspberrypi3-64 -- the
 #                   only MBR board -- can never encrypt (C21), so the alias can
 #                   never be a mapper there.
@@ -551,9 +561,13 @@ sysblk() {
 # program knows, exits before preparing anything, and never grows /data. The
 # program this one replaced reached it through the fstab, i.e. through the
 # alias.
+#
+# When root-disk-part finds nothing it says why on stderr, which is the
+# journal here. That is the normal case on the MBR board, so it is not a
+# warning.
 resolve_data_device() {
-    if [ -b "$DATA_BY_PARTLABEL" ]; then
-        DATA=$DATA_BY_PARTLABEL
+    if _part=$(root-disk-part data) && [ -b "$_part" ]; then
+        DATA=$_part
         return 0
     fi
 
@@ -1052,17 +1066,19 @@ if ! resolve_data_device; then
     # all -- not "no GPT partition name", which the alias now covers. There is
     # nothing to prepare and nothing to encrypt.
     if [ "$flag_encrypt" = "1" ]; then
-        finish no_support 1 "neither $DATA_BY_PARTLABEL nor $ALIAS exists, so there is no /data device to encrypt on this board"
+        finish no_support 1 "the root disk has no partition named data and $ALIAS does not exist, so there is no /data device to encrypt on this board"
     fi
-    finish plain 0 "neither $DATA_BY_PARTLABEL nor $ALIAS exists, so /data is left as it is"
+    finish plain 0 "the root disk has no partition named data and $ALIAS does not exist, so /data is left as it is"
 fi
 
 # The alias fallback is the only way a device-mapper node could ever land in
 # DATA, and a mapper here would point every destructive step below -- wipefs,
-# blkdiscard, luksFormat, mkfs -- at unlocked, LIVE user data. It cannot
-# happen: the only board with no by-partlabel path is the MBR one, and that
-# board can never encrypt (C21), so its alias is always the raw partition.
-# Checked anyway, because the cost of being wrong once is the whole of /data.
+# blkdiscard, luksFormat, mkfs -- at unlocked, LIVE user data. It should not
+# happen. The MBR board can never encrypt (C21), so its alias is always the raw
+# partition. On a GPT board rule 1 of 99-wendyos-data.rules asks root-disk-part
+# the same question this program just asked, so when the lookup above failed
+# the raw partition has no alias either, and only a mapper could provide one.
+# Checked, because the cost of being wrong once is the whole of /data.
 data_real=$(basename "$(readlink -f "$DATA")")
 if [ -e "/sys/class/block/$data_real/dm/name" ]; then
     finish probe_failed 1 "the raw /data device resolved to $DATA -> /dev/$data_real, which is a device-mapper node and should be impossible here. Nothing was touched"
