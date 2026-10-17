@@ -20,6 +20,7 @@ Before=data.mount
 [Service]
 Type=oneshot
 RemainAfterExit=yes
+TimeoutStartSec=10min
 ExecStart=/usr/sbin/wendyos-data-init.sh
 
 [Install]

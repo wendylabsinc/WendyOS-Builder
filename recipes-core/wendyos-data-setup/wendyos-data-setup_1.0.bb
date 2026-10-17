@@ -12,6 +12,8 @@ SRC_URI = " \
     file://wendyos-data-init.sh \
     file://wendyos-data-init.service \
     file://data.mount \
+    file://wants-data-consumers.conf \
+    file://data-device-timeout.conf \
 "
 
 S = "${UNPACKDIR}"
@@ -25,12 +27,32 @@ do_install() {
     install -d ${D}${systemd_system_unitdir}
     install -m 0644 ${UNPACKDIR}/wendyos-data-init.service ${D}${systemd_system_unitdir}/
     install -m 0644 ${UNPACKDIR}/data.mount ${D}${systemd_system_unitdir}/
+
+    # Pull the /data consumers in whenever data.mount is (re)started, not
+    # just on the boot that first mounted it (WDY-3127). Also effective for
+    # the LUKS variant: the bbappend installs data-luks.mount AS data.mount,
+    # so this drop-in applies under either unit name.
+    install -d ${D}${systemd_system_unitdir}/data.mount.d
+    install -m 0644 ${UNPACKDIR}/wants-data-consumers.conf ${D}${systemd_system_unitdir}/data.mount.d/wants-data-consumers.conf
+
+    # x-systemd.device-timeout= in a .mount unit's Options= is silently
+    # ignored -- systemd only honours it in /etc/fstab, where
+    # systemd-fstab-generator translates it into exactly this kind of
+    # drop-in on the DEVICE unit. Ship that drop-in directly on the
+    # by-partlabel device unit (WDY-3127). The directory name below must
+    # keep the literal backslash from the device unit's escaped name
+    # (dev-disk-by\x2dpartlabel-data.device, same name wendyos-data-init.service
+    # already Wants=/After=s) -- quoted so the shell does not touch it.
+    install -d "${D}${systemd_system_unitdir}/dev-disk-by\x2dpartlabel-data.device.d"
+    install -m 0644 ${UNPACKDIR}/data-device-timeout.conf "${D}${systemd_system_unitdir}/dev-disk-by\x2dpartlabel-data.device.d/50-wendyos-device-timeout.conf"
 }
 
 FILES:${PN} += " \
     ${sbindir}/wendyos-data-init.sh \
     ${systemd_system_unitdir}/wendyos-data-init.service \
     ${systemd_system_unitdir}/data.mount \
+    ${systemd_system_unitdir}/data.mount.d/wants-data-consumers.conf \
+    ${systemd_system_unitdir}/dev-disk-by\x2dpartlabel-data.device.d/50-wendyos-device-timeout.conf \
 "
 
 # data.mount is enabled via its [Install] WantedBy; the init service is
