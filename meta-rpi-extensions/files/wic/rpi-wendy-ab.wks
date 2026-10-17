@@ -23,9 +23,9 @@
 #   - The kernel is loaded by boot.scr from the SELECTED slot's rootfs /boot
 #     (A/B-safe), so the rootfs must contain /boot/${KERNEL_IMAGETYPE}.
 #   - /data is created as a small ext4 here; the first-boot grow is done by
-#     grow-data-part (see the plan — wendyos-data-setup's format-trigger does
-#     NOT fire on a wic-preformatted fs). Do NOT add expand-rootfs to an A/B
-#     image: it would grow rootfsA over rootfsB.
+#     wendyos-data.service, which grows the partition before the mount and
+#     leaves the filesystem this wks made in place. Do NOT add expand-rootfs to
+#     an A/B image: it would grow rootfsA over rootfsB.
 #   - boot/config/rootfsA carry partuuid-rpi UUIDs; rootfsB/data get
 #     wic-generated ones. NOTE these UUIDs are NOT stable across builds
 #     (partuuid-rpi caches them per build dir), so nothing the rootfs carries

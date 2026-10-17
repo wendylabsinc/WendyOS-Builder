@@ -34,8 +34,8 @@ require ${@'rpi-systemd.inc' if 'rpi' in d.getVar('MACHINEOVERRIDES').split(':')
 
 # systemd's two security PACKAGECONFIGs follow different gates. tpm2 belongs to the
 # TPM stack itself; cryptsetup belongs to /data encryption, which is what needs
-# systemd-cryptenroll and the boot-time systemd-cryptsetup@data (both ship in the
-# systemd-crypt package). The tpm2 PACKAGECONFIG pulls in libtss2 from
+# systemd-cryptenroll and systemd-cryptsetup, which the /data resolver calls
+# directly to unlock the volume (both ship in the systemd-crypt package). The tpm2 PACKAGECONFIG pulls in libtss2 from
 # meta-security/meta-tpm, so a board turning it on must also layer meta-tpm (x86
 # does; other boards wire it as needed). Each is inert — stock systemd — when its
 # own gate is off. At the default both are on, giving the same set as before.

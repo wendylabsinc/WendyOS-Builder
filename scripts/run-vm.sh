@@ -439,7 +439,8 @@ main() {
         # OVERLAY's directory, not the working directory.
         execute "qemu-img create -f qcow2 -F raw -b '${base_image}' '${overlay}' >/dev/null"
         # The .wic ends one sector after its last partition, so /data has nowhere
-        # to grow into. grow-data-part runs on first boot and needs this headroom.
+        # to grow into. wendyos-data.service runs on first boot and needs this
+        # headroom.
         execute "qemu-img resize '${overlay}' '+${DISK_GROW}' >/dev/null"
         if [[ -z "${BIOS}" ]]; then
             execute "cp '${fw_vars}' '${nvram}'"

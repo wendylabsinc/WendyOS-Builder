@@ -16,8 +16,10 @@ IMAGE_INSTALL:remove = " \
 # wendy OTA deltas, gated on WENDYOS_OTA == "wendy".
 #  - wendyos-update-config pins the OTA connector to grubenv.
 #  - grub-editenv lets that connector edit EFI/BOOT/grubenv from Linux.
-#  - grow-data-part is deliberately absent: the flash tool already grew /data
-#    (patch0.xml rewrites the last partition's end LBA from the real disk size).
+#  - Nothing is listed for the /data grow. The flash tool already grew the
+#    partition (patch0.xml rewrites the last partition's end LBA from the real
+#    disk size), and wendyos-data.service (the data-device recipe, fleet-wide via
+#    packagegroup-wendyos-base) re-checks it on every boot and no-ops.
 WENDYOS_QCOM_OTA_INSTALL = " \
     wendyos-update-config \
     grub-editenv \
@@ -38,11 +40,12 @@ WENDYOS_QCOM_BOARD_PACKAGEGROUP ?= "packagegroup-wendyos-qcom"
 IMAGE_INSTALL:append = " ${WENDYOS_QCOM_BOARD_PACKAGEGROUP}"
 IMAGE_INSTALL:append = "${@' ' + d.getVar('WENDYOS_QCOM_OTA_INSTALL') if d.getVar('WENDYOS_OTA') == 'wendy' else ''}"
 
-# wendyos-data-setup is KEPT, unlike the wic boards (rpi/x86) which create and label
-# the filesystems at image-build time. qcom-ptool only ALLOCATES partitions, so
-# nothing would otherwise put a filesystem on /data -- Tegra keeps it for the same
-# reason. /data is left out of qcom-wendy-fstab so the recipe's own data.mount, and
-# its Requires= on the formatter, is the unit that mounts it.
+# data-mount is KEPT, unlike the wic boards (rpi/x86) which create and label the
+# filesystems at image-build time. /data is left out of qcom-wendy-fstab, so
+# without this package there is no data.mount at all: systemd-fstab-generator has
+# no entry to build one from. Tegra keeps it for the same reason. Putting the
+# filesystem on the partition is a separate job, done on every board by
+# wendyos-data.service (the data-device recipe).
 
 # /config and /data need mount points in the rootfs to mount onto, and the /data
 # bind targets must exist or the binds fail and the agent never starts.

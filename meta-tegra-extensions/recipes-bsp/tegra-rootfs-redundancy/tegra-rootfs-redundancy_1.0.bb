@@ -33,6 +33,15 @@ do_install() {
 # nvbootctrl is guaranteed on every tegra image (meta-tegra
 # MACHINE_EXTRA_RDEPENDS -> tegra-redundant-boot); the script also guards on
 # its presence, so no hard RDEPENDS that would couple this to a package name.
+#
+# root-disk-part (data-device) is not in RDEPENDS either, on purpose. This
+# recipe is allarch and data-device is MACHINE_ARCH, so naming it would put a
+# per-machine package in this package's signature and rebuild it for every
+# machine. The Yocto reference manual (allarch class) says such a recipe should
+# not be allarch. The dependency is already guaranteed: data-device is in
+# packagegroup-wendyos-base, and wendyos-image.bb fails the image build when its
+# unit is missing. If the helper were missing anyway, the script does not arm
+# and logs why.
 RDEPENDS:${PN} = "systemd"
 
 FILES:${PN} += " \

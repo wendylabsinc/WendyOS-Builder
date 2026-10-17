@@ -11,7 +11,7 @@ LICENSE_FLAGS_ACCEPTED += "synaptics-killswitch"
 # All RPi machines run the wendyos-update OTA stack (the wendyos.conf
 # default); the A/B disk layout comes from the per-machine rpi-wendy-ab*.wks
 # (config partition before /data, /data last so it can grow to fill the
-# medium on first boot via grow-data-part). The FAT32 "config" partition is
+# medium on first boot via wendyos-data.service). The FAT32 "config" partition is
 # seeded by `wendy os install` with first-boot provisioning; wendy-agent
 # consumes and erases the seed files (configpartition.Apply) but the
 # partition itself persists as a re-seed/recovery channel.

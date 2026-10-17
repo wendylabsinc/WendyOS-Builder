@@ -1,0 +1,148 @@
+#!/bin/sh
+# Name the partition called NAME on the disk that / is mounted from.
+#
+#   root-disk-part NAME          prints /dev/<kernel name> of that partition
+#   root-disk-part NAME KERNEL   prints nothing, succeeds only if that
+#                                partition's kernel name is KERNEL
+#
+# Exit 0 found (or matched), 1 not found, not a match, more than one, or a
+# root this cannot follow, 2 wrong arguments. Every failure prints one line on
+# stderr saying why. Success prints nothing but the answer.
+#
+# WHY NOT /dev/disk/by-partlabel/NAME. A GPT partition name is unique on one
+# disk, not on the machine. A device that once ran WendyOS from one disk and now
+# runs it from another -- an AGX Orin moved from eMMC to NVMe -- carries a
+# `data` partition on both, and the by-partlabel link then points at whichever
+# udev saw last. Everything that finds /data goes on to grow, wipe, encrypt or
+# format it, so "either one" is not an answer. Every WendyOS layout puts /data
+# on the same disk as the root slots, so the disk / is mounted from is the one
+# that counts.
+#
+# The second form is for udev. A PROGRAM key accepts %k, but RESULT does not
+# accept substitutions (systemd man/udev.xml), so a rule cannot compare the
+# printed path against the device it is looking at. It passes its own kernel
+# name in instead and matches on the exit status.
+#
+# Reads only /sys and, through findmnt, /proc/self/mountinfo. No udev database,
+# no /dev/disk links and no blkid, so it gives the same answer inside a udev
+# PROGRAM and before udev has run at all. The method is the one the Tegra ESP
+# mount generator uses for the same reason (wendyos-boot-efi-generator.sh, PR
+# #306).
+#
+# A root on device-mapper, overlay, a loop device or a whole disk is refused,
+# not followed. There is no single disk to name in those cases, and guessing
+# one is the mistake this program exists to prevent.
+set -u
+
+# udev starts a PROGRAM with the device's properties as its entire
+# environment, so there is no PATH (systemd src/udev/udev-spawn.c passes
+# device_get_properties_strv() straight to execve). Without this line the
+# commands below would be found through whatever default the shell compiles
+# in, which differs between busybox, dash and bash.
+PATH=${PATH:-/usr/sbin:/usr/bin:/sbin:/bin}
+
+# The sysfs root. Overridden only by the tests, which run against a fake tree.
+SYSFS=${ROOT_DISK_PART_SYSFS:-/sys}
+
+fail() {
+    echo "root-disk-part: $*" >&2
+    exit 1
+}
+
+if [ "$#" -lt 1 ] || [ "$#" -gt 2 ] || [ -z "$1" ]; then
+    echo "root-disk-part: usage: root-disk-part NAME [KERNEL]" >&2
+    exit 2
+fi
+
+name=$1
+kernel=${2:-}
+
+# MAJ:MIN rather than the mount source: the source can read /dev/root, which
+# names no device node, while the device number is always the real one.
+root_majmin=$(findmnt -nr -o MAJ:MIN --target / 2>/dev/null) \
+    || fail "findmnt cannot say which device / is mounted from"
+
+# Exactly one digits:digits. Anything else -- empty, two lines from stacked
+# mounts, stray characters -- is not a device number to look up.
+case $root_majmin in
+    ''|*[!0-9:]*|:*|*:|*:*:*)
+        fail "/ is mounted from '$root_majmin', which is not a device number"
+        ;;
+    *:*)
+        ;;
+    *)
+        fail "/ is mounted from '$root_majmin', which is not a device number"
+        ;;
+esac
+
+root_sys=$(readlink -f "$SYSFS/dev/block/$root_majmin" 2>/dev/null) \
+    || fail "cannot follow $SYSFS/dev/block/$root_majmin"
+
+# A partition has a `partition` file. device-mapper nodes, loop devices,
+# overlay and whole disks do not.
+if [ ! -f "$root_sys/partition" ]; then
+    fail "/ is mounted from $root_majmin, which is not a disk partition"
+fi
+
+disk_sys=${root_sys%/*}
+if [ ! -f "$disk_sys/dev" ]; then
+    fail "cannot find the disk that holds $root_sys"
+fi
+
+disk=${disk_sys##*/}
+
+# The partitions are the children of the disk that carry a `partition` file.
+# Their uevent carries the GPT name as PARTNAME (block/partitions/core.c,
+# part_uevent()), and only when the table has names: MBR partitions have none,
+# so they never match.
+match=""
+for part in "$disk_sys"/*; do
+    if [ ! -f "$part/partition" ] || [ ! -r "$part/uevent" ]; then
+        continue
+    fi
+
+    partname=""
+    devname=""
+    while IFS= read -r line; do
+        case $line in
+            PARTNAME=*)
+                partname=${line#PARTNAME=}
+                ;;
+            DEVNAME=*)
+                devname=${line#DEVNAME=}
+                ;;
+        esac
+    done < "$part/uevent"
+
+    if [ "$partname" != "$name" ]; then
+        continue
+    fi
+
+    if [ -n "$match" ]; then
+        fail "more than one partition on $disk is named '$name' ($match and $devname)"
+    fi
+
+    # A kernel name is a plain word. Anything else is refused rather than
+    # pasted into a /dev path.
+    case $devname in
+        ''|*[!a-zA-Z0-9_-]*)
+            fail "a partition on $disk named '$name' has the device name '$devname', which is not a plain kernel name"
+            ;;
+    esac
+
+    match=$devname
+done
+
+if [ -z "$match" ]; then
+    fail "no partition on $disk is named '$name'"
+fi
+
+if [ -n "$kernel" ]; then
+    if [ "$match" != "$kernel" ]; then
+        fail "$kernel is not the partition named '$name' on $disk, $match is"
+    fi
+
+    exit 0
+fi
+
+echo "/dev/$match"

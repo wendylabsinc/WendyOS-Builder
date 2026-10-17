@@ -74,12 +74,12 @@ WENDYOS_DEBUG_UART ??= "0"
 WENDYOS_SSHD ??= "0"
 
 # Local interactive login, split by console type — both default OFF on every
-# image (a login prompt is pure attack surface). CI opts UART login in on PR
-# builds only (see build.yml); enable either knob explicitly in local.conf or
-# board config otherwise. UART/serial = serial-getty@ + console-getty on
-# serial-console boards; VT = getty@ + autovt@ (+ console-getty on x86, where
-# /dev/console is tty0). Root is never opened — log in as the wendy user
-# (passwordless sudo).
+# image (a login prompt is pure attack surface). bootstrap.sh --debug and the
+# CI PR profile (see build.yml) turn both on; nightly and release builds keep
+# both off. Otherwise enable either one in local.conf or board config.
+# UART/serial = serial-getty@ + console-getty on serial-console boards;
+# VT = getty@ + autovt@ (+ console-getty on x86, where /dev/console is tty0).
+# Root is never opened — log in as the wendy user (passwordless sudo).
 WENDYOS_ENABLE_UART_LOGIN ??= "0"
 WENDYOS_ENABLE_VT_LOGIN ??= "0"
 

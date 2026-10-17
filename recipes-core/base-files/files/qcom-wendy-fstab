@@ -15,9 +15,14 @@
 # per-build PARTUUID, since an OTA writes only the rootfs slot and never
 # re-partitions.
 #
+# Only /var/volatile and /boot are mounted here. /data and /config are mounted by
+# systemd units instead: data.mount from data-mount and config.mount from
+# wendyos-config-setup. data-mount is kept on Qualcomm because without a /data
+# line here systemd-fstab-generator has nothing to build a data.mount from. The
+# filesystem on /data is made by wendyos-data.service (data-device): qcom-ptool
+# only allocates the partition.
 # /data is grown to fill the disk by the FLASH tool, not on first boot: it is the
 # last partition and patch0.xml patches its end LBA from the device's real
-# NUM_DISK_SECTORS. /config is the FAT provisioning partition. All by LABEL, all
-# nofail.
+# NUM_DISK_SECTORS.
 tmpfs                   /var/volatile  tmpfs  defaults                 0 0
 LABEL=boot              /boot          vfat   defaults,nofail          0 2

@@ -34,10 +34,19 @@ fi
 
 # Only arm when a second rootfs slot actually exists — arming redundancy on a
 # genuinely single-slot device would be wrong. APP is slot A, APP_b is slot B.
-if [ ! -e /dev/disk/by-partlabel/APP_b ]; then
-    log "no APP_b partition; device is single-slot, not arming redundancy"
+#
+# Look on the disk / is mounted from, not at /dev/disk/by-partlabel/APP_b. A
+# GPT name is unique on one disk, not on the machine. An AGX Orin that once
+# ran WendyOS from eMMC and now runs it from NVMe has two disks, and the link
+# can name an APP_b on the disk we did not boot from. root-disk-part prints
+# the partition on success and one line saying why on failure. Any failure,
+# including a root it cannot follow, means we do not arm.
+log "looking for APP_b on the disk / is mounted from"
+if ! app_b=$(root-disk-part APP_b 2>&1); then
+    log "not arming redundancy: ${app_b}"
     exit 0
 fi
+log "slot B is ${app_b} on the root disk"
 
 # Guard against a reboot loop: if we already tried once and the variable is
 # still missing, the arm did not take (needs a reflash) — do not try again.

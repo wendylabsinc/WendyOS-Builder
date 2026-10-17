@@ -1,16 +1,21 @@
 [Unit]
 Description=WendyOS config partition (/config)
-# Format on first boot must complete before we mount. Mounting by PARTLABEL --
-# the identifier the formatter waits on -- not by LABEL: the filesystem label
-# does not exist until mkfs has run, so an fstab LABEL= entry races the format
-# and, being nofail, fails silently on exactly the first boot that matters.
+# Format on first boot must complete before we mount. Mounting by the
+# /dev/wendyos/config link -- the device the formatter waits on -- not by LABEL:
+# the filesystem label does not exist until mkfs has run, so an fstab LABEL=
+# entry races the format and, being nofail, fails silently on exactly the first
+# boot that matters. The link, like the partition name it is made from, exists
+# before mkfs. It names only the config partition on the disk / is mounted from
+# (99-wendyos-config.rules, data-device recipe), so a config partition on a
+# second disk is never mounted.
 Requires=wendyos-config-init.service
 After=wendyos-config-init.service
 
 [Mount]
-What=/dev/disk/by-partlabel/config
+What=/dev/wendyos/config
 Where=/config
-Type=vfat
+# auto, not vfat: /config is FAT today and is converted to ext4 in place later.
+Type=auto
 Options=defaults,nofail
 
 [Install]
