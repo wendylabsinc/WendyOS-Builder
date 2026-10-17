@@ -1,12 +1,13 @@
 [Unit]
 Description=WendyOS /config partition first-boot setup
 DefaultDependencies=no
-# A device dependency, not systemd-udev-settle (deprecated, and After= alone
-# never pulls it in): a condition or bare ordering races udev's coldplug of the
-# UFS disk, and losing that race skips the format -- the same failure the /data
-# initialiser documents.
-Wants=dev-disk-by\x2dpartlabel-config.device
-After=systemd-udevd.service dev-disk-by\x2dpartlabel-config.device
+# A device dependency on the /dev/wendyos/config link, not systemd-udev-settle
+# (deprecated, and After= alone never pulls it in): a condition or bare ordering
+# races udev's coldplug of the disk, and losing that race skips the format --
+# the same failure the /data initialiser documents. The link has no filesystem
+# match in its rule (99-wendyos-config.rules), so it exists on a blank partition.
+Wants=dev-wendyos-config.device
+After=systemd-udevd.service dev-wendyos-config.device
 Before=config.mount local-fs.target shutdown.target
 Conflicts=shutdown.target
 

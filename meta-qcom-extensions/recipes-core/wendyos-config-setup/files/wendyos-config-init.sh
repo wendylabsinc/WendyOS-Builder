@@ -43,22 +43,25 @@
 # updated slot looks like a first boot.
 set -eu
 
-BYLABEL=/dev/disk/by-partlabel/config
+# The config partition on the disk / is mounted from, never one on a second
+# disk (99-wendyos-config.rules, data-device recipe). udev makes the link from
+# the GPT partition name, so it exists before the partition has a filesystem.
+CONFIG_LINK=/dev/wendyos/config
 log() { printf '[wendyos-config-init] %s\n' "$*"; }
 
-# Wait briefly for udev to publish the by-partlabel link.
+# Wait briefly for udev to publish the link.
 i=0
-while [ ! -e "$BYLABEL" ] && [ $i -lt 10 ]; do
+while [ ! -e "$CONFIG_LINK" ] && [ $i -lt 10 ]; do
     udevadm settle 2>/dev/null || true
     sleep 1
     i=$((i + 1))
 done
-if [ ! -e "$BYLABEL" ]; then
-    log "no $BYLABEL after ${i}s; nothing to do"
+if [ ! -e "$CONFIG_LINK" ]; then
+    log "no $CONFIG_LINK after ${i}s; nothing to do"
     exit 0
 fi
 
-DEV=$(readlink -f "$BYLABEL")
+DEV=$(readlink -f "$CONFIG_LINK")
 
 # Blank means no filesystem AND no partition table. Neither probe answers it
 # alone, and the same pair is read for the same reason in wendyos-data.sh.

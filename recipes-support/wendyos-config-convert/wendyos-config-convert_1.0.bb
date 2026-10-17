@@ -52,9 +52,10 @@ FILES:${PN} = " \
 #   coreutils          cp, du, df, tail, mkdir, mv, rm, sync, readlink,
 #                      basename, printf, tr
 #   e2fsprogs-mke2fs   mkfs.ext4, which makes the new filesystem
-#   udev               udevadm settle, so /dev/disk/by-label/config names the
-#                      new filesystem and not the FAT one it replaced before
-#                      the partition is mounted again
+#   udev               udevadm settle, so udev has re-probed the partition
+#                      before it is mounted again. On raspberrypi3-64 that is
+#                      what makes /dev/disk/by-label/config name the new
+#                      filesystem and not the FAT one it replaced
 #   systemd            systemctl, which is how every mount and the OP-TEE
 #                      supplicant are stopped and started. It also brings
 #                      util-linux-mount and util-linux-umount, which systemd's

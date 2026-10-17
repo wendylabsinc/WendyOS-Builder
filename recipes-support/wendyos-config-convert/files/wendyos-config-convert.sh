@@ -102,9 +102,10 @@ read_mount() {
 # Returns 0 when there is at least one.
 #
 # Sources are compared after `readlink -f`, because the same device is spelled
-# differently from one mount to the next: /config is mounted by label or by
-# partition label, while a bind mount of a directory on it reports the raw
-# device node. Only the resolved path is the same string in both.
+# differently from one mount to the next: /config is mounted through the
+# /dev/wendyos/config link or, on raspberrypi3-64, by label, while a bind mount
+# of a directory on it reports the raw device node. Only the resolved path is
+# the same string in both.
 mounts_on_device() {
     _dev=$1
     _found=""
@@ -550,9 +551,11 @@ fi
 log "$CONFIG_DEV is no longer mounted anywhere"
 
 # --- step 7: format -------------------------------------------------------
-# The label must stay `config`. Every board finds this partition by name:
-# the fstab entries use LABEL=config and the Qualcomm config.mount uses the
-# partition label, which the format does not touch.
+# The label must stay `config`. raspberrypi3-64 has MBR, so no partition names,
+# and its fstab finds /config by LABEL=config. Every other board mounts the
+# /dev/wendyos/config link, which udev makes from the GPT partition name on the
+# disk / is mounted from (99-wendyos-config.rules). The format touches neither
+# that name nor the link.
 log "formatting $CONFIG_DEV as ext4, label config"
 if ! mkfs.ext4 -q -L config "$CONFIG_DEV"; then
     log "ERROR: mkfs.ext4 failed on $CONFIG_DEV. The contents are safe in $STAGING and the next boot tries again"
@@ -561,18 +564,28 @@ if ! mkfs.ext4 -q -L config "$CONFIG_DEV"; then
     exit 1
 fi
 
-# udev has to re-probe the partition before /dev/disk/by-label/config points at
-# the new filesystem. Without the settle the mount below can still be served by
-# the link udev made for the FAT filesystem that is now gone.
-udevadm settle || log "WARN: udevadm settle failed, so the by-label link may still name the old filesystem"
+# udev has to re-probe the partition after the format. On raspberrypi3-64,
+# /dev/disk/by-label/config only points at the new filesystem once it has, and
+# without the settle the mount below can still be served by the link udev made
+# for the FAT filesystem that is now gone. /dev/wendyos/config does not depend
+# on the filesystem, but the settle also lets udev finish re-running its rule.
+udevadm settle || log "WARN: udevadm settle failed, so the /config link may still name the old filesystem"
 
-# Checked only when the link exists at all: the Qualcomm board mounts /config
-# by partition label and has no by-label link in its mount path.
-if [ -e /dev/disk/by-label/config ]; then
-    bylabel=$(readlink -f /dev/disk/by-label/config 2>/dev/null)
-    if [ "$bylabel" != "$CONFIG_DEV" ]; then
-        log "WARN: /dev/disk/by-label/config points at $bylabel, not $CONFIG_DEV"
+# Check the link this board mounts /config through: /dev/wendyos/config when it
+# exists, which is every GPT board, otherwise /dev/disk/by-label/config, which
+# is raspberrypi3-64.
+if [ -e /dev/wendyos/config ]; then
+    config_link=/dev/wendyos/config
+else
+    config_link=/dev/disk/by-label/config
+fi
+if [ -e "$config_link" ]; then
+    linked=$(readlink -f "$config_link" 2>/dev/null)
+    if [ "$linked" != "$CONFIG_DEV" ]; then
+        log "WARN: $config_link points at $linked, not $CONFIG_DEV"
     fi
+else
+    log "WARN: neither /dev/wendyos/config nor /dev/disk/by-label/config exists, so the mount below may not find $CONFIG_DEV"
 fi
 
 # --- step 8: mount it back ------------------------------------------------
@@ -591,7 +604,7 @@ if ! read_mount "$CONFIG_DIR" || [ "$mount_fstype" != "ext4" ]; then
     exit 1
 fi
 
-# And that it is OUR partition. This is the check that makes the by-label
+# And that it is OUR partition. This is the check that makes the link
 # warning above safe to be only a warning: the mount resolves a name, and if
 # that name ever came to point somewhere else, restoring 256 MB of /config onto
 # whatever filesystem answered it is the one mistake with no undo.

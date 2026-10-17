@@ -68,8 +68,11 @@ tegraflash_custom_post:append() {
 
 # Add fstab entry for config partition on Jetson (RPi5 has it in rpi-fstab)
 # Type auto, not vfat: /config is FAT today and is converted to ext4 in place later.
+# By the /dev/wendyos/config link, not LABEL=config: an AGX Orin moved from eMMC
+# to NVMe has a config partition on both disks, and the link names only the one
+# on the disk / is mounted from (99-wendyos-config.rules, data-device recipe).
 add_config_fstab() {
-    echo "LABEL=config  /config  auto  defaults,nofail  0 0" >> ${IMAGE_ROOTFS}${sysconfdir}/fstab
+    echo "/dev/wendyos/config  /config  auto  defaults,nofail  0 0" >> ${IMAGE_ROOTFS}${sysconfdir}/fstab
     mkdir -p ${IMAGE_ROOTFS}/config
 }
 ROOTFS_POSTPROCESS_COMMAND:append:tegra = " add_config_fstab;"

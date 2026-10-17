@@ -16,6 +16,10 @@ inherit systemd
 SYSTEMD_SERVICE:${PN} = "wendyos-config-init.service config.mount"
 SYSTEMD_AUTO_ENABLE:${PN} = "enable"
 
+# The udev rule and root-disk-part that make /dev/wendyos/config come from
+# data-device. It is not in RDEPENDS on purpose: data-device is per machine,
+# so naming it would rebuild this package for every machine (same reason as
+# tegra-rootfs-redundancy_1.0.bb). packagegroup-wendyos-base installs it.
 RDEPENDS:${PN} = "coreutils dosfstools util-linux-blkid"
 
 do_install() {

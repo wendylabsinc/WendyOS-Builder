@@ -78,9 +78,9 @@ IMAGE_INSTALL:append = "${@' ' + d.getVar('WENDYOS_VM_OTA_INSTALL') if d.getVar(
 IMAGE_INSTALL:remove = "${@'data-mount' if d.getVar('WENDYOS_OTA') == 'wendy' else ''}"
 
 # /config and /data mount points. Both are real partitions in the VM wks files,
-# mounted from vm-wendy-fstab: /config by LABEL, /data by the /dev/wendyos/data
-# alias. The rootfs must carry empty mount-point directories for the mounts to
-# land on. install -d is idempotent.
+# mounted from vm-wendy-fstab: /config by the /dev/wendyos/config link, /data by
+# the /dev/wendyos/data alias. The rootfs must carry empty mount-point
+# directories for the mounts to land on. install -d is idempotent.
 create_wendyos_vm_dirs() {
     install -d -m 0755 ${IMAGE_ROOTFS}/config
     install -d -m 0755 ${IMAGE_ROOTFS}/data
