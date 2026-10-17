@@ -1,103 +1,66 @@
-# v4l2loopback support
+# V4L2 and ALSA loopback support
 
-WendyOS ships the out-of-tree [v4l2loopback](https://github.com/v4l2loopback/v4l2loopback)
-kernel module on every Jetson image for IP-camera container parity
-(WDY-2430): it gives any container that only knows how to open a V4L2
-device a way to consume a network camera transparently, by letting the
-WendyAgent device agent decode an RTSP stream and feed the frames into a
-virtual `/dev/video<nr>` capture node instead of a real one.
+WendyOS includes `v4l2loopback` on Tegra and Qualcomm images. The agent uses
+its control device to create virtual cameras for IP cameras and SensorLink
+sources. Qualcomm images also include `snd-aloop`, which exposes SensorLink
+microphones through ALSA PCM devices.
 
-## What ships
+## Packages and loading
 
-- **Module**: `v4l2loopback_0.15.4.bb`
-  (`meta-tegra-extensions-jp7/recipes-kernel/v4l2loopback/`), built
-  out-of-tree against `linux-noble-nvidia-tegra` (kernel 6.8) via
-  `inherit module`. The recipe pins an exact upstream commit with
-  `SRCREV = "0f9ee86760b7f2bea174b7e3e7a1d38845da0ab4"` (the v0.15.4 tag) —
-  not a floating branch head — because, as covered below, the module's
-  public ioctl ABI is a contract the agent code depends on.
-- **Autoload**: `KERNEL_MODULE_AUTOLOAD` has
-  `kernel-module-split.bbclass` generate a `modules-load.d/v4l2loopback.conf`
-  file in the module package, so its control device exists before the agent
-  starts adding per-camera nodes.
-- **Options**: `KERNEL_MODULE_PROBECONF` similarly generates a
-  `modprobe.d/v4l2loopback.conf` file that pins `devices=0`:
-  - `devices=0` boots the module with only the control device
-    (`/dev/v4l2loopback`) and no stray `/dev/video0` — the agent creates
-    every capture node itself via ioctl, and a phantom device 0 would
-    collide with real camera enumeration.
-  - The module-level `exclusive_caps` parameter applies only to devices
-    created while the module initializes, so it has no effect when
-    `devices=0`. The agent instead sets `announce_all_caps=0` in each
-    `V4L2LOOPBACK_CTL_ADD` request, making that device announce OUTPUT xor
-    CAPTURE capabilities (never both), as consumers such as GStreamer and
-    ffmpeg expect.
-- Unconditionally RDEPENDS'd onto every Tegra image via
-  `packagegroup-wendyos-tegra.bb` — the recipe only exists in the
-  blacksail (JP7.2) layer tree, but every current Tegra board builds
-  blacksail, so there is no per-board gate.
+The shared recipe is `recipes-kernel/v4l2loopback/v4l2loopback_0.15.4.bb`.
+It builds against the target kernel through `inherit module`. Its source pin
+stays at `0f9ee86760b7f2bea174b7e3e7a1d38845da0ab4`, the v0.15.4 tag.
+The agent's ioctl definitions match that version. Upstream changed the public
+ioctl numbers and structure layout in v0.15.0, so a future version change
+must check the agent's definitions against the new header.
 
-## The kernel contract
+Tegra images require the package through `packagegroup-wendyos-tegra`.
+`qcom-image.inc` explicitly installs `v4l2loopback` and
+`kernel-module-snd-aloop` on every `qcom-wendyos` target, including Uno Q.
+These are required image packages. Missing drivers fail the image build.
 
-The module links against the running kernel's `videodev` (V4L2 core) and
-`vb2-vmalloc` (videobuf2 vmalloc allocator) symbols, gated by
-`CONFIG_VIDEO_DEV` and `CONFIG_VIDEOBUF2_VMALLOC`. Both are already enabled
-in NVIDIA's kernel config — V4L2 is load-bearing for the CSI/ISP camera
-stack this BSP ships regardless (the `nvvideo4linux2` /
-`nvarguscamerasrc` GStreamer plugins depend on it too) — so nothing needs
-to be turned on for v4l2loopback specifically.
+The v4l2loopback recipe generates module loading and modprobe configuration
+with `devices=0`. Boot loads only `/dev/v4l2loopback`; the agent creates
+numbered `/dev/video*` nodes through `V4L2LOOPBACK_CTL_ADD`. This avoids
+creating a spare `/dev/video0` which could collide with camera enumeration.
+The agent sets `announce_all_caps=0` per virtual camera for exclusive
+OUTPUT or CAPTURE capabilities. The module's `exclusive_caps` parameter
+only affects devices created during module initialization.
 
-What *can* happen is a future kernel bump or config change silently
-dropping one of those symbols, which would otherwise surface only as an
-obscure module build/link failure deep inside the image build, with
-nothing pointing at the actual missing Kconfig option. To fail fast
-instead, the `v4l2loopback_0.15.4.bb` module recipe adds a
-`do_configure:append()` that reads the effective
-`${STAGING_KERNEL_BUILDDIR}/.config` after Kconfig has resolved every BSP
-fragment and dependency, and `bbfatal`s with a named symbol if either is
-missing:
+The agent loads `snd-aloop` on demand using `modprobe snd-aloop`.
+The Qualcomm kernel fragment preserves the BSP's modular sound and media
+stacks and requires `CONFIG_SND_ALOOP=m`. ALSA selects the PCM and timer
+dependencies. No ALSA card is created by an additional boot autoload rule.
+
+## Build checks
+
+The module recipe checks the effective kernel configuration for
+`CONFIG_VIDEO_DEV` and `CONFIG_VIDEOBUF2_VMALLOC`. The Qualcomm kernel
+append also checks those settings and requires `CONFIG_SND_ALOOP=m`
+after Kconfig resolves its fragments.
+
+After `do_rootfs` generates `modules.dep`, `sensor-loopback-check.bbclass`
+validates each Qualcomm image. It checks both loopback driver files and
+every module dependency against the compiled kernel release. A module tree
+for a different kernel, a missing dependency, or an absent driver fails
+before image and OTA artifacts are produced. This catches the IQ9 failure
+where the kernel enabled ALSA loopback but the image omitted its package,
+and v4l2loopback was available only to the Tegra layer.
+
+Run the fixture tests without a Yocto build:
 
 ```sh
-for symbol in CONFIG_VIDEO_DEV CONFIG_VIDEOBUF2_VMALLOC; do
-    grep -Eq "^${symbol}=(y|m)$" "${STAGING_KERNEL_BUILDDIR}/.config" || bbfatal "..."
-done
+python3 -m unittest scripts/check_sensor_loopback_support_test.py scripts/check_mesh_kernel_support_test.py
 ```
 
-This is a tripwire, not an enabler — the recipe carries no `SRC_URI`
-kernel-config fragment. Keeping the assertion in the module recipe also
-means changes to the check do not invalidate the shared Tegra kernel's
-sstate across every machine.
+For the IQ9 image, build with `BOARD=dragonwing-iq9075` using the normal
+builder setup. The kernel and rootfs checks run as part of that build.
+The fixture tests do not replace a target kernel build or device validation.
 
-## The consumer
+## Device validation
 
-WendyAgent owns everything past the control device. For each configured
-IP camera it opens `/dev/v4l2loopback` and issues `V4L2LOOPBACK_CTL_ADD` to
-create a pinned-number capture node in the `/dev/video200`–`/dev/video255`
-range (kept well clear of real camera enumeration, which starts at
-`/dev/video0`), then writes decoded RTSP frames into it.
-
-This is why the module version is pinned by exact `SRCREV` rather than
-tracking `main`: upstream's 0.15.0 release changed the public ioctl
-numbers and struct layout ("change public ioctl numbers!" in their
-ChangeLog) relative to the 0.13.x/0.14.x line. The agent's ioctl struct
-definitions must be generated from this exact pinned revision's
-`v4l2loopback.h`, not an older or newer one — bumping `SRCREV` past an ABI
-boundary without regenerating the agent-side headers would silently
-corrupt the control-device protocol.
-
-## On-device smoke test
-
-```sh
-# Module loaded, control device only (devices=0 means no /dev/video0 here)
-lsmod | grep v4l2loopback
-ls -l /dev/v4l2loopback
-
-# After the agent has added at least one camera node:
-v4l2-ctl --list-devices
-```
-
-`v4l2-ctl` ships in every Tegra image via `v4l-utils`
-(`conf/distro/include/tegra-image.inc`), so no extra package install is
-needed on-device. `v4l2-ctl --list-devices` should list the loopback
-device(s) the agent created, each showing its exclusive OUTPUT or CAPTURE
-capability per the add request's `announce_all_caps=0` setting.
+After installing the matching image, the agent should find
+`/dev/v4l2loopback`, mount the paired camera channels, and load `snd-aloop`
+when it mounts a microphone channel. Confirm the pairing reports connected
+and the consuming application receives camera frames or microphone samples.
+Successful module loading alone does not establish that sensor data arrives.

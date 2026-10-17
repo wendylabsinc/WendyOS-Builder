@@ -1,6 +1,6 @@
 SUMMARY = "v4l2loopback kernel module (virtual V4L2 capture devices)"
 DESCRIPTION = "Builds the out-of-tree v4l2loopback module against \
-linux-noble-nvidia-tegra. It is required for IP-camera container parity: \
+the target kernel on Tegra and Qualcomm Dragonwing. It is required for IP-camera and SensorLink container parity: \
 the WendyAgent device agent creates one pinned-number /dev/video<nr> \
 loopback node per camera (via V4L2LOOPBACK_CTL_ADD on the control device) \
 and feeds decoded RTSP frames into it, so any container that only knows how \
@@ -26,7 +26,7 @@ SRC_URI = " \
     "
 SRCREV = "0f9ee86760b7f2bea174b7e3e7a1d38845da0ab4"
 
-COMPATIBLE_MACHINE = "(tegra)"
+COMPATIBLE_MACHINE = "(tegra|qcom-wendyos)"
 
 # Standard single-file Kbuild module (Kbuild just declares
 # obj-m := v4l2loopback.o at the repo root) — no nested build subdir and no
