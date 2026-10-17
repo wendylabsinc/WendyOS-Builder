@@ -38,7 +38,8 @@ def _safe_module_path(path: str) -> bool:
 
 
 def validate(config: dict[str, str], rootfs: Path, release: str,
-             builtin: list[str], modules: dict[str, str]) -> list[str]:
+             builtin: list[str], modules: dict[str, str],
+             external_modules: list[str] | None = None) -> list[str]:
     errors: list[str] = []
     if not re.fullmatch(r"[A-Za-z0-9_.+-]+", release) or release in {".", ".."}:
         return [f"invalid kernel release: {release!r}"]
@@ -51,7 +52,12 @@ def validate(config: dict[str, str], rootfs: Path, release: str,
         if state not in {"y", "m"}:
             errors.append(f"{symbol} is not enabled (effective value: {state or 'unset'})")
         elif state == "m":
-            needed[symbol] = module.replace("-", "_")
+            needed[symbol + '=m'] = module.replace("-", "_")
+    for module in external_modules or []:
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", module):
+            errors.append(f"invalid external module name: {module!r}")
+        else:
+            needed['external module ' + module] = module.replace('-', '_')
     if not needed:
         return errors
 
@@ -100,7 +106,7 @@ def validate(config: dict[str, str], rootfs: Path, release: str,
     for symbol, name in sorted(needed.items()):
         matches = names.get(name, [])
         if len(matches) != 1:
-            errors.append(f"{symbol}=m requires exactly one installed {name}.ko (found {len(matches)})")
+            errors.append(f"{symbol} requires exactly one installed {name}.ko (found {len(matches)})")
             continue
         check_file(matches[0], symbol)
     return errors
