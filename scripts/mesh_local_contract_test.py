@@ -69,6 +69,16 @@ class MeshLocalContractTest(unittest.TestCase):
             values[symbol] = 'm'
             self.assertNotEqual(self.run_gate(values).returncode, 0)
 
+    def test_mesh_host_interface_requires_dummy_driver(self):
+        # IQ9 had working IPv6 policy routing and TUN but NewKernel failed
+        # creating wlmesh0 because its vendor defconfig omitted CONFIG_DUMMY.
+        self.assertIn('CONFIG_DUMMY:dummy', contract('WENDYOS_MESH_LOCAL_MODULES'))
+        values = self.all_values()
+        values.pop('CONFIG_DUMMY')
+        result = self.run_gate(values)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('CONFIG_DUMMY', result.stderr)
+
     def test_missing_config_or_empty_contract_is_fatal(self):
         self.assertNotEqual(self.run_gate({}, missing=True).returncode, 0)
         for name in ('WENDYOS_MESH_LOCAL_BUILTIN', 'WENDYOS_MESH_LOCAL_MODULES'):
@@ -106,7 +116,7 @@ class MeshLocalContractTest(unittest.TestCase):
         data = Data()
         exec(textwrap.dedent(body), {'d': data})
         self.assertEqual(data.values['RRECOMMENDS:packagegroup-wendyos-kernel'].split(),
-                         ['kernel-module-ipv6', 'kernel-module-tun',
+                         ['kernel-module-ipv6', 'kernel-module-tun', 'kernel-module-dummy',
                           'kernel-module-xt-tproxy', 'kernel-module-nf-tproxy-ipv4'])
 
     def test_installed_nm_policy_owns_mesh_and_preserves_physical_interfaces(self):
