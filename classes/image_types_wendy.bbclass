@@ -56,12 +56,20 @@ IMAGE_CMD:wendy () {
             bbfatal "image_types_wendy: rootfs image is $payload_size bytes but WENDYOS_ROOTFS_SIZE_KB pins it to $expected_size; refusing to pack a mis-sized OTA payload"
         fi
     fi
+    # The updater stages capsules according to the marker in the written
+    # rootfs. Report that same decision in the manifest: leaving pack's
+    # default false mislabels Jetson capsule updates as rootfs-only updates.
+    bootloader_update=false
+    if [ -e "${IMAGE_ROOTFS}/var/lib/wendyos/update-bootloader" ]; then
+        bootloader_update=true
+    fi
     wendyos-update pack \
         --image ${IMGDEPLOYDIR}/${IMAGE_LINK_NAME}.${WENDY_ARTIFACTIMG_FSTYPE} \
         --name ${WENDY_ARTIFACT_NAME} \
         --version ${WENDY_ARTIFACT_VERSION} \
         --device ${WENDYOS_BOARD_ID} \
         --compression ${WENDY_ARTIFACT_COMPRESSION} \
+        --bootloader-update="$bootloader_update" \
         -o ${IMGDEPLOYDIR}/${IMAGE_NAME}.wendy
 }
 
