@@ -5,6 +5,8 @@ name: Scripts CI
 on:
   pull_request:
     paths:
+      - 'classes/image_types_wendy.bbclass'
+      - 'scripts/wendy_artifact_manifest_test.py'
       - 'scripts/mark_fat_volumes_test.py'
       - 'recipes-core/images/files/mark-fat-volumes.py'
       - 'recipes-core/images/wendyos-image.bbappend'
@@ -93,6 +95,8 @@ on:
   push:
     branches: [main]
     paths:
+      - 'classes/image_types_wendy.bbclass'
+      - 'scripts/wendy_artifact_manifest_test.py'
       - 'scripts/mark_fat_volumes_test.py'
       - 'recipes-core/images/files/mark-fat-volumes.py'
       - 'recipes-core/images/wendyos-image.bbappend'
@@ -262,6 +266,9 @@ jobs:
 
       - name: Run resolver tests
         run: bash scripts/resolve-artifacts.test.sh
+
+      - name: Verify OTA capsule metadata follows the rootfs marker
+        run: python3 -m unittest scripts/wendy_artifact_manifest_test.py -v
 
       # The agent updater ships in the image and decides which agent every
       # device runs; a comparison bug there silently moves the whole fleet
