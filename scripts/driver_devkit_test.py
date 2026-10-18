@@ -125,6 +125,29 @@ printf '%s\\n' "$result"
         selected, _ = self.select(os_devices="jetson-agx-orin", entries=entries, device="jetson-agx-orin-emmc")
         self.assertEqual(selected["devkit"]["kernel_version"], "emmc-kernel")
 
+    def test_nano_nightly_uses_current_sd_or_nvme_devkit(self):
+        version = "nightly-20261018T120000"
+        entries = [self.entry(device="jetson-orin-nano", storage=storage, version=version,
+                              devkit=dict(kernel_version="6.8-nano", path=f"nano/{storage}/devkit"))
+                   for storage in ("nvme", "sd")]
+        for candidates in ([entries[0]], [entries[1]], entries):
+            with self.subTest(storage=[entry["storage"] for entry in candidates]):
+                selected, urls = self.select(prefix="", want=version, os_devices="jetson-orin-nano",
+                                             device="jetson-orin-nano", entries=candidates,
+                                             public=manifest("old-nightly", "6.1"))
+                self.assertEqual(urls, [])
+                self.assertEqual(selected["version"], version)
+                self.assertTrue(selected["nightly"])
+                self.assertEqual(selected["devkit"]["kernel_version"], "6.8-nano")
+
+    def test_nano_build_refuses_missing_devkit_without_using_public_kernel(self):
+        for entries in ([], [self.entry(device="jetson-orin-nano", build_run_id="old")],
+                        [self.entry(device="jetson-orin-nano", devkit=None)]):
+            with self.subTest(entries=entries):
+                _, urls = self.select(os_devices="jetson-orin-nano", device="jetson-orin-nano",
+                                      entries=entries, public=manifest("0.19.1", "6.8"), expected_status=2)
+                self.assertEqual(urls, [])
+
     def test_non_opted_in_or_unbuilt_device_is_skipped(self):
         for device in ["jetson-agx-orin", "vm-arm64"]:
             _, urls = self.select(os_devices="jetson-agx-thor vm-arm64", device=device, expected_status=1)

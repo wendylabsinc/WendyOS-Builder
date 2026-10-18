@@ -68,7 +68,7 @@ class DriverManifestTests(unittest.TestCase):
         self.assertIn("replace brcmfmac\n", result.stdout)
         self.assertIn("restore-wifi-pci 8086:272b\n", result.stdout)
         self.assertNotIn("restore-wifi-connection wlan0", result.stdout)
-        for device in ("jetson-agx-thor", "jetson-agx-orin", "jetson-agx-orin-emmc"):
+        for device in ("jetson-agx-thor", "jetson-agx-orin", "jetson-agx-orin-emmc", "jetson-orin-nano"):
             with self.subTest(device=device):
                 jetson = self.validate("pack-sysext.sh", marker, manifest, device)
                 self.assertEqual(jetson.returncode, 0, jetson.stderr)
