@@ -112,6 +112,16 @@ stamp_boot_screen() {
 }
 ROOTFS_POSTPROCESS_COMMAND += "stamp_boot_screen;"
 
+# Rack qualification compares this immutable rootfs hash with the running agent.
+# The agent updater can replace /opt/wendyos/bin/wendy-agent after boot; that
+# replacement must never be mistaken for the binary shipped in this OS image.
+stamp_bundled_agent() {
+    install -d "${IMAGE_ROOTFS}/usr/lib/wendyos"
+    agent_hash=$(sha256sum "${IMAGE_ROOTFS}/opt/wendyos/bin/wendy-agent") || bbfatal "Bundled agent missing"
+    printf '%s\n' "${agent_hash%% *}" > "${IMAGE_ROOTFS}/usr/lib/wendyos/agent-sha256"
+}
+ROOTFS_POSTPROCESS_COMMAND += "stamp_bundled_agent;"
+
 # Optional runtime package management (rpm/dnf in the rootfs).
 # Disabled by default — image is updated atomically via the A/B OTA.
 # Set WENDYOS_ENABLE_PACKAGE_MANAGEMENT = "1" in local.conf or distro to enable.

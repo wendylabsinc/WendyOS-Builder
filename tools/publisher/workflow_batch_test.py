@@ -123,28 +123,65 @@ with (Path(os.environ["TEST_ROOT"]) / "calls.jsonl").open("a") as f:
         result, calls = self.run_step("Update master manifest")
         self.assertEqual(result.returncode, 1, result.stderr)
         self.assertIn("leaving latest on with-drivers", result.stdout)
+        self.assertEqual(calls, [])
+
+    def test_release_preserves_channels_after_all_candidates_pass(self):
+        self.entry("stable", "stable", nightly=False)
+        self.entry("nightly-sd", "nightly", nightly=True, storage="sd")
+        self.entry("nightly-nvme", "nightly", nightly=True, storage="nvme")
+        for device in ("stable", "nightly"):
+            self.write_json(f"cloud/{device}.json", {"versions": {"new": {}}})
+        result, calls = self.run_step("Update master manifest")
+        self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(len(calls), 1)
-        self.assertNotIn("--pr", calls[0]["args"])
         rows = {row["device"]: row for row in calls[0]["batch"]}
         self.assertEqual(set(rows), {"stable", "nightly"})
         self.assertFalse(rows["stable"]["nightly"])
         self.assertTrue(rows["nightly"]["nightly"])
         self.assertEqual(len(calls[0]["batch"]), 2)
 
-    def test_all_devices_held_back_yields_empty_batch(self):
+    def test_all_devices_held_back_never_calls_publisher(self):
         self.entry("held", "held")
         self.write_json("cloud/master.json", {"devices": {"held": {"latest": "old"}}})
         self.write_json("cloud/held.json", {"versions": {"old": {"extensions": [{}]}, "new": {}}})
         result, calls = self.run_step("Update master manifest")
         self.assertEqual(result.returncode, 1)
-        self.assertEqual([call["batch"] for call in calls], [[]])
+        self.assertEqual(calls, [])
 
-    def test_no_entries_skips_publisher(self):
-        for name in ("Update master manifest", "Update PR master manifest"):
+    def test_missing_master_or_device_manifest_never_promotes(self):
+        self.entry("pi", "pi", nightly=True)
+        result, calls = self.run_step("Update master manifest")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("device manifest unreadable", result.stderr)
+        self.assertEqual(calls, [])
+        (self.root / "cloud/master.json").unlink()
+        result, calls = self.run_step("Update master manifest")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("master manifest unreadable", result.stderr)
+        self.assertEqual(calls, [])
+
+    def test_missing_candidate_version_prevents_whole_batch(self):
+        self.entry("a-good", "good")
+        self.entry("z-missing", "missing")
+        self.write_json("cloud/good.json", {"versions": {"new": {}}})
+        self.write_json("cloud/missing.json", {"versions": {"old": {}}})
+        result, calls = self.run_step("Update master manifest")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("candidate version new is missing", result.stderr)
+        self.assertEqual(calls, [])
+
+    def test_no_release_entries_fails_before_publication(self):
+        self.env["GITHUB_OUTPUT"] = str(self.root / "output")
+        for name in ("Write device manifests", "Update master manifest"):
             with self.subTest(name=name):
                 result, calls = self.run_step(name)
-                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertNotEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(calls, [])
+
+    def test_driver_only_pr_without_os_entries_skips_publisher(self):
+        result, calls = self.run_step("Update PR master manifest")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(calls, [])
 
     def test_malformed_entry_fails_before_publishing(self):
         (self.root / "manifest-entries/bad.json").write_text("bad JSON")

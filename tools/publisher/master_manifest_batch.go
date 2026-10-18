@@ -74,6 +74,25 @@ func normalizeMasterManifestBatch(updates []MasterManifestUpdate) ([]MasterManif
 	return result, nil
 }
 
+// promoteMasterManifestBatch is the explicit promotion boundary for staged
+// candidates. The release workflow calls it only after hardware qualification.
+// Repeat device writes on retries, including an already-current master pointer.
+func promoteMasterManifestBatch(ctx context.Context, logger *logrus.Entry, bucket *storage.BucketHandle, prefix string, updates []MasterManifestUpdate, forceWrite bool) error {
+	updates, err := normalizeMasterManifestBatch(updates)
+	if err != nil {
+		return err
+	}
+	for _, update := range updates {
+		if err := updateVersionMetadata(ctx, logger, bucket, prefix, update.Device, update.Version, update.Nightly, true, func(metadata VersionMetadata) (VersionMetadata, error) {
+			metadata.IsLatest = true
+			return metadata, nil
+		}); err != nil {
+			return fmt.Errorf("promoting %s version %s: %w", update.Device, update.Version, err)
+		}
+	}
+	return updateMasterManifestBatch(ctx, logger, bucket, prefix, updates, forceWrite)
+}
+
 func updateMasterManifestBatch(ctx context.Context, logger *logrus.Entry, bucket *storage.BucketHandle, prefix string, updates []MasterManifestUpdate, forceWrite bool) error {
 	updates, err := normalizeMasterManifestBatch(updates)
 	if err != nil || len(updates) == 0 {

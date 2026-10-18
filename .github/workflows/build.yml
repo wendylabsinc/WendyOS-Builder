@@ -70,11 +70,29 @@ jobs:
       devices: ${{ steps.set.outputs.devices }}
       version: ${{ steps.version.outputs.version }}
       is-release: ${{ steps.version.outputs.is-release }}
+      source-sha: ${{ steps.source.outputs.sha }}
+      integration-sha: ${{ steps.integration.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           ref: ${{ inputs.version }}
+
+      - name: Pin builder source
+        id: source
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Pin hardware test source
+        id: integration
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sha=$(gh api repos/wendylabsinc/wendyos/commits/main --jq .sha)
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "Invalid hardware test source SHA" >&2; exit 1; }
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "Hardware tests use wendylabsinc/wendyos@$sha" >> "$GITHUB_STEP_SUMMARY"
 
       # No OS rebuild can change an add-on built against a published devkit.
       # 'os' is '**' minus the driver paths, so a PR touching both still builds.
@@ -259,7 +277,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           path: wendyos
-          ref: ${{ inputs.version }}
+          ref: ${{ needs.detect-changes.outputs.source-sha }}
 
       # Point the three build caches at the tenant's persistent NVMe pool.
       # common.inc pins DL_DIR/SSTATE_DIR to ${TOPDIR}/../{downloads,sstate-cache},
@@ -442,20 +460,14 @@ jobs:
         # they surface on the boot screen (/etc/issue) and in /etc/wendyos/commit.
         # VERSION is the same string the publish step uploads under
         # (pr-<N> | nightly-<ts> | X.Y.Z); COMMIT is the full builder SHA — the PR
-        # head on pull_request (the reviewed commit, not the ephemeral merge SHA),
-        # otherwise github.sha. Runs on every build. See WENDYOS_BUILD_* in
+        # merge checkout on pull_request, otherwise the resolved source ref.
+        # Runs on every build. See WENDYOS_BUILD_* in
         # conf/template/include/local/common.inc.
         env:
           BUILD_VERSION: ${{ needs.detect-changes.outputs.version }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PUSH_SHA: ${{ github.sha }}
+          BUILD_COMMIT: ${{ needs.detect-changes.outputs.source-sha }}
         run: |
           set -euo pipefail
-          if [[ "${GITHUB_EVENT_NAME:-}" == "pull_request" ]]; then
-            BUILD_COMMIT="$PR_HEAD_SHA"
-          else
-            BUILD_COMMIT="$PUSH_SHA"
-          fi
           {
             echo ''
             echo '# CI: build provenance stamped into the image'
@@ -1107,7 +1119,8 @@ jobs:
               [[ "$alias" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "invalid manifest alias" >&2; exit 1; }
             fi
             jq --arg alias "$alias" --arg run "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" \
-              '.aliases = (if $alias == "" then [] else [$alias] end) | .build_run_id = $run | .build_run_attempt = $attempt' \
+              --arg sha "${{ needs.detect-changes.outputs.source-sha }}" --arg storage "$STORAGE" \
+              '.aliases = (if $alias == "" then [] else [$alias] end) | .build_run_id = $run | .build_run_attempt = $attempt | .build_sha = $sha | .build_storage = $storage' \
               "$ENTRY_FILE" > "$ENTRY_FILE.tmp"
             mv "$ENTRY_FILE.tmp" "$ENTRY_FILE"
             echo "::endgroup::"
@@ -1155,12 +1168,12 @@ jobs:
   # hand over manifest-entry artifacts; this job applies them one at a time,
   # so device and master manifests never see concurrent read-modify-writes
   # from CI. Runs for nightly (main/dispatch) and release (tag) builds.
-  # !cancelled(): publish whatever subset of devices built successfully.
+  # A failed build matrix cannot publish a partial candidate set.
   # ---------------------------------------------------------------------------
   publish:
     name: Publish manifests
     needs: [detect-changes, build]
-    if: ${{ !cancelled() && github.event_name != 'pull_request' }}
+    if: ${{ !cancelled() && needs.build.result == 'success' && github.event_name != 'pull_request' }}
     concurrency:
       group: update-master-manifest
       cancel-in-progress: false
@@ -1187,7 +1200,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           path: wendyos
-          ref: ${{ inputs.version }}
+          ref: ${{ needs.detect-changes.outputs.source-sha }}
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -1220,9 +1233,9 @@ jobs:
           shopt -s nullglob
           entries=("$GITHUB_WORKSPACE"/manifest-entries/*.json)
           if [[ ${#entries[@]} -eq 0 ]]; then
-            echo "::warning::No manifest entries found (did every build fail?); nothing to publish."
+            echo "::error::No manifest entries found; refusing candidate publication." >&2
             echo "published=false" >> "$GITHUB_OUTPUT"
-            exit 0
+            exit 1
           fi
           echo "published=true" >> "$GITHUB_OUTPUT"
           TOKEN=$(gcloud auth print-access-token)
@@ -1238,78 +1251,6 @@ jobs:
             "$RUNNER_TEMP/publisher" --apply-metadata "$entry" --access-token "$TOKEN"
             echo "::endgroup::"
           done
-
-      - name: Tag nightly pre-release on GitHub
-        # Nightly builds only: release tags already exist (created by promote.yml).
-        # Skipped when zero entries were published (every build failed) - never
-        # tag and announce a nightly that has no images behind it.
-        if: ${{ success() && github.ref_type != 'tag' && steps.apply.outputs.published == 'true' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ needs.detect-changes.outputs.version }}
-        run: |
-          set -euo pipefail
-          cd "$GITHUB_WORKSPACE/wendyos"
-
-          # -f/--force for idempotency: a re-run of this job re-tags the same
-          # commit with the same nightly-<timestamp> version.
-          git tag -f "$VERSION"
-          git push origin "$VERSION" --force
-
-          if gh release view "$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "Release $VERSION already exists (job re-run), skipping create."
-          else
-            gh release create "$VERSION" \
-              --repo "$GITHUB_REPOSITORY" \
-              --title "WendyOS $VERSION" \
-              --generate-notes \
-              --prerelease
-          fi
-
-          # Keep the releases page tidy: retain the 7 most recent nightly
-          # pre-releases. Git tags are kept forever for traceability and
-          # promotion; nightly-YYYYMMDDTHHMMSS sorts chronologically.
-          gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName,isPrerelease \
-            --jq '[.[] | select(.isPrerelease and (.tagName | startswith("nightly-"))) | .tagName] | sort | reverse | .[7:][]' |
-            while read -r old; do
-              echo "Pruning old nightly pre-release $old (tag kept)"
-              gh release delete "$old" --yes --repo "$GITHUB_REPOSITORY"
-            done
-
-      - name: Attach SBOMs to GitHub release
-        # Both nightly and release (tag) builds: for nightly the release was
-        # just created above; for tags it already exists (from promote.yml).
-        # Skipped when nothing published (every build failed).
-        if: ${{ success() && steps.apply.outputs.published == 'true' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ needs.detect-changes.outputs.version }}
-        run: |
-          set -euo pipefail
-          shopt -s nullglob
-          assets=("$GITHUB_WORKSPACE"/sbom-assets/*)
-          if [[ ${#assets[@]} -eq 0 ]]; then
-            echo "::warning::No SBOM assets downloaded; nothing to attach to release $VERSION."
-            exit 0
-          fi
-          # --clobber makes re-runs idempotent (replaces same-named assets).
-          gh release upload "$VERSION" "${assets[@]}" \
-            --repo "$GITHUB_REPOSITORY" --clobber
-
-      - name: Send Discord announcement
-        # Nightly builds only: release announcements are sent by promote.yml.
-        if: ${{ success() && github.ref_type != 'tag' && steps.apply.outputs.published == 'true' }}
-        env:
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_NIGHTLY_WEBHOOK_URL }}
-          VERSION: ${{ needs.detect-changes.outputs.version }}
-        run: |
-          [[ -z "${DISCORD_WEBHOOK_URL}" ]] && exit 0
-          RELEASE_URL="https://github.com/${GITHUB_REPOSITORY}/releases/tag/${VERSION}"
-          jq -n --arg msg "**WendyOS ${VERSION}** is out! Full changelog and downloads: ${RELEASE_URL}" '{content: $msg}' | \
-            curl -fsS -o /dev/null \
-              -H "Content-Type: application/json" \
-              -d @- \
-              "$DISCORD_WEBHOOK_URL"
 
   # ---------------------------------------------------------------------------
   # publish-pr: PR-only counterpart to `publish`. Writes into the pr/<N>/
@@ -1418,17 +1359,41 @@ jobs:
       device: ${{ inputs.device }}
     secrets: inherit
 
+  # The test workflow consumes this run's immutable metadata artifacts, installs
+  # those exact OTA bytes, and verifies boot provenance before running app tests.
+  # Land the WendyOS workflow interface first; see docs/hardware-qualification.md.
+  hardware-qualification:
+    name: Qualify candidate OS on hardware
+    needs: [detect-changes, build, publish, drivers]
+    if: >-
+      !cancelled() && github.event_name != 'pull_request' &&
+      needs.build.result == 'success' && needs.publish.result == 'success' &&
+      needs.drivers.result == 'success'
+    permissions:
+      contents: read
+      actions: read
+    uses: wendylabsinc/wendyos/.github/workflows/integration-tests.yml@6f3535bef440992f0d8c119f3dc0f96458e5ee92
+    with:
+      jobs: integration
+      platform: macos
+      source_ref: ${{ needs.detect-changes.outputs.integration-sha }}
+      os_candidate_version: ${{ needs.detect-changes.outputs.version }}
+      os_candidate_sha: ${{ needs.detect-changes.outputs.source-sha }}
+      os_candidate_repository: ${{ github.repository }}
+      os_candidate_run_id: ${{ github.run_id }}
+
   # Advancing "latest" is what actually offers a version to a device, so it runs
   # only once the add-ons for that version are published. Until then the build is
   # uploaded and its manifest entry written — drivers.yml needs both to find the
   # devkit — but no device resolves it through auto-detect.
   promote:
     name: Promote to latest
-    needs: [detect-changes, publish, drivers]
-    # publish must have succeeded: a version whose device manifest was never
-    # written would become a latest pointer devices cannot resolve. A failed
-    # drivers job still runs through, where the per-device guard below catches it.
-    if: ${{ !cancelled() && needs.publish.result == 'success' && github.event_name != 'pull_request' }}
+    needs: [detect-changes, build, publish, drivers, hardware-qualification]
+    # Skipped, failed, and cancelled qualification all hold the existing pointers.
+    if: >-
+      !cancelled() && github.event_name != 'pull_request' &&
+      needs.build.result == 'success' && needs.publish.result == 'success' &&
+      needs.drivers.result == 'success' && needs.hardware-qualification.result == 'success'
     concurrency:
       group: update-master-manifest
       cancel-in-progress: false
@@ -1452,7 +1417,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           path: wendyos
-          ref: ${{ inputs.version }}
+          ref: ${{ needs.detect-changes.outputs.source-sha }}
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -1473,21 +1438,19 @@ jobs:
           shopt -s nullglob
           entries=("$GITHUB_WORKSPACE"/manifest-entries/*.json)
           if [[ ${#entries[@]} -eq 0 ]]; then
-            echo "No manifest entries; skipping master manifest update."
-            exit 0
+            echo "::error::No manifest entries; refusing promotion." >&2
+            exit 1
           fi
           TOKEN=$(gcloud auth print-access-token)
           if ! MASTER=$(curl -sfL "${PUBLIC_BASE}/manifests/master.json"); then
-            echo "::warning::master manifest unreadable, promoting without the add-on check"
-            MASTER='{}'
+            echo "::error::master manifest unreadable; refusing promotion" >&2
+            exit 1
           fi
-          failed=0
           cd "$GITHUB_WORKSPACE/wendyos/tools/publisher"
           go build -o "$RUNNER_TEMP/publisher" .
-          # Collect only devices that published and pass the add-on check.
-          # Failed/held-back devices keep their previous pointers. Identical
-          # storage variants are deduplicated; conflicting rows reach the
-          # publisher's batch validation instead of silently choosing one.
+          # Validate every candidate before changing any channel pointer.
+          # Identical storage variants are deduplicated; conflicting rows reach
+          # the publisher's batch validation instead of silently choosing one.
           jq -sc '[.[] | . as $entry | (.device, .aliases[]?) as $device | $entry | {device: $device, version, nightly, stability}] | unique | .[]' "${entries[@]}" > "$RUNNER_TEMP/master-candidates.jsonl"
           readarray -t rows < "$RUNNER_TEMP/master-candidates.jsonl"
           : > "$RUNNER_TEMP/master-updates.jsonl"
@@ -1502,8 +1465,12 @@ jobs:
             # channel being moved, so a channel that never shipped add-ons is never
             # held back.
             if ! DEV_MANIFEST=$(curl -sfL "${PUBLIC_BASE}/manifests/${DEVICE}.json"); then
-              echo "::warning::${DEVICE}: device manifest unreadable, promoting without the add-on check"
-              DEV_MANIFEST='{}'
+              echo "::error::${DEVICE}: device manifest unreadable; refusing promotion" >&2
+              exit 1
+            fi
+            if ! jq -e --arg v "$VERSION" '.versions[$v] | type == "object"' <<<"$DEV_MANIFEST" >/dev/null; then
+              echo "::error::${DEVICE}: candidate version ${VERSION} is missing; refusing promotion" >&2
+              exit 1
             fi
             if [[ "$NIGHTLY" == "true" ]]; then
               PREV=$(jq -r --arg d "$DEVICE" '.devices[$d].latest_nightly // ""' <<<"$MASTER")
@@ -1515,11 +1482,128 @@ jobs:
             if [[ -n "$PREV" && "$PREV_EXTS" -gt 0 && "$NEW_EXTS" -eq 0 ]]; then
               echo "::error::${DEVICE}: ${PREV} publishes driver add-ons but ${VERSION} has none;" \
                    "leaving latest on ${PREV} so no device is offered a build without its drivers"
-              failed=1
-              continue
+              exit 1
             fi
             printf '%s\n' "$row" >> "$RUNNER_TEMP/master-updates.jsonl"
           done
           jq -s '.' "$RUNNER_TEMP/master-updates.jsonl" > "$RUNNER_TEMP/master-updates.json"
           "$RUNNER_TEMP/publisher" --master-manifest-batch "$RUNNER_TEMP/master-updates.json" --access-token "$TOKEN" </dev/null
-          exit "$failed"
+
+  announce-qualified:
+    name: Publish qualified GitHub release
+    needs: [detect-changes, promote, hardware-qualification]
+    if: >-
+      !cancelled() && needs.promote.result == 'success' &&
+      needs.hardware-qualification.result == 'success'
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: wendyos
+          ref: ${{ needs.detect-changes.outputs.source-sha }}
+      - name: Download SBOM artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: sbom-*
+          path: sbom-assets
+          merge-multiple: true
+      - name: Tag nightly pre-release on GitHub
+        # Nightly builds only: release tags already exist (created by promote.yml).
+        if: ${{ success() && github.ref_type != 'tag' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.detect-changes.outputs.version }}
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE/wendyos"
+
+          if git show-ref --verify --quiet "refs/tags/$VERSION"; then
+            [[ "$(git rev-parse "refs/tags/$VERSION^{commit}")" == "$(git rev-parse HEAD)" ]] || {
+              echo "Refusing to move qualified tag $VERSION to another source commit" >&2
+              exit 1
+            }
+          else
+            git tag "$VERSION"
+            git push origin "$VERSION"
+          fi
+
+          if gh release view "$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $VERSION already exists (job re-run), skipping create."
+          else
+            gh release create "$VERSION" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "WendyOS $VERSION" \
+              --generate-notes \
+              --prerelease
+          fi
+
+          # Keep the releases page tidy: retain the 7 most recent nightly
+          # pre-releases. Git tags are kept forever for traceability and
+          # promotion; nightly-YYYYMMDDTHHMMSS sorts chronologically.
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName,isPrerelease \
+            --jq '[.[] | select(.isPrerelease and (.tagName | startswith("nightly-"))) | .tagName] | sort | reverse | .[7:][]' |
+            while read -r old; do
+              echo "Pruning old nightly pre-release $old (tag kept)"
+              gh release delete "$old" --yes --repo "$GITHUB_REPOSITORY"
+            done
+
+      - name: Publish qualified stable release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.detect-changes.outputs.version }}
+        run: |
+          set -euo pipefail
+          if gh release view "$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$VERSION" --repo "$GITHUB_REPOSITORY" --draft=false
+          else
+            gh release create "$VERSION" --repo "$GITHUB_REPOSITORY" \
+              --title "WendyOS $VERSION" --generate-notes --verify-tag
+          fi
+
+      - name: Attach SBOMs to GitHub release
+        # Both nightly and release (tag) builds: for nightly the release was
+        # just created above; for tags it already exists (from promote.yml).
+        if: ${{ success() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.detect-changes.outputs.version }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          assets=("$GITHUB_WORKSPACE"/sbom-assets/*)
+          if [[ ${#assets[@]} -eq 0 ]]; then
+            echo "::warning::No SBOM assets downloaded; nothing to attach to release $VERSION."
+            exit 0
+          fi
+          # --clobber makes re-runs idempotent (replaces same-named assets).
+          gh release upload "$VERSION" "${assets[@]}" \
+            --repo "$GITHUB_REPOSITORY" --clobber
+
+      - name: Send Discord announcement
+        # Nightly builds only: release announcements are sent by promote.yml.
+        if: ${{ success() && github.ref_type != 'tag' }}
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_NIGHTLY_WEBHOOK_URL }}
+          VERSION: ${{ needs.detect-changes.outputs.version }}
+        run: |
+          [[ -z "${DISCORD_WEBHOOK_URL}" ]] && exit 0
+          RELEASE_URL="https://github.com/${GITHUB_REPOSITORY}/releases/tag/${VERSION}"
+          jq -n --arg msg "**WendyOS ${VERSION}** is out! Full changelog and downloads: ${RELEASE_URL}" '{content: $msg}' | \
+            curl -fsS -o /dev/null \
+              -H "Content-Type: application/json" \
+              -d @- \
+              "$DISCORD_WEBHOOK_URL"
+
+      - name: Announce qualified stable release
+        if: github.ref_type == 'tag'
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
+          VERSION: ${{ needs.detect-changes.outputs.version }}
+        run: |
+          [[ -z "${DISCORD_WEBHOOK_URL}" ]] && exit 0
+          RELEASE_URL="https://github.com/${GITHUB_REPOSITORY}/releases/tag/${VERSION}"
+          jq -n --arg msg "**WendyOS ${VERSION}** is out! Full changelog and downloads: ${RELEASE_URL}" '{content: $msg}' | \
+            curl -fsS -o /dev/null -H "Content-Type: application/json" -d @- "$DISCORD_WEBHOOK_URL"

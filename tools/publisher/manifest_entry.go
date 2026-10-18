@@ -136,8 +136,8 @@ func prPrefix(pr int) string {
 	return fmt.Sprintf("pr/%d/", pr)
 }
 
-// applyManifestEntry writes only device manifests. The workflow advances the
-// canonical and alias master pointers after every entry has been applied.
+// applyManifestEntry stages candidate metadata without changing latest markers.
+// The workflow promotes both the markers and master pointers after qualification.
 func applyManifestEntry(ctx context.Context, logger *logrus.Entry, bucket *storage.BucketHandle, entry ManifestEntry) error {
 	if err := entry.validate(); err != nil {
 		return err
@@ -149,5 +149,5 @@ func applyManifestEntry(ctx context.Context, logger *logrus.Entry, bucket *stora
 		entry.RecoveryPath, entry.RecoverySize, entry.RecoveryChecksum,
 		entry.FlashpackPath, entry.FlashpackSize, entry.FlashpackChecksum,
 		entry.SBOMPath, entry.SBOMSize, entry.SBOMChecksum,
-		entry.Extensions, entry.Devkit, entry.Storage, entry.Nightly, entry.Aliases...)
+		entry.Extensions, entry.Devkit, entry.Storage, entry.Nightly, false, entry.Aliases...)
 }
