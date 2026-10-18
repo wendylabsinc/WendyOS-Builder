@@ -85,6 +85,12 @@ then
     cp -p /usr/lib/wendyos/commit /etc/wendyos/commit
 fi
 
+# Candidate ID follows the same rootfs authority as the version and commit.
+if mountpoint -q /etc/wendyos && [ -f /usr/lib/wendyos/build-version ]
+then
+    cp -p /usr/lib/wendyos/build-version /etc/wendyos/build-version
+fi
+
 # [Note]
 # /etc/hostname is NOT bind-mounted because file-level bind mounts prevent atomic
 # writes. hostnamectl uses rename() for atomic updates, which fails with EBUSY on

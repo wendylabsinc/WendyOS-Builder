@@ -72,6 +72,11 @@ do_install() {
     install -m 0644 ${WORKDIR}/commit ${D}${nonarch_libdir}/wendyos/commit
     ln -sf ../../usr/lib/wendyos/commit ${D}${sysconfdir}/wendyos/commit
 
+    # Exact CI candidate ID distinguishes rebuilds of the same builder commit.
+    echo "${WENDYOS_BUILD_VERSION}" > ${WORKDIR}/build-version
+    install -m 0644 ${WORKDIR}/build-version ${D}${nonarch_libdir}/wendyos/build-version
+    ln -sf ../../usr/lib/wendyos/build-version ${D}${sysconfdir}/wendyos/build-version
+
     # Create build ID file (actual date will be set at first boot if needed)
     echo "WendyOS-${DISTRO_VERSION}" > ${WORKDIR}/wendyos-build-id
     install -m 0644 ${WORKDIR}/wendyos-build-id ${D}${sysconfdir}/wendyos-build-id
@@ -115,3 +120,4 @@ FILES:${PN} += "${sysconfdir}/wendyos-build-id"
 CONFFILES:${PN} += "${sysconfdir}/wendyos/device-type"
 
 RDEPENDS:${PN} = "bash util-linux-uuidgen avahi-daemon coreutils iproute2"
+FILES:${PN} += "${nonarch_libdir}/wendyos/build-version ${sysconfdir}/wendyos/build-version"

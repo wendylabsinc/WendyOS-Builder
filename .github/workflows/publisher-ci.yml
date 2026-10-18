@@ -9,6 +9,7 @@ on:
       - 'tools/publisher/**'
       - '.github/workflows/build.yml'
       - '.github/workflows/drivers.yml'
+      - '.github/workflows/promote.yml'
       - '.github/workflows/publisher-ci.yml'
   push:
     branches: [main]
@@ -16,6 +17,7 @@ on:
       - 'tools/publisher/**'
       - '.github/workflows/build.yml'
       - '.github/workflows/drivers.yml'
+      - '.github/workflows/promote.yml'
       - '.github/workflows/publisher-ci.yml'
 
 jobs:
@@ -41,3 +43,6 @@ jobs:
 
       - name: Publishing workflow tests
         run: python3 workflow_batch_test.py
+
+      - name: Hardware promotion gate tests
+        run: python3 hardware_gate_test.py

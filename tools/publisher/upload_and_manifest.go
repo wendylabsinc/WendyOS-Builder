@@ -1135,8 +1135,8 @@ func main() {
 	storage := flag.String("storage", "", "Storage type for multi-artifact devices: nvme or sd (omit for single-storage devices)")
 	updateOnly := flag.Bool("update-only", false, "Only update manifests without uploading")
 	skipMasterManifest := flag.Bool("skip-master-manifest", false, "Skip master manifest update (a separate job will handle it)")
-	masterManifestOnly := flag.Bool("master-manifest-only", false, "Only update the master manifest, skip upload and device manifest")
-	masterManifestBatch := flag.String("master-manifest-batch", "", "JSON array of device/version/nightly/stability updates to publish in one master manifest write; --pr selects the namespace")
+	masterManifestOnly := flag.Bool("master-manifest-only", false, "Promote existing device metadata and update the master manifest, without uploading artifacts")
+	masterManifestBatch := flag.String("master-manifest-batch", "", "JSON array of device/version/nightly/stability updates to promote and publish in one master manifest write; --pr selects the namespace")
 	uploadOnly := flag.Bool("upload-only", false, "Upload files without touching any manifest; requires --metadata-out (a serialised publish job applies the manifest writes later)")
 	metadataOut := flag.String("metadata-out", "", "Path to write the manifest-entry JSON produced by --upload-only")
 	applyMetadata := flag.String("apply-metadata", "", "Path to a manifest-entry JSON (from --upload-only); updates the device manifest from it without uploading")
@@ -1477,13 +1477,13 @@ func main() {
 	}
 
 	if *masterManifestBatch != "" {
-		if err := updateMasterManifestBatch(ctx, logrus.NewEntry(log), bucket, prefix, masterUpdates, true); err != nil {
+		if err := promoteMasterManifestBatch(ctx, logrus.NewEntry(log), bucket, prefix, masterUpdates, true); err != nil {
 			log.WithError(err).Fatal("Failed to publish master manifest batch")
 		}
 		return
 	}
 
-	// Update only the master manifest (used by a serialised publish job after parallel builds)
+	// Promote staged metadata and its master pointer after qualification.
 	if *masterManifestOnly {
 		logger := log.WithFields(logrus.Fields{
 			"device_type": *deviceType,
@@ -1491,7 +1491,7 @@ func main() {
 			"is_nightly":  *nightly,
 			"stability":   *stability,
 		})
-		if err := updateMasterManifest(ctx, logger, bucket, prefix, *deviceType, *version, *nightly, *stability, true); err != nil {
+		if err := promoteMasterManifestBatch(ctx, logger, bucket, prefix, []MasterManifestUpdate{{Device: *deviceType, Version: *version, Nightly: *nightly, Stability: *stability}}, true); err != nil {
 			log.WithError(err).Fatal("Failed to update master manifest")
 		}
 		return
@@ -2264,7 +2264,7 @@ func updateManifests(ctx context.Context, bucket *storage.BucketHandle, prefix, 
 
 	if skipMasterManifest {
 		logger.Info("Updating device manifest (master manifest will be updated by a separate publish job)")
-		if err := updateDeviceManifest(ctx, deviceLogger, bucket, prefix, deviceType, version, filePath, fileSize, fileChecksum, bmapPath, zstPath, zstChecksum, zstSize, otaUpdatePath, otaUpdateSize, otaUpdateChecksum, recoveryPath, recoverySize, recoveryChecksum, flashpackPath, flashpackSize, flashpackChecksum, sbomPath, sbomSize, sbomChecksum, extensions, devkit, storage, isNightly); err != nil {
+		if err := updateDeviceManifest(ctx, deviceLogger, bucket, prefix, deviceType, version, filePath, fileSize, fileChecksum, bmapPath, zstPath, zstChecksum, zstSize, otaUpdatePath, otaUpdateSize, otaUpdateChecksum, recoveryPath, recoverySize, recoveryChecksum, flashpackPath, flashpackSize, flashpackChecksum, sbomPath, sbomSize, sbomChecksum, extensions, devkit, storage, isNightly, false); err != nil {
 			logger.WithError(err).Fatal("Failed to update device manifest")
 		}
 	} else {
@@ -2286,7 +2286,7 @@ func updateManifests(ctx context.Context, bucket *storage.BucketHandle, prefix, 
 
 		go func() {
 			defer wg.Done()
-			deviceErrChan <- updateDeviceManifest(ctx, deviceLogger, bucket, prefix, deviceType, version, filePath, fileSize, fileChecksum, bmapPath, zstPath, zstChecksum, zstSize, otaUpdatePath, otaUpdateSize, otaUpdateChecksum, recoveryPath, recoverySize, recoveryChecksum, flashpackPath, flashpackSize, flashpackChecksum, sbomPath, sbomSize, sbomChecksum, extensions, devkit, storage, isNightly)
+			deviceErrChan <- updateDeviceManifest(ctx, deviceLogger, bucket, prefix, deviceType, version, filePath, fileSize, fileChecksum, bmapPath, zstPath, zstChecksum, zstSize, otaUpdatePath, otaUpdateSize, otaUpdateChecksum, recoveryPath, recoverySize, recoveryChecksum, flashpackPath, flashpackSize, flashpackChecksum, sbomPath, sbomSize, sbomChecksum, extensions, devkit, storage, isNightly, true)
 		}()
 
 		go func() {
@@ -2708,12 +2708,14 @@ func validateRecoveryPromotion(deviceType string, source VersionMetadata, paths 
 	return nil
 }
 
-func updateDeviceManifest(ctx context.Context, logger *logrus.Entry, bucket *storage.BucketHandle, prefix, deviceType, version, filePath string, fileSize int64, fileChecksum string, bmapPath string, zstPath, zstChecksum string, zstSize int64, otaUpdatePath string, otaUpdateSize int64, otaUpdateChecksum string, recoveryPath string, recoverySize int64, recoveryChecksum string, flashpackPath string, flashpackSize int64, flashpackChecksum string, sbomPath string, sbomSize int64, sbomChecksum string, extensions []ExtensionMetadata, devkit *DevkitMetadata, storageType string, isNightly bool, aliases ...string) error {
+func updateDeviceManifest(ctx context.Context, logger *logrus.Entry, bucket *storage.BucketHandle, prefix, deviceType, version, filePath string, fileSize int64, fileChecksum string, bmapPath string, zstPath, zstChecksum string, zstSize int64, otaUpdatePath string, otaUpdateSize int64, otaUpdateChecksum string, recoveryPath string, recoverySize int64, recoveryChecksum string, flashpackPath string, flashpackSize int64, flashpackChecksum string, sbomPath string, sbomSize int64, sbomChecksum string, extensions []ExtensionMetadata, devkit *DevkitMetadata, storageType string, isNightly, markLatest bool, aliases ...string) error {
 	var published VersionMetadata
-	err := updateVersionMetadata(ctx, logger, bucket, prefix, deviceType, version, isNightly, func(versionMetadata VersionMetadata) (VersionMetadata, error) {
+	err := updateVersionMetadata(ctx, logger, bucket, prefix, deviceType, version, isNightly, false, func(versionMetadata VersionMetadata) (VersionMetadata, error) {
 		// Update release date
 		versionMetadata.ReleaseDate = time.Now()
-		versionMetadata.IsLatest = true
+		if markLatest {
+			versionMetadata.IsLatest = true
+		}
 		versionMetadata.IsNightly = isNightly
 
 		// Update OS image fields only if provided (filePath not empty).
@@ -2880,8 +2882,11 @@ func updateDeviceManifest(ctx context.Context, logger *logrus.Entry, bucket *sto
 		// Compute board-specific fields only once, using the canonical identity.
 		// Replace stale image routes in the alias, while retaining driver add-ons
 		// independently published there. The devkit belongs to this storage entry.
-		if err := updateVersionMetadata(ctx, logger, bucket, prefix, alias, version, isNightly, func(previous VersionMetadata) (VersionMetadata, error) {
+		if err := updateVersionMetadata(ctx, logger, bucket, prefix, alias, version, isNightly, false, func(previous VersionMetadata) (VersionMetadata, error) {
 			metadata := published
+			if !markLatest {
+				metadata.IsLatest = previous.IsLatest
+			}
 			metadata.Extensions = mergeExtensions(previous.Extensions, published.Extensions)
 			return metadata, nil
 		}); err != nil {
@@ -2891,7 +2896,7 @@ func updateDeviceManifest(ctx context.Context, logger *logrus.Entry, bucket *sto
 	return nil
 }
 
-func updateVersionMetadata(ctx context.Context, logger *logrus.Entry, bucket *storage.BucketHandle, prefix, deviceType, version string, isNightly bool, update func(VersionMetadata) (VersionMetadata, error)) error {
+func updateVersionMetadata(ctx context.Context, logger *logrus.Entry, bucket *storage.BucketHandle, prefix, deviceType, version string, isNightly, requireExisting bool, update func(VersionMetadata) (VersionMetadata, error)) error {
 	manifestPath := deviceManifestPath(prefix, deviceType)
 	logger = logger.WithField("manifest_path", manifestPath)
 	logger.Info("Processing device manifest")
@@ -2951,31 +2956,12 @@ func updateVersionMetadata(ctx context.Context, logger *logrus.Entry, bucket *st
 			logger.WithField("version", version).Info("Version already exists, updating metadata")
 		}
 
-		// Update version information
-		if isNightly {
-			// For nightly builds, only update nightly versions' IsLatest
-			for k, v := range manifest.Versions {
-				if v.IsNightly {
-					v.IsLatest = false
-					manifest.Versions[k] = v
-				}
-			}
-			logger.WithField("version", version).Info("Setting version as latest nightly")
-		} else {
-			// For stable builds, only update stable versions' IsLatest
-			for k, v := range manifest.Versions {
-				if !v.IsNightly {
-					v.IsLatest = false
-					manifest.Versions[k] = v
-				}
-			}
-			logger.WithField("version", version).Info("Setting version as latest stable")
-		}
-
-		// Add or update this version and mark as latest
-		// Start with existing metadata if version already exists, otherwise create new
+		// Start with existing metadata so staging preserves the qualified marker.
 		versionMetadata, exists := manifest.Versions[version]
 		if !exists {
+			if requireExisting {
+				return fmt.Errorf("cannot promote missing version %s for %s", version, deviceType)
+			}
 			versionMetadata = VersionMetadata{}
 			logger.Info("Creating new version entry")
 		} else {
@@ -2987,6 +2973,15 @@ func updateVersionMetadata(ctx context.Context, logger *logrus.Entry, bucket *st
 			return err
 		}
 
+		// Only explicit promotion clears the previous latest version in this channel.
+		if versionMetadata.IsLatest {
+			for key, previous := range manifest.Versions {
+				if previous.IsNightly == isNightly {
+					previous.IsLatest = false
+					manifest.Versions[key] = previous
+				}
+			}
+		}
 		manifest.Versions[version] = versionMetadata
 
 		// Write back to bucket using GenerationMatch to prevent lost updates from

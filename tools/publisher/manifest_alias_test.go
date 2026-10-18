@@ -25,7 +25,14 @@ func TestApplyManifestEntryAliases(t *testing.T) {
 			prefix := prPrefix(pr)
 			canonical := deviceManifestPath(prefix, "jetson-agx-orin")
 			alias := deviceManifestPath(prefix, "jetson-agx-orin-emmc")
+			masterPath := masterManifestPath(prefix)
+			master := MasterManifest{}
+			masterWrites := 0
 			objects := map[string]DeviceManifest{
+				canonical: {DeviceID: "jetson-agx-orin", Versions: map[string]VersionMetadata{
+					"old":    {IsNightly: true, IsLatest: true},
+					"stable": {IsLatest: true},
+				}},
 				alias: {DeviceID: "jetson-agx-orin-emmc", Versions: map[string]VersionMetadata{
 					"v1":  {Path: "stale-bundle", EMMCPath: "stale-bundle", IsNightly: true},
 					"old": {Path: "historical-version", IsNightly: true, IsLatest: true},
@@ -35,6 +42,11 @@ func TestApplyManifestEntryAliases(t *testing.T) {
 				w.Header().Set("Content-Type", "application/json")
 				if r.Method == http.MethodGet {
 					name := strings.TrimPrefix(r.URL.Path, "/test-bucket/")
+					if name == masterPath {
+						w.Header().Set("X-Goog-Generation", "7")
+						json.NewEncoder(w).Encode(master)
+						return
+					}
 					obj, ok := objects[name]
 					if !ok {
 						w.WriteHeader(404)
@@ -65,11 +77,11 @@ func TestApplyManifestEntryAliases(t *testing.T) {
 					w.WriteHeader(400)
 					return
 				}
-				if meta.Name != canonical && meta.Name != alias {
+				if meta.Name != canonical && meta.Name != alias && meta.Name != masterPath {
 					t.Errorf("unexpected write %s", meta.Name)
 				}
 				condition := "0"
-				if _, exists := objects[meta.Name]; exists {
+				if _, exists := objects[meta.Name]; exists || meta.Name == masterPath {
 					condition = "7"
 				}
 				if got := r.URL.Query().Get("ifGenerationMatch"); got != condition {
@@ -79,6 +91,14 @@ func TestApplyManifestEntryAliases(t *testing.T) {
 				if err != nil {
 					t.Error(err)
 					w.WriteHeader(400)
+					return
+				}
+				if meta.Name == masterPath {
+					if err := json.NewDecoder(part).Decode(&master); err != nil {
+						t.Error(err)
+					}
+					masterWrites++
+					fmt.Fprintf(w, `{"name":%q,"generation":"7"}`, meta.Name)
 					return
 				}
 				var candidate DeviceManifest
@@ -111,8 +131,8 @@ func TestApplyManifestEntryAliases(t *testing.T) {
 			if got.InstallMode != "recovery" || got.Path != "" || got.EMMCPath != "" || got.EMMCFlashpackPath != "emmc-flashpack" {
 				t.Fatalf("unsafe alias metadata: %#v", got)
 			}
-			if objects[alias].Versions["old"].Path != "historical-version" || objects[alias].Versions["old"].IsLatest {
-				t.Fatal("historical version lost or still latest")
+			if objects[alias].Versions["old"].Path != "historical-version" || !objects[alias].Versions["old"].IsLatest || got.IsLatest || want.IsLatest {
+				t.Fatal("staging changed the qualified latest marker")
 			}
 			nvme := emmc
 			nvme.Aliases = nil
@@ -136,6 +156,60 @@ func TestApplyManifestEntryAliases(t *testing.T) {
 			got = objects[alias].Versions["v1"]
 			if got.Devkit.Machine != "emmc" || len(got.Extensions) != 1 || got.Extensions[0].Name != "alias-driver" {
 				t.Fatalf("alias resources lost: %#v", got)
+			}
+			// Driver publication and image retries must keep the candidate staged.
+			driver := ManifestEntry{Device: "jetson-agx-orin-emmc", PR: pr, Version: "v1", Nightly: true,
+				Extensions: []ExtensionMetadata{{Name: "second-driver", KernelVersion: "emmc-kernel", Path: "second.raw"}}}
+			if err := applyManifestEntry(context.Background(), batchTestLogger(), bucket, driver); err != nil {
+				t.Fatal(err)
+			}
+			if objects[alias].Versions["v1"].IsLatest || !objects[alias].Versions["old"].IsLatest {
+				t.Fatal("driver publication promoted an unqualified candidate")
+			}
+			updates := []MasterManifestUpdate{
+				{Device: "jetson-agx-orin", Version: "v1", Nightly: true},
+				{Device: "jetson-agx-orin-emmc", Version: "v1", Nightly: true},
+			}
+			if err := promoteMasterManifestBatch(context.Background(), batchTestLogger(), bucket, prefix, updates, false); err != nil {
+				t.Fatal(err)
+			}
+			for _, path := range []string{canonical, alias} {
+				if !objects[path].Versions["v1"].IsLatest || objects[path].Versions["old"].IsLatest {
+					t.Fatalf("qualified candidate latest markers incorrect: %s", path)
+				}
+			}
+			if !objects[canonical].Versions["stable"].IsLatest || masterWrites != 1 || master.Devices["jetson-agx-orin-emmc"].LatestNightly != "v1" {
+				t.Fatal("promotion changed the stable marker or missed the master update")
+			}
+			// A partial marker write can be repaired even when the master is current.
+			candidate := objects[alias].Versions["v1"]
+			candidate.IsLatest = false
+			objects[alias].Versions["v1"] = candidate
+			if err := applyManifestEntry(context.Background(), batchTestLogger(), bucket, emmc); err != nil {
+				t.Fatal(err)
+			}
+			if objects[alias].Versions["v1"].IsLatest || !objects[canonical].Versions["v1"].IsLatest {
+				t.Fatal("staging copied the canonical latest marker onto the alias")
+			}
+			if err := promoteMasterManifestBatch(context.Background(), batchTestLogger(), bucket, prefix, updates, false); err != nil {
+				t.Fatal(err)
+			}
+			if !objects[alias].Versions["v1"].IsLatest || masterWrites != 1 {
+				t.Fatal("no-op master retry failed to repair the latest marker")
+			}
+			// Staging new bytes for a previously promoted version preserves its marker.
+			if err := applyManifestEntry(context.Background(), batchTestLogger(), bucket, emmc); err != nil {
+				t.Fatal(err)
+			}
+			if !objects[canonical].Versions["v1"].IsLatest || !objects[alias].Versions["v1"].IsLatest {
+				t.Fatal("staging cleared a previously qualified candidate marker")
+			}
+			missing := []MasterManifestUpdate{{Device: "jetson-agx-orin", Version: "missing", Nightly: true}}
+			if err := promoteMasterManifestBatch(context.Background(), batchTestLogger(), bucket, prefix, missing, false); err == nil || !strings.Contains(err.Error(), "missing version") {
+				t.Fatalf("missing metadata promoted: %v", err)
+			}
+			if masterWrites != 1 {
+				t.Fatal("missing candidate advanced the master manifest")
 			}
 		})
 	}
