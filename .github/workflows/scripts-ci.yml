@@ -28,6 +28,11 @@ on:
       - 'recipes-core/wendyos-agent/files/wendyos-agent.service'
       - 'recipes-core/images/wendyos-image.bb'
       - 'scripts/check_mesh_kernel_support*'
+      - 'scripts/check_sensor_loopback_support*'
+      - 'classes/sensor-loopback-check.bbclass'
+      - 'recipes-kernel/v4l2loopback/**'
+      - 'meta-tegra-extensions-jp7/recipes-kernel/v4l2loopback/**'
+      - 'conf/distro/include/qcom-image.inc'
       - 'scripts/mesh_local_contract_test.py'
       - 'classes/mesh-kernel-check.bbclass'
       - 'conf/distro/include/mesh-*.inc'
@@ -111,6 +116,11 @@ on:
       - 'recipes-core/wendyos-agent/files/wendyos-agent.service'
       - 'recipes-core/images/wendyos-image.bb'
       - 'scripts/check_mesh_kernel_support*'
+      - 'scripts/check_sensor_loopback_support*'
+      - 'classes/sensor-loopback-check.bbclass'
+      - 'recipes-kernel/v4l2loopback/**'
+      - 'meta-tegra-extensions-jp7/recipes-kernel/v4l2loopback/**'
+      - 'conf/distro/include/qcom-image.inc'
       - 'scripts/mesh_local_contract_test.py'
       - 'classes/mesh-kernel-check.bbclass'
       - 'conf/distro/include/mesh-*.inc'
@@ -303,6 +313,9 @@ jobs:
 
       - name: Run mesh kernel image acceptance tests
         run: python3 -m unittest scripts/check_mesh_kernel_support_test.py scripts/mesh_local_contract_test.py
+
+      - name: Run SensorLink loopback image acceptance tests
+        run: python3 -m unittest scripts/check_sensor_loopback_support_test.py
 
       - name: Verify reproducible kernel patch commit identities
         run: python3 -m unittest scripts/kernel_patch_dates_test.py

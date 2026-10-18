@@ -1,6 +1,13 @@
 # Qualcomm Dragonwing image configuration.
 # Required from wendyos-image.bb when MACHINEOVERRIDES contains 'qcom-wendyos'.
 
+inherit sensor-loopback-check
+
+# SensorLink mounts remote cameras and microphones as local V4L2/ALSA devices.
+# Hard image requirements apply to every qcom-wendyos target, including boards
+# such as Uno Q which select a different hardware packagegroup below.
+IMAGE_INSTALL:append = " v4l2loopback kernel-module-snd-aloop"
+
 # wendyos-image.bb pairs these with WENDYOS_USB_GADGET for every board, but both
 # live in meta-tegra-extensions. IMAGE_INSTALL resolves at task-scheduling time, so
 # an absent package must be removed explicitly or the build fails on it. Neither is
