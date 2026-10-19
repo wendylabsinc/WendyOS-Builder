@@ -5,6 +5,14 @@ name: Scripts CI
 on:
   pull_request:
     paths:
+      - 'scripts/timesync_persistence_test.py'
+      - 'recipes-core/systemd-mount-timesync/**'
+      - 'recipes-core/systemd-mount-wendy/**'
+      - 'recipes-core/wendyos-data-setup/files/*.service'
+      - 'recipes-core/wendyos-data-setup/files/*.mount'
+      - 'recipes-core/packagegroups/packagegroup-wendyos-base.bb'
+      - 'recipes-core/packagegroups/qemu-packagegroup-base.inc'
+      - 'meta-arduino-extensions/recipes-core/packagegroups/*'
       - 'scripts/mark_fat_volumes_test.py'
       - 'recipes-core/images/files/mark-fat-volumes.py'
       - 'recipes-core/images/wendyos-image.bbappend'
@@ -93,6 +101,14 @@ on:
   push:
     branches: [main]
     paths:
+      - 'scripts/timesync_persistence_test.py'
+      - 'recipes-core/systemd-mount-timesync/**'
+      - 'recipes-core/systemd-mount-wendy/**'
+      - 'recipes-core/wendyos-data-setup/files/*.service'
+      - 'recipes-core/wendyos-data-setup/files/*.mount'
+      - 'recipes-core/packagegroups/packagegroup-wendyos-base.bb'
+      - 'recipes-core/packagegroups/qemu-packagegroup-base.inc'
+      - 'meta-arduino-extensions/recipes-core/packagegroups/*'
       - 'scripts/mark_fat_volumes_test.py'
       - 'recipes-core/images/files/mark-fat-volumes.py'
       - 'recipes-core/images/wendyos-image.bbappend'
@@ -259,6 +275,12 @@ jobs:
 
       - name: Verify network ownership and wait-online recipe installation
         run: python3 -m unittest scripts/network_manager_ownership_test.py -v
+
+      - name: Test persistent clock packaging and systemd units
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y systemd-timesyncd
+          sudo python3 -m unittest scripts/timesync_persistence_test.py -v
 
       - name: Run resolver tests
         run: bash scripts/resolve-artifacts.test.sh
