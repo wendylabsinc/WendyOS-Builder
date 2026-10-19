@@ -82,6 +82,15 @@ FILES:${PN} = " \
 #                         above the conversion in wendyos-data.sh, and a
 #                         line number here goes stale every time that
 #                         file is edited -- as this one already had
+#   data-device           NOT listed, on purpose. data-recovery-key finds the
+#                         /data partition with root-disk-part from data-device.
+#                         This recipe is per CPU arch and data-device is per
+#                         machine, so naming it would rebuild this package for
+#                         every machine (same reason as
+#                         tegra-rootfs-redundancy_1.0.bb). The helper is
+#                         guaranteed anyway: data-device is in
+#                         packagegroup-wendyos-base, and wendyos-image.bb
+#                         fails the build when its unit is missing
 # util-linux-lsblk is gone: its only user was the migration guard, which the
 # resolver replaced.
 RDEPENDS:${PN} = " \

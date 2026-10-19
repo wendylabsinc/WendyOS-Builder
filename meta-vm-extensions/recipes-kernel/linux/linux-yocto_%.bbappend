@@ -26,3 +26,6 @@ KMACHINE:vm-arm64-wendyos = "genericarm64"
 # against yocto-kernel-cache branch yocto-6.18.
 
 require ${@'recipes-kernel/linux/game-controller.inc' if d.getVar('WENDYOS_GAME_CONTROLLER') == '1' else ''}
+
+require recipes-kernel/linux/mesh-local.inc
+require recipes-kernel/linux/mesh-internet.inc

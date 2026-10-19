@@ -105,9 +105,9 @@ IMAGE_INSTALL:append = " \
 
 # /config and /data mount points. With the A/B layout they are now real
 # partitions (FAT config + ext4 data in genericx86-ab.wks) mounted from the A/B
-# fstab (x86-wendy-fstab): /config by LABEL, /data by the /dev/wendyos/data
-# alias. The rootfs must carry empty mount-point directories for the mounts to
-# land on. install -d is idempotent.
+# fstab (x86-wendy-fstab): /config by the /dev/wendyos/config link, /data by the
+# /dev/wendyos/data alias. The rootfs must carry empty mount-point directories
+# for the mounts to land on. install -d is idempotent.
 create_wendyos_dirs() {
     install -d -m 0755 ${IMAGE_ROOTFS}/config
     install -d -m 0755 ${IMAGE_ROOTFS}/data

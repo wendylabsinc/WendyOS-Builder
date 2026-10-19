@@ -20,13 +20,31 @@
 # that are not there yet.
 #
 # This file covers the two cases every board can hit:
-#   1. GPT boards, plaintext /data. Matched by the GPT partition name.
+#   1. GPT boards, plaintext /data. Matched by the GPT partition name, on the
+#      disk / is mounted from only.
 #   2. Any board, encrypted /data. Matched by the device-mapper name.
 #
 # Rule 1 excludes crypto_LUKS so it stops matching the moment the partition is
 # LUKS-formatted. From then on only rule 2 provides the alias. The encrypted
 # case has to be matched by mapper name because luksFormat also destroys the
 # ext4 label, so there is no "data" label left to match.
+#
+# Rule 1 asks root-disk-part (data-device recipe) whether this partition is the
+# one named "data" on the root disk. A GPT name is unique on one disk, not on
+# the machine: a device that once ran WendyOS from another disk -- an AGX Orin
+# moved from eMMC to NVMe -- has a "data" partition on both, and without the
+# check the alias would point at whichever one udev handled last. data.mount
+# would then mount an old installation's /data.
+#
+# PROGRAM is a match that is true when the program exits 0, and it takes %k
+# (systemd man/udev.xml). RESULT takes no substitutions, so the rule cannot
+# compare the printed path with this device. That is why root-disk-part has a
+# second form that is given the kernel name and only answers yes or no. The
+# path is absolute because udev runs a relative name from /usr/lib/udev.
+# udev sorts PROGRAM after the other matches in a rule (sort_tokens() in
+# src/udev/udev-rules.c), so it only runs for a partition already named "data".
+# The same disk-only rule is what wendyos-data.sh uses to pick the partition it
+# grows, wipes and formats, so the alias and the resolver always agree.
 #
 # The MBR case cannot be matched by partition name, because MBR has no
 # partition names. It lives in the companion file 99-wendyos-data-mbr.rules,
@@ -37,6 +55,7 @@
 # Qualcomm. Every board mounts /data through the alias.
 ACTION!="remove", SUBSYSTEM=="block", ENV{ID_PART_ENTRY_SCHEME}=="gpt", \
     ENV{ID_PART_ENTRY_NAME}=="data", ENV{ID_FS_TYPE}!="crypto_LUKS", \
+    PROGRAM="/usr/sbin/root-disk-part data %k", \
     SYMLINK+="wendyos/data"
 
 ACTION!="remove", SUBSYSTEM=="block", KERNEL=="dm-*", ENV{DM_NAME}=="data", \

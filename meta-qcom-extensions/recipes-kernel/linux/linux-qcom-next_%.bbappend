@@ -40,3 +40,31 @@ SRC_URI:append:qcom-wendyos = " file://0004-Revert-usb-dwc3-qcom-skip-phy-manage
 # it: setlocalversion checks with `git status -uno`, which ignores untracked
 # files. A machine override, so it reaches the devupstream variant as well.
 PATCHTOOL:qcom-wendyos = "git"
+
+require recipes-kernel/linux/mesh-local.inc
+require recipes-kernel/linux/mesh-internet.inc
+
+# Remote SensorLink camera and microphone endpoints need local loopback drivers.
+SRC_URI:append:qcom-wendyos = " file://sensor-loopback.cfg"
+
+python __anonymous() {
+    if 'qcom-wendyos' in (d.getVar('MACHINEOVERRIDES') or '').split(':'):
+        d.appendVarFlag('do_configure', 'postfuncs', ' wendyos_check_sensor_loopback')
+}
+
+wendyos_check_sensor_loopback() {
+    config="${B}/.config"
+    [ -f "$config" ] || bbfatal "SensorLink loopback: no resolved kernel config at $config"
+    for symbol in CONFIG_VIDEO_DEV CONFIG_VIDEOBUF2_VMALLOC; do
+        grep -Eq "^$symbol=(y|m)$" "$config" || \
+            bbfatal "SensorLink loopback: $symbol is disabled for ${MACHINE}"
+    done
+    # Match the required module package and the agent's on-demand modprobe.
+    grep -q '^CONFIG_SND_ALOOP=m$' "$config" || \
+        bbfatal "SensorLink loopback: CONFIG_SND_ALOOP must be modular for ${MACHINE}"
+}
+
+# Arduino Uno Q also includes this layer and uses the same pinned kernel.
+# The newer callback releases its reference after the unlock label.
+BLUETOOTH_LE_PENDING_PATCH = "0001-bluetooth-clean-up-rejected-pending-le-connection-qcom.patch"
+require recipes-kernel/linux/bluetooth-le-pending.inc

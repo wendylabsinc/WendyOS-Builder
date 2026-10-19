@@ -25,11 +25,6 @@
 # proof enough.
 set -u
 
-# The raw partition, not /dev/mapper/data. Keyslots live in the LUKS2 header on
-# the partition, and cryptenroll edits that header independently of whatever
-# dm-crypt mapping is active, so this works while /data is mounted and in use.
-DEV=/dev/disk/by-partlabel/data
-
 usage() {
     echo "usage: data-recovery-key status|enroll" >&2
     echo "  status  exit 0 enrolled, 1 none, 2 cannot tell" >&2
@@ -38,8 +33,18 @@ usage() {
 
 verb="${1:-}"
 
-if [ ! -e "$DEV" ]; then
-    echo "data-recovery-key: $DEV does not exist -- /data is not encrypted on this device" >&2
+# The raw partition, not /dev/mapper/data. Keyslots live in the LUKS2 header on
+# the partition, and cryptenroll edits that header independently of whatever
+# dm-crypt mapping is active, so this works while /data is mounted and in use.
+#
+# It is the partition named "data" on the disk / is mounted from, the one
+# wendyos-data.sh encrypted, as root-disk-part (data-device recipe) reports it.
+# Not /dev/disk/by-partlabel/data: a device with a second disk from an older
+# installation has a "data" partition there too, and that link can point at
+# either one. root-disk-part says on stderr why it found nothing.
+DEV=$(root-disk-part data) || DEV=""
+if [ -z "$DEV" ] || [ ! -e "$DEV" ]; then
+    echo "data-recovery-key: the root disk has no partition named data -- /data is not encrypted on this device" >&2
     exit 2
 fi
 

@@ -3,8 +3,9 @@
 # Identical in intent to rpi-wendy-fstab, but /boot is referenced by LABEL, not
 # PARTUUID: under MBR the kernel exposes PARTUUIDs as <disk-signature>-<partno>,
 # so the UUIDv4 that partuuid-rpi generates never resolves (see rpi-wendy-ab-mbr.wks
-# and rpi-mbr-fstab). /config uses LABEL= and /data the udev alias
-# /dev/wendyos/data, the same as the GPT variant.
+# and rpi-mbr-fstab). /config uses LABEL=, not the /dev/wendyos/config link of
+# the GPT variant: MBR has no partition names for that link's rule to match.
+# /data uses the udev alias /dev/wendyos/data, the same as the GPT variant.
 #
 # Deliberately NO "/" entry: the rootfs slot is A/B and is mounted by the kernel
 # from the root= that boot-ab.cmd.in sets per slot, so a fixed root device here

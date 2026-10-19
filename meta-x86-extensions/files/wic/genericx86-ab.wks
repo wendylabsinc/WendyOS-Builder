@@ -4,8 +4,11 @@
 # disk only while wic assembles the raw image, and the resulting .wic is written
 # unchanged to whatever the target boots from (NVMe, SATA/eMMC or USB). At runtime
 # everything is found by GPT partlabel / fs-label — GRUB does `search --label`, the
-# kernel gets root=PARTLABEL=, and the fstab mounts by LABEL. So one image boots
-# any of those disks with no per-disk variant.
+# kernel gets root=PARTLABEL=, and the fstab mounts /boot by LABEL and /config and
+# /data by the udev links /dev/wendyos/config and /dev/wendyos/data. Those pick the
+# partition by GPT name on the disk / is mounted from (the /data link points at the
+# mapper once encrypted). So one image boots any of those disks with no per-disk
+# variant.
 #
 # Partition ORDER is load-bearing and mirrors meta-rpi-extensions/files/wic/
 # rpi-wendy-ab.wks:

@@ -1,0 +1,33 @@
+# /etc/udev/rules.d/99-wendyos-config.rules
+#
+# Stable link /dev/wendyos/config for the /config partition on the disk / is
+# mounted from.
+#
+# A GPT partition name is unique on one disk, not on the machine. A device that
+# once ran WendyOS from another disk -- an AGX Orin moved from eMMC to NVMe --
+# has a "config" partition on both, and LABEL=config or the by-partlabel link
+# then names whichever one udev handled last. Mounting the old disk's /config is
+# not harmless. A data.enroll.pending marker left on it would make the /data
+# resolver wipe the live LUKS header on the root disk, and /config/tee would
+# come from the wrong disk.
+#
+# The rule asks root-disk-part (data-device recipe) whether this partition is
+# the one named "config" on the root disk, the same check rule 1 of
+# 99-wendyos-data.rules makes for "data". See that file for why it is a udev
+# SYMLINK, why the prefix is 99, and why PROGRAM is given %k and the program
+# answers only yes or no.
+#
+# Unlike the /data rule, nothing here looks at the filesystem. On Qualcomm the
+# partition is blank on first boot, and wendyos-config-init waits for this link
+# before it formats the partition, so the link has to exist with no filesystem
+# on it. It also keeps the link in place across the FAT32 to ext4 conversion.
+#
+# MBR has no partition names, so this never matches on raspberrypi3-64. That
+# board keeps LABEL=config in its fstab.
+#
+# Consumers: the x86, VM and RPi4/5 fstabs, the /config line the image adds to
+# the Tegra fstab, and the Qualcomm config.mount and wendyos-config-init.
+ACTION!="remove", SUBSYSTEM=="block", ENV{ID_PART_ENTRY_SCHEME}=="gpt", \
+    ENV{ID_PART_ENTRY_NAME}=="config", \
+    PROGRAM="/usr/sbin/root-disk-part config %k", \
+    SYMLINK+="wendyos/config"

@@ -1,5 +1,6 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Benjamin Kelenyi <benjamin@wendy.sh>
+Date: Thu, 1 Oct 2026 13:32:57 +0300
 Subject: [PATCH] arm64: dts: qcom: qrb2210-arduino-imola: attach MPM to the
  cluster power domain
 

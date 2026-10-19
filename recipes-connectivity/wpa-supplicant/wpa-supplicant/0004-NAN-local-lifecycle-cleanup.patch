@@ -1,0 +1,337 @@
+From: Wendy Labs <engineering@wendy.dev>
+Subject: [PATCH] NAN: clean up local NDP state on all interface removal paths
+
+Upstream-Status: Pending
+
+Graceful controllers must drain NDP termination before removing the radio.
+Fix forced cleanup, local NDI matching, same-radio management lookup, and
+separate failed setup from established NDP reference ownership. Stop NAN
+before generic interface cleanup frees the discovery engine used by its
+stop callback; otherwise stopping the shared daemon with NAN running crashes.
+Keep NAN teardown out of the generic root-interface P2P group cleanup, which
+would otherwise disconnect unrelated Wi-Fi Direct sessions on other radios.
+
+diff --git a/src/nan/nan.c b/src/nan/nan.c
+index a62edd1..15ce345 100644
+--- a/src/nan/nan.c
++++ b/src/nan/nan.c
+@@ -30,6 +30,10 @@ static void nan_set_peer_timeout(struct nan_data *nan, struct nan_peer *peer,
+ 				 unsigned int sec, unsigned int usec);
+ static int nan_action_send(struct nan_data *nan, struct nan_peer *peer,
+ 			   enum nan_subtype subtype);
++static void nan_ndp_terminated_local(struct nan_data *nan, struct nan_peer *peer,
++			struct nan_ndp_id *ndp_id, const u8 *local_ndi,
++			const u8 *peer_ndi, enum nan_reason reason, u8 gtk_id,
++			bool locally_generated);
+ 
+ 
+ struct nan_data * nan_init(const struct nan_config *cfg)
+@@ -222,24 +226,21 @@ static void nan_del_peer(struct nan_data *nan, struct nan_peer *peer)
+ 	wpa_printf(MSG_DEBUG, "NAN: Removing peer: " MACSTR,
+ 		   MAC2STR(peer->nmi_addr));
+ 
+-	if (!dl_list_empty(&peer->ndps)) {
+-		struct nan_ndp *ndp, *tndp;
+-
+-		/* TODO: tear down active NDPs */
+-		wpa_printf(MSG_DEBUG,
+-			   "NAN: Peer delete while there are active NDPs");
++	/* Forced teardown must notify clients and release NDI station/key state,
++	 * not just free NDP objects. Graceful users drain termination before
++	 * stopping the radio; no frame delivery is assumed here. */
++	if (peer->ndp_setup.ndp)
++		nan_ndp_disconnected(nan, peer, NAN_REASON_UNSPECIFIED_REASON,
++				     true);
+ 
+-		dl_list_for_each_safe(ndp, tndp, &peer->ndps,
+-				      struct nan_ndp, list) {
+-			dl_list_del(&ndp->list);
+-			os_free(ndp);
+-		}
+-	}
++	while (!dl_list_empty(&peer->ndps)) {
++		struct nan_ndp *ndp = dl_list_first(&peer->ndps,
++						  struct nan_ndp, list);
+ 
+-	if (peer->ndp_setup.ndp) {
+-		wpa_printf(MSG_DEBUG,
+-			   "NAN: Peer delete while NDP setup is WIP");
+-		nan_ndp_setup_stop(nan, peer);
++		dl_list_del(&ndp->list);
++		peer->ndp_setup.ndp = ndp;
++		nan_ndp_disconnected(nan, peer, NAN_REASON_UNSPECIFIED_REASON,
++				     true);
+ 	}
+ 
+ 	wpabuf_free(peer->bootstrap.npba);
+@@ -1904,29 +1905,33 @@ static bool nan_peer_ndi_in_use(struct nan_peer *peer, const u8 *peer_ndi)
+ 
+ static void nan_terminate_ndps_for_ndi(struct nan_data *nan,
+ 				       struct nan_peer *peer,
+-				       const u8 *peer_ndi)
++				       const u8 *ndi_addr, bool local)
+ {
+-	struct nan_ndp *ndp, *tndp, *curr_ndp;
+-
+-	curr_ndp = peer->ndp_setup.ndp;
++	struct nan_ndp *ndp, *tndp;
+ 
+ 	dl_list_for_each_safe(ndp, tndp, &peer->ndps, struct nan_ndp, list) {
+-		const u8 *ndp_peer_ndi = ndp->initiator ?
+-			ndp->resp_ndi : ndp->init_ndi;
++		const u8 *addr = (ndp->initiator == local) ?
++			ndp->init_ndi : ndp->resp_ndi;
+ 
+-		if (!ether_addr_equal(ndp_peer_ndi, peer_ndi))
++		if (!ether_addr_equal(addr, ndi_addr))
+ 			continue;
+ 
+ 		dl_list_del(&ndp->list);
+ 
+-		/* Temporarily set the NDP being disconnected */
+-		peer->ndp_setup.ndp = ndp;
+-		nan_ndp_disconnected(nan, peer, NAN_REASON_UNSPECIFIED_REASON,
+-				     true);
+-	}
+ 
+-	/* Restore the current NDP */
+-	peer->ndp_setup.ndp = curr_ndp;
++		/* Preserve an unrelated in-progress setup, including its timer. */
++		{
++			struct nan_ndp_id id;
++			os_memcpy(id.peer_nmi, peer->nmi_addr, ETH_ALEN);
++			os_memcpy(id.init_ndi, ndp->init_ndi, ETH_ALEN);
++			id.id = ndp->ndp_id;
++			nan_ndp_terminated_local(nan, peer, &id,
++				ndp->initiator ? ndp->init_ndi : ndp->resp_ndi,
++				ndp->initiator ? ndp->resp_ndi : ndp->init_ndi,
++				NAN_REASON_UNSPECIFIED_REASON, ndp->gtk_id, true);
++		}
++		os_free(ndp);
++	}
+ }
+ 
+ 
+@@ -2080,13 +2085,14 @@ static int nan_ndp_connected(struct nan_data *nan, struct nan_peer *peer)
+ 				   ret);
+ 			if (ret == -2)
+ 				nan_terminate_ndps_for_ndi(nan, peer,
+-							   params.peer_ndi);
++							   params.peer_ndi, false);
+ 
+ 			return ret;
+ 		}
+ 	}
+ 
+ 	/* Move the NDP to the list of tracked NDPs */
++	peer->ndp_setup.ndp->connected = true;
+ 	dl_list_add(&peer->ndps, &peer->ndp_setup.ndp->list);
+ 	peer->ndp_setup.ndp = NULL;
+ 
+@@ -2134,11 +2140,9 @@ static void nan_ndp_disconnected(struct nan_data *nan, struct nan_peer *peer,
+ 	if (remove_sta)
+ 		nan_peer_del_sec_entry(&peer->info, peer_ndi);
+ 
+-	/*
+-	 * NAN_NDP_STATE_NONE means the NDP was not in progress, thus
+-	 * the failure flag should be false.
+-	 */
+-	fail = peer->ndp_setup.state != NAN_NDP_STATE_NONE;
++	/* Transaction state also changes during termination. Track whether this
++	 * particular NDP actually completed connection, not its scratch state. */
++	fail = !peer->ndp_setup.ndp->connected;
+ 
+ 	if (nan->cfg->ndp_disconnected)
+ 		nan->cfg->ndp_disconnected(nan->cfg->cb_ctx, &ndp_id,
+@@ -2715,9 +2719,10 @@ int nan_handle_ndp_setup(struct nan_data *nan, struct nan_ndp_params *params)
+ }
+ 
+ 
+-void nan_ndp_terminated(struct nan_data *nan, struct nan_peer *peer,
++static void nan_ndp_terminated_local(struct nan_data *nan, struct nan_peer *peer,
+ 			struct nan_ndp_id *ndp_id, const u8 *local_ndi,
+-			const u8 *peer_ndi, enum nan_reason reason, u8 gtk_id)
++			const u8 *peer_ndi, enum nan_reason reason, u8 gtk_id,
++			bool locally_generated)
+ {
+ 	/*
+ 	 * Remove the NDI station only if no other NDP is using the same
+@@ -2732,7 +2737,7 @@ void nan_ndp_terminated(struct nan_data *nan, struct nan_peer *peer,
+ 
+ 	if (nan->cfg->ndp_disconnected)
+ 		nan->cfg->ndp_disconnected(nan->cfg->cb_ctx, ndp_id, local_ndi,
+-					   peer_ndi, reason, false, remove_sta,
++					   peer_ndi, reason, locally_generated, remove_sta,
+ 					   false, gtk_id);
+ 
+ 	/* Need to also remove the NDL if it is not needed */
+@@ -2741,6 +2746,15 @@ void nan_ndp_terminated(struct nan_data *nan, struct nan_peer *peer,
+ }
+ 
+ 
++void nan_ndp_terminated(struct nan_data *nan, struct nan_peer *peer,
++			struct nan_ndp_id *ndp_id, const u8 *local_ndi,
++			const u8 *peer_ndi, enum nan_reason reason, u8 gtk_id)
++{
++	nan_ndp_terminated_local(nan, peer, ndp_id, local_ndi, peer_ndi,
++				 reason, gtk_id, false);
++}
++
++
+ struct nan_device_capabilities *
+ nan_peer_get_device_capabilities(struct nan_data *nan, const u8 *addr,
+ 				 u8 map_id)
+@@ -3655,8 +3669,8 @@ int nan_peer_dump_ndps_to_buf(struct nan_data *nan, const u8 *addr,
+  * @nan: NAN module context from nan_init()
+  * @ndi_addr: NDI address for which all NDPs should be terminated
+  *
+- * This function terminates all NDPs that have the given NDI address as either
+- * initiator or responder NDI.
++ * This function locally disconnects NDPs using the removed local NDI.
++ * It does not send termination frames after the interface has disappeared.
+  */
+ void nan_terminate_ndi_ndps(struct nan_data *nan, const u8 *ndi_addr)
+ {
+@@ -3666,12 +3680,14 @@ void nan_terminate_ndi_ndps(struct nan_data *nan, const u8 *ndi_addr)
+ 		return;
+ 
+ 	dl_list_for_each(peer, &nan->peer_list, struct nan_peer, list) {
+-		/*
+-		 * It is possible that an NDP setup in progress is not on the
+-		 * NDI that is being removed. However, to simplify things, stop
+-		 * the setup, so the other NDPs could be cleanly removed.
+-		 */
+-		nan_ndp_setup_stop(nan, peer);
+-		nan_terminate_ndps_for_ndi(nan, peer, ndi_addr);
++		struct nan_ndp *pending = peer->ndp_setup.ndp;
++
++		/* Do not abort setup on an unrelated local NDI. */
++		if (pending &&
++		    ether_addr_equal(pending->initiator ? pending->init_ndi :
++				     pending->resp_ndi, ndi_addr))
++			nan_ndp_disconnected(nan, peer,
++					     NAN_REASON_UNSPECIFIED_REASON, true);
++		nan_terminate_ndps_for_ndi(nan, peer, ndi_addr, true);
+ 	}
+ }
+diff --git a/src/nan/nan_i.h b/src/nan/nan_i.h
+index 5a9f2b5..8f91dd3 100644
+--- a/src/nan/nan_i.h
++++ b/src/nan/nan_i.h
+@@ -139,6 +139,8 @@ enum nan_ndp_state {
+  * @list: Used for linking in the NDPs list
+  * @peer: Pointer to the peer data structure
+  * @initiator: True iff the local device is the initiator
++ * @connected: True after successful connection notification; retained during
++ *     termination so setup failure cannot release an established NDP's state
+  * @ndp_id: NDP ID
+  * @init_ndi: Initiator NDI
+  * @resp_ndi: Responder NDI. Might not always be set (as this depends on the
+@@ -151,6 +153,7 @@ struct nan_ndp {
+ 	struct dl_list list;
+ 	struct nan_peer *peer;
+ 	bool initiator;
++	bool connected;
+ 	u8 ndp_id;
+ 	u8 init_ndi[ETH_ALEN];
+ 	u8 resp_ndi[ETH_ALEN];
+diff --git a/wpa_supplicant/events.c b/wpa_supplicant/events.c
+index 4f85da1..2558413 100644
+--- a/wpa_supplicant/events.c
++++ b/wpa_supplicant/events.c
+@@ -5426,7 +5426,6 @@ wpa_supplicant_event_interface_status(struct wpa_supplicant *wpa_s,
+ 			wpa_printf(MSG_DEBUG, "%s: NAN data interface removed",
+ 				   wpa_s->ifname);
+ 
+-			wpas_nan_data_interface_removed(wpa_s);
+ 			wpa_supplicant_remove_iface(wpa_s->global, wpa_s, 0);
+ 			break;
+ 		}
+diff --git a/wpa_supplicant/nan_supplicant.c b/wpa_supplicant/nan_supplicant.c
+index f44a7a6..f66aa66 100644
+--- a/wpa_supplicant/nan_supplicant.c
++++ b/wpa_supplicant/nan_supplicant.c
+@@ -782,7 +782,10 @@ static void wpas_nan_ndp_disconnected_cb(void *ctx, struct nan_ndp_id *ndp_id,
+ {
+ 	struct wpa_supplicant *wpa_s = ctx;
+ 
+-	wpas_nan_remove_ndi_sta(wpa_s, local_ndi, peer_ndi, remove_sta, gtk_id);
++	/* A failed setup never acquired an NDP reference on the NDI. */
++	if (!failure)
++		wpas_nan_remove_ndi_sta(wpa_s, local_ndi, peer_ndi, remove_sta,
++					gtk_id);
+ 	wpas_notify_nan_ndp_disconnected(wpa_s, ndp_id->peer_nmi,
+ 					 ndp_id->id, local_ndi, peer_ndi,
+ 					 reason, locally_generated, failure);
+@@ -4930,7 +4933,7 @@ wpas_nan_get_mgmt_iface(struct wpa_supplicant *wpa_s)
+ 
+ 	for (nmi_wpa_s = wpa_s->global->ifaces; nmi_wpa_s;
+ 	     nmi_wpa_s = nmi_wpa_s->next) {
+-		if (nmi_wpa_s->nan_mgmt)
++		if (nmi_wpa_s->nan_mgmt && nmi_wpa_s->radio == wpa_s->radio)
+ 			return nmi_wpa_s;
+ 	}
+ 
+diff --git a/wpa_supplicant/wpa_supplicant.c b/wpa_supplicant/wpa_supplicant.c
+index d872c1e..3d5221b 100644
+--- a/wpa_supplicant/wpa_supplicant.c
++++ b/wpa_supplicant/wpa_supplicant.c
+@@ -8320,7 +8320,9 @@
+ 	struct wpa_global *global = wpa_s->global;
+ 	struct wpa_supplicant *iface, *prev;
+ 
+-	if (wpa_s == wpa_s->parent)
++	/* NAN interfaces are independent roots but do not own P2P groups.
++	 * Their removal must not disconnect Wi-Fi Direct on other radios. */
++	if (wpa_s == wpa_s->parent && !wpas_is_nan_iface(wpa_s))
+ 		wpas_p2p_group_remove(wpa_s, "*");
+ 
+ 	iface = global->ifaces;
+@@ -8358,10 +8360,12 @@
+ 		}
+ 	}
+ 
++	/* NAN stop callbacks still use the discovery engine and driver. Stop
++	 * NAN before generic cleanup releases nan_de and its callbacks. */
++	wpas_nan_deinit(wpa_s);
++
+ 	wpa_supplicant_cleanup(wpa_s);
+ 	wpas_p2p_deinit_iface(wpa_s);
+-
+-	wpas_nan_deinit(wpa_s);
+ 
+ 	wpas_ctrl_radio_work_flush(wpa_s);
+ 	radio_remove_interface(wpa_s);
+@@ -8585,18 +8589,27 @@ int wpa_supplicant_remove_iface(struct wpa_global *global,
+ 	struct wpa_supplicant *parent = wpa_s->parent;
+ #endif /* CONFIG_MESH */
+ 
+-	/* Remove interface from the global list of interfaces */
++	/* Validate membership before cleanup, retaining lookup visibility while
++	 * NAN callbacks release NDI station and key state. */
+ 	prev = global->ifaces;
+-	if (prev == wpa_s) {
+-		global->ifaces = wpa_s->next;
+-	} else {
++	if (prev != wpa_s) {
+ 		while (prev && prev->next != wpa_s)
+ 			prev = prev->next;
+ 		if (prev == NULL)
+ 			return -1;
+-		prev->next = wpa_s->next;
+ 	}
+ 
++#ifdef CONFIG_NAN
++	if (wpa_s->nan_data)
++		wpas_nan_data_interface_removed(wpa_s);
++#endif /* CONFIG_NAN */
++
++	/* Remove interface from the global list of interfaces. */
++	if (prev == wpa_s)
++		global->ifaces = wpa_s->next;
++	else
++		prev->next = wpa_s->next;
++
+ 	wpa_dbg(wpa_s, MSG_DEBUG, "Removing interface %s", wpa_s->ifname);
+ 
+ #ifdef CONFIG_MESH

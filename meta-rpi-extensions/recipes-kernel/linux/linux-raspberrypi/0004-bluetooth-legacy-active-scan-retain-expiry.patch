@@ -1,0 +1,708 @@
+From: Wendy Labs <engineering@wendy.dev>
+Subject: [PATCH] Bluetooth: preserve legacy advertising intent across active scan
+
+Pause only the legacy shared-address advertising transaction while preparing
+an active scan. Restore management intent and wall-clock expiry without
+spending another rotation slice, and reconcile final shared random address
+with the existing public scan fallback and RPA cache. Retain elapsed expiry
+authority across timer allocation/submit failures, backing off from 100 ms to
+3.2 seconds between retries without dropping cleanup.
+Commit explicit armed/deadline ownership under the device lock so canceled
+callbacks cannot truncate a pending replacement or consume a fresh slice.
+Retire a completed instance's expiry marker even when selection has changed,
+without canceling the replacement instance's timer.
+Use the owned marker/deadline for scan expiry checks without acquiring the
+command work-list mutex under hdev->lock; cancellation callbacks can take
+the device lock while holding that mutex.
+
+Changes internal hci_dev state: build the complete matching kernel and all
+modules, then export the matching SDK and image. This is not a claim to fix
+controller Hardware Error 0x00.
+
+Base: Raspberry Pi Linux 95b85bebbedcaedfa7ca79116ed38b7376fba412.
+Apply after the existing four WendyOS Raspberry Pi recipe patches.
+Upstream-Status: Pending
+
+---
+--- a/net/bluetooth/hci_sync.c
++++ b/net/bluetooth/hci_sync.c
+@@ -463,8 +463,11 @@
+ 
+ static void cancel_adv_timeout(struct hci_dev *hdev)
+ {
+-	if (hdev->adv_instance_timeout) {
++	if (hdev->adv_instance_timeout || hdev->expired_adv_instance ||
++	    hdev->adv_instance_expire_armed) {
+ 		hdev->adv_instance_timeout = 0;
++		hdev->expired_adv_instance = 0;
++		hdev->adv_instance_expire_armed = false;
+ 		cancel_delayed_work(&hdev->adv_instance_expire);
+ 	}
+ }
+@@ -491,6 +494,13 @@
+ 	if (!instance || hdev->cur_adv_instance == instance)
+ 		cancel_adv_timeout(hdev);
+ 
++	/* Expiry belongs to the completed slice, even if a disconnect has
++	 * already changed the selected instance. Retire only that marker;
++	 * a replacement instance keeps its own timer and armed authority.
++	 */
++	if (hdev->expired_adv_instance == instance)
++		hdev->expired_adv_instance = 0;
++
+ 	/* Get the next instance to advertise BEFORE we remove
+ 	 * the current one. This can be the same instance again
+ 	 * if there is only one instance.
+@@ -550,9 +560,23 @@
+ 	return 0;
+ }
+ 
++/* Back off allocation/queue failures, retaining expiry authority until cleanup
++ * succeeds. A fresh advertising slice resets the retry count.
++ */
++static unsigned long adv_timeout_retry_delay(struct hci_dev *hdev)
++{
++	unsigned int delay = 100U << hdev->adv_instance_expire_retries;
++
++	if (hdev->adv_instance_expire_retries < 5)
++		hdev->adv_instance_expire_retries++;
++
++	return msecs_to_jiffies(delay);
++}
++
+ static void adv_timeout_expire(struct work_struct *work)
+ {
+ 	u8 *inst_ptr;
++	int err;
+ 	struct hci_dev *hdev = container_of(work, struct hci_dev,
+ 					    adv_instance_expire.work);
+ 
+@@ -560,17 +584,51 @@
+ 
+ 	hci_dev_lock(hdev);
+ 
+-	hdev->adv_instance_timeout = 0;
+-
+-	if (hdev->cur_adv_instance == 0x00)
++	if (hdev->cur_adv_instance == 0x00) {
++		hdev->adv_instance_timeout = 0;
++		hdev->expired_adv_instance = 0;
++		hdev->adv_instance_expire_armed = false;
+ 		goto unlock;
+-
++	}
++
++	/* Management may have canceled this already-running callback while
++	 * it waited for hdev->lock. A pending replacement belongs to its own
++	 * invocation; even a due or zero-duration replacement is not ours.
++	 */
++	if (!hdev->adv_instance_expire_armed ||
++	    delayed_work_pending(&hdev->adv_instance_expire))
++		goto unlock;
++
++	/* Retain expired authority before either allocation can fail. A retry
++	 * moves timer.expires, so the selected instance needs its own marker;
++	 * timeout alone also cannot represent an armed zero-duration slice.
++	 */
++	hdev->expired_adv_instance = hdev->cur_adv_instance;
+ 	inst_ptr = kmalloc(1, GFP_KERNEL);
+ 	if (!inst_ptr)
+-		goto unlock;
++		goto retry;
+ 
+ 	*inst_ptr = hdev->cur_adv_instance;
+-	hci_cmd_sync_queue(hdev, adv_timeout_expire_sync, inst_ptr, NULL);
++	err = hci_cmd_sync_queue(hdev, adv_timeout_expire_sync, inst_ptr, NULL);
++	if (err) {
++		kfree(inst_ptr);
++		goto retry;
++	}
++
++	/* The successfully queued sync entry now owns rotation/removal. */
++	hdev->adv_instance_expire_armed = false;
++	hdev->adv_instance_timeout = 0;
++	goto unlock;
++
++retry:
++	/* Recover allocation/submit failure without a busy loop or spending
++	 * another rotation slice. Close/cancel/remove also cancel this work.
++	 */
++	if (test_bit(HCI_RUNNING, &hdev->flags) &&
++	    !hci_dev_test_flag(hdev, HCI_UNREGISTER))
++		queue_delayed_work(hdev->req_workqueue,
++				   &hdev->adv_instance_expire,
++				   adv_timeout_retry_delay(hdev));
+ 
+ unlock:
+ 	hci_dev_unlock(hdev);
+@@ -1825,7 +1883,8 @@
+ 	return hci_enable_advertising_sync(hdev);
+ }
+ 
+-int hci_enable_advertising_sync(struct hci_dev *hdev)
++static int __hci_enable_advertising_sync(struct hci_dev *hdev,
++		bool (*can_enable)(struct hci_dev *hdev, void *data), void *data)
+ {
+ 	struct adv_info *adv_instance;
+ 	struct hci_cp_le_set_adv_param cp;
+@@ -1833,7 +1892,7 @@
+ 	bool connectable;
+ 	u16 adv_min_interval, adv_max_interval;
+ 	u32 flags;
+-	u8 status;
++	int status;
+ 
+ 	if (ext_adv_capable(hdev))
+ 		return hci_enable_ext_advertising_sync(hdev,
+@@ -1907,8 +1966,17 @@
+ 	if (status)
+ 		return status;
+ 
++	/* A scan-local pause keeps its original wall-clock deadlines. */
++	if (can_enable && !can_enable(hdev, data))
++		return 0;
++
+ 	return __hci_cmd_sync_status(hdev, HCI_OP_LE_SET_ADV_ENABLE,
+ 				     sizeof(enable), &enable, HCI_CMD_TIMEOUT);
++}
++
++int hci_enable_advertising_sync(struct hci_dev *hdev)
++{
++	return __hci_enable_advertising_sync(hdev, NULL, NULL);
+ }
+ 
+ static int enable_advertising_sync(struct hci_dev *hdev, void *data)
+@@ -1961,18 +2029,35 @@
+ int hci_schedule_adv_instance_sync(struct hci_dev *hdev, u8 instance,
+ 				   bool force)
+ {
+-	struct adv_info *adv = NULL;
++	struct adv_info *adv;
++	bool legacy = !ext_adv_capable(hdev);
++	bool already_enabled;
+ 	u16 timeout;
+-
+-	if (hci_dev_test_flag(hdev, HCI_ADVERTISING) && !ext_adv_capable(hdev))
+-		return -EPERM;
+-
+-	if (hdev->adv_instance_timeout)
+-		return -EBUSY;
++	int err = 0;
++
++	/* Commit timer authority and slice bookkeeping together with
++	 * management cancellation. Never hold hdev->lock over HCI commands.
++	 */
++	hci_dev_lock(hdev);
++
++	if (hci_dev_test_flag(hdev, HCI_ADVERTISING) && legacy) {
++		err = -EPERM;
++		goto unlock;
++	}
++
++	if (hdev->adv_instance_timeout ||
++	    (legacy && (hdev->adv_instance_expire_armed ||
++			hdev->expired_adv_instance ||
++			delayed_work_pending(&hdev->adv_instance_expire)))) {
++		err = -EBUSY;
++		goto unlock;
++	}
+ 
+ 	adv = hci_find_adv_instance(hdev, instance);
+-	if (!adv)
+-		return -ENOENT;
++	if (!adv) {
++		err = -ENOENT;
++		goto unlock;
++	}
+ 
+ 	/* A zero timeout means unlimited advertising. As long as there is
+ 	 * only one instance, duration should be ignored. We still set a timeout
+@@ -1987,31 +2072,46 @@
+ 	else
+ 		timeout = adv->remaining_time;
+ 
+-	/* The remaining time is being reduced unless the instance is being
+-	 * advertised without time limit.
++	/* Only use work for scheduling instances with legacy advertising.
++	 * Commit its authority while management cancellation is excluded;
++	 * zero-delay work can already be queued before we release the lock.
++	 */
++	if (legacy) {
++		if (!queue_delayed_work(hdev->req_workqueue,
++					&hdev->adv_instance_expire,
++					secs_to_jiffies(timeout))) {
++			err = -EBUSY;
++			goto unlock;
++		}
++		hdev->expired_adv_instance = 0;
++		hdev->adv_instance_timeout = timeout;
++		hdev->adv_instance_expire_deadline =
++			jiffies + secs_to_jiffies(timeout);
++		hdev->adv_instance_expire_retries = 0;
++		hdev->adv_instance_expire_armed = true;
++	}
++
++	/* Debit only a successfully committed slice; a failed timer queue
++	 * must not spend lifetime or claim a new advertising instance.
+ 	 */
+ 	if (adv->timeout)
+-		adv->remaining_time = adv->remaining_time - timeout;
+-
+-	/* Only use work for scheduling instances with legacy advertising */
+-	if (!ext_adv_capable(hdev)) {
+-		hdev->adv_instance_timeout = timeout;
+-		queue_delayed_work(hdev->req_workqueue,
+-				   &hdev->adv_instance_expire,
+-				   secs_to_jiffies(timeout));
+-	}
+-
+-	/* If we're just re-scheduling the same instance again then do not
+-	 * execute any HCI commands. This happens when a single instance is
+-	 * being advertised.
+-	 */
+-	if (!force && hdev->cur_adv_instance == instance &&
+-	    hci_dev_test_flag(hdev, HCI_LE_ADV))
+-		return 0;
+-
+-	hdev->cur_adv_instance = instance;
++		adv->remaining_time -= timeout;
++
++	already_enabled = !force && hdev->cur_adv_instance == instance &&
++			  hci_dev_test_flag(hdev, HCI_LE_ADV);
++	if (!already_enabled)
++		hdev->cur_adv_instance = instance;
++
++	hci_dev_unlock(hdev);
++
++	if (already_enabled)
++		return 0;
+ 
+ 	return hci_start_adv_sync(hdev, instance);
++
++unlock:
++	hci_dev_unlock(hdev);
++	return err;
+ }
+ 
+ static int hci_clear_adv_sets_sync(struct hci_dev *hdev, struct sock *sk)
+@@ -2105,6 +2205,13 @@
+ 	if (!instance || hdev->cur_adv_instance == instance)
+ 		cancel_adv_timeout(hdev);
+ 
++	/* Expiry belongs to the completed slice, even if a disconnect has
++	 * already changed the selected instance. Retire only that marker;
++	 * a replacement instance keeps its own timer and armed authority.
++	 */
++	if (hdev->expired_adv_instance == instance)
++		hdev->expired_adv_instance = 0;
++
+ 	/* Get the next instance to advertise BEFORE we remove
+ 	 * the current one. This can be the same instance again
+ 	 * if there is only one instance.
+@@ -2629,7 +2736,8 @@
+ 	return err;
+ }
+ 
+-static int hci_pause_addr_resolution(struct hci_dev *hdev)
++static int __hci_pause_addr_resolution(struct hci_dev *hdev,
++				       bool resume_advertising)
+ {
+ 	int err;
+ 
+@@ -2664,8 +2772,14 @@
+ 	if (!err && scan_use_rpa(hdev))
+ 		return 0;
+ 
+-	hci_resume_advertising_sync(hdev);
++	if (resume_advertising)
++		hci_resume_advertising_sync(hdev);
+ 	return err;
++}
++
++static int hci_pause_addr_resolution(struct hci_dev *hdev)
++{
++	return __hci_pause_addr_resolution(hdev, true);
+ }
+ 
+ struct sk_buff *hci_read_local_oob_data_sync(struct hci_dev *hdev,
+@@ -5263,9 +5377,12 @@
+ 
+ 	cancel_interleave_scan(hdev);
+ 
+-	if (hdev->adv_instance_timeout) {
++	if (hdev->adv_instance_timeout || hdev->expired_adv_instance ||
++	    hdev->adv_instance_expire_armed) {
+ 		cancel_delayed_work_sync(&hdev->adv_instance_expire);
+ 		hdev->adv_instance_timeout = 0;
++		hdev->expired_adv_instance = 0;
++		hdev->adv_instance_expire_armed = false;
+ 	}
+ 
+ 	err = hci_dev_shutdown(hdev);
+@@ -5944,8 +6061,210 @@
+ 				     sizeof(cp), &cp, HCI_CMD_TIMEOUT);
+ }
+ 
++struct hci_legacy_scan_adv {
++	bool paused;
++	bool management;
++	bool refresh;
++	u8 instance;
++};
++
++/* Called with hdev->lock held. A running timer callback may already have
++ * cleared its pending bit, or queued expiry behind this scan and cleared
++ * adv_instance_timeout. The original sync expiry still owns that slice.
++ * A canceled/unarmed timer alone does not expire an unlimited instance.
++ */
++static bool hci_legacy_scan_adv_expired(struct hci_dev *hdev, u8 instance)
++{
++	/* The timer publishes this marker under hdev->lock before queueing
++	 * expiry and retains it until cleanup or explicit cancellation. The
++	 * marker therefore covers queued work without taking the work-list
++	 * mutex (whose cancellation callbacks may take hdev->lock).
++	 */
++	if (hdev->expired_adv_instance == instance)
++		return true;
++
++	/* delay==0 queues work without rewriting timer.expires. The owned
++	 * slice deadline also survives a later allocation-retry timer date.
++	 */
++	return hdev->adv_instance_expire_armed &&
++	       time_after_eq(jiffies, hdev->adv_instance_expire_deadline);
++}
++
++/* A scan address update must not reschedule advertising or spend another
++ * rotation slice. Keep the original instance/deadlines and pause only the
++ * legacy advertiser whose command family shares the scan random address.
++ */
++static int hci_legacy_scan_adv_pause_sync(struct hci_dev *hdev,
++					struct hci_legacy_scan_adv *state)
++{
++	int err = 0;
++
++	hci_dev_lock(hdev);
++	if (hci_lookup_le_connect(hdev)) {
++		err = -EBUSY;
++		goto unlock;
++	}
++
++	/* An outside pause may coexist with directed connection advertising.
++	 * Never release it or change that advertiser's address.
++	 */
++	if (hdev->advertising_paused) {
++		if (hci_dev_test_flag(hdev, HCI_LE_ADV))
++			err = -EBUSY;
++		goto unlock;
++	}
++
++	if (!hci_dev_test_flag(hdev, HCI_LE_ADV))
++		goto unlock;
++
++	state->management = hci_dev_test_flag(hdev, HCI_ADVERTISING);
++	state->instance = hdev->cur_adv_instance;
++	if (!state->instance && !state->management) {
++		err = -EBUSY;
++		goto unlock;
++	}
++
++	/* Set Advertising/Discoverable inspect this pause. Other management
++	 * callers may still update intent while HCI commands wait, so resume
++	 * and the final enable boundary revalidate the current state.
++	 */
++	hdev->advertising_paused = true;
++	state->paused = true;
++	hci_dev_unlock(hdev);
++
++	return hci_disable_advertising_sync(hdev);
++
++unlock:
++	hci_dev_unlock(hdev);
++	return err;
++}
++
++/* Revalidate at the final enable boundary, after all HCI parameter waits.
++ * A newly expired discovery setting needs fresh AD/address parameters; an
++ * expired instance is left disabled for its original queued rotation work.
++ */
++static bool hci_legacy_scan_adv_can_enable(struct hci_dev *hdev, void *data)
++{
++	struct hci_legacy_scan_adv *state = data;
++	bool allowed;
++
++	hci_dev_lock(hdev);
++	if (hdev->discov_timeout && delayed_work_pending(&hdev->discov_off) &&
++	    time_after_eq(jiffies, hdev->discov_off.timer.expires)) {
++		hci_dev_clear_flag(hdev, HCI_LIMITED_DISCOVERABLE);
++		hci_dev_clear_flag(hdev, HCI_DISCOVERABLE);
++		hdev->discov_timeout = 0;
++		state->refresh = true;
++	}
++
++	allowed = !hci_lookup_le_connect(hdev) &&
++		  hdev->cur_adv_instance == state->instance;
++	if (state->management)
++		allowed = allowed && hci_dev_test_flag(hdev, HCI_ADVERTISING);
++	else
++		allowed = allowed && !hci_dev_test_flag(hdev, HCI_ADVERTISING) &&
++			  hci_find_adv_instance(hdev, state->instance) &&
++			  !hci_legacy_scan_adv_expired(hdev, state->instance);
++	hci_dev_unlock(hdev);
++
++	if (!allowed)
++		state->refresh = false;
++	return allowed && !state->refresh;
++}
++
++static int hci_legacy_scan_adv_resume_sync(struct hci_dev *hdev,
++					 struct hci_legacy_scan_adv *state)
++{
++	bool resume = false;
++	int err = 0;
++
++	if (!state->paused)
++		return 0;
++	state->paused = false;
++
++	hci_dev_lock(hdev);
++	/* Preserve actual expiry rather than restoring saved discoverability.
++	 * Its original queued work still publishes the settings change.
++	 */
++	if (hdev->discov_timeout && delayed_work_pending(&hdev->discov_off) &&
++	    time_after_eq(jiffies, hdev->discov_off.timer.expires)) {
++		hci_dev_clear_flag(hdev, HCI_LIMITED_DISCOVERABLE);
++		hci_dev_clear_flag(hdev, HCI_DISCOVERABLE);
++		hdev->discov_timeout = 0;
++	}
++
++	if (!hci_dev_test_flag(hdev, HCI_LE_ADV) &&
++	    !hci_lookup_le_connect(hdev)) {
++		if (state->management) {
++			resume = hci_dev_test_flag(hdev, HCI_ADVERTISING) &&
++				 hdev->cur_adv_instance == 0x00;
++		} else if (!hci_dev_test_flag(hdev, HCI_ADVERTISING) &&
++			   hdev->cur_adv_instance == state->instance &&
++			   hci_find_adv_instance(hdev, state->instance)) {
++			/* The original queued expiry owns rotation/removal. Do not
++			 * restart a slice whose wall-clock deadline already passed.
++			 */
++			resume = !hci_legacy_scan_adv_expired(hdev, state->instance);
++		}
++	}
++	hci_dev_unlock(hdev);
++
++	if (resume) {
++		do {
++			state->refresh = false;
++			err = hci_update_adv_data_sync(hdev, state->instance);
++			if (err)
++				break;
++			err = hci_update_scan_rsp_data_sync(hdev, state->instance);
++			if (err)
++				break;
++			err = __hci_enable_advertising_sync(hdev,
++					 hci_legacy_scan_adv_can_enable, state);
++		} while (!err && state->refresh);
++	}
++
++	hci_dev_lock(hdev);
++	hdev->advertising_paused = false;
++	/* Restore may have written a different random address before a later
++	 * HCI parameter/enable failure. Expire that stale RPA on error too.
++	 */
++	if (bacmp(&hdev->random_addr, &hdev->rpa))
++		hci_dev_set_flag(hdev, HCI_RPA_EXPIRED);
++	hci_dev_unlock(hdev);
++
++	return err;
++}
++
++/* Legacy scanning and advertising share one random address. Restoring an
++ * advertiser can select NRPA/static instead of the scan's RPA, or static
++ * instead of its NRPA. Preserve the existing public-address scan fallback
++ * in that case; do not enable scanning with a stale private address type.
++ */
++static u8 hci_legacy_scan_own_addr_type(struct hci_dev *hdev, u8 own_addr_type)
++{
++	hci_dev_lock(hdev);
++	/* A successful non-RPA write does not expire the global RPA cache in
++	 * its completion callback. Validate the actual final shared address.
++	 */
++	if (bacmp(&hdev->random_addr, &hdev->rpa))
++		hci_dev_set_flag(hdev, HCI_RPA_EXPIRED);
++
++	if (own_addr_type != ADDR_LE_DEV_PUBLIC) {
++		if (scan_use_rpa(hdev)) {
++			if (!rpa_valid(hdev))
++				own_addr_type = ADDR_LE_DEV_PUBLIC;
++		} else if (hdev->random_addr.b[5] & 0xc0) {
++			own_addr_type = ADDR_LE_DEV_PUBLIC;
++		}
++	}
++	hci_dev_unlock(hdev);
++
++	return own_addr_type;
++}
++
+ static int hci_active_scan_sync(struct hci_dev *hdev, uint16_t interval)
+ {
++	struct hci_legacy_scan_adv legacy = {};
+ 	u8 own_addr_type;
+ 	/* Accept list is not used for discovery */
+ 	u8 filter_policy = 0x00;
+@@ -5955,6 +6274,10 @@
+ 
+ 	bt_dev_dbg(hdev, "");
+ 
++	/* A directed connection attempt owns the legacy random address. */
++	if (!ext_adv_capable(hdev) && hci_lookup_le_connect(hdev))
++		return -EBUSY;
++
+ 	/* If controller is scanning, it means the passive scanning is
+ 	 * running. Thus, we should temporarily stop it in order to set the
+ 	 * discovery scanning parameters.
+@@ -5967,21 +6290,39 @@
+ 
+ 	cancel_interleave_scan(hdev);
+ 
+-	/* Pause address resolution for active scan and stop advertising if
+-	 * privacy is enabled.
+-	 */
+-	err = hci_pause_addr_resolution(hdev);
++	if (ext_adv_capable(hdev)) {
++		/* Extended advertising has per-set addresses. Retain its existing
++		 * independent address-resolution pause policy.
++		 */
++		err = hci_pause_addr_resolution(hdev);
++	} else {
++		err = hci_legacy_scan_adv_pause_sync(hdev, &legacy);
++		if (err)
++			goto failed;
++
++		/* The legacy transaction owns its pause. The resolution helper
++		 * must not release it or an outside pause internally.
++		 */
++		err = __hci_pause_addr_resolution(hdev, false);
++	}
+ 	if (err)
+ 		goto failed;
+ 
+-	/* All active scans will be done with either a resolvable private
+-	 * address (when privacy feature has been enabled) or non-resolvable
+-	 * private address.
++	/* Prefer a resolvable private address when privacy is enabled,
++	 * otherwise a non-resolvable private address. Retain the public
++	 * fallback on setup failure or incompatible legacy advert restore.
+ 	 */
+ 	err = hci_update_random_address_sync(hdev, true, scan_use_rpa(hdev),
+ 					     &own_addr_type);
+ 	if (err < 0)
+ 		own_addr_type = ADDR_LE_DEV_PUBLIC;
++
++	err = hci_legacy_scan_adv_resume_sync(hdev, &legacy);
++	if (err)
++		goto failed;
++
++	if (!ext_adv_capable(hdev))
++		own_addr_type = hci_legacy_scan_own_addr_type(hdev, own_addr_type);
+ 
+ 	if (hci_is_adv_monitoring(hdev) ||
+ 	    (hci_test_quirk(hdev, HCI_QUIRK_STRICT_DUPLICATE_FILTER) &&
+@@ -6006,9 +6347,17 @@
+ 		return err;
+ 
+ failed:
+-	/* Resume advertising if it was paused */
+-	if (ll_privacy_capable(hdev))
+-		hci_resume_advertising_sync(hdev);
++	if (ext_adv_capable(hdev)) {
++		/* Preserve the existing extended address-resolution cleanup. */
++		if (ll_privacy_capable(hdev))
++			hci_resume_advertising_sync(hdev);
++	} else {
++		int resume_err = hci_legacy_scan_adv_resume_sync(hdev, &legacy);
++
++		if (resume_err)
++			bt_dev_err(hdev, "Unable to resume legacy advertising: %d",
++				   resume_err);
++	}
+ 
+ 	/* Resume passive scanning */
+ 	hci_update_passive_scan_sync(hdev);
+--- a/net/bluetooth/mgmt.c
++++ b/net/bluetooth/mgmt.c
+@@ -1284,8 +1284,11 @@
+ 
+ static void cancel_adv_timeout(struct hci_dev *hdev)
+ {
+-	if (hdev->adv_instance_timeout) {
++	if (hdev->adv_instance_timeout || hdev->expired_adv_instance ||
++	    hdev->adv_instance_expire_armed) {
+ 		hdev->adv_instance_timeout = 0;
++		hdev->expired_adv_instance = 0;
++		hdev->adv_instance_expire_armed = false;
+ 		cancel_delayed_work(&hdev->adv_instance_expire);
+ 	}
+ }
+--- a/net/bluetooth/hci_core.c
++++ b/net/bluetooth/hci_core.c
+@@ -1642,13 +1642,19 @@
+ 	BT_DBG("%s removing %dMR", hdev->name, instance);
+ 
+ 	if (hdev->cur_adv_instance == instance) {
+-		if (hdev->adv_instance_timeout) {
++		if (hdev->adv_instance_timeout || hdev->expired_adv_instance ||
++		    hdev->adv_instance_expire_armed) {
+ 			cancel_delayed_work(&hdev->adv_instance_expire);
+ 			hdev->adv_instance_timeout = 0;
++			hdev->expired_adv_instance = 0;
++			hdev->adv_instance_expire_armed = false;
+ 		}
+ 		hdev->cur_adv_instance = 0x00;
+ 	}
+ 
++	if (hdev->expired_adv_instance == instance)
++		hdev->expired_adv_instance = 0;
++
+ 	cancel_delayed_work_sync(&adv_instance->rpa_expired_cb);
+ 
+ 	list_del(&adv_instance->list);
+@@ -1672,9 +1678,12 @@
+ {
+ 	struct adv_info *adv_instance, *n;
+ 
+-	if (hdev->adv_instance_timeout) {
++	if (hdev->adv_instance_timeout || hdev->expired_adv_instance ||
++	    hdev->adv_instance_expire_armed) {
+ 		disable_delayed_work(&hdev->adv_instance_expire);
+ 		hdev->adv_instance_timeout = 0;
++		hdev->expired_adv_instance = 0;
++		hdev->adv_instance_expire_armed = false;
+ 	}
+ 
+ 	list_for_each_entry_safe(adv_instance, n, &hdev->adv_instances, list) {
+@@ -2465,6 +2474,9 @@
+ 	hdev->adv_instance_cnt = 0;
+ 	hdev->cur_adv_instance = 0x00;
+ 	hdev->adv_instance_timeout = 0;
++	hdev->expired_adv_instance = 0;
++	hdev->adv_instance_expire_armed = false;
++	hdev->adv_instance_expire_deadline = 0;
+ 
+ 	hdev->advmon_allowlist_duration = 300;
+ 	hdev->advmon_no_filter_duration = 500;
+--- a/include/net/bluetooth/hci_core.h
++++ b/include/net/bluetooth/hci_core.h
+@@ -600,6 +600,12 @@
+ 	struct list_head	adv_instances;
+ 	unsigned int		adv_instance_cnt;
+ 	__u8			cur_adv_instance;
++	/* Expired legacy slice retained across fallible queueing/retry. */
++	__u8			expired_adv_instance;
++	/* Timer authority is independent of zero duration and retry dates. */
++	u8			adv_instance_expire_retries;
++	bool			adv_instance_expire_armed;
++	unsigned long		adv_instance_expire_deadline;
+ 	__u16			adv_instance_timeout;
+ 	struct delayed_work	adv_instance_expire;
+ 

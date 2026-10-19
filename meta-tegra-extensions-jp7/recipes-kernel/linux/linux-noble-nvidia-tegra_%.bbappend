@@ -18,15 +18,43 @@ SRC_URI += " \
     file://usb-gadget.cfg \
     file://usb-gadget-builtin.cfg \
     file://usb-serial.cfg \
+    file://mesh-tproxy.cfg \
     file://0001-crypto-scatterwalk-Backport-memcpy_sglist.patch \
     file://0002-crypto-algif_aead-use-memcpy_sglist-instead-of-null-skcipher.patch \
     file://0003-crypto-algif_aead-Revert-to-operating-out-of-place-CVE-2026-31431.patch \
     file://0004-crypto-algif_aead-snapshot-IV-for-async-AEAD-requests.patch \
     file://0005-crypto-algif_aead-Fix-minimum-RX-size-check-for-decryption.patch \
+    file://0006-bluetooth-btusb-trust-le-states-by-default.patch \
+    file://0007-bluetooth-mark-scan-interrupted-before-disable.patch \
     file://cve-2026-46333-ptrace.patch \
     "
+
+# Mesh UDP VIP interception uses the iptables TPROXY target. A fragment is
+# only a request: fail the build if a vendor Kconfig change drops either module.
+python __anonymous() {
+    d.appendVarFlag('do_configure', 'postfuncs', ' wendyos_check_mesh_tproxy')
+}
+
+wendyos_check_mesh_tproxy() {
+    config="${B}/.config"
+    [ -f "$config" ] || bbfatal "mesh TPROXY: no resolved kernel config at $config"
+    for symbol in CONFIG_NETFILTER_XT_TARGET_TPROXY CONFIG_NF_TPROXY_IPV4; do
+        grep -q "^$symbol=m$" "$config" || \
+            bbfatal "mesh TPROXY: $symbol must be a module for ${MACHINE}"
+    done
+}
 
 # Driver add-ons: the board-neutral filesystem/module-signing prerequisites.
 # Kept behind the machine opt-in so other JP7 images retain their vendor kernel
 # configuration and task hashes.
 require ${@'recipes-kernel/linux/driver-extensions.inc' if d.getVar('WENDYOS_DRIVER_EXTENSIONS') == '1' else ''}
+
+require recipes-kernel/linux/mesh-local.inc
+require recipes-kernel/linux/mesh-internet.inc
+
+# Config changes alter exported kernel symbols. Give kernels and driver add-ons
+# a new release key so an old sysext cannot masquerade as a matching build.
+KERNEL_LOCALVERSION:append = "-wendy-mesh2"
+
+# Retire the actual failed pending LE connection, including a second queued dial.
+require recipes-kernel/linux/bluetooth-le-pending.inc

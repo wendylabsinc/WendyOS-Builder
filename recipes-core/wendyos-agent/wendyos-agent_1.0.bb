@@ -140,3 +140,8 @@ INSANE_SKIP:${PN} += "already-stripped buildpaths ldflags"
 # Runtime dependencies
 # curl/wget needed for auto-updater, tar for extraction
 RDEPENDS:${PN} = "bash curl tar"
+# Per-app Avahi retains the host daemon and uses private mount namespaces.
+RDEPENDS:${PN}:append = " dbus avahi-daemon xdg-dbus-proxy util-linux-nsenter util-linux-unshare util-linux-mount iproute2"
+
+# Host policy required by core mesh UDP, regardless of Internet-sharing settings.
+RDEPENDS:${PN}:append = " wendyos-mesh-policy"

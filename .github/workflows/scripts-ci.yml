@@ -5,6 +5,14 @@ name: Scripts CI
 on:
   pull_request:
     paths:
+      - 'scripts/timesync_persistence_test.py'
+      - 'recipes-core/systemd-mount-timesync/**'
+      - 'recipes-core/systemd-mount-wendy/**'
+      - 'recipes-core/data-mount/files/*.mount'
+      - 'recipes-support/data-device/files/*.service'
+      - 'recipes-core/packagegroups/packagegroup-wendyos-base.bb'
+      - 'recipes-core/packagegroups/qemu-packagegroup-base.inc'
+      - 'meta-arduino-extensions/recipes-core/packagegroups/*'
       - 'scripts/mark_fat_volumes_test.py'
       - 'recipes-core/images/files/mark-fat-volumes.py'
       - 'recipes-core/images/wendyos-image.bbappend'
@@ -19,9 +27,36 @@ on:
       - 'scripts/tegra_boot_efi_generator_test.py'
       - 'meta-tegra-extensions/recipes-bsp/tools/**'
       - 'scripts/check_game_controller_support*'
+      - 'scripts/kernel_patch_dates_test.py'
+      - 'meta-qcom-extensions/recipes-kernel/linux/**'
+      - 'meta-arduino-extensions/recipes-kernel/linux/**'
+      - 'scripts/check_mesh_local_policy.py'
+      - 'scripts/mesh_local_policy_test.py'
+      - 'classes/mesh-local-policy-check.bbclass'
+      - 'recipes-core/wendyos-mesh-policy/**'
+      - 'recipes-core/wendyos-agent/wendyos-agent_1.0.bb'
+      - 'recipes-core/wendyos-agent/files/wendyos-agent.service'
+      - 'recipes-core/images/wendyos-image.bb'
+      - 'scripts/check_mesh_kernel_support*'
+      - 'scripts/check_sensor_loopback_support*'
+      - 'classes/sensor-loopback-check.bbclass'
+      - 'recipes-kernel/v4l2loopback/**'
+      - 'meta-tegra-extensions-jp7/recipes-kernel/v4l2loopback/**'
+      - 'conf/distro/include/qcom-image.inc'
+      - 'scripts/mesh_local_contract_test.py'
+      - 'classes/mesh-kernel-check.bbclass'
+      - 'conf/distro/include/mesh-*.inc'
+      - 'recipes-kernel/linux/mesh-*'
+      - 'recipes-kernel/linux/mesh-*/**'
       - 'conf/distro/include/game-controller.inc'
       - 'recipes-kernel/linux/game-controller.inc'
       - 'recipes-kernel/linux/game-controller/**'
+      - 'recipes-kernel/linux/bluetooth-le-pending*'
+      - 'recipes-kernel/linux/bluetooth-le-pending/**'
+      - 'tests/bluetooth-le-pending/**'
+      - 'meta-tegra-extensions-jp7/recipes-kernel/linux/linux-noble-nvidia-tegra/*.patch'
+      - 'meta-rpi-extensions/recipes-kernel/linux/linux-raspberrypi/*.patch'
+      - 'tests/bluetooth-advertising/**'
       - 'recipes-core/packagegroups/packagegroup-wendyos-kernel.bb'
       - 'meta-*/recipes-kernel/linux/linux-*.bbappend'
       - 'meta-*/conf/layer.conf'
@@ -32,7 +67,11 @@ on:
       - 'scripts/driver_supports_device_test.py'
       - 'scripts/driver_activation_test.py'
       - 'scripts/driver_manifest_test.py'
+      - 'drivers/**'
       - 'scripts/driver_devkit_test.py'
+      - 'scripts/driver_sdk_setup_test.py'
+      - 'scripts/package_local_agent_test.py'
+      - 'tools/mesh/package-local-agent.py'
       - 'scripts/select-driver-devkit.sh'
       - '.github/device-artifacts.json'
       - '.github/workflows/drivers.yml'
@@ -40,6 +79,11 @@ on:
       - 'recipes-kernel/wendyos-kernel-devkit/files/*.sh'
       - 'recipes-core/wendyos-identity/files/*.sh'
       - 'recipes-connectivity/avahi/files/*.sh'
+      - 'recipes-connectivity/networkmanager/**'
+      - 'recipes-connectivity/wpa-supplicant/**'
+      - 'recipes-core/systemd-conf/**'
+      - 'scripts/network_manager_ownership_test.py'
+      - 'tests/nm-transient-psk/**'
       - 'meta-arduino-extensions/recipes-connectivity/wendyos-radio-addr/files/*.sh'
       # No *.sh filter: data-recovery-key is a command and carries no extension.
       - 'recipes-support/data-device/files/*'
@@ -64,6 +108,14 @@ on:
   push:
     branches: [main]
     paths:
+      - 'scripts/timesync_persistence_test.py'
+      - 'recipes-core/systemd-mount-timesync/**'
+      - 'recipes-core/systemd-mount-wendy/**'
+      - 'recipes-core/data-mount/files/*.mount'
+      - 'recipes-support/data-device/files/*.service'
+      - 'recipes-core/packagegroups/packagegroup-wendyos-base.bb'
+      - 'recipes-core/packagegroups/qemu-packagegroup-base.inc'
+      - 'meta-arduino-extensions/recipes-core/packagegroups/*'
       - 'scripts/mark_fat_volumes_test.py'
       - 'recipes-core/images/files/mark-fat-volumes.py'
       - 'recipes-core/images/wendyos-image.bbappend'
@@ -78,9 +130,36 @@ on:
       - 'scripts/tegra_boot_efi_generator_test.py'
       - 'meta-tegra-extensions/recipes-bsp/tools/**'
       - 'scripts/check_game_controller_support*'
+      - 'scripts/kernel_patch_dates_test.py'
+      - 'meta-qcom-extensions/recipes-kernel/linux/**'
+      - 'meta-arduino-extensions/recipes-kernel/linux/**'
+      - 'scripts/check_mesh_local_policy.py'
+      - 'scripts/mesh_local_policy_test.py'
+      - 'classes/mesh-local-policy-check.bbclass'
+      - 'recipes-core/wendyos-mesh-policy/**'
+      - 'recipes-core/wendyos-agent/wendyos-agent_1.0.bb'
+      - 'recipes-core/wendyos-agent/files/wendyos-agent.service'
+      - 'recipes-core/images/wendyos-image.bb'
+      - 'scripts/check_mesh_kernel_support*'
+      - 'scripts/check_sensor_loopback_support*'
+      - 'classes/sensor-loopback-check.bbclass'
+      - 'recipes-kernel/v4l2loopback/**'
+      - 'meta-tegra-extensions-jp7/recipes-kernel/v4l2loopback/**'
+      - 'conf/distro/include/qcom-image.inc'
+      - 'scripts/mesh_local_contract_test.py'
+      - 'classes/mesh-kernel-check.bbclass'
+      - 'conf/distro/include/mesh-*.inc'
+      - 'recipes-kernel/linux/mesh-*'
+      - 'recipes-kernel/linux/mesh-*/**'
       - 'conf/distro/include/game-controller.inc'
       - 'recipes-kernel/linux/game-controller.inc'
       - 'recipes-kernel/linux/game-controller/**'
+      - 'recipes-kernel/linux/bluetooth-le-pending*'
+      - 'recipes-kernel/linux/bluetooth-le-pending/**'
+      - 'tests/bluetooth-le-pending/**'
+      - 'meta-tegra-extensions-jp7/recipes-kernel/linux/linux-noble-nvidia-tegra/*.patch'
+      - 'meta-rpi-extensions/recipes-kernel/linux/linux-raspberrypi/*.patch'
+      - 'tests/bluetooth-advertising/**'
       - 'recipes-core/packagegroups/packagegroup-wendyos-kernel.bb'
       - 'meta-*/recipes-kernel/linux/linux-*.bbappend'
       - 'meta-*/conf/layer.conf'
@@ -91,7 +170,11 @@ on:
       - 'scripts/driver_supports_device_test.py'
       - 'scripts/driver_activation_test.py'
       - 'scripts/driver_manifest_test.py'
+      - 'drivers/**'
       - 'scripts/driver_devkit_test.py'
+      - 'scripts/driver_sdk_setup_test.py'
+      - 'scripts/package_local_agent_test.py'
+      - 'tools/mesh/package-local-agent.py'
       - 'scripts/select-driver-devkit.sh'
       - '.github/device-artifacts.json'
       - '.github/workflows/drivers.yml'
@@ -99,6 +182,11 @@ on:
       - 'recipes-kernel/wendyos-kernel-devkit/files/*.sh'
       - 'recipes-core/wendyos-identity/files/*.sh'
       - 'recipes-connectivity/avahi/files/*.sh'
+      - 'recipes-connectivity/networkmanager/**'
+      - 'recipes-connectivity/wpa-supplicant/**'
+      - 'recipes-core/systemd-conf/**'
+      - 'scripts/network_manager_ownership_test.py'
+      - 'tests/nm-transient-psk/**'
       - 'meta-arduino-extensions/recipes-connectivity/wendyos-radio-addr/files/*.sh'
       # No *.sh filter: data-recovery-key is a command and carries no extension.
       - 'recipes-support/data-device/files/*'
@@ -122,6 +210,43 @@ on:
       - '.github/workflows/scripts-ci.yml'
 
 jobs:
+  nan:
+    name: Host NAN lifecycle regressions
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install supplicant build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential patch libssl-dev libnl-3-dev libnl-genl-3-dev libnl-route-3-dev libdbus-1-dev pkg-config
+      - name: Check helper shell scripts
+        run: shellcheck recipes-connectivity/wpa-supplicant/wpa-supplicant/wendyos-nan recipes-connectivity/wpa-supplicant/wpa-supplicant/*.test.sh
+      - name: Test checksum-pinned supplicant patch queue and lifecycle
+        run: python3 recipes-connectivity/wpa-supplicant/run-tests.py
+
+  networkmanager:
+    name: NetworkManager saved-password recovery
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install harness dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc libglib2.0-dev pkg-config patch
+      - name: Test exact pinned NetworkManager policy
+        run: python3 tests/nm-transient-psk/run.py --fetch-upstream --output "$RUNNER_TEMP/nm-transient-psk"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nm-transient-psk-results
+          path: ${{ runner.temp }}/nm-transient-psk
+
   test:
     name: Resolver map + unit tests
     runs-on: ubuntu-latest
@@ -129,6 +254,15 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+
+      - name: Test pending Bluetooth connection cleanup on pinned kernels
+        run: |
+          python3 tests/bluetooth-le-pending/run.py
+          python3 tests/bluetooth-le-pending/run-scan-order.py
+      - name: Test legacy advertising expiry on pinned Raspberry Pi kernel
+        run: |
+          python3 -m unittest discover -s tests/bluetooth-advertising -p '*_test.py'
+          python3 tests/bluetooth-advertising/run.py
 
       - name: Validate device-artifacts.json
         run: jq empty .github/device-artifacts.json
@@ -156,6 +290,15 @@ jobs:
                      recipes-core/wendyos-identity/files/update-mdns-uuid.test.sh \
                      recipes-connectivity/avahi/files/generate-hostname.sh \
                      meta-arduino-extensions/recipes-connectivity/wendyos-radio-addr/files/wendyos-radio-addr.sh
+
+      - name: Verify network ownership and wait-online recipe installation
+        run: python3 -m unittest scripts/network_manager_ownership_test.py -v
+
+      - name: Test persistent clock packaging and systemd units
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y systemd-timesyncd
+          sudo python3 -m unittest scripts/timesync_persistence_test.py -v
 
       - name: Run resolver tests
         run: bash scripts/resolve-artifacts.test.sh
@@ -207,6 +350,21 @@ jobs:
           shellcheck meta-tegra-extensions/recipes-bsp/tools/files/wendyos-boot-efi-generator.sh
           python3 -m unittest scripts/tegra_boot_efi_generator_test.py -v
 
+      - name: Test installed mesh bridge policy with systemd
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y systemd udev
+          sudo env WENDY_TEST_SYSTEMD_POLICY=1 python3 -m unittest scripts/mesh_local_policy_test.py -v
+
+      - name: Run mesh kernel image acceptance tests
+        run: python3 -m unittest scripts/check_mesh_kernel_support_test.py scripts/mesh_local_contract_test.py
+
+      - name: Run SensorLink loopback image acceptance tests
+        run: python3 -m unittest scripts/check_sensor_loopback_support_test.py
+
+      - name: Verify reproducible kernel patch commit identities
+        run: python3 -m unittest scripts/kernel_patch_dates_test.py
+
       - name: Run game-controller support validator tests
         run: python3 -m unittest scripts/check_game_controller_support_test.py
 
@@ -221,3 +379,9 @@ jobs:
 
       - name: Run driver devkit selection tests
         run: python3 -m unittest scripts/driver_devkit_test.py
+
+      - name: Run driver SDK setup tests
+        run: python3 -m unittest scripts/driver_sdk_setup_test.py
+
+      - name: Run local agent packaging tests
+        run: python3 -m unittest scripts/package_local_agent_test.py

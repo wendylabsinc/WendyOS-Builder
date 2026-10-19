@@ -3,11 +3,13 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
 
 # Install NetworkManager configuration files
 SRC_URI += " \
+    file://0001-policy-retry-saved-wifi-after-no-secrets.patch \
     file://NetworkManager.conf \
     file://00-manage-usb0.conf \
     file://10-usb-gadget.conf \
     file://usb-gadget.nmconnection \
     file://99-interface-metrics.conf \
+    file://50-wendy-local-mesh.conf \
     "
 
 # Map WENDYOS_USB_NET_MODE to NetworkManager ipv4.method value
@@ -18,7 +20,8 @@ def usb_net_nm_method(d):
         bb.warn("WENDYOS_USB_NET_MODE='%s' is not recognized, falling back to 'link-local'" % mode)
     return mapping.get(mode, 'link-local')
 
-# dnsmasq is only needed for dhcp-server mode (NM spawns it for method=shared)
+# NetworkManager needs dnsmasq for dhcp-server mode (method=shared). The base
+# package group also installs it independently for the agent's mesh sharing.
 RDEPENDS:${PN}-daemon += "${@'dnsmasq' if d.getVar('WENDYOS_USB_NET_MODE') == 'dhcp-server' else ''}"
 
 # Remove dnsmasq from NM's weak recommendations when not in dhcp-server mode
@@ -35,6 +38,7 @@ do_install:append() {
     install -m 0644 ${UNPACKDIR}/00-manage-usb0.conf ${D}${sysconfdir}/NetworkManager/conf.d/00-manage-usb0.conf
     install -m 0644 ${UNPACKDIR}/10-usb-gadget.conf ${D}${sysconfdir}/NetworkManager/conf.d/10-usb-gadget.conf
     install -m 0644 ${UNPACKDIR}/99-interface-metrics.conf ${D}${sysconfdir}/NetworkManager/conf.d/99-interface-metrics.conf
+    install -m 0644 ${UNPACKDIR}/50-wendy-local-mesh.conf ${D}${sysconfdir}/NetworkManager/conf.d/50-wendy-local-mesh.conf
 
     # Install distro-managed connection profile to /usr/lib (read-only on rootfs).
     # NM 1.46+ natively reads /usr/lib/NetworkManager/system-connections/ as a
@@ -57,6 +61,7 @@ FILES:${PN} += " \
     ${sysconfdir}/NetworkManager/conf.d/00-manage-usb0.conf \
     ${sysconfdir}/NetworkManager/conf.d/10-usb-gadget.conf \
     ${sysconfdir}/NetworkManager/conf.d/99-interface-metrics.conf \
+    ${sysconfdir}/NetworkManager/conf.d/50-wendy-local-mesh.conf \
     "
 
 # Ensure NetworkManager starts after USB gadget is set up

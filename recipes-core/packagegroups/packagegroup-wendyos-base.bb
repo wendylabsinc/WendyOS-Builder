@@ -5,6 +5,8 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 inherit packagegroup
 
 SUMMARY:${PN} = "Base support"
+# Local mesh sharing starts its own scoped dnsmasq proxy when enabled. The
+# system-wide dnsmasq service remains disabled by dnsmasq_%.bbappend.
 RDEPENDS:${PN} = " \
     packagegroup-core-boot \
     bash \
@@ -16,6 +18,7 @@ RDEPENDS:${PN} = " \
     lsof \
     networkmanager \
     networkmanager-nmcli \
+    dnsmasq \
     vim \
     htop \
     usbutils \
@@ -41,7 +44,7 @@ RDEPENDS:${PN} = " \
 # services would fail at boot.
 RDEPENDS:${PN}:append = " \
     ${@'' if (d.getVar('WENDYOS_OTA') or 'none') == 'none' else \
-        'wendyos-user-data-setup systemd-mount-containerd systemd-mount-wendy swapfile-setup wendyos-etc-binds'} \
+        'wendyos-user-data-setup systemd-mount-containerd systemd-mount-wendy systemd-mount-timesync swapfile-setup wendyos-etc-binds'} \
     "
 
 # The /config FAT32 -> ext4 conversion service. Gated on WENDYOS_CONFIG_EXT4

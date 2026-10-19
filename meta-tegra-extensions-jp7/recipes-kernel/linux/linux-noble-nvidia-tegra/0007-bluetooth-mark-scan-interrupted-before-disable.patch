@@ -1,0 +1,44 @@
+From: WendyOS maintainers <engineering@wendy.com>
+Subject: [PATCH] Bluetooth: mark interrupted scan before synchronous disable
+
+Backport the ordering fix from upstream 2cabe7ff1001b7a197009cf50ba71701f9cbd354.
+The scan-disable completion runs before hci_scan_disable_sync returns. Set
+HCI_LE_SCAN_INTERRUPTED first so it stops discovery instead of queuing an
+advertising restart after the connection has already resumed the sets.
+
+On the NVIDIA kernel this redundant restart attempts to reprogram enabled
+extended advertising handle 0 and is rejected with Command Disallowed.
+
+Also clear an unconsumed flag when disable fails or is skipped for suspend.
+Return a disable error through advertising restoration without entering the
+create-timeout cancellation branch: no create command has been sent here.
+
+Upstream-Status: Backport [https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=2cabe7ff1001b7a197009cf50ba71701f9cbd354]
+[Adapt to NVIDIA 6.8.12; clear the flag on unsuccessful/no-op disable and
+return errors without entering the create-timeout cancellation branch.]
+
+---
+--- a/net/bluetooth/hci_sync.c
++++ b/net/bluetooth/hci_sync.c
+@@ -6466,8 +6466,12 @@
+ 	 * state.
+ 	 */
+ 	if (hci_dev_test_flag(hdev, HCI_LE_SCAN)) {
+-		hci_scan_disable_sync(hdev);
+ 		hci_dev_set_flag(hdev, HCI_LE_SCAN_INTERRUPTED);
++		err = hci_scan_disable_sync(hdev);
++		/* A failed or skipped disable has no completion to consume it. */
++		hci_dev_clear_flag(hdev, HCI_LE_SCAN_INTERRUPTED);
++		if (err)
++			goto resume_advertising;
+ 	}
+ 
+ 	/* Update random address, but set require_privacy to false so
+@@ -6515,6 +6519,7 @@
+ 	if (err == -ETIMEDOUT)
+ 		hci_le_connect_cancel_sync(hdev, conn, 0x00);
+ 
++resume_advertising:
+ 	/* Re-enable advertising after the connection attempt is finished. */
+ 	hci_resume_advertising_sync(hdev);
+ 	return err;

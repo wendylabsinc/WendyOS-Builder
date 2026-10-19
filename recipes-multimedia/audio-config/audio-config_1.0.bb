@@ -11,6 +11,7 @@ SRC_URI = " \
     file://95-pipewire.preset \
     file://50-wireplumber-headless.conf \
     file://60-wireplumber-camera-headless.conf \
+    file://70-wireplumber-no-ble-midi.conf \
     file://wireplumber-bluetooth.conf \
     file://wireplumber-dbus.conf \
 "
@@ -44,6 +45,11 @@ do_install() {
     install -m 0644 ${UNPACKDIR}/60-wireplumber-camera-headless.conf \
         ${D}${sysconfdir}/wireplumber/wireplumber.conf.d/
 
+    # PipeWire's BLE-MIDI monitor probes a peer's encrypted MIDI GATT
+    # characteristic and can tear down the unpaired ACL used by mesh CoC.
+    install -m 0644 ${UNPACKDIR}/70-wireplumber-no-ble-midi.conf \
+        ${D}${sysconfdir}/wireplumber/wireplumber.conf.d/
+
     # Install D-Bus policy for Bluetooth access
     # Allows wendy user to communicate with BlueZ over D-Bus
     install -d ${D}${sysconfdir}/dbus-1/system.d
@@ -63,6 +69,7 @@ FILES:${PN} += " \
     ${systemd_unitdir}/user-preset/95-pipewire.preset \
     ${sysconfdir}/wireplumber/wireplumber.conf.d/50-wireplumber-headless.conf \
     ${sysconfdir}/wireplumber/wireplumber.conf.d/60-wireplumber-camera-headless.conf \
+    ${sysconfdir}/wireplumber/wireplumber.conf.d/70-wireplumber-no-ble-midi.conf \
     ${sysconfdir}/dbus-1/system.d/wireplumber-bluetooth.conf \
     ${systemd_unitdir}/user/wireplumber.service.d/dbus.conf \
 "

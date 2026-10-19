@@ -148,6 +148,7 @@ do_compile() {
     cat > ${DEVKIT_ROOT}/devkit.json <<EOF
  {
    "machine": "${MACHINE}",
+   "device": "${WENDYOS_BOARD_ID}",
    "kernel_version": "$kver",
    "arch": "$karch",
    "cross_compile": "${TARGET_PREFIX}",
