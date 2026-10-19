@@ -1,8 +1,8 @@
 SUMMARY = "First-boot FAT32 setup for the Dragonwing /config partition"
 DESCRIPTION = "qcom-ptool allocates the config partition but leaves it raw (no \
 --filename in partitions.conf), so unlike the wic-built boards nothing creates a \
-filesystem on it. This is the /config counterpart to wendyos-data-setup, which \
-does the same job for /data on the allocate-empty platforms."
+filesystem on it. This is the /config counterpart to wendyos-data.service (the \
+data-device recipe), which does the same job for /data."
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
 
@@ -16,6 +16,10 @@ inherit systemd
 SYSTEMD_SERVICE:${PN} = "wendyos-config-init.service config.mount"
 SYSTEMD_AUTO_ENABLE:${PN} = "enable"
 
+# The udev rule and root-disk-part that make /dev/wendyos/config come from
+# data-device. It is not in RDEPENDS on purpose: data-device is per machine,
+# so naming it would rebuild this package for every machine (same reason as
+# tegra-rootfs-redundancy_1.0.bb). packagegroup-wendyos-base installs it.
 RDEPENDS:${PN} = "coreutils dosfstools util-linux-blkid"
 
 do_install() {

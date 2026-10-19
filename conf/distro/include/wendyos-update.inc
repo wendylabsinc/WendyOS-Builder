@@ -4,7 +4,8 @@
 # Pulls in the on-device pieces and the build-side artifact:
 #   - wendyos-update:      the OTA client (/usr/bin/wendyos-update + the
 #                          boot-verify and auto-commit systemd units).
-#   - wendyos-data-setup:  first-boot /data format/grow + the data.mount.
+#   - data-mount:          the data.mount unit, for the boards whose /data is
+#                          not in fstab (x86, VM and RPi remove it again).
 #   - image_types_wendy:   defines the "wendy" IMAGE_FSTYPE that produces
 #                          the .wendy OTA artifact via `wendyos-update pack`.
 
@@ -16,7 +17,7 @@ require conf/distro/include/wendyos-rootfs-size.inc
 # required at distro scope, so a bare :append would also hit the Tegra
 # flashing-helper images (tegra-espimage, the initramfs images), each
 # producing a bogus .wendy and pulling the OTA client into the initramfs.
-IMAGE_INSTALL:append:pn-wendyos-image = " wendyos-update wendyos-data-setup"
+IMAGE_INSTALL:append:pn-wendyos-image = " wendyos-update data-mount"
 
 # Build the .wendy OTA artifact alongside the flashable image. :append
 # (not +=) so it survives machine overrides that *replace* IMAGE_FSTYPES

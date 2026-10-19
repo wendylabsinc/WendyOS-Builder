@@ -113,7 +113,8 @@ Environment variables:
 Options:
   --help, -h   Show this help message.
   --debug      Enable debug build flags in build/conf/auto.conf:
-                 WENDYOS_DEBUG="1", WENDYOS_DEBUG_UART="1", WENDYOS_SSHD="1"
+                 WENDYOS_DEBUG="1", WENDYOS_DEBUG_UART="1", WENDYOS_SSHD="1",
+                 WENDYOS_ENABLE_UART_LOGIN="1", WENDYOS_ENABLE_VT_LOGIN="1"
   --history    Enable buildhistory tracking in build/conf/auto.conf:
                  INHERIT+="buildhistory", BUILDHISTORY_COMMIT="1",
                  BUILDHISTORY_FEATURES="image package"
@@ -751,7 +752,9 @@ auto_conf="./${YOCTO_BUILD_DIR}/conf/auto.conf"
         printf '# --debug\n'
         printf 'WENDYOS_DEBUG = "1"\n'
         printf 'WENDYOS_DEBUG_UART = "1"\n'
-        printf 'WENDYOS_SSHD = "1"\n\n'
+        printf 'WENDYOS_SSHD = "1"\n'
+        printf 'WENDYOS_ENABLE_UART_LOGIN = "1"\n'
+        printf 'WENDYOS_ENABLE_VT_LOGIN = "1"\n\n'
     fi
     if [[ "${OPT_HISTORY}" == "1" ]]
     then
