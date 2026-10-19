@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import tempfile
@@ -11,6 +12,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 RECIPE_DIR = ROOT / "meta-tegra-extensions/recipes-bsp/tools"
 GENERATOR = RECIPE_DIR / "files/wendyos-boot-efi-generator.sh"
+BBAPPEND = RECIPE_DIR / "setup-nv-boot-control_%.bbappend"
 
 
 class BootEfiGeneratorTests(unittest.TestCase):
@@ -29,7 +31,10 @@ class BootEfiGeneratorTests(unittest.TestCase):
             GENERATOR.read_text().replace("/sys/dev/block", str(self.sys))
             .replace("@ESPMOUNT@", "/boot/efi")
             .replace("@ESPMOUNTUNIT@", "boot-efi.mount"))
-        self.mock("findmnt", 'printf "%s\\n" "$TEST_ROOT_DEVICE"\n')
+        self.mock("findmnt", '''
+[ "$*" = "-nr -o MAJ:MIN --target /" ] || exit 9
+printf '%s\\n' "$TEST_ROOT_DEVICE"
+''')
         self.mock("blkid", '''
 [ "$*" = "-p -s TYPE -o value -- $TEST_ESP" ] || exit 9
 printf '%s\\n' "${TEST_FSTYPE:-vfat}"
@@ -142,6 +147,14 @@ printf '%s\\n' "${TEST_FSTYPE:-vfat}"
             text=True, capture_output=True, check=False)
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_failed_write_leaves_no_unit(self):
+        # systemd loads whatever a generator left behind, even after it failed.
+        self.disk("nvme0n1", [(1, "APP", "259:1"), (11, "esp", "259:11")])
+        self.mock("cat", 'printf "[Unit]\\n"\nexit 1\n')
+        result = self.run_generator()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(list(self.output.rglob("*.mount")), [])
+
     def test_overlay_and_device_mapper_roots_are_rejected(self):
         for device in ("0:34", "253:0"):
             with self.subTest(device=device):
@@ -159,6 +172,46 @@ printf '%s\\n' "${TEST_FSTYPE:-vfat}"
                 self.env["TEST_ROOT_DEVICE"] = device
                 self.assert_rejected("invalid root device number")
 
+
+
+class BbappendInstallTests(unittest.TestCase):
+    """Run the bbappend's do_install:append against a fake image tree."""
+
+    def run_install(self, upstream_unit):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        image, unpack = root / "image", root / "unpack"
+        (image / "usr/lib/systemd/system").mkdir(parents=True)
+        unpack.mkdir()
+        shutil.copy(GENERATOR, unpack / GENERATOR.name)
+        if upstream_unit:
+            (image / "usr/lib/systemd/system/boot-efi.mount").write_text("[Mount]\n")
+        body = re.search(r"^do_install:append\(\) \{\n(.*?)^\}", BBAPPEND.read_text(),
+                         re.S | re.M).group(1)
+        values = {"D": image, "UNPACKDIR": unpack, "ESPMOUNT": "/boot/efi",
+                  "ESPMOUNTUNIT": "boot-efi.mount",
+                  "systemd_system_unitdir": "/usr/lib/systemd/system",
+                  "systemd_unitdir": "/usr/lib/systemd"}
+        script = re.sub(r"\$\{(\w+)\}", lambda m: str(values[m.group(1)]), body)
+        # bitbake runs shell tasks with -e and provides bbfatal.
+        result = subprocess.run(["sh", "-ec", 'bbfatal() { echo "$*" >&2; exit 1; }\n' + script],
+                                text=True, capture_output=True, check=False)
+        return result, image
+
+    def test_replaces_the_upstream_mount(self):
+        result, image = self.run_install(upstream_unit=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((image / "usr/lib/systemd/system/boot-efi.mount").exists())
+        generator = image / "usr/lib/systemd/system-generators/wendyos-boot-efi-generator"
+        self.assertTrue(os.access(generator, os.X_OK))
+        self.assertNotIn("@ESPMOUNT", generator.read_text())
+
+    def test_missing_upstream_mount_fails_the_build(self):
+        # A renamed upstream unit would otherwise stay in the image unnoticed.
+        result, _ = self.run_install(upstream_unit=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("boot-efi.mount", result.stderr)
 
 if __name__ == "__main__":
     unittest.main()

@@ -8,7 +8,9 @@ SRC_URI += "file://wendyos-boot-efi-generator.sh"
 do_install:append() {
     # Do not leave the ambiguous upstream mount available as a fallback when
     # the generator cannot establish an unambiguous root-disk ESP.
-    rm -f ${D}${systemd_system_unitdir}/${ESPMOUNTUNIT}
+    [ -e ${D}${systemd_system_unitdir}/${ESPMOUNTUNIT} ] || \
+        bbfatal "upstream no longer installs ${ESPMOUNTUNIT}; re-check what replaces it"
+    rm ${D}${systemd_system_unitdir}/${ESPMOUNTUNIT}
     install -d ${D}${systemd_unitdir}/system-generators
     sed -e 's,@ESPMOUNT@,${ESPMOUNT},g' \
         -e 's,@ESPMOUNTUNIT@,${ESPMOUNTUNIT},g' \
@@ -19,6 +21,8 @@ do_install:append() {
 
 # The generator creates the mount and its local-fs.target dependency together.
 # Replace the upstream postinstall, which creates a static mount dependency.
+# TODO: re-check on every meta-tegra update that upstream's postinst still
+# only links ${ESPMOUNTUNIT}; anything else it gains is dropped here.
 pkg_postinst:${PN}() {
     :
 }
