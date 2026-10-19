@@ -1,9 +1,18 @@
+import json
+from pathlib import Path
 import unittest
 
 from scripts.driver_supports_device import supported_devices, supports
 
 
 class DriverSupportsDeviceTests(unittest.TestCase):
+    def test_shipped_addons_include_orin_nano(self):
+        root = Path(__file__).resolve().parents[1]
+        for name in ("intel-be202", "wendyos-hello"):
+            with self.subTest(driver=name):
+                manifest = json.loads((root / "drivers" / name / "driver.json").read_text())
+                self.assertTrue(supports(manifest, "jetson-orin-nano"))
+
     def test_omitted_devices_preserves_every_device_default(self):
         self.assertTrue(supports({"name": "legacy"}, "jetson-agx-thor"))
 

@@ -21,8 +21,9 @@ installing its matching WendyOS PR image. An old image lacking the driver
 runtime must be updated first. Future OS updates stage the add-on built for the
 target kernel through the existing Wendy driver workflow.
 
-Supported hardware: AGX Thor developer kit (NVMe) and AGX Orin developer kit
-(NVMe or eMMC), using a PCIe BE202 with its USB Bluetooth function connected.
+Jetson build targets are AGX Thor developer kit (NVMe), AGX Orin developer kit
+(NVMe or eMMC), and Orin Nano developer kit (SD or NVMe). They use a PCIe BE202
+with its USB Bluetooth function connected.
 The same package is built for Raspberry Pi 5 (SD or NVMe image). The Waveshare
 PCIe TO M.2 E KEY HAT+ connects to the Pi 5 PCIe FPC connector; use the SD boot
 image while its single M.2 slot holds the BE202. NVMe boot needs a carrier that
@@ -42,7 +43,8 @@ fallback supported by the pinned driver. The PNVM is retained for compatibility.
 
 The Bluetooth payload is the `ibt-0291-0291` pair requested by the BE202's
 `8087:0038` USB function on the AGX Thor developer kit. Verify the same USB
-identity and firmware request on each Pi carrier during hardware testing.
+identity and firmware request on Orin Nano and each Pi carrier during hardware
+testing.
 Both firmware notices are included: `LICENCE.iwlwifi_firmware` for Wi-Fi and
 `LICENCE.ibt_firmware` for Bluetooth, as identified by upstream `WHENCE`.
 
