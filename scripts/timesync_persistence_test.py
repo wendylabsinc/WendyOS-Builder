@@ -107,12 +107,16 @@ class TimesyncPersistenceTest(unittest.TestCase):
                         symlinks=True, dirs_exist_ok=True)
         (self.root / "lib").symlink_to("usr/lib")
         install_recipe("systemd-mount-timesync", self.root)
-        for name in ("data.mount", "wendyos-data-init.service"):
-            shutil.copy(REPO / "recipes-core/wendyos-data-setup/files" / name,
-                        self.root / UNITDIR / name)
+        for unit in ("recipes-core/data-mount/files/data.mount",
+                     "recipes-support/data-device/files/wendyos-data.service"):
+            shutil.copy(REPO / unit, self.root / UNITDIR / Path(unit).name)
+        # Enable them as systemd.bbclass does: only the [Install] wants link pulls
+        # the prep service into the data.mount transaction.
+        subprocess.run(["systemctl", "--quiet", f"--root={self.root}", "enable",
+                        "data.mount", "wendyos-data.service"], check=True)
         # verify checks executables exist but never runs them. Avoid depending
         # on target-specific /usr/sbin helpers being installed on the test host.
-        for path in ("usr/bin/install", "usr/bin/chown", "usr/sbin/wendyos-data-init.sh",
+        for path in ("usr/bin/install", "usr/bin/chown", "usr/sbin/wendyos-data.sh",
                      "usr/lib/systemd/systemd-timesyncd", "bin/true"):
             executable = self.root / path
             executable.parent.mkdir(parents=True, exist_ok=True)
@@ -132,6 +136,8 @@ class TimesyncPersistenceTest(unittest.TestCase):
         ], text=True, capture_output=True, env={**os.environ, "SYSTEMD_LOG_LEVEL": "debug"})
         output = result.stdout + result.stderr
         self.assertEqual(result.returncode, 0, output)
+        # Without the prep service in the transaction the cycle check is vacuous.
+        self.assertIn("Installed new job wendyos-data.service/start", output)
         # Check the resolved dependencies, not just the drop-in text:
         # StateDirectory= can silently turn Wants= into an implicit Requires=.
         service = output.split("-> Unit systemd-timesyncd.service:", 1)[1].split("-> Unit ", 1)[0]
