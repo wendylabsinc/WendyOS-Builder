@@ -95,7 +95,13 @@ SRC_URI = "git://${GO_IMPORT};protocol=https;branch=main;destsuffix=${GO_SRCURI_
 # when the ESP has no room for one; and add the `check` verb, which reports
 # whether the device could take an install at all (exit 5 when not).
 # `check` fails with exit 5 on a deliberately filled ESP.
-SRCREV = "dc8c82e997b7ea43a8de6c9977f0f215de87103f"
+#
+# 1f160d4 (main, wendyos-update #14 + #15): Tegra resolves the rootfs slots and
+# the ESP on the running root disk, follows the firmware's BootOrder to the ESP
+# it reads capsules from, and refuses a capsule install while a boot-chain
+# switch is unsettled; rollback always disarms a staged capsule. grubenv status
+# scans only the boot disk and reads the environment once.
+SRCREV = "1f160d407833783755af153a64f1b386e8f922ac"
 
 inherit go-mod systemd
 

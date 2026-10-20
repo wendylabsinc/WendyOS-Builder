@@ -24,6 +24,8 @@ on:
       - 'scripts/t234_flashpack_manifest*'
       - 'scripts/make-jetson-disk-img.py'
       - 'scripts/make_jetson_disk_img_test.py'
+      - 'scripts/tegra_boot_efi_generator_test.py'
+      - 'meta-tegra-extensions/recipes-bsp/tools/**'
       - 'scripts/check_game_controller_support*'
       - 'scripts/kernel_patch_dates_test.py'
       - 'meta-qcom-extensions/recipes-kernel/linux/**'
@@ -125,6 +127,8 @@ on:
       - 'scripts/t234_flashpack_manifest*'
       - 'scripts/make-jetson-disk-img.py'
       - 'scripts/make_jetson_disk_img_test.py'
+      - 'scripts/tegra_boot_efi_generator_test.py'
+      - 'meta-tegra-extensions/recipes-bsp/tools/**'
       - 'scripts/check_game_controller_support*'
       - 'scripts/kernel_patch_dates_test.py'
       - 'meta-qcom-extensions/recipes-kernel/linux/**'
@@ -340,6 +344,11 @@ jobs:
 
       - name: Run Jetson raw disk image tests
         run: python3 -m unittest scripts/make_jetson_disk_img_test.py
+
+      - name: Check Jetson root-disk EFI mount generation
+        run: |
+          shellcheck meta-tegra-extensions/recipes-bsp/tools/files/wendyos-boot-efi-generator.sh
+          python3 -m unittest scripts/tegra_boot_efi_generator_test.py -v
 
       - name: Test installed mesh bridge policy with systemd
         run: |
