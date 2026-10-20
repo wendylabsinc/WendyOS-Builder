@@ -7,6 +7,7 @@ SRC_URI += " \
     file://NetworkManager.conf \
     file://00-manage-usb0.conf \
     file://10-usb-gadget.conf \
+    file://20-ethernet-dhcp.conf \
     file://usb-gadget.nmconnection \
     file://99-interface-metrics.conf \
     file://50-wendy-local-mesh.conf \
@@ -37,6 +38,7 @@ do_install:append() {
     install -d ${D}${sysconfdir}/NetworkManager/conf.d
     install -m 0644 ${UNPACKDIR}/00-manage-usb0.conf ${D}${sysconfdir}/NetworkManager/conf.d/00-manage-usb0.conf
     install -m 0644 ${UNPACKDIR}/10-usb-gadget.conf ${D}${sysconfdir}/NetworkManager/conf.d/10-usb-gadget.conf
+    install -m 0644 ${UNPACKDIR}/20-ethernet-dhcp.conf ${D}${sysconfdir}/NetworkManager/conf.d/20-ethernet-dhcp.conf
     install -m 0644 ${UNPACKDIR}/99-interface-metrics.conf ${D}${sysconfdir}/NetworkManager/conf.d/99-interface-metrics.conf
     install -m 0644 ${UNPACKDIR}/50-wendy-local-mesh.conf ${D}${sysconfdir}/NetworkManager/conf.d/50-wendy-local-mesh.conf
 
@@ -60,6 +62,7 @@ FILES:${PN} += " \
     ${sysconfdir}/NetworkManager/NetworkManager.conf \
     ${sysconfdir}/NetworkManager/conf.d/00-manage-usb0.conf \
     ${sysconfdir}/NetworkManager/conf.d/10-usb-gadget.conf \
+    ${sysconfdir}/NetworkManager/conf.d/20-ethernet-dhcp.conf \
     ${sysconfdir}/NetworkManager/conf.d/99-interface-metrics.conf \
     ${sysconfdir}/NetworkManager/conf.d/50-wendy-local-mesh.conf \
     "
