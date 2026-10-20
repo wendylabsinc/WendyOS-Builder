@@ -64,10 +64,15 @@ class NetworkManagerConfigTest(unittest.TestCase):
     def test_install(self):
         with tempfile.TemporaryDirectory() as tmp:
             installed = run_install(install_values(tmp))
-            target = f'etc/NetworkManager/conf.d/{DHCP_CONF}'
-            self.assertIn(target, installed)
-            self.assertEqual(installed[target].read_bytes(), (FILES / DHCP_CONF).read_bytes())
-            self.assertEqual(installed[target].stat().st_mode & 0o777, 0o644)
+            for target, source, mode in (
+                (f'etc/NetworkManager/conf.d/{DHCP_CONF}', DHCP_CONF, 0o644),
+                # NetworkManager runs only root-owned dispatcher scripts that
+                # group and others cannot write.
+                ('usr/lib/NetworkManager/dispatcher.d/50-wendyos-dhcp-ntp', 'wendyos-dhcp-ntp.sh', 0o755),
+            ):
+                self.assertIn(target, installed)
+                self.assertEqual(installed[target].read_bytes(), (FILES / source).read_bytes())
+                self.assertEqual(installed[target].stat().st_mode & 0o777, mode)
         fetched = set(re.findall(r'file://(\S+)', RECIPE.read_text()))
         sources = set(re.findall(r'\$\{UNPACKDIR\}/(\S+)', install_body()))
         self.assertTrue(sources <= fetched, sources - fetched)

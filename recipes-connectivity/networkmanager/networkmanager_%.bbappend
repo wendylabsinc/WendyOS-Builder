@@ -11,6 +11,7 @@ SRC_URI += " \
     file://usb-gadget.nmconnection \
     file://99-interface-metrics.conf \
     file://50-wendy-local-mesh.conf \
+    file://wendyos-dhcp-ntp.sh \
     "
 
 # Map WENDYOS_USB_NET_MODE to NetworkManager ipv4.method value
@@ -53,11 +54,15 @@ do_install:append() {
         ${UNPACKDIR}/usb-gadget.nmconnection \
         > ${D}${nonarch_libdir}/NetworkManager/system-connections/usb-gadget.nmconnection
     chmod 0600 ${D}${nonarch_libdir}/NetworkManager/system-connections/usb-gadget.nmconnection
+
+    # Hand Ethernet DHCP NTP servers to timesyncd
+    install -D -m 0755 ${UNPACKDIR}/wendyos-dhcp-ntp.sh \
+        ${D}${nonarch_libdir}/NetworkManager/dispatcher.d/50-wendyos-dhcp-ntp
 }
 
 # Make sure our config files are packaged
-# Note: usb-gadget.nmconnection is in ${nonarch_libdir}/NetworkManager/system-connections/
-# which is already covered by upstream FILES:${PN}-daemon
+# Note: usb-gadget.nmconnection and the dispatcher script are already covered
+# by upstream FILES:${PN}-daemon
 FILES:${PN} += " \
     ${sysconfdir}/NetworkManager/NetworkManager.conf \
     ${sysconfdir}/NetworkManager/conf.d/00-manage-usb0.conf \
