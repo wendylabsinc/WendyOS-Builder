@@ -1,0 +1,76 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Benjamin Kelenyi <benjamin@wendy.sh>
+Date: Tue, 20 Oct 2026 10:00:00 +0300
+Subject: [PATCH] rtl8822ce: pass cfg80211 its own external_auth_params type
+
+rtw_cfg80211_external_auth_request() builds the request in the driver's
+private struct rtw_external_auth_params and casts it to struct
+cfg80211_external_auth_params. The private copy predates the pmkid
+pointer (Linux 5.1) and mld_addr (Linux 6.3): it is 68 bytes, the kernel
+type is 72 bytes on 64-bit, and mld_addr sits at offset 64. cfg80211
+therefore reads the last two bytes of mld_addr past the end of the
+driver's object. With the stack protector those bytes are the canary,
+whose low byte is always 0 and the next random, so the address is
+non-zero (observed: 00:00:00:00:00:70) and nl80211 forwards it to
+userspace as NL80211_ATTR_MLD_ADDR.
+
+wpa_supplicant 2.11 and later takes that address as the SAE peer, so the
+SAE frames go to a station that does not exist and WPA3 association
+fails every time, except when that canary byte happens to be 0. The read
+is also a stack out-of-bounds access that leaks a canary byte.
+
+Build the request in the kernel's own type, as rtl8852ce already does.
+
+Upstream-Status: Pending
+Signed-off-by: Benjamin Kelenyi <benjamin@wendy.sh>
+---
+ .../rtl8822ce/os_dep/linux/ioctl_cfg80211.c   | 26 +++++++++++--------
+ 1 file changed, 15 insertions(+), 11 deletions(-)
+
+diff --git a/drivers/net/wireless/realtek/rtl8822ce/os_dep/linux/ioctl_cfg80211.c b/drivers/net/wireless/realtek/rtl8822ce/os_dep/linux/ioctl_cfg80211.c
+index 4790dd8..ee465c3 100644
+--- a/drivers/net/wireless/realtek/rtl8822ce/os_dep/linux/ioctl_cfg80211.c
++++ b/drivers/net/wireless/realtek/rtl8822ce/os_dep/linux/ioctl_cfg80211.c
+@@ -7204,7 +7204,6 @@ static int cfg80211_rtw_set_monitor_channel(struct wiphy *wiphy
+ 
+ void rtw_cfg80211_external_auth_request(_adapter *padapter, union recv_frame *rframe)
+ {
+-	struct rtw_external_auth_params params;
+ 	struct wireless_dev *wdev = padapter->rtw_wdev;
+ 	struct net_device *netdev = wdev_to_ndev(wdev);
+ 	struct mlme_ext_priv *pmlmeext = &(padapter->mlmeextpriv);
+@@ -7220,16 +7219,21 @@ void rtw_cfg80211_external_auth_request(_adapter *padapter, union recv_frame *rf
+ 
+ #if (KERNEL_VERSION(4, 17, 0) <= LINUX_VERSION_CODE) \
+     || defined(CONFIG_KERNEL_PATCH_EXTERNAL_AUTH)
+-	params.action = EXTERNAL_AUTH_START;
+-	_rtw_memcpy(params.bssid, get_my_bssid(&pmlmeinfo->network), ETH_ALEN);
+-	params.ssid.ssid_len = pmlmeinfo->network.Ssid.SsidLength;
+-	_rtw_memcpy(params.ssid.ssid, pmlmeinfo->network.Ssid.Ssid,
+-		pmlmeinfo->network.Ssid.SsidLength);
+-	params.key_mgmt_suite = 0x8ac0f00;
+-
+-	RTW_INFO("external auth: use kernel API: cfg80211_external_auth_request()\n");
+-	cfg80211_external_auth_request(netdev,
+-		(struct cfg80211_external_auth_params *)&params, GFP_ATOMIC);
++	{
++		/* Not struct rtw_external_auth_params: that copy is shorter than
++		 * the kernel's type, so cfg80211 would read mld_addr past its end. */
++		struct cfg80211_external_auth_params params = {0};
++
++		params.action = NL80211_EXTERNAL_AUTH_START;
++		_rtw_memcpy(params.bssid, get_my_bssid(&pmlmeinfo->network), ETH_ALEN);
++		params.ssid.ssid_len = pmlmeinfo->network.Ssid.SsidLength;
++		_rtw_memcpy(params.ssid.ssid, pmlmeinfo->network.Ssid.Ssid,
++			pmlmeinfo->network.Ssid.SsidLength);
++		params.key_mgmt_suite = 0x8ac0f00;
++
++		RTW_INFO("external auth: use kernel API: cfg80211_external_auth_request()\n");
++		cfg80211_external_auth_request(netdev, &params, GFP_ATOMIC);
++	}
+ #elif (KERNEL_VERSION(2, 6, 37) <= LINUX_VERSION_CODE)
+ 	set_frame_sub_type(frame, WIFI_AUTH);
+ 
+-- 
+2.43.0
+
