@@ -56,7 +56,9 @@ inherit packagegroup
 # - nvidia-container-toolkit (nvidia-ctk for CDI generation)
 # - nvidia-container-runtime
 
-# Core packages required for l4t.csv container support (always included)
+# Core packages required for l4t.csv container support (always included).
+# glxcore supplies the entry point named by NVIDIA's Vulkan ICD, including for
+# headless container workloads that never create an X11 surface.
 RDEPENDS:${PN} = " \
     nvidia-container-config \
     nvidia-container-toolkit \
@@ -77,6 +79,7 @@ RDEPENDS:${PN} = " \
     tegra-libraries-camera \
     tegra-libraries-eglcore \
     tegra-libraries-glescore \
+    tegra-libraries-glxcore \
     cudnn \
     cusparselt \
     tensorrt-core \
