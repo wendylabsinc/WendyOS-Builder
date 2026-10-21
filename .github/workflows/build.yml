@@ -1397,22 +1397,87 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # device-tests: OTA this PR's image onto real hardware and run the lab suite.
-  # Needs publish-pr, because the device downloads the payload itself and can
-  # only do that once the manifest is live.
+  # Dispatched rather than called: a called workflow runs on the CALLER's
+  # runners, and the lab's runner is registered to the lab repo.
+  # Needs publish-pr, because the device fetches the payload itself.
   # ---------------------------------------------------------------------------
   device-tests:
     name: Device tests
     needs: [detect-changes, publish-pr]
-    if: ${{ github.event_name == 'pull_request' && needs.detect-changes.outputs.devices != '' }}
-    uses: wendylabsinc/wendy-lab/.github/workflows/device-test.yml@main
-    with:
-      # Families, not inventory keys; the lab expands them to its storage variants
-      # and passes when it holds no board for one.
-      device: ${{ needs.detect-changes.outputs.devices }}
-      category: ota
-      ota_source: pr
-      pr: "${{ github.event.pull_request.number }}"
-      allow_no_device: true
+    # Only a branch pushed to this repo carries secrets, and only a member with
+    # write access can push one, so this is also the org-member gate: a fork's PR
+    # skips rather than failing on a secret it was never going to receive.
+    if: >-
+      ${{ github.event_name == 'pull_request'
+          && github.event.pull_request.head.repo.full_name == github.repository
+          && needs.detect-changes.outputs.devices != '' }}
+    runs-on: ubuntu-latest
+    # One lab runner takes one job at a time, so a multi-device ota sweep is
+    # serial. This only has to outlast that.
+    timeout-minutes: 240
+    steps:
+      - name: Run the lab suite on hardware
+        env:
+          GH_TOKEN: ${{ secrets.WENDY_LAB_DISPATCH_TOKEN }}
+          LAB: wendylabsinc/wendy-lab
+          DEVICES: ${{ needs.detect-changes.outputs.devices }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          title="Device Tests - PR #${PR}"
+
+          # A dispatch hands back no run id, so note the time first and then
+          # match the run by the name the lab builds from the pr input.
+          since=$(date -u -d '-2 minutes' +%Y-%m-%dT%H:%M:%SZ)
+          gh workflow run device-test.yml --repo "$LAB" \
+            -f device="$DEVICES" \
+            -f category=ota \
+            -f ota_source=pr \
+            -f pr="$PR" \
+            -f allow_no_device=true
+
+          run_id=""
+          for _ in $(seq 1 30); do
+            run_id=$(gh run list --repo "$LAB" --workflow device-test.yml \
+                       --json databaseId,displayTitle,createdAt --limit 30 \
+                     | jq -r --arg since "$since" --arg title "$title" \
+                         'first(.[] | select(.createdAt >= $since)
+                                    | select(.displayTitle == $title))
+                          | .databaseId // empty')
+            [ -n "$run_id" ] && break
+            sleep 10
+          done
+          [ -n "$run_id" ] || { echo "::error::the lab run never appeared"; exit 1; }
+
+          url="https://github.com/$LAB/actions/runs/$run_id"
+          echo "LAB_RUN_ID=$run_id" >> "$GITHUB_ENV"
+          echo "Lab run: $url"
+
+          status=""; conclusion=""
+          for _ in $(seq 1 300); do
+            info=$(gh run view "$run_id" --repo "$LAB" --json status,conclusion)
+            status=$(jq -r '.status' <<<"$info")
+            conclusion=$(jq -r '.conclusion // ""' <<<"$info")
+            [ "$status" = "completed" ] && break
+            sleep 45
+          done
+
+          {
+            echo "### Device tests"
+            echo "- devices: \`$DEVICES\`"
+            echo "- result: \`${conclusion:-$status}\`"
+            echo "- [full run]($url)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          [ "$status" = "completed" ] || { echo "::error::lab run did not finish - $url"; exit 1; }
+          [ "$conclusion" = "success" ] || { echo "::error::lab run $conclusion - $url"; exit 1; }
+
+      # A cancelled PR must not leave a board mid-OTA with nobody watching.
+      - name: Cancel the lab run if this job was cancelled
+        if: cancelled() && env.LAB_RUN_ID != ''
+        env:
+          GH_TOKEN: ${{ secrets.WENDY_LAB_DISPATCH_TOKEN }}
+        run: gh run cancel "$LAB_RUN_ID" --repo wendylabsinc/wendy-lab || true
 
   # ---------------------------------------------------------------------------
   # drivers: rebuild every add-on against the devkit this run published. A kernel
