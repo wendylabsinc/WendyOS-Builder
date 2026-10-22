@@ -166,44 +166,21 @@ test_jetson_nano_sd() {
   rm -rf "$d"
 }
 
-# RPi sdimg: prefer .sdimg, resolve the symlink chain to the real file, gzip flag set.
-test_rpi_sdimg() {
-  local d M; d=$(newdir); M=raspberrypi4-64-wendyos
-  : >"$d/wendyos-image-$M.rootfs.wic.real"          # decoy: wic exists too
-  : >"$d/wendyos-image-$M.rootfs.wic"
-  : >"$d/wendyos-image-$M.sdimg.real"               # the real deep-chain target
-  ln -s "wendyos-image-$M.sdimg.real" "$d/wendyos-image-$M.sdimg"
-  local out; out=$(run_resolver raspberry-pi-4 sd "$M" "$d"); local rc=$?
-  assert_eq "rpi sdimg: exits 0" 0 "$rc"
-  assert_eq "rpi sdimg: kind"       sdimg-gz-with-wic-fallback "$(field IMAGE_KIND <<<"$out")"
-  assert_eq "rpi sdimg: needs_gzip" true "$(field RPI_NEEDS_GZIP <<<"$out")"
-  # readlink -f resolves the symlink to the real file.
-  assert_eq "rpi sdimg: image real path" "$(readlink -f "$d/wendyos-image-$M.sdimg.real")" "$(field IMAGE_FILE <<<"$out")"
-  assert_eq "rpi sdimg: no bundle" "" "$(field TEGRAFLASH_BUNDLE <<<"$out")"
-  assert_eq "rpi sdimg: bmap"        true  "$(field BMAP_REQUIRED <<<"$out")"
-  assert_eq "rpi sdimg: pass_storage" false "$(field PASS_STORAGE <<<"$out")"
-  rm -rf "$d"
-}
-
-# RPi wic fallback: no .sdimg present.
-test_rpi_wic() {
-  local d M; d=$(newdir); M=raspberrypi3-64-wendyos
-  : >"$d/wendyos-image-$M.rootfs.wic"
-  local out; out=$(run_resolver raspberry-pi-3 sd "$M" "$d"); local rc=$?
-  assert_eq "rpi wic: exits 0" 0 "$rc"
-  assert_eq "rpi wic: kind"       sdimg-gz-with-wic-fallback "$(field IMAGE_KIND <<<"$out")"
-  assert_eq "rpi wic: needs_gzip" false "$(field RPI_NEEDS_GZIP <<<"$out")"
-  assert_eq "rpi wic: image"      "$d/wendyos-image-$M.rootfs.wic" "$(field IMAGE_FILE <<<"$out")"
-  rm -rf "$d"
-}
-
-# rpi-5 passes --storage.
-test_rpi5_pass_storage() {
-  local d M; d=$(newdir); M=raspberrypi5-wendyos
-  : >"$d/wendyos-image-$M.rootfs.wic"
-  local out; out=$(run_resolver raspberry-pi-5 sd "$M" "$d")
-  assert_eq "rpi5: pass_storage" true "$(field PASS_STORAGE <<<"$out")"
-  rm -rf "$d"
+# The Pis: one .wic for every boot disk, published without --storage.
+test_rpi_wic_disk() {
+  local pair dev M d out rc
+  for pair in raspberry-pi-3:raspberrypi3-64-wendyos \
+              raspberry-pi-4:raspberrypi4-64-wendyos \
+              raspberry-pi-5:raspberrypi5-wendyos; do
+    dev=${pair%%:*} M=${pair#*:} d=$(newdir)
+    : >"$d/wendyos-image-$M.rootfs.wic"
+    out=$(run_resolver "$dev" disk "$M" "$d"); rc=$?
+    assert_eq "$dev: exits 0" 0 "$rc"
+    assert_eq "$dev: kind"         wic-disk "$(field IMAGE_KIND <<<"$out")"
+    assert_eq "$dev: image"        "$d/wendyos-image-$M.rootfs.wic" "$(field IMAGE_FILE <<<"$out")"
+    assert_eq "$dev: pass_storage" false "$(field PASS_STORAGE <<<"$out")"
+    rm -rf "$d"
+  done
 }
 
 # Generic x86_64 (wic-disk): single .wic disk image, no bundle, no gzip; bmap
@@ -220,7 +197,6 @@ test_x86_wic_disk() {
   assert_eq "x86 wic-disk: bmap"        true  "$(field BMAP_REQUIRED <<<"$out")"
   assert_eq "x86 wic-disk: flashpack"   false "$(field FLASHPACK_REQUIRED <<<"$out")"
   assert_eq "x86 wic-disk: pass_storage" false "$(field PASS_STORAGE <<<"$out")"
-  assert_eq "x86 wic-disk: no gzip"     false "$(field RPI_NEEDS_GZIP <<<"$out")"
   rm -rf "$d"
 }
 
@@ -242,7 +218,6 @@ test_vm_wic_disk() {
     assert_eq "$dev wic-disk: bmap"         true  "$(field BMAP_REQUIRED <<<"$out")"
     assert_eq "$dev wic-disk: flashpack"    false "$(field FLASHPACK_REQUIRED <<<"$out")"
     assert_eq "$dev wic-disk: pass_storage" false "$(field PASS_STORAGE <<<"$out")"
-    assert_eq "$dev wic-disk: no gzip"      false "$(field RPI_NEEDS_GZIP <<<"$out")"
     rm -rf "$d"
   done
 }
@@ -260,15 +235,6 @@ test_missing_bundle_fatal() {
   if grep -q "jetson-agx-orin/emmc" <<<"$out"; then ok "missing bundle: names device/storage"; else bad "missing bundle: error lacks device/storage"; fi
   if grep -q "tegraflash-tar" <<<"$out"; then ok "missing bundle: names expected pattern"; else bad "missing bundle: error lacks pattern"; fi
   if grep -q "ls -la" <<<"$out"; then ok "missing bundle: dumps deploy dir"; else bad "missing bundle: no deploy-dir dump"; fi
-  rm -rf "$d"
-}
-
-# RPi with neither sdimg nor wic -> fatal.
-test_missing_rpi_fatal() {
-  local d M; d=$(newdir); M=raspberrypi3-64-wendyos
-  local out; out=$(run_resolver raspberry-pi-3 sd "$M" "$d" 2>&1); local rc=$?
-  if [[ "$rc" -ne 0 ]]; then ok "missing rpi image: non-zero exit"; else bad "missing rpi image: expected non-zero"; fi
-  if grep -q "sdimg" <<<"$out"; then ok "missing rpi image: names sdimg pattern"; else bad "missing rpi image: error lacks pattern"; fi
   rm -rf "$d"
 }
 
@@ -319,9 +285,9 @@ test_matrix_coverage() {
     jetson-agx-orin/emmc
     jetson-orin-nano/nvme
     jetson-orin-nano/sd
-    raspberry-pi-5/sd
-    raspberry-pi-4/sd
-    raspberry-pi-3/sd
+    raspberry-pi-5/disk
+    raspberry-pi-4/disk
+    raspberry-pi-3/disk
     generic-x86-64/disk
     vm-arm64/disk
     vm-x86-64/disk
@@ -355,13 +321,10 @@ test_dragonwing_qcomflash
 test_dragonwing_versioned_fallback
 test_missing_qcomflash_fatal
 test_jetson_nano_sd
-test_rpi_sdimg
-test_rpi_wic
-test_rpi5_pass_storage
+test_rpi_wic_disk
 test_x86_wic_disk
 test_vm_wic_disk
 test_missing_bundle_fatal
-test_missing_rpi_fatal
 test_missing_x86_fatal
 test_unknown_combo_fatal
 test_generated_nvme_bundle_absent

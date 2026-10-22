@@ -19,9 +19,9 @@ This repository provides the meta-layer and build flow to build **WendyOS** — 
 | Jetson AGX Orin DevKit | Tegra234 | 64GB | `jetson-agx-orin` | `jetson-agx-orin-devkit-nvme-wendyos` | NVMe | Mender |
 | Jetson AGX Orin DevKit | Tegra234 | 64GB | `jetson-agx-orin-emmc` | `jetson-agx-orin-devkit-emmc-wendyos` | onboard eMMC | Mender |
 | Jetson AGX Thor DevKit | Tegra264 | 128GB | `jetson-agx-thor` | `jetson-agx-thor-devkit-nvme-wendyos` | NVMe | _(coming, wendyos-update)_ |
-| Raspberry Pi 3 (B/B+) | Broadcom BCM2837 | 1GB | `rpi3-sd` | `raspberrypi3-64-wendyos` | SD or USB | Mender |
-| Raspberry Pi 4 | Broadcom BCM2711 | 1–8GB | `rpi4-sd` | `raspberrypi4-64-wendyos` | SD or USB | Mender |
-| Raspberry Pi 5 | Broadcom BCM2712 | 8GB | `rpi5-sd` | `raspberrypi5-wendyos` | SD or NVMe | Mender |
+| Raspberry Pi 3 (B/B+) | Broadcom BCM2837 | 1GB | `rpi3-sd` | `raspberrypi3-64-wendyos` | SD or USB | wendyos-update |
+| Raspberry Pi 4 | Broadcom BCM2711 | 1–8GB | `rpi4-sd` | `raspberrypi4-64-wendyos` | SD or USB | wendyos-update |
+| Raspberry Pi 5 | Broadcom BCM2712 | 8GB | `rpi5-sd` | `raspberrypi5-wendyos` | SD or NVMe | wendyos-update |
 | QEMU ARM64 | virtual | configurable | `qemu-arm64` | `qemuarm64-wendyos` | virtio | none |
 | Generic x86_64 PC | Intel/AMD x86_64 | varies | `generic-x86-64` | `genericx86-64-wendyos` | USB / disk (.wic) | wendyos-update |
 | Virtual machine (x86_64) | virtual | configurable | `vm-x86-64` | `vm-x86-64-wendyos` | virtio (.wic) | wendyos-update |
@@ -1102,8 +1102,8 @@ Replace `/dev/sdX` with the target disk, such as `/dev/sdb` for a USB SSD or
 
 WendyOS supports the **Raspberry Pi 3 (64-bit), Pi 4, and Pi 5** as alternative targets.
 The RPi builds use [meta-raspberrypi](https://git.yoctoproject.org/meta-raspberrypi) as
-their BSP layer. Mender OTA (A/B rootfs redundancy) **is** supported on all three boards;
-the build produces a Mender `.sdimg` disk image (with a `.mender` OTA artifact).
+their BSP layer. wendyos-update A/B OTA is supported on all three boards; the build
+produces a `.wic` disk image (with a `.wendy` OTA artifact).
 
 ### Supported Machines
 
@@ -1149,29 +1149,29 @@ interface. UART console is enabled at 115200 baud (`ttyS0` on RPi3/4, `ttyAMA0` 
    bitbake wendyos-image
    ```
 
-   The build produces a Mender SD image (A/B rootfs layout):
+   The build produces a disk image (A/B rootfs layout) and an OTA artifact:
    ```
-   build/tmp/deploy/images/<machine>/wendyos-image-<machine>.sdimg
-   build/tmp/deploy/images/<machine>/wendyos-image-<machine>.mender   # OTA artifact
+   build/tmp/deploy/images/<machine>/wendyos-image-<machine>.rootfs.wic
+   build/tmp/deploy/images/<machine>/wendyos-image-<machine>.rootfs.wendy   # OTA artifact
    ```
 
    > The easiest way to flash is `make flash-to-external` (works on macOS and
-   > Linux), which auto-detects the RPi `.sdimg` and writes it to your chosen
+   > Linux), which auto-detects the RPi `.wic` and writes it to your chosen
    > drive. To flash manually, follow the steps below.
 
 ### Flash the Image
 
-Use `bmaptool` (faster, recommended) or `dd` to write the `.sdimg` image to the target
+Use `bmaptool` (faster, recommended) or `dd` to write the `.wic` image to the target
 storage device.
 
 **With bmaptool:**
 ```bash
-sudo bmaptool copy wendyos-image-<machine>.sdimg /dev/sdX
+sudo bmaptool copy wendyos-image-<machine>.rootfs.wic /dev/sdX
 ```
 
 **With dd:**
 ```bash
-sudo dd if=wendyos-image-<machine>.sdimg of=/dev/sdX bs=4M status=progress conv=fsync
+sudo dd if=wendyos-image-<machine>.rootfs.wic of=/dev/sdX bs=4M status=progress conv=fsync
 sync
 ```
 

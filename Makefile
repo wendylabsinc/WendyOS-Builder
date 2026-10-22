@@ -347,7 +347,6 @@ deploy: _check-machine
 			for ARTIFACT in \
 				"$(IMAGE_TARGET)-$(MACHINE).rootfs.wic" \
 				"$(IMAGE_TARGET)-$(MACHINE).rootfs.wic.bmap" \
-				"$(IMAGE_TARGET)-$(MACHINE).sdimg" \
 				"$(IMAGE_TARGET)-$(MACHINE).tegraflash.tar.gz"; \
 			do \
 				if [ -f "$$OUTDIR/$$ARTIFACT" ]; then \
@@ -390,7 +389,6 @@ flash-to-external: _check-machine
 		cp "$$SRC" "$(PROJECT_DIR)/deploy/wendyos.img"; \
 		printf "$(GREEN)x86_64 wic image ready: $(PROJECT_DIR)/deploy/wendyos.img$(NC)\n\n"; \
 	elif echo "$(MACHINE)" | grep -q "raspberrypi"; then \
-		SDIMG="$(PROJECT_DIR)/build/tmp/deploy/images/$(MACHINE)/$(IMAGE_TARGET)-$(MACHINE).sdimg"; \
 		WIC_IMG="$(PROJECT_DIR)/build/tmp/deploy/images/$(MACHINE)/$(IMAGE_TARGET)-$(MACHINE).rootfs.wic"; \
 		if [ -f "$$WIC_IMG" ]; then \
 			SRC="$$WIC_IMG"; KIND="wic"; \

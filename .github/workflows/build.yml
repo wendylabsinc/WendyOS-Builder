@@ -172,9 +172,9 @@ jobs:
             {"device":"generic-x86-64","storages":"disk"},
             {"device":"dragonwing-iq-9075","storages":"ufs"},
             {"device":"arduino-uno-q","storages":"emmc"},
-            {"device":"raspberry-pi-5","storages":"sd"},
-            {"device":"raspberry-pi-4","storages":"sd"},
-            {"device":"raspberry-pi-3","storages":"sd"},
+            {"device":"raspberry-pi-5","storages":"disk"},
+            {"device":"raspberry-pi-4","storages":"disk"},
+            {"device":"raspberry-pi-3","storages":"disk"},
             {"device":"vm-arm64","storages":"disk"},
             {"device":"vm-x86-64","storages":"disk"}
           ]'
@@ -305,9 +305,9 @@ jobs:
           MAP=""
           for STORAGE in $STORAGES; do
             case "$DEVICE:$STORAGE" in
-              raspberry-pi-3:sd)    BOARD=rpi3-sd;               MACHINE=raspberrypi3-64-wendyos ;;
-              raspberry-pi-4:sd)    BOARD=rpi4-sd;               MACHINE=raspberrypi4-64-wendyos ;;
-              raspberry-pi-5:sd)    BOARD=rpi5-sd;               MACHINE=raspberrypi5-wendyos ;;
+              raspberry-pi-3:disk)  BOARD=rpi3-sd;               MACHINE=raspberrypi3-64-wendyos ;;
+              raspberry-pi-4:disk)  BOARD=rpi4-sd;               MACHINE=raspberrypi4-64-wendyos ;;
+              raspberry-pi-5:disk)  BOARD=rpi5-sd;               MACHINE=raspberrypi5-wendyos ;;
               jetson-agx-orin:nvme) BOARD=jetson-agx-orin;       MACHINE=jetson-agx-orin-devkit-nvme-wendyos ;;
               jetson-agx-orin:emmc) BOARD=jetson-agx-orin-emmc;  MACHINE=jetson-agx-orin-devkit-emmc-wendyos ;;
               jetson-orin-nano:nvme) BOARD=jetson-orin-nano-nvme; MACHINE=jetson-orin-nano-devkit-nvme-wendyos ;;
@@ -948,7 +948,7 @@ jobs:
             # map (.github/device-artifacts.json) via the single resolver — the
             # same source of truth the generate step used. It emits:
             #   IMAGE_KIND IMAGE_FILE TEGRAFLASH_BUNDLE RECOVERY_EXPECTED
-            #   BMAP_REQUIRED FLASHPACK_REQUIRED PASS_STORAGE RPI_NEEDS_GZIP
+            #   BMAP_REQUIRED FLASHPACK_REQUIRED PASS_STORAGE
             RESOLVED=$(DEVICE="$DEVICE" STORAGE="$STORAGE" MACHINE="$MACHINE" \
                        DEPLOY_DIR="$DEPLOY_DIR" \
                        "$GITHUB_WORKSPACE/wendyos/scripts/resolve-artifacts.sh") || exit 1
@@ -981,25 +981,12 @@ jobs:
                 # IMAGE_FILE is the qcomflash tarball itself, already
                 # existence-checked by the resolver. No bmap, no gzip.
                 : ;;
-              sdimg-gz-with-wic-fallback)
-                # RPi: IMAGE_FILE is the readlink-resolved raw image (.sdimg real
-                # target, or .rootfs.wic). Generate bmap before gzip — bmaptool
-                # operates on the raw image. For sdimg, gzip -f the raw file
-                # (suppresses the Yocto hard-link "has N other links" error) and
-                # point IMAGE_FILE at the .gz; wic uploads uncompressed.
-                bmaptool create "$IMAGE_FILE" > "${IMAGE_FILE}.bmap"
-                BMAP_FILE="${IMAGE_FILE}.bmap"
-                if [[ "$RPI_NEEDS_GZIP" == "true" ]]; then
-                  gzip -f "$IMAGE_FILE"
-                  IMAGE_FILE="${IMAGE_FILE}.gz"
-                fi
-                ;;
               wic-disk)
-                # generic-x86-64: IMAGE_FILE is the .wic disk image (the flashable
-                # install artifact). Regenerate the bmap here (deterministic, not
-                # dependent on Yocto's wic.bmap naming) and upload the .wic
-                # uncompressed — the publisher recompresses it. No gzip and no
-                # tegraflash recovery bundle. The A/B OTA payload (.wendy) is
+                # x86, VMs and the Pis: IMAGE_FILE is the .wic disk image (the
+                # flashable install artifact). Regenerate the bmap here
+                # (deterministic, not dependent on Yocto's wic.bmap naming) and upload
+                # the .wic uncompressed — the publisher recompresses it. No gzip and
+                # no tegraflash recovery bundle. The A/B OTA payload (.wendy) is
                 # uploaded separately by the device-agnostic OTA glob below.
                 bmaptool create "$IMAGE_FILE" > "${IMAGE_FILE}.bmap"
                 BMAP_FILE="${IMAGE_FILE}.bmap"
