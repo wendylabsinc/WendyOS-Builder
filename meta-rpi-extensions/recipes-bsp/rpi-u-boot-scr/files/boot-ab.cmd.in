@@ -12,12 +12,11 @@
 #   wendyos_boot_slot          0|1  slot to boot (0=rootfsA, 1=rootfsB)
 #   wendyos_upgrade_available  0|1  a trial boot is armed
 #   bootcount / bootlimit      trial attempt counter / budget
-@@WENDYOS_UBOOT_PRECMD@@
 @@BOOTDEV@@
 @@BOOTDEV@@# --- Boot device ----------------------------------------------------------
-@@BOOTDEV@@# Standard boot's script bootmeth sets devtype/devnum ("mmc 0", "usb 0", ...)
-@@BOOTDEV@@# before sourcing us, so the same image boots from SD or a USB disk. Fall
-@@BOOTDEV@@# back to the build-time device if the script is sourced by hand.
+@@BOOTDEV@@# U-Boot sets devtype/devnum ("mmc 0", "usb 0", "nvme 0") before sourcing
+@@BOOTDEV@@# us: standard boot on the Pi 4, the bootcmd on the Pi 5. Fall back to the
+@@BOOTDEV@@# build-time device if the script is sourced by hand.
 @@BOOTDEV@@setenv wendyos_if ${devtype}
 @@BOOTDEV@@setenv wendyos_dev ${devnum}
 @@BOOTDEV@@if test -z "${wendyos_if}"; then setenv wendyos_if @@WENDYOS_UBOOT_IF@@; setenv wendyos_dev @@WENDYOS_UBOOT_DEV@@; fi
