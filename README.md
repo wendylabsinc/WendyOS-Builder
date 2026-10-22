@@ -21,7 +21,7 @@ This repository provides the meta-layer and build flow to build **WendyOS** — 
 | Jetson AGX Thor DevKit | Tegra264 | 128GB | `jetson-agx-thor` | `jetson-agx-thor-devkit-nvme-wendyos` | NVMe | _(coming, wendyos-update)_ |
 | Raspberry Pi 3 (B/B+) | Broadcom BCM2837 | 1GB | `rpi3-sd` | `raspberrypi3-64-wendyos` | SD | Mender |
 | Raspberry Pi 4 | Broadcom BCM2711 | 1–8GB | `rpi4-sd` | `raspberrypi4-64-wendyos` | SD | Mender |
-| Raspberry Pi 5 | Broadcom BCM2712 | 8GB | `rpi5-sd` | `raspberrypi5-wendyos` | SD or NVMe | Mender |
+| Raspberry Pi 5 | Broadcom BCM2712 | 8GB | `rpi5` | `raspberrypi5-wendyos` | SD or NVMe | Mender |
 | QEMU ARM64 | virtual | configurable | `qemu-arm64` | `qemuarm64-wendyos` | virtio | none |
 | Generic x86_64 PC | Intel/AMD x86_64 | varies | `generic-x86-64` | `genericx86-64-wendyos` | USB / disk (.wic) | wendyos-update |
 | Virtual machine (x86_64) | virtual | configurable | `vm-x86-64` | `vm-x86-64-wendyos` | virtio (.wic) | wendyos-update |
@@ -196,7 +196,7 @@ make setup BOARD=rpi4-sd
 make build
 
 # Raspberry Pi 5 (SD card or NVMe)
-make setup BOARD=rpi5-sd
+make setup BOARD=rpi5
 make build
 
 # QEMU (ARM64, for development)
@@ -273,7 +273,7 @@ make build MACHINE=arduino-uno-q-wendyos
    BOARD=jetson-agx-thor       ./meta-wendyos/bootstrap.sh
    BOARD=rpi3-sd               ./meta-wendyos/bootstrap.sh
    BOARD=rpi4-sd               ./meta-wendyos/bootstrap.sh
-   BOARD=rpi5-sd               ./meta-wendyos/bootstrap.sh
+   BOARD=rpi5                  ./meta-wendyos/bootstrap.sh
    BOARD=qemu-arm64            ./meta-wendyos/bootstrap.sh
    BOARD=generic-x86-64        ./meta-wendyos/bootstrap.sh
    BOARD=vm-x86-64             ./meta-wendyos/bootstrap.sh
@@ -310,7 +310,7 @@ make build MACHINE=arduino-uno-q-wendyos
      - `jetson-agx-thor`         → `jetson-agx-thor-devkit-nvme-wendyos`
      - `rpi3-sd`                 → `raspberrypi3-64-wendyos`
      - `rpi4-sd`                 → `raspberrypi4-64-wendyos`
-     - `rpi5-sd`                 → `raspberrypi5-wendyos`
+     - `rpi5`                    → `raspberrypi5-wendyos`
      - `qemu-arm64`              → `qemuarm64-wendyos`
      - `generic-x86-64`          → `genericx86-64-wendyos`
      - `vm-x86-64`               → `vm-x86-64-wendyos`
@@ -1111,7 +1111,7 @@ the build produces a Mender `.sdimg` disk image (with a `.mender` OTA artifact).
 |---------|----------|-------------|------------|
 | `raspberrypi3-64-wendyos` | `rpi3-sd` | SD card | no (LAN9514 hub blocks DWC2 peripheral mode) |
 | `raspberrypi4-64-wendyos` | `rpi4-sd` | SD card | yes (OTG-capable USB-C port) |
-| `raspberrypi5-wendyos` | `rpi5-sd` | SD card or NVMe | yes |
+| `raspberrypi5-wendyos` | `rpi5` | SD card or NVMe | yes |
 
 All machines include Wi-Fi and Bluetooth support. RPi4/5 also expose a USB gadget (NCM)
 interface. UART console is enabled at 115200 baud (`ttyS0` on RPi3/4, `ttyAMA0` on RPi5).
@@ -1127,7 +1127,7 @@ interface. UART console is enabled at 115200 baud (`ttyS0` on RPi3/4, `ttyAMA0` 
    # Pi 4 (SD card,  yocto MACHINE = raspberrypi4-64-wendyos)
    BOARD=rpi4-sd ./meta-wendyos/bootstrap.sh
    # Pi 5 (SD card or NVMe, yocto MACHINE = raspberrypi5-wendyos)
-   BOARD=rpi5-sd ./meta-wendyos/bootstrap.sh
+   BOARD=rpi5 ./meta-wendyos/bootstrap.sh
    ```
 
    The bootstrap script copies `build/conf/bblayers.conf` and

@@ -307,7 +307,7 @@ jobs:
             case "$DEVICE:$STORAGE" in
               raspberry-pi-3:sd)    BOARD=rpi3-sd;               MACHINE=raspberrypi3-64-wendyos ;;
               raspberry-pi-4:sd)    BOARD=rpi4-sd;               MACHINE=raspberrypi4-64-wendyos ;;
-              raspberry-pi-5:sd)    BOARD=rpi5-sd;               MACHINE=raspberrypi5-wendyos ;;
+              raspberry-pi-5:sd)    BOARD=rpi5;                  MACHINE=raspberrypi5-wendyos ;;
               jetson-agx-orin:nvme) BOARD=jetson-agx-orin;       MACHINE=jetson-agx-orin-devkit-nvme-wendyos ;;
               jetson-agx-orin:emmc) BOARD=jetson-agx-orin-emmc;  MACHINE=jetson-agx-orin-devkit-emmc-wendyos ;;
               jetson-orin-nano:nvme) BOARD=jetson-orin-nano-nvme; MACHINE=jetson-orin-nano-devkit-nvme-wendyos ;;
