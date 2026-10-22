@@ -1,6 +1,6 @@
-# Per-board repo overrides for rpi3-sd (blacksail tree).
+# Per-board repo overrides for rpi3 (blacksail tree).
 #
-# RPi3 (SD) on the blacksail OE series (fleet unification with rpi4 + rpi5 + the
+# RPi3 on the blacksail OE series (fleet unification with rpi4 + rpi5 + the
 # Jetsons). See docs/plans/wendyos-update-rpi.md.
 #
 # WENDYOS_LAYER_TREE="blacksail" makes bootstrap clone every upstream repo under
