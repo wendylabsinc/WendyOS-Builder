@@ -23,3 +23,7 @@ SRC_URI:append:x86-wendyos = " ${@bb.utils.contains('WENDYOS_DEBUG', '1', d.getV
 
 require recipes-kernel/linux/mesh-local.inc
 require recipes-kernel/linux/mesh-internet.inc
+
+# SocketCAN: the shared CAN fragment. It also pins CONFIG_SPI, which the x86
+# config does not enable.
+require ${@'recipes-kernel/linux/can.inc' if d.getVar('WENDYOS_CAN') == '1' else ''}

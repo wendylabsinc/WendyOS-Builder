@@ -72,6 +72,12 @@ WENDYOS_DEEPSTREAM = "1"
 # local.conf to build without it.
 WENDYOS_DATA_ENCRYPTED ?= "1"
 
+# SocketCAN. On by default: Jetson is a robotics target and USB-CAN adapters are
+# common on it. Set = "0" in local.conf to leave it out. Set it here, not in
+# tegra-image.inc: a value set there is not seen by the kernel recipe or the
+# packagegroup.
+WENDYOS_CAN ?= "1"
+
 # Master gate for the TPM 2.0 stack itself (fTPM over OP-TEE, plus the Thor
 # DT overlay in tegra-overlays.inc). Encrypting /data needs a TPM at runtime,
 # so it turns this on. Nothing turns encryption on implicitly. Set = "1" in

@@ -58,3 +58,7 @@ KERNEL_LOCALVERSION:append = "-wendy-mesh2"
 
 # Retire the actual failed pending LE connection, including a second queued dial.
 require recipes-kernel/linux/bluetooth-le-pending.inc
+
+# SocketCAN: the shared CAN fragment, when WENDYOS_CAN is "1".
+require ${@'recipes-kernel/linux/can.inc' if d.getVar('WENDYOS_CAN') == '1' else ''}
+

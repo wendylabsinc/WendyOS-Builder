@@ -3,11 +3,14 @@
 # contains 'rpi'). All non-QEMU RPi machines (RPi3/4/5) emit wendyos-update
 # OTA artifacts via the rpi-wendy-ab*.wks wic layouts; geometry is per-machine.
 
-# No EFI/UEFI on RPi
+# Family defaults. They apply to any RPi machine that does not set these itself;
+# the base defaults in wendyos.conf are weak (??=), so these win over them.
+# No EFI/UEFI on RPi.
 WENDYOS_UPDATE_BOOTLOADER ?= "0"
 WENDYOS_EFI_DEBUG ?= "0"
-WENDYOS_DEEPSTREAM ?= "0"
 WENDYOS_PERSIST_JOURNAL_LOGS ?= "0"
+WENDYOS_DEEPSTREAM ?= "0"
+WENDYOS_CAN ?= "1"
 # WiFi support
 DISTRO_FEATURES:append = " wifi"
 # RPi .wks layouts live in meta-rpi-extensions/files/wic/
