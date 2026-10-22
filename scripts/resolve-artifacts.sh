@@ -164,10 +164,10 @@ case "$IMAGE_KIND" in
     ;;
   wic-disk)
     # One directly-bootable .wic disk image: the generic x86_64 PC, the VM
-    # machines and the Pi 5 (SD or NVMe). Their .wendy OTA payload is published by
-    # the workflow's OTA glob (--ota-update), not resolved here. Uploaded as-is
-    # (bmap generated in the workflow); the publisher recompresses .wic. A missing
-    # wic here is fatal.
+    # machines, the Pi 4 (SD or USB) and the Pi 5 (SD or NVMe). Their .wendy OTA
+    # payload is published by the workflow's OTA glob (--ota-update), not
+    # resolved here. Uploaded as-is (bmap generated in the workflow); the
+    # publisher recompresses .wic. A missing wic here is fatal.
     wic="$DEPLOY_DIR/wendyos-image-${MACHINE}.rootfs.wic"
     if [[ ! -f "$wic" ]]; then
       fail "no disk image for $KEY ($MACHINE): expected wendyos-image-${MACHINE}.rootfs.wic in $DEPLOY_DIR (map entry image_kind=wic-disk)"

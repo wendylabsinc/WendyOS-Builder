@@ -168,12 +168,12 @@ test_jetson_nano_sd() {
 
 # RPi sdimg: prefer .sdimg, resolve the symlink chain to the real file, gzip flag set.
 test_rpi_sdimg() {
-  local d M; d=$(newdir); M=raspberrypi4-64-wendyos
+  local d M; d=$(newdir); M=raspberrypi3-64-wendyos
   : >"$d/wendyos-image-$M.rootfs.wic.real"          # decoy: wic exists too
   : >"$d/wendyos-image-$M.rootfs.wic"
   : >"$d/wendyos-image-$M.sdimg.real"               # the real deep-chain target
   ln -s "wendyos-image-$M.sdimg.real" "$d/wendyos-image-$M.sdimg"
-  local out; out=$(run_resolver raspberry-pi-4 sd "$M" "$d"); local rc=$?
+  local out; out=$(run_resolver raspberry-pi-3 sd "$M" "$d"); local rc=$?
   assert_eq "rpi sdimg: exits 0" 0 "$rc"
   assert_eq "rpi sdimg: kind"       sdimg-gz-with-wic-fallback "$(field IMAGE_KIND <<<"$out")"
   assert_eq "rpi sdimg: needs_gzip" true "$(field RPI_NEEDS_GZIP <<<"$out")"
@@ -197,16 +197,19 @@ test_rpi_wic() {
   rm -rf "$d"
 }
 
-# rpi-5: one .wic for SD and NVMe, published without --storage.
-test_rpi5_wic_disk() {
-  local d M; d=$(newdir); M=raspberrypi5-wendyos
-  : >"$d/wendyos-image-$M.rootfs.wic"
-  local out; out=$(run_resolver raspberry-pi-5 disk "$M" "$d"); local rc=$?
-  assert_eq "rpi5: exits 0" 0 "$rc"
-  assert_eq "rpi5: kind"         wic-disk "$(field IMAGE_KIND <<<"$out")"
-  assert_eq "rpi5: image"        "$d/wendyos-image-$M.rootfs.wic" "$(field IMAGE_FILE <<<"$out")"
-  assert_eq "rpi5: pass_storage" false "$(field PASS_STORAGE <<<"$out")"
-  rm -rf "$d"
+# rpi-4/rpi-5: one .wic for every boot disk, published without --storage.
+test_rpi_wic_disk() {
+  local pair dev M d out rc
+  for pair in raspberry-pi-4:raspberrypi4-64-wendyos raspberry-pi-5:raspberrypi5-wendyos; do
+    dev=${pair%%:*} M=${pair#*:} d=$(newdir)
+    : >"$d/wendyos-image-$M.rootfs.wic"
+    out=$(run_resolver "$dev" disk "$M" "$d"); rc=$?
+    assert_eq "$dev: exits 0" 0 "$rc"
+    assert_eq "$dev: kind"         wic-disk "$(field IMAGE_KIND <<<"$out")"
+    assert_eq "$dev: image"        "$d/wendyos-image-$M.rootfs.wic" "$(field IMAGE_FILE <<<"$out")"
+    assert_eq "$dev: pass_storage" false "$(field PASS_STORAGE <<<"$out")"
+    rm -rf "$d"
+  done
 }
 
 # Generic x86_64 (wic-disk): single .wic disk image, no bundle, no gzip; bmap
@@ -323,7 +326,7 @@ test_matrix_coverage() {
     jetson-orin-nano/nvme
     jetson-orin-nano/sd
     raspberry-pi-5/disk
-    raspberry-pi-4/sd
+    raspberry-pi-4/disk
     raspberry-pi-3/sd
     generic-x86-64/disk
     vm-arm64/disk
@@ -360,7 +363,7 @@ test_missing_qcomflash_fatal
 test_jetson_nano_sd
 test_rpi_sdimg
 test_rpi_wic
-test_rpi5_wic_disk
+test_rpi_wic_disk
 test_x86_wic_disk
 test_vm_wic_disk
 test_missing_bundle_fatal
