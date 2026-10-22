@@ -1,5 +1,5 @@
 # RPi layers for the blacksail tree (WENDYOS_LAYER_TREE = "blacksail"), used by
-# the rpi3-sd / rpi4-sd / rpi5-sd / rpi5-nvme board templates. Uses the wendy OTA
+# the rpi3 / rpi4 / rpi5 board templates. Uses the wendy OTA
 # stack: meta-rpi-extensions supplies the A/B boot.cmd via its
 # rpi-u-boot-scr.bbappend.
 #

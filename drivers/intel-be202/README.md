@@ -24,9 +24,9 @@ target kernel through the existing Wendy driver workflow.
 Jetson build targets are AGX Thor developer kit (NVMe), AGX Orin developer kit
 (NVMe or eMMC), and Orin Nano developer kit (SD or NVMe). They use a PCIe BE202
 with its USB Bluetooth function connected.
-The same package is built for Raspberry Pi 5 (SD or NVMe image). The Waveshare
-PCIe TO M.2 E KEY HAT+ connects to the Pi 5 PCIe FPC connector; use the SD boot
-image while its single M.2 slot holds the BE202. NVMe boot needs a carrier that
+The same package is built for Raspberry Pi 5 (SD or NVMe boot). The Waveshare
+PCIe TO M.2 E KEY HAT+ connects to the Pi 5 PCIe FPC connector; boot from SD
+while its single M.2 slot holds the BE202. NVMe boot needs a carrier that
 can host both devices. This HAT does not provide native PCIe on a standard Pi 4
 Model B, whose PCIe lane is used by its USB 3 controller. A Pi 4 BE202 build
 would require different hardware, such as a Compute Module 4 carrier exposing
