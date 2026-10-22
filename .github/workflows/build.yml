@@ -136,15 +136,14 @@ jobs:
           set -euo pipefail
 
           # One matrix entry per DEVICE. A device with several storage variants
-          # (jetson-agx-orin: nvme+emmc; jetson-orin-nano: nvme+sd;
-          # raspberry-pi-5: nvme+sd) builds them all in a SINGLE job, one after
-          # another, in one build tree: the storage variants of a device share
-          # identical layers and repo SRCREVs and differ only in
-          # DEVICE/STORAGE/MACHINE (all in the board local.conf; the real
-          # per-disk differences live in conf/machine/${MACHINE}.conf). So the
-          # first variant populates sstate and the rest reuse it via the
-          # persistent NVMe cache — the heavy MACHINE-independent compile is done
-          # once, not once per disk.
+          # (jetson-agx-orin: nvme+emmc; jetson-orin-nano: nvme+sd) builds them
+          # all in a SINGLE job, one after another, in one build tree: the
+          # storage variants of a device share identical layers and repo SRCREVs
+          # and differ only in DEVICE/STORAGE/MACHINE (all in the board
+          # local.conf; the real per-disk differences live in
+          # conf/machine/${MACHINE}.conf). So the first variant populates sstate
+          # and the rest reuse it via the persistent NVMe cache — the heavy
+          # MACHINE-independent compile is done once, not once per disk.
           #
           # Ordered longest-pole-first. The self-hosted builder pool cannot run
           # all matrix jobs at once, so queued jobs are picked up in this
@@ -154,8 +153,8 @@ jobs:
           # (~14 min warm vs ~5 min for a Pi; heavier still on release builds,
           # which add tegraflash + flashpack + upload), then the other Jetsons,
           # then dragonwing-iq-8275 and generic-x86-64 (coldest sstate — newest boards),
-          # then the Raspberry Pis. The merged multi-storage jobs (agx-orin, orin-nano,
-          # rpi-5) are heavier than a single-variant build of the same device
+          # then the Raspberry Pis. The merged multi-storage jobs (agx-orin, orin-nano)
+          # are heavier than a single-variant build of the same device
           # (one full build + a mostly-cached second variant) but lighter than
           # two separate jobs. Do NOT sort this alphabetically.
           #
@@ -173,7 +172,7 @@ jobs:
             {"device":"generic-x86-64","storages":"disk"},
             {"device":"dragonwing-iq-9075","storages":"ufs"},
             {"device":"arduino-uno-q","storages":"emmc"},
-            {"device":"raspberry-pi-5","storages":"nvme sd"},
+            {"device":"raspberry-pi-5","storages":"sd"},
             {"device":"raspberry-pi-4","storages":"sd"},
             {"device":"raspberry-pi-3","storages":"sd"},
             {"device":"vm-arm64","storages":"disk"},
@@ -309,7 +308,6 @@ jobs:
               raspberry-pi-3:sd)    BOARD=rpi3-sd;               MACHINE=raspberrypi3-64-wendyos ;;
               raspberry-pi-4:sd)    BOARD=rpi4-sd;               MACHINE=raspberrypi4-64-wendyos ;;
               raspberry-pi-5:sd)    BOARD=rpi5-sd;               MACHINE=raspberrypi5-wendyos ;;
-              raspberry-pi-5:nvme)  BOARD=rpi5-nvme;             MACHINE=raspberrypi5-nvme-wendyos ;;
               jetson-agx-orin:nvme) BOARD=jetson-agx-orin;       MACHINE=jetson-agx-orin-devkit-nvme-wendyos ;;
               jetson-agx-orin:emmc) BOARD=jetson-agx-orin-emmc;  MACHINE=jetson-agx-orin-devkit-emmc-wendyos ;;
               jetson-orin-nano:nvme) BOARD=jetson-orin-nano-nvme; MACHINE=jetson-orin-nano-devkit-nvme-wendyos ;;
