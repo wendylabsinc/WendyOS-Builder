@@ -6,7 +6,7 @@
 
 This repository provides the meta-layer and build flow to build **WendyOS** — a Yocto-based embedded Linux distribution — across a broad range of ARM64 hardware:
 - **NVIDIA Jetson** Developer Kits — Orin Nano, AGX Orin, and AGX Thor
-- **Raspberry Pi** — Pi 3, Pi 4, and Pi 5 (SD card; the Pi 5 image also boots from NVMe)
+- **Raspberry Pi** — Pi 3, Pi 4, and Pi 5 (SD card; the Pi 3/4 image also boots from a USB disk, the Pi 5 image from NVMe)
 - **QEMU ARM64** (virtual machine, for development)
 - **Generic x86_64 PCs** (experimental UEFI/BIOS disk image)
 
@@ -19,8 +19,8 @@ This repository provides the meta-layer and build flow to build **WendyOS** — 
 | Jetson AGX Orin DevKit | Tegra234 | 64GB | `jetson-agx-orin` | `jetson-agx-orin-devkit-nvme-wendyos` | NVMe | Mender |
 | Jetson AGX Orin DevKit | Tegra234 | 64GB | `jetson-agx-orin-emmc` | `jetson-agx-orin-devkit-emmc-wendyos` | onboard eMMC | Mender |
 | Jetson AGX Thor DevKit | Tegra264 | 128GB | `jetson-agx-thor` | `jetson-agx-thor-devkit-nvme-wendyos` | NVMe | _(coming, wendyos-update)_ |
-| Raspberry Pi 3 (B/B+) | Broadcom BCM2837 | 1GB | `rpi3-sd` | `raspberrypi3-64-wendyos` | SD | Mender |
-| Raspberry Pi 4 | Broadcom BCM2711 | 1–8GB | `rpi4-sd` | `raspberrypi4-64-wendyos` | SD | Mender |
+| Raspberry Pi 3 (B/B+) | Broadcom BCM2837 | 1GB | `rpi3-sd` | `raspberrypi3-64-wendyos` | SD or USB | Mender |
+| Raspberry Pi 4 | Broadcom BCM2711 | 1–8GB | `rpi4-sd` | `raspberrypi4-64-wendyos` | SD or USB | Mender |
 | Raspberry Pi 5 | Broadcom BCM2712 | 8GB | `rpi5-sd` | `raspberrypi5-wendyos` | SD or NVMe | Mender |
 | QEMU ARM64 | virtual | configurable | `qemu-arm64` | `qemuarm64-wendyos` | virtio | none |
 | Generic x86_64 PC | Intel/AMD x86_64 | varies | `generic-x86-64` | `genericx86-64-wendyos` | USB / disk (.wic) | wendyos-update |
@@ -187,11 +187,11 @@ make build
 make setup BOARD=jetson-agx-thor
 make build
 
-# Raspberry Pi 3 (SD card)
+# Raspberry Pi 3 (SD card or USB disk)
 make setup BOARD=rpi3-sd
 make build
 
-# Raspberry Pi 4 (SD card)
+# Raspberry Pi 4 (SD card or USB disk)
 make setup BOARD=rpi4-sd
 make build
 
@@ -1109,8 +1109,8 @@ the build produces a Mender `.sdimg` disk image (with a `.mender` OTA artifact).
 
 | Machine | Board id | Boot device | USB gadget |
 |---------|----------|-------------|------------|
-| `raspberrypi3-64-wendyos` | `rpi3-sd` | SD card | no (LAN9514 hub blocks DWC2 peripheral mode) |
-| `raspberrypi4-64-wendyos` | `rpi4-sd` | SD card | yes (OTG-capable USB-C port) |
+| `raspberrypi3-64-wendyos` | `rpi3-sd` | SD card or USB disk | no (LAN9514 hub blocks DWC2 peripheral mode) |
+| `raspberrypi4-64-wendyos` | `rpi4-sd` | SD card or USB disk | yes (OTG-capable USB-C port) |
 | `raspberrypi5-wendyos` | `rpi5-sd` | SD card or NVMe | yes |
 
 All machines include Wi-Fi and Bluetooth support. RPi4/5 also expose a USB gadget (NCM)
@@ -1122,9 +1122,9 @@ interface. UART console is enabled at 115200 baud (`ttyS0` on RPi3/4, `ttyAMA0` 
 
    ```bash
    cd /path/to/project
-   # Pi 3 (SD card,  yocto MACHINE = raspberrypi3-64-wendyos)
+   # Pi 3 (SD card or USB disk, yocto MACHINE = raspberrypi3-64-wendyos)
    BOARD=rpi3-sd ./meta-wendyos/bootstrap.sh
-   # Pi 4 (SD card,  yocto MACHINE = raspberrypi4-64-wendyos)
+   # Pi 4 (SD card or USB disk, yocto MACHINE = raspberrypi4-64-wendyos)
    BOARD=rpi4-sd ./meta-wendyos/bootstrap.sh
    # Pi 5 (SD card or NVMe, yocto MACHINE = raspberrypi5-wendyos)
    BOARD=rpi5-sd ./meta-wendyos/bootstrap.sh
@@ -1180,11 +1180,12 @@ for NVMe).
 
 **Warning**: This will erase all data on the target device!
 
-Insert the flashed SD card into the Raspberry Pi and power on. On a Pi 5 the same image
-also boots from an NVMe drive on a PCIe adapter. U-Boot tries the SD first, so remove a
-WendyOS SD card to boot the NVMe. The board EEPROM is configured generically by the
-`rpi-eeprom-config` package (included on every RPi5 image) to boot either SD or NVMe — it
-sets `BOOT_ORDER=0xf461` (SD then NVMe), `PCIE_PROBE=1`, and `PSU_MAX_CURRENT`.
+Insert the flashed SD card into the Raspberry Pi and power on. The same image also boots
+from a USB disk on a Pi 3 or Pi 4, and from an NVMe drive on a PCIe adapter on a Pi 5.
+U-Boot tries the SD first, so remove a WendyOS SD card to boot the other disk. On the Pi 5
+the board EEPROM is configured generically by the `rpi-eeprom-config` package (included on
+every RPi5 image) to boot either SD or NVMe — it sets `BOOT_ORDER=0xf461` (SD then NVMe),
+`PCIE_PROBE=1`, and `PSU_MAX_CURRENT`.
 
 ## Virtual Machines
 

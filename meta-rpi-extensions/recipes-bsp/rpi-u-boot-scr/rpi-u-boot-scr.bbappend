@@ -19,61 +19,27 @@ WENDYOS_ROOTFS_PART_B ?= "4"
 # committed before U-Boot falls back. 1 = one attempt.
 WENDYOS_BOOTLIMIT ?= "1"
 
-# root= device base and the U-Boot load interface/device: the SD card
-# (mmcblk0 / mmc 0) on every RPi.
-WENDYOS_ROOT_DEV_BASE ?= "/dev/mmcblk0p"
-WENDYOS_UBOOT_IF      ?= "mmc"
-WENDYOS_UBOOT_DEV     ?= "0"
-
-# Follow the boot device instead of the fixed one above: load from whichever
-# device standard boot found boot.scr on (devtype/devnum), keep the A/B env in
-# uboot.env on that device (not U-Boot's compiled-in mmc 0:1), and pass
-# root=PARTUUID=. The template's @@BOOTDEV@@ lines are kept and its @@FIXED@@
-# lines dropped; with "0" the reverse, so the output is unchanged.
-#
-# RPi4: one image boots from SD or a USB disk (incl. USB-NVMe enclosures); its
-# stock U-Boot already runs "pci enum; usb start" and scans mmc then usb.
-# RPi5: one image boots from SD or NVMe; the bootcmd in rpi5-boot.cfg tries the
-# SD first. RPi3 keeps its fixed script.
-WENDYOS_UBOOT_FOLLOW_BOOTDEV ?= "0"
-WENDYOS_UBOOT_FOLLOW_BOOTDEV:raspberrypi4-64 = "1"
-WENDYOS_UBOOT_FOLLOW_BOOTDEV:raspberrypi5 = "1"
-
 # Must equal U-Boot's CONFIG_ENV_SIZE and the size in fw_env.config.
 WENDYOS_UBOOT_ENV_SIZE ?= "0x4000"
 
 # RPi3 (BCM2837) boots MBR only, so its A/B wks (rpi-wendy-ab-mbr.wks) puts the
 # two rootfs slots on PRIMARY partitions p2/p3 (boot=p1; config/data are logical
 # p5/p6 inside the extended partition) — NOT the GPT p3/p4 the defaults assume.
-# SD card, so the mmc / mmcblk0 device defaults still hold.
 WENDYOS_ROOTFS_PART_A:raspberrypi3-64 = "2"
 WENDYOS_ROOTFS_PART_B:raspberrypi3-64 = "3"
 
 # Re-run if any of the templated knobs change.
 do_compile[vardeps] += "WENDYOS_OTA WENDYOS_ROOTFS_PART_A WENDYOS_ROOTFS_PART_B \
-                        WENDYOS_BOOTLIMIT WENDYOS_ROOT_DEV_BASE WENDYOS_UBOOT_IF \
-                        WENDYOS_UBOOT_DEV WENDYOS_UBOOT_FOLLOW_BOOTDEV \
-                        WENDYOS_UBOOT_ENV_SIZE"
+                        WENDYOS_BOOTLIMIT WENDYOS_UBOOT_ENV_SIZE"
 
 do_compile() {
     if [ "${WENDYOS_OTA}" = "wendy" ]; then
-        if [ "${WENDYOS_UBOOT_FOLLOW_BOOTDEV}" = "1" ]; then
-            keep=BOOTDEV drop=FIXED
-        else
-            keep=FIXED drop=BOOTDEV
-        fi
-        # '#' delimiter for the device-base sub (it contains '/').
-        sed -e "/^@@$drop@@/d" \
-            -e "s/^@@$keep@@//" \
-            -e 's/@@KERNEL_IMAGETYPE@@/${KERNEL_IMAGETYPE}/' \
+        sed -e 's/@@KERNEL_IMAGETYPE@@/${KERNEL_IMAGETYPE}/' \
             -e 's/@@KERNEL_BOOTCMD@@/${KERNEL_BOOTCMD}/' \
-            -e 's/@@WENDYOS_UBOOT_IF@@/${WENDYOS_UBOOT_IF}/' \
-            -e 's/@@WENDYOS_UBOOT_DEV@@/${WENDYOS_UBOOT_DEV}/' \
             -e 's/@@WENDYOS_ROOTFS_PART_A@@/${WENDYOS_ROOTFS_PART_A}/' \
             -e 's/@@WENDYOS_ROOTFS_PART_B@@/${WENDYOS_ROOTFS_PART_B}/' \
             -e 's/@@WENDYOS_BOOTLIMIT@@/${WENDYOS_BOOTLIMIT}/' \
             -e 's/@@WENDYOS_UBOOT_ENV_SIZE@@/${WENDYOS_UBOOT_ENV_SIZE}/g' \
-            -e 's#@@WENDYOS_ROOT_DEV_BASE@@#${WENDYOS_ROOT_DEV_BASE}#' \
             "${UNPACKDIR}/boot-ab.cmd.in" > "${WORKDIR}/boot.cmd"
     else
         sed -e 's/@@KERNEL_IMAGETYPE@@/${KERNEL_IMAGETYPE}/' \

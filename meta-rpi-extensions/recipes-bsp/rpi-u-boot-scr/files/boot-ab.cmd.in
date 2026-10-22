@@ -12,31 +12,31 @@
 #   wendyos_boot_slot          0|1  slot to boot (0=rootfsA, 1=rootfsB)
 #   wendyos_upgrade_available  0|1  a trial boot is armed
 #   bootcount / bootlimit      trial attempt counter / budget
-@@BOOTDEV@@
-@@BOOTDEV@@# --- Boot device ----------------------------------------------------------
-@@BOOTDEV@@# U-Boot sets devtype/devnum ("mmc 0", "usb 0", "nvme 0") before sourcing
-@@BOOTDEV@@# us: standard boot on the Pi 4, the bootcmd on the Pi 5. Fall back to the
-@@BOOTDEV@@# build-time device if the script is sourced by hand.
-@@BOOTDEV@@setenv wendyos_if ${devtype}
-@@BOOTDEV@@setenv wendyos_dev ${devnum}
-@@BOOTDEV@@if test -z "${wendyos_if}"; then setenv wendyos_if @@WENDYOS_UBOOT_IF@@; setenv wendyos_dev @@WENDYOS_UBOOT_DEV@@; fi
-@@BOOTDEV@@
-@@BOOTDEV@@# U-Boot's own env storage is compiled to mmc 0:1 (the SD card): the wrong
-@@BOOTDEV@@# file when booting from USB, and with an unrelated SD card inserted, saveenv
-@@BOOTDEV@@# would write to THAT card. So never saveenv here: read our vars from uboot.env
-@@BOOTDEV@@# on the boot device (clearing them first so nothing leaks in from whatever
-@@BOOTDEV@@# env U-Boot loaded at startup), and write it back like saveenv does: the
-@@BOOTDEV@@# WHOLE env, CRC32 format, full size (must match fw_env.config). Whole, not
-@@BOOTDEV@@# just our vars: on SD boot U-Boot loads this file as its entire startup
-@@BOOTDEV@@# env, replacing the defaults (bootcmd, load addresses, ...).
-@@BOOTDEV@@setenv wendyos_boot_slot
-@@BOOTDEV@@setenv wendyos_upgrade_available
-@@BOOTDEV@@setenv bootcount
-@@BOOTDEV@@setenv bootlimit
-@@BOOTDEV@@if load ${wendyos_if} ${wendyos_dev}:1 ${ramdisk_addr_r} uboot.env; then
-@@BOOTDEV@@    env import -c ${ramdisk_addr_r} @@WENDYOS_UBOOT_ENV_SIZE@@ wendyos_boot_slot wendyos_upgrade_available bootcount bootlimit
-@@BOOTDEV@@fi
-@@BOOTDEV@@setenv wendyos_saveenv "env export -c -s @@WENDYOS_UBOOT_ENV_SIZE@@ ${ramdisk_addr_r} && fatwrite ${wendyos_if} ${wendyos_dev}:1 ${ramdisk_addr_r} uboot.env @@WENDYOS_UBOOT_ENV_SIZE@@"
+
+# --- Boot device ----------------------------------------------------------
+# U-Boot sets devtype/devnum ("mmc 0", "usb 0", "nvme 0") before sourcing
+# us: standard boot on the Pi 3 and Pi 4, the bootcmd on the Pi 5. Fall back to
+# the SD card if the script is sourced by hand.
+setenv wendyos_if ${devtype}
+setenv wendyos_dev ${devnum}
+if test -z "${wendyos_if}"; then setenv wendyos_if mmc; setenv wendyos_dev 0; fi
+
+# U-Boot's own env storage is compiled to mmc 0:1 (the SD card): the wrong
+# file when booting from USB, and with an unrelated SD card inserted, saveenv
+# would write to THAT card. So never saveenv here: read our vars from uboot.env
+# on the boot device (clearing them first so nothing leaks in from whatever
+# env U-Boot loaded at startup), and write it back like saveenv does: the
+# WHOLE env, CRC32 format, full size (must match fw_env.config). Whole, not
+# just our vars: on SD boot U-Boot loads this file as its entire startup
+# env, replacing the defaults (bootcmd, load addresses, ...).
+setenv wendyos_boot_slot
+setenv wendyos_upgrade_available
+setenv bootcount
+setenv bootlimit
+if load ${wendyos_if} ${wendyos_dev}:1 ${ramdisk_addr_r} uboot.env; then
+    env import -c ${ramdisk_addr_r} @@WENDYOS_UBOOT_ENV_SIZE@@ wendyos_boot_slot wendyos_upgrade_available bootcount bootlimit
+fi
+setenv wendyos_saveenv "env export -c -s @@WENDYOS_UBOOT_ENV_SIZE@@ ${ramdisk_addr_r} && fatwrite ${wendyos_if} ${wendyos_dev}:1 ${ramdisk_addr_r} uboot.env @@WENDYOS_UBOOT_ENV_SIZE@@"
 
 # --- First-boot env init (idempotent) -------------------------------------
 # Stock U-Boot has none of our vars compiled in; seed sane defaults. Persist
@@ -46,8 +46,7 @@ if test "${wendyos_boot_slot}" = ""; then setenv wendyos_boot_slot 0; fi
 if test "${wendyos_upgrade_available}" = ""; then setenv wendyos_upgrade_available 0; fi
 if test "${bootlimit}" = ""; then setenv bootlimit @@WENDYOS_BOOTLIMIT@@; fi
 if test "${bootcount}" = ""; then setenv bootcount 0; fi
-@@FIXED@@if test ! -e @@WENDYOS_UBOOT_IF@@ @@WENDYOS_UBOOT_DEV@@:1 uboot.env; then saveenv; fi
-@@BOOTDEV@@if test ! -e ${wendyos_if} ${wendyos_dev}:1 uboot.env; then run wendyos_saveenv; fi
+if test ! -e ${wendyos_if} ${wendyos_dev}:1 uboot.env; then run wendyos_saveenv; fi
 
 # --- Trial boot -----------------------------------------------------------
 # Only while an update is armed (set by `wendyos-update install`) do we count
@@ -57,13 +56,12 @@ if test "${bootcount}" = ""; then setenv bootcount 0; fi
 # slot (clearing the flag).
 if test "${wendyos_upgrade_available}" = "1"; then
     setexpr bootcount ${bootcount} + 1
-@@FIXED@@    saveenv
-@@BOOTDEV@@    # A count that cannot be persisted never reaches bootlimit, so give up the
-@@BOOTDEV@@    # trial now instead of looping in an unproven slot.
-@@BOOTDEV@@    if run wendyos_saveenv; then true; else
-@@BOOTDEV@@        echo "wendyos: cannot save bootcount; abandoning trial slot ${wendyos_boot_slot}"
-@@BOOTDEV@@        setexpr bootcount ${bootlimit} + 1
-@@BOOTDEV@@    fi
+    # A count that cannot be persisted never reaches bootlimit, so give up the
+    # trial now instead of looping in an unproven slot.
+    if run wendyos_saveenv; then true; else
+        echo "wendyos: cannot save bootcount; abandoning trial slot ${wendyos_boot_slot}"
+        setexpr bootcount ${bootlimit} + 1
+    fi
     if test ${bootcount} -gt ${bootlimit}; then
         echo "wendyos: trial slot ${wendyos_boot_slot} exhausted (bootcount=${bootcount} > bootlimit=${bootlimit}); falling back"
         if test "${wendyos_boot_slot}" = "0"; then
@@ -73,8 +71,7 @@ if test "${wendyos_upgrade_available}" = "1"; then
         fi
         setenv wendyos_upgrade_available 0
         setenv bootcount 0
-@@FIXED@@        saveenv
-@@BOOTDEV@@        run wendyos_saveenv
+        run wendyos_saveenv
     fi
 fi
 
@@ -99,29 +96,27 @@ echo "wendyos: booting slot ${wendyos_boot_slot} (rootfs partition ${wendyos_roo
 # read-only, which breaks first-boot postinsts, wendyos-hostname, and any service
 # with StateDirectory= (timesyncd, rfkill). Every other WendyOS RPi fstab mounts
 # / with "defaults" (= rw); this is the per-slot-safe equivalent for A/B.
-@@BOOTDEV@@#
-@@BOOTDEV@@# The SD card and the NVMe drive get a fixed root= path, since a PARTUUID also
-@@BOOTDEV@@# matches any disk cloned from the same image. A USB disk's kernel name is not
-@@BOOTDEV@@# known here, so it gets the PARTUUID from its GPT instead. An unreadable
-@@BOOTDEV@@# table resets.
+#
+# The SD card and the NVMe drive get a fixed root= path, since a PARTUUID also
+# matches any disk cloned from the same image. A USB disk's kernel name is not
+# known here, so it gets the PARTUUID from its partition table instead. An
+# unreadable table resets.
 fdt addr ${fdt_addr} && fdt get value bootargs /chosen bootargs
-@@FIXED@@setenv bootargs "${bootargs} root=@@WENDYOS_ROOT_DEV_BASE@@${wendyos_root_part} rootwait rw"
-@@BOOTDEV@@if test "${wendyos_if} ${wendyos_dev}" = "@@WENDYOS_UBOOT_IF@@ @@WENDYOS_UBOOT_DEV@@"; then
-@@BOOTDEV@@    setenv bootargs "${bootargs} root=@@WENDYOS_ROOT_DEV_BASE@@${wendyos_root_part} rootwait rw"
-@@BOOTDEV@@elif test "${wendyos_if} ${wendyos_dev}" = "nvme 0"; then
-@@BOOTDEV@@    setenv bootargs "${bootargs} root=/dev/nvme0n1p${wendyos_root_part} rootwait rw"
-@@BOOTDEV@@elif part uuid ${wendyos_if} ${wendyos_dev}:${wendyos_root_part} wendyos_root_uuid; then
-@@BOOTDEV@@    setenv bootargs "${bootargs} root=PARTUUID=${wendyos_root_uuid} rootwait rw"
-@@BOOTDEV@@else
-@@BOOTDEV@@    echo "wendyos: cannot read PARTUUID of ${wendyos_if} ${wendyos_dev}:${wendyos_root_part}; resetting"
-@@BOOTDEV@@    reset
-@@BOOTDEV@@fi
+if test "${wendyos_if} ${wendyos_dev}" = "mmc 0"; then
+    setenv bootargs "${bootargs} root=/dev/mmcblk0p${wendyos_root_part} rootwait rw"
+elif test "${wendyos_if} ${wendyos_dev}" = "nvme 0"; then
+    setenv bootargs "${bootargs} root=/dev/nvme0n1p${wendyos_root_part} rootwait rw"
+elif part uuid ${wendyos_if} ${wendyos_dev}:${wendyos_root_part} wendyos_root_uuid; then
+    setenv bootargs "${bootargs} root=PARTUUID=${wendyos_root_uuid} rootwait rw"
+else
+    echo "wendyos: cannot read PARTUUID of ${wendyos_if} ${wendyos_dev}:${wendyos_root_part}; resetting"
+    reset
+fi
 
 # Load the kernel from the SELECTED slot's rootfs /boot (A/B-safe: each slot
 # carries its own kernel). A failed load or a returning boot falls through to
 # reset, which during a trial advances bootcount toward the fall-back above.
-@@FIXED@@if ext4load @@WENDYOS_UBOOT_IF@@ @@WENDYOS_UBOOT_DEV@@:${wendyos_root_part} ${kernel_addr_r} /boot/@@KERNEL_IMAGETYPE@@; then
-@@BOOTDEV@@if ext4load ${wendyos_if} ${wendyos_dev}:${wendyos_root_part} ${kernel_addr_r} /boot/@@KERNEL_IMAGETYPE@@; then
+if ext4load ${wendyos_if} ${wendyos_dev}:${wendyos_root_part} ${kernel_addr_r} /boot/@@KERNEL_IMAGETYPE@@; then
     @@KERNEL_BOOTCMD@@ ${kernel_addr_r} - ${fdt_addr}
 fi
 
