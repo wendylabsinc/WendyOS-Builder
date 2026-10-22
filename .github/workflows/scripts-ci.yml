@@ -83,6 +83,7 @@ on:
       - 'recipes-connectivity/wpa-supplicant/**'
       - 'recipes-core/systemd-conf/**'
       - 'scripts/network_manager_ownership_test.py'
+      - 'scripts/networkmanager_config_test.py'
       - 'tests/nm-transient-psk/**'
       - 'meta-arduino-extensions/recipes-connectivity/wendyos-radio-addr/files/*.sh'
       # No *.sh filter: data-recovery-key is a command and carries no extension.
@@ -186,6 +187,7 @@ on:
       - 'recipes-connectivity/wpa-supplicant/**'
       - 'recipes-core/systemd-conf/**'
       - 'scripts/network_manager_ownership_test.py'
+      - 'scripts/networkmanager_config_test.py'
       - 'tests/nm-transient-psk/**'
       - 'meta-arduino-extensions/recipes-connectivity/wendyos-radio-addr/files/*.sh'
       # No *.sh filter: data-recovery-key is a command and carries no extension.
@@ -290,9 +292,14 @@ jobs:
                      recipes-core/wendyos-identity/files/update-mdns-uuid.test.sh \
                      recipes-connectivity/avahi/files/generate-hostname.sh \
                      meta-arduino-extensions/recipes-connectivity/wendyos-radio-addr/files/wendyos-radio-addr.sh
+          shellcheck recipes-connectivity/networkmanager/files/wendyos-dhcp-ntp.sh \
+                     recipes-connectivity/networkmanager/files/wendyos-dhcp-ntp.test.sh
 
       - name: Verify network ownership and wait-online recipe installation
         run: python3 -m unittest scripts/network_manager_ownership_test.py -v
+
+      - name: Verify NetworkManager connection defaults and installation
+        run: python3 -m unittest scripts/networkmanager_config_test.py -v
 
       - name: Test persistent clock packaging and systemd units
         run: |
@@ -320,6 +327,9 @@ jobs:
       # the next reboot with nothing in the logs.
       - name: Run mDNS identity publisher tests
         run: bash recipes-core/wendyos-identity/files/update-mdns-uuid.test.sh
+
+      - name: Run DHCP NTP dispatcher tests
+        run: bash recipes-connectivity/networkmanager/files/wendyos-dhcp-ntp.test.sh
 
       # This config runs before any userspace exists, so a mistake in it surfaces
       # only as a device that will not boot. Asserts its couplings to
