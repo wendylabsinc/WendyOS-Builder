@@ -1401,7 +1401,11 @@ jobs:
   # ---------------------------------------------------------------------------
   device-tests:
     name: Device tests
-    needs: [detect-changes, publish-pr]
+    # publish-pr belongs here only when the lab installs this PR's image:
+    # the device fetches the payload itself, so the manifest has to be live.
+    # A smoke run installs nothing, so waiting on every image builds nothing
+    # but delay. Restore it alongside the ota category.
+    needs: [detect-changes]
     # Only a branch pushed to this repo carries secrets, and only a member with
     # write access can push one, so this is also the org-member gate: a fork's PR
     # skips rather than failing on a secret it was never going to receive.
@@ -1430,7 +1434,9 @@ jobs:
           # Smoke, not ota, until an interrupted install can no longer leave a
           # board unable to update: the tunnel drops calls, and one drop part
           # way through a write has already cost a slot.
-          gh workflow run device-test.yml --repo "$LAB" \
+          # --ref is explicit so gh never looks up the default branch, which
+          # needs a repository read the dispatch itself does not.
+          gh workflow run device-test.yml --repo "$LAB" --ref main \
             -f device="$DEVICES" \
             -f category=smoke \
             -f ota_source=pr \
