@@ -12,12 +12,11 @@
 #   wendyos_boot_slot          0|1  slot to boot (0=rootfsA, 1=rootfsB)
 #   wendyos_upgrade_available  0|1  a trial boot is armed
 #   bootcount / bootlimit      trial attempt counter / budget
-@@WENDYOS_UBOOT_PRECMD@@
 @@BOOTDEV@@
 @@BOOTDEV@@# --- Boot device ----------------------------------------------------------
-@@BOOTDEV@@# Standard boot's script bootmeth sets devtype/devnum ("mmc 0", "usb 0", ...)
-@@BOOTDEV@@# before sourcing us, so the same image boots from SD or a USB disk. Fall
-@@BOOTDEV@@# back to the build-time device if the script is sourced by hand.
+@@BOOTDEV@@# U-Boot sets devtype/devnum ("mmc 0", "usb 0", "nvme 0") before sourcing
+@@BOOTDEV@@# us: standard boot on the Pi 4, the bootcmd on the Pi 5. Fall back to the
+@@BOOTDEV@@# build-time device if the script is sourced by hand.
 @@BOOTDEV@@setenv wendyos_if ${devtype}
 @@BOOTDEV@@setenv wendyos_dev ${devnum}
 @@BOOTDEV@@if test -z "${wendyos_if}"; then setenv wendyos_if @@WENDYOS_UBOOT_IF@@; setenv wendyos_dev @@WENDYOS_UBOOT_DEV@@; fi
@@ -101,15 +100,16 @@ echo "wendyos: booting slot ${wendyos_boot_slot} (rootfs partition ${wendyos_roo
 # with StateDirectory= (timesyncd, rfkill). Every other WendyOS RPi fstab mounts
 # / with "defaults" (= rw); this is the per-slot-safe equivalent for A/B.
 @@BOOTDEV@@#
-@@BOOTDEV@@# The build-time device keeps its fixed root= path: a PARTUUID would also
-@@BOOTDEV@@# match any disk cloned from it. Other boot devices pass the PARTUUID from
-@@BOOTDEV@@# their GPT, since the kernel's name for a USB disk (sdX) is not knowable
-@@BOOTDEV@@# here; the kernel resolves it without an initramfs. An unreadable table
-@@BOOTDEV@@# resets.
+@@BOOTDEV@@# The SD card and the NVMe drive get a fixed root= path, since a PARTUUID also
+@@BOOTDEV@@# matches any disk cloned from the same image. A USB disk's kernel name is not
+@@BOOTDEV@@# known here, so it gets the PARTUUID from its GPT instead. An unreadable
+@@BOOTDEV@@# table resets.
 fdt addr ${fdt_addr} && fdt get value bootargs /chosen bootargs
 @@FIXED@@setenv bootargs "${bootargs} root=@@WENDYOS_ROOT_DEV_BASE@@${wendyos_root_part} rootwait rw"
 @@BOOTDEV@@if test "${wendyos_if} ${wendyos_dev}" = "@@WENDYOS_UBOOT_IF@@ @@WENDYOS_UBOOT_DEV@@"; then
 @@BOOTDEV@@    setenv bootargs "${bootargs} root=@@WENDYOS_ROOT_DEV_BASE@@${wendyos_root_part} rootwait rw"
+@@BOOTDEV@@elif test "${wendyos_if} ${wendyos_dev}" = "nvme 0"; then
+@@BOOTDEV@@    setenv bootargs "${bootargs} root=/dev/nvme0n1p${wendyos_root_part} rootwait rw"
 @@BOOTDEV@@elif part uuid ${wendyos_if} ${wendyos_dev}:${wendyos_root_part} wendyos_root_uuid; then
 @@BOOTDEV@@    setenv bootargs "${bootargs} root=PARTUUID=${wendyos_root_uuid} rootwait rw"
 @@BOOTDEV@@else

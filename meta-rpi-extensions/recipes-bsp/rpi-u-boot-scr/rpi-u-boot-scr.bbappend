@@ -19,17 +19,11 @@ WENDYOS_ROOTFS_PART_B ?= "4"
 # committed before U-Boot falls back. 1 = one attempt.
 WENDYOS_BOOTLIMIT ?= "1"
 
-# root= device base and the U-Boot load interface/device. Defaults target the
-# SD card (mmcblk0 / mmc 0); the NVMe machine overrides them below and adds the
-# `nvme scan` that U-Boot needs before NVMe block devices appear.
+# root= device base and the U-Boot load interface/device: the SD card
+# (mmcblk0 / mmc 0) on every RPi.
 WENDYOS_ROOT_DEV_BASE ?= "/dev/mmcblk0p"
 WENDYOS_UBOOT_IF      ?= "mmc"
 WENDYOS_UBOOT_DEV     ?= "0"
-WENDYOS_UBOOT_PRECMD  ?= ""
-
-WENDYOS_ROOT_DEV_BASE:raspberrypi5-nvme = "/dev/nvme0n1p"
-WENDYOS_UBOOT_IF:raspberrypi5-nvme      = "nvme"
-WENDYOS_UBOOT_PRECMD:raspberrypi5-nvme  = "nvme scan"
 
 # Follow the boot device instead of the fixed one above: load from whichever
 # device standard boot found boot.scr on (devtype/devnum), keep the A/B env in
@@ -39,9 +33,11 @@ WENDYOS_UBOOT_PRECMD:raspberrypi5-nvme  = "nvme scan"
 #
 # RPi4: one image boots from SD or a USB disk (incl. USB-NVMe enclosures); its
 # stock U-Boot already runs "pci enum; usb start" and scans mmc then usb.
-# RPi4 only for now; RPi3/RPi5 keep their bench-validated fixed scripts.
+# RPi5: one image boots from SD or NVMe; the bootcmd in rpi5-boot.cfg tries the
+# SD first. RPi3 keeps its fixed script.
 WENDYOS_UBOOT_FOLLOW_BOOTDEV ?= "0"
 WENDYOS_UBOOT_FOLLOW_BOOTDEV:raspberrypi4-64 = "1"
+WENDYOS_UBOOT_FOLLOW_BOOTDEV:raspberrypi5 = "1"
 
 # Must equal U-Boot's CONFIG_ENV_SIZE and the size in fw_env.config.
 WENDYOS_UBOOT_ENV_SIZE ?= "0x4000"
@@ -56,8 +52,8 @@ WENDYOS_ROOTFS_PART_B:raspberrypi3-64 = "3"
 # Re-run if any of the templated knobs change.
 do_compile[vardeps] += "WENDYOS_OTA WENDYOS_ROOTFS_PART_A WENDYOS_ROOTFS_PART_B \
                         WENDYOS_BOOTLIMIT WENDYOS_ROOT_DEV_BASE WENDYOS_UBOOT_IF \
-                        WENDYOS_UBOOT_DEV WENDYOS_UBOOT_PRECMD \
-                        WENDYOS_UBOOT_FOLLOW_BOOTDEV WENDYOS_UBOOT_ENV_SIZE"
+                        WENDYOS_UBOOT_DEV WENDYOS_UBOOT_FOLLOW_BOOTDEV \
+                        WENDYOS_UBOOT_ENV_SIZE"
 
 do_compile() {
     if [ "${WENDYOS_OTA}" = "wendy" ]; then
@@ -73,7 +69,6 @@ do_compile() {
             -e 's/@@KERNEL_BOOTCMD@@/${KERNEL_BOOTCMD}/' \
             -e 's/@@WENDYOS_UBOOT_IF@@/${WENDYOS_UBOOT_IF}/' \
             -e 's/@@WENDYOS_UBOOT_DEV@@/${WENDYOS_UBOOT_DEV}/' \
-            -e 's/@@WENDYOS_UBOOT_PRECMD@@/${WENDYOS_UBOOT_PRECMD}/' \
             -e 's/@@WENDYOS_ROOTFS_PART_A@@/${WENDYOS_ROOTFS_PART_A}/' \
             -e 's/@@WENDYOS_ROOTFS_PART_B@@/${WENDYOS_ROOTFS_PART_B}/' \
             -e 's/@@WENDYOS_BOOTLIMIT@@/${WENDYOS_BOOTLIMIT}/' \
