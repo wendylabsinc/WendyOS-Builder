@@ -172,7 +172,7 @@ jobs:
             {"device":"generic-x86-64","storages":"disk"},
             {"device":"dragonwing-iq-9075","storages":"ufs"},
             {"device":"arduino-uno-q","storages":"emmc"},
-            {"device":"raspberry-pi-5","storages":"sd"},
+            {"device":"raspberry-pi-5","storages":"disk"},
             {"device":"raspberry-pi-4","storages":"sd"},
             {"device":"raspberry-pi-3","storages":"sd"},
             {"device":"vm-arm64","storages":"disk"},
@@ -307,7 +307,7 @@ jobs:
             case "$DEVICE:$STORAGE" in
               raspberry-pi-3:sd)    BOARD=rpi3-sd;               MACHINE=raspberrypi3-64-wendyos ;;
               raspberry-pi-4:sd)    BOARD=rpi4-sd;               MACHINE=raspberrypi4-64-wendyos ;;
-              raspberry-pi-5:sd)    BOARD=rpi5;                  MACHINE=raspberrypi5-wendyos ;;
+              raspberry-pi-5:disk)  BOARD=rpi5;                  MACHINE=raspberrypi5-wendyos ;;
               jetson-agx-orin:nvme) BOARD=jetson-agx-orin;       MACHINE=jetson-agx-orin-devkit-nvme-wendyos ;;
               jetson-agx-orin:emmc) BOARD=jetson-agx-orin-emmc;  MACHINE=jetson-agx-orin-devkit-emmc-wendyos ;;
               jetson-orin-nano:nvme) BOARD=jetson-orin-nano-nvme; MACHINE=jetson-orin-nano-devkit-nvme-wendyos ;;
@@ -995,11 +995,11 @@ jobs:
                 fi
                 ;;
               wic-disk)
-                # generic-x86-64: IMAGE_FILE is the .wic disk image (the flashable
-                # install artifact). Regenerate the bmap here (deterministic, not
-                # dependent on Yocto's wic.bmap naming) and upload the .wic
-                # uncompressed — the publisher recompresses it. No gzip and no
-                # tegraflash recovery bundle. The A/B OTA payload (.wendy) is
+                # x86, VMs and the Pi 5: IMAGE_FILE is the .wic disk image (the
+                # flashable install artifact). Regenerate the bmap here
+                # (deterministic, not dependent on Yocto's wic.bmap naming) and upload
+                # the .wic uncompressed — the publisher recompresses it. No gzip and
+                # no tegraflash recovery bundle. The A/B OTA payload (.wendy) is
                 # uploaded separately by the device-agnostic OTA glob below.
                 bmaptool create "$IMAGE_FILE" > "${IMAGE_FILE}.bmap"
                 BMAP_FILE="${IMAGE_FILE}.bmap"

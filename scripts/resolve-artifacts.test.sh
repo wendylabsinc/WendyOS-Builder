@@ -197,12 +197,15 @@ test_rpi_wic() {
   rm -rf "$d"
 }
 
-# rpi-5 passes --storage.
-test_rpi5_pass_storage() {
+# rpi-5: one .wic for SD and NVMe, published without --storage.
+test_rpi5_wic_disk() {
   local d M; d=$(newdir); M=raspberrypi5-wendyos
   : >"$d/wendyos-image-$M.rootfs.wic"
-  local out; out=$(run_resolver raspberry-pi-5 sd "$M" "$d")
-  assert_eq "rpi5: pass_storage" true "$(field PASS_STORAGE <<<"$out")"
+  local out; out=$(run_resolver raspberry-pi-5 disk "$M" "$d"); local rc=$?
+  assert_eq "rpi5: exits 0" 0 "$rc"
+  assert_eq "rpi5: kind"         wic-disk "$(field IMAGE_KIND <<<"$out")"
+  assert_eq "rpi5: image"        "$d/wendyos-image-$M.rootfs.wic" "$(field IMAGE_FILE <<<"$out")"
+  assert_eq "rpi5: pass_storage" false "$(field PASS_STORAGE <<<"$out")"
   rm -rf "$d"
 }
 
@@ -319,7 +322,7 @@ test_matrix_coverage() {
     jetson-agx-orin/emmc
     jetson-orin-nano/nvme
     jetson-orin-nano/sd
-    raspberry-pi-5/sd
+    raspberry-pi-5/disk
     raspberry-pi-4/sd
     raspberry-pi-3/sd
     generic-x86-64/disk
@@ -357,7 +360,7 @@ test_missing_qcomflash_fatal
 test_jetson_nano_sd
 test_rpi_sdimg
 test_rpi_wic
-test_rpi5_pass_storage
+test_rpi5_wic_disk
 test_x86_wic_disk
 test_vm_wic_disk
 test_missing_bundle_fatal
