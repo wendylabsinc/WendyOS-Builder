@@ -197,11 +197,11 @@ test_rpi_wic() {
   rm -rf "$d"
 }
 
-# rpi-5 passes --storage (both nvme and sd).
+# rpi-5 passes --storage.
 test_rpi5_pass_storage() {
-  local d M; d=$(newdir); M=raspberrypi5-nvme-wendyos
+  local d M; d=$(newdir); M=raspberrypi5-wendyos
   : >"$d/wendyos-image-$M.rootfs.wic"
-  local out; out=$(run_resolver raspberry-pi-5 nvme "$M" "$d")
+  local out; out=$(run_resolver raspberry-pi-5 sd "$M" "$d")
   assert_eq "rpi5: pass_storage" true "$(field PASS_STORAGE <<<"$out")"
   rm -rf "$d"
 }
@@ -319,7 +319,6 @@ test_matrix_coverage() {
     jetson-agx-orin/emmc
     jetson-orin-nano/nvme
     jetson-orin-nano/sd
-    raspberry-pi-5/nvme
     raspberry-pi-5/sd
     raspberry-pi-4/sd
     raspberry-pi-3/sd

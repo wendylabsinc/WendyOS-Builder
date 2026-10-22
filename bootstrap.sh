@@ -89,7 +89,7 @@ Usage:
 
 Example:
   BOARD=jetson-agx-orin $(basename "${0}")
-  BOARD=rpi5-nvme $(basename "${0}")
+  BOARD=rpi5-sd $(basename "${0}")
 
 Environment variables:
   BOARD     (required) Target board id. Must match a directory

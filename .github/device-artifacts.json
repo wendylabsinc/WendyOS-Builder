@@ -4,7 +4,6 @@
   "jetson-agx-orin/emmc":   { "driver_devkit": true, "image_kind": "tegraflash-bundle",          "recovery_bundle_expected": true,  "bmap": false, "flashpack": true,  "pass_storage": true, "manifest_alias": "jetson-agx-orin-emmc" },
   "jetson-orin-nano/nvme":  { "driver_devkit": true, "image_kind": "generated-nvme-img",         "recovery_bundle_expected": true,  "bmap": true,  "flashpack": true,  "pass_storage": true },
   "jetson-orin-nano/sd":    { "driver_devkit": true, "image_kind": "generated-sd-img",           "recovery_bundle_expected": true,  "bmap": true,  "flashpack": false, "pass_storage": true },
-  "raspberry-pi-5/nvme":    { "driver_devkit": true, "image_kind": "sdimg-gz-with-wic-fallback", "recovery_bundle_expected": false, "bmap": true,  "flashpack": false, "pass_storage": true },
   "raspberry-pi-5/sd":      { "driver_devkit": true, "image_kind": "sdimg-gz-with-wic-fallback", "recovery_bundle_expected": false, "bmap": true,  "flashpack": false, "pass_storage": true },
   "raspberry-pi-4/sd":      { "image_kind": "sdimg-gz-with-wic-fallback", "recovery_bundle_expected": false, "bmap": true,  "flashpack": false, "pass_storage": false },
   "raspberry-pi-3/sd":      { "image_kind": "sdimg-gz-with-wic-fallback", "recovery_bundle_expected": false, "bmap": true,  "flashpack": false, "pass_storage": false },
