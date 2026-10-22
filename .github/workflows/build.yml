@@ -1427,9 +1427,12 @@ jobs:
           # A dispatch hands back no run id, so note the time first and then
           # match the run by the name the lab builds from the pr input.
           since=$(date -u -d '-2 minutes' +%Y-%m-%dT%H:%M:%SZ)
+          # Smoke, not ota, until an interrupted install can no longer leave a
+          # board unable to update: the tunnel drops calls, and one drop part
+          # way through a write has already cost a slot.
           gh workflow run device-test.yml --repo "$LAB" \
             -f device="$DEVICES" \
-            -f category=ota \
+            -f category=smoke \
             -f ota_source=pr \
             -f pr="$PR" \
             -f allow_no_device=true
