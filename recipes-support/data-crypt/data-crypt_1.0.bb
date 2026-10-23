@@ -59,7 +59,9 @@ FILES:${PN} = " \
 #   cryptsetup            luksFormat, open, close, luksUUID
 #   systemd-crypt         systemd-cryptenroll (TPM + recovery key) and
 #                         systemd-cryptsetup attach (the boot-time unlock)
-#   gptfdisk              sgdisk -e, to move the GPT backup header to the disk end
+#   util-linux-sfdisk     sfdisk --relocate, to move the GPT backup header to
+#                         the disk end, and sfdisk -d, which decides whether to
+#                         run it
 #   parted                parted resizepart and partprobe
 #   e2fsprogs-mke2fs      mkfs.ext4, inside the new container
 #   coreutils             basename, readlink, cat, head, date, tr, sync
@@ -96,7 +98,7 @@ FILES:${PN} = " \
 RDEPENDS:${PN} = " \
     cryptsetup \
     systemd-crypt \
-    gptfdisk \
+    util-linux-sfdisk \
     parted \
     e2fsprogs-mke2fs \
     coreutils \

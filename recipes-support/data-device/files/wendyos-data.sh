@@ -23,10 +23,10 @@
 # It also PREPARES a plain /data -- grow the partition to fill the disk, then
 # make sure the partition carries a filesystem the kernel can mount. That work
 # comes from grow-data-part.sh and wendyos-data-init.sh, which this program
-# replaces (C57). Three programs ran before data.mount and all three ran
-# `sgdisk -e` then `parted resizepart`, and every /data ordering bug so far has
-# been between two units in that window. One program means the question which
-# device does this one wait on cannot be asked a second time.
+# replaces (C57). Three programs ran before data.mount and all three moved the
+# GPT backup header then ran `parted resizepart`, and every /data ordering bug
+# so far has been between two units in that window. One program means the
+# question which device does this one wait on cannot be asked a second time.
 #
 # Two entry points, one program: no argument (or "boot") runs the state machine
 # below, "resize" runs the online resize2fs on the MOUNTED /data and nothing
@@ -708,13 +708,13 @@ find_cryptsetup_helper() {
 # Before=data.mount, so a tool that hangs now holds /data hostage with nothing
 # in `systemctl --failed` to see.
 #
-# One unit cannot carry two timeouts, so the split lives here: sgdisk, sfdisk,
-# parted, e2fsck and mkfs.ext4 run under `timeout $TOOL_TIMEOUT`, and blkdiscard
-# and the rest of the conversion deliberately do not. grow_partition() is shared
-# with the conversion path, so its partition tools are bounded there too --
-# that is the intent, not an oversight: a wedged parted on a conversion boot
-# would stall forever under an infinite unit timeout, where failing rolls the
-# conversion back and leaves /data plain (C7).
+# One unit cannot carry two timeouts, so the split lives here: sfdisk
+# --relocate, parted, e2fsck and mkfs.ext4 run under `timeout $TOOL_TIMEOUT`,
+# and blkdiscard and the rest of the conversion deliberately do not.
+# grow_partition() is shared with the conversion path, so its parted and sfdisk
+# --relocate are bounded there too -- that is the intent, not an oversight: a
+# wedged parted on a conversion boot would stall forever under an infinite unit
+# timeout, where failing rolls the conversion back and leaves /data plain (C7).
 #
 # Say why a bounded tool stopped: exit 124 is coreutils timeout(1)'s "the
 # command timed out" (timeout(1) EXIT STATUS), and it must not be reported as
@@ -759,16 +759,16 @@ grow_partition() {
     # mid-disk after flashing an image onto a larger disk), else resizepart
     # cannot use the free space.
     #
-    # Skipped on a table sfdisk positively reports as MBR: sgdisk finds no GPT
-    # there, converts the MBR in memory and then refuses to write ("Non-GPT
-    # disk; not saving changes", exit 3), so it is a guaranteed failure that
-    # would print a WARN on every raspberrypi3-64 first boot. Anything else,
-    # including an unreadable dump, still runs it -- the failure is inert, and
+    # Skipped on a table sfdisk positively reports as MBR: there is no GPT
+    # backup header to move. On a healthy MBR `sfdisk --relocate` writes
+    # nothing, but it still re-reads the partition table and reports it as
+    # altered, a false entry in the journal on every raspberrypi3-64 first
+    # boot. Anything else, including an unreadable dump, still runs it --
     # skipping it on a GPT disk by mistake would cost the grow.
     if [ "$(sb_field label "$_table")" != "dos" ]; then
         announce "relocating the GPT backup header to the end of $DISK"
-        timeout "$TOOL_TIMEOUT" sgdisk -e "$DISK" >/dev/null 2>&1 \
-            || announce "WARN: sgdisk -e failed ($(exit_reason $?))"
+        timeout "$TOOL_TIMEOUT" sfdisk --relocate gpt-bak-std "$DISK" >/dev/null 2>&1 \
+            || announce "WARN: sfdisk --relocate failed ($(exit_reason $?))"
         partprobe "$DISK" 2>/dev/null || true
         udevadm settle -t 10 2>/dev/null || true
     fi
@@ -1240,7 +1240,7 @@ missing=""
 # tar is in the sweep for the same reason as the rest: preserve_identity()
 # needs it, and a missing tar has to report no_support here, before anything is
 # touched, rather than abort a conversion that has already started.
-for tool in cryptsetup systemd-cryptenroll mkfs.ext4 wipefs sgdisk parted partprobe tar; do
+for tool in cryptsetup systemd-cryptenroll mkfs.ext4 wipefs sfdisk parted partprobe tar; do
     have "$tool" || missing="$missing $tool"
 done
 find_cryptsetup_helper >/dev/null || missing="$missing systemd-cryptsetup"
