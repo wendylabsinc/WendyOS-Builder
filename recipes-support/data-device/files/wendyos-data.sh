@@ -803,7 +803,10 @@ grow_partition() {
         _ext_num=$(sysblk "$(basename "$_ext_dev")" partition)
         if [ -n "$_ext_num" ]; then
             announce "growing the MBR extended container, partition #$_ext_num on $DISK, so the logical /data inside it can grow"
-            timeout "$TOOL_TIMEOUT" parted -s "$DISK" resizepart "$_ext_num" 100% \
+            # Not parted: it refuses while a logical inside is mounted. --no-reread
+            # skips sfdisk's whole-disk busy check, which / on this disk always trips.
+            # No type field: re-typing an extended entry drops its logicals.
+            printf ',+\n' | timeout "$TOOL_TIMEOUT" sfdisk -q --no-reread --no-tell-kernel -N "$_ext_num" "$DISK" \
                 || announce "WARN: growing the extended container failed ($(exit_reason $?))"
             partprobe "$DISK" 2>/dev/null || true
             udevadm settle -t 10 2>/dev/null || true
