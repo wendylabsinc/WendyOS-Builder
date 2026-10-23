@@ -1427,7 +1427,7 @@ To check the current state:
 
 ## Architecture Notes
 
-- **Yocto Version**: `blacksail` (every board; `wrynose` stays in the layers' compat set as the fallback series)
+- **Yocto Version**: `blacksail` (every board)
 - **BSP Layers**: `meta-tegra` (NVIDIA Jetson) and `meta-raspberrypi` (Raspberry Pi)
 - **Init System**: `systemd`
 - **Package Manager**: `RPM`

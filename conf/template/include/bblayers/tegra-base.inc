@@ -19,9 +19,3 @@ BBLAYERS += " \
 # on TPM-off builds via SKIP_META_TPM_SANITY_CHECK in local/tegra-t234.inc and
 # local/tegra-t264.inc (same as x86).
 BBLAYERS += " ${TOPDIR}/../repos/${WENDYOS_LAYER_TREE}/meta-security/meta-tpm "
-
-# blacksail gate bridge: meta-tpm declares LAYERSERIES_COMPAT_tpm-layer="wrynose";
-# make blacksail explicit. Must live in a bblayers include (LAYERSERIES_COMPAT is
-# checked during the layer.conf loop, before local.conf postfiles). Inert off the
-# blacksail tree.
-LAYERSERIES_COMPAT_tpm-layer:append = "${@' blacksail' if d.getVar('WENDYOS_LAYER_TREE') == 'blacksail' else ''}"
