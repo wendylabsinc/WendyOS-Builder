@@ -10,11 +10,11 @@
 # irrelevant here — RPi never layers them.
 WENDYOS_LAYER_TREE="blacksail"
 
-# NOTE: the RPi5 NVMe bbappend (meta-rpi-extensions/recipes-bsp/u-boot/
-# u-boot_%.bbappend) force-pins blacksail rpi5 U-Boot to v2026.07-rc4 (SRCREV
-# 1296a428) + the phys->bus DMA patch, independent of the oe-core pin. So bumping
-# SRCREV_OECORE will NOT move rpi5 U-Boot — revisit/repin that bbappend's SRCREV
-# when you want rpi5 on a newer U-Boot.
+# NOTE: rpi5 builds oe-core's stock U-Boot (v2026.07 at the current pin), so it
+# moves with SRCREV_OECORE. meta-rpi-extensions/recipes-bsp/u-boot/
+# u-boot_%.bbappend only adds the Pi 5 config fragments and, on the NVMe
+# machine, the phys->bus DMA patch. Re-test Pi 5 boot when a pin bump moves
+# U-Boot.
 #
-# No REPOS_EXTRA: blacksail oe-core ships Go 1.26 and U-Boot 2026.04 natively, so
+# No REPOS_EXTRA: blacksail oe-core ships Go and U-Boot 2026.07 natively, so
 # nothing has to be backported.

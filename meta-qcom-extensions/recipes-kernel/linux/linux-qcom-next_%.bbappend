@@ -28,19 +28,6 @@ SRC_URI:append:iq-8275-evk = " \
 # SerDes reconfiguration rather than a false link-up.
 SRC_URI:append:qcom-wendyos = " file://0002-net-stmmac-qcom-ethqos-advertise-serdes-interfaces.patch file://0003-net-stmmac-propagate-platform-mac-finish-errors.patch"
 
-# dwc3-qcom over-frees a managed software node when it tears the xHCI down to
-# change role, leaving the controller with neither an xHCI nor a UDC until the
-# next boot. Reproduced on both boards: every role-switching port reaches it.
-SRC_URI:append:qcom-wendyos = " file://0004-Revert-usb-dwc3-qcom-skip-phy-management-swnode.patch"
-
-# quilt edits the tracked source in place and leaves it modified in the shared
-# kernel tree. CONFIG_LOCALVERSION_AUTO is on here (default y, and no fragment
-# we merge unsets it), so setlocalversion appends -dirty to the release string
-# and to every module package name. It is not quilt's .pc/ directory that does
-# it: setlocalversion checks with `git status -uno`, which ignores untracked
-# files. A machine override, so it reaches the devupstream variant as well.
-PATCHTOOL:qcom-wendyos = "git"
-
 require recipes-kernel/linux/mesh-local.inc
 require recipes-kernel/linux/mesh-internet.inc
 
@@ -63,8 +50,3 @@ wendyos_check_sensor_loopback() {
     grep -q '^CONFIG_SND_ALOOP=m$' "$config" || \
         bbfatal "SensorLink loopback: CONFIG_SND_ALOOP must be modular for ${MACHINE}"
 }
-
-# Arduino Uno Q also includes this layer and uses the same pinned kernel.
-# The newer callback releases its reference after the unlock label.
-BLUETOOTH_LE_PENDING_PATCH = "0001-bluetooth-clean-up-rejected-pending-le-connection-qcom.patch"
-require recipes-kernel/linux/bluetooth-le-pending.inc

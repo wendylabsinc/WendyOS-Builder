@@ -1,46 +1,30 @@
 FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
 
-# === RPi5 (BCM2712): U-Boot v2026.07-rc4 fleet-wide + boot-wedge fixes ===
+# === RPi5 (BCM2712): boot fixes on top of oe-core's stock U-Boot ===
 #
-# RPi5 U-Boot needs two things missing from oe-core v2026.04:
-#   1. the BCM2712 PCIe driver (brcm,bcm2712-pcie + bcm2712_cfg), mainline ~June
-#      2026, ships in v2026.07 -- required for NVMe boot;
-#   2. our drivers/nvme/nvme.c phys->bus DMA fix (files/0001-nvme-phys-to-bus.patch,
-#      not upstream): BCM2712 inbound dma-ranges maps PCIe bus 0x10_00000000 ->
-#      CPU 0x0, and stock nvme.c programs raw CPU phys, so nvme_init times out
-#      (-110). The patch translates every controller DMA address + recovers the
-#      DMA constraints. VALIDATED on hardware (SD-less NVMe boot + A/B OTA).
+# Both Pi 5 machines (SD and NVMe) build oe-core's U-Boot v2026.07, which has
+# the BCM2712 PCIe driver NVMe boot needs. We add three things:
+#   - files/0001-nvme-phys-to-bus.patch (NVMe machine only, not upstream):
+#     BCM2712 inbound dma-ranges maps PCIe bus 0x10_00000000 -> CPU 0x0, and
+#     stock nvme.c programs raw CPU addresses, so nvme_init times out (-110).
+#     The patch translates every controller DMA address and recovers the DMA
+#     constraints. Validated on hardware (SD-less NVMe boot + A/B OTA).
+#   - sd-boot.cfg (SD machine only): compiles out CONFIG_USE_PREBOOT. The
+#     stock preboot "pci enum; usb start;" hangs some boards before boot.scr.
+#     The NVMe machine keeps its own PREBOOT from nvme-boot.cfg.
+#   - rpi5-bootdelay.cfg (both machines): CONFIG_BOOTDELAY=-2. The autoboot
+#     countdown's stdin poll is a known Pi 5 wedge across U-Boot versions.
 #
-# rc4 applies to the WHOLE rpi5 family (SD + NVMe), not just NVMe. PR #154
-# briefly scoped it to :raspberrypi5-nvme and returned the SD machine to stock
-# 2026.04, but 2026.04 never booted a Pi 5 SD in this repo (the original
-# blacksail bring-up could not boot until the rc4 bump, and the field report
-# after #154 merged was another dead board), so the scoping was reverted. rc4
-# is the only version bench-validated on Pi 5 here; its two known BOOT WEDGES
-# are fixed by config fragments instead of a downgrade:
-#   - sd-boot.cfg (SD machine only): compile out CONFIG_USE_PREBOOT. rc4's new
-#     BCM2712 PCIe driver made the stock preboot "pci enum; usb start;" live,
-#     and it hangs some boards (CanaKit Pi 5, fresh flash) before boot.scr.
-#     NVMe keeps its own required PREBOOT from nvme-boot.cfg.
-#   - rpi5-bootdelay.cfg (both machines, from #154): CONFIG_BOOTDELAY=-2. The
-#     autoboot countdown's stdin poll is a known Pi 5 wedge across U-Boot
-#     versions; the 0.16.x images shipped -2 (verified in the 0.16.0 binary)
-#     and never hit it, nightlies shipped the default 2 and did.
-# See docs/docs-ext/rpi5-nvme.md.
+# These were validated on 2026.07-rc4, which is an ancestor of v2026.07. The
+# commits between them do not touch drivers/nvme or drivers/pci.
 #
-# No gating needed beyond the machine overrides:
-#   - rpi3 / rpi4 are raspberrypi3 / raspberrypi4 machines, so the
-#     :raspberrypi5* overrides are inert on them, and the wildcard filename
-#     matches their recipe (NO dangling append -- a version-pinned
-#     u-boot_2026.04.bbappend would dangle on those builds).
+# rpi3 / rpi4 are raspberrypi3 / raspberrypi4 machines, so the :raspberrypi5*
+# overrides are inert on them. The wildcard filename matches their recipe too,
+# so this append never dangles.
 #
-# Repin rc4 -> v2026.07 stable when it ships (due ~early July 2026), drop the
-# DMA patch once the BCM2712 NVMe fix is upstream, and re-evaluate sd-boot.cfg
-# once the PCIe-driver hang is fixed upstream (see that file's removal
-# condition). See project_rpi_blacksail_migration_plan.
-
-SRC_URI:raspberrypi5 = "git://source.denx.de/u-boot/u-boot.git;protocol=https;branch=master"
-SRCREV:raspberrypi5 = "1296a428c67cf103eca482d4a63349661c1b799f"
+# Drop the DMA patch once the BCM2712 NVMe fix is upstream, and re-evaluate
+# sd-boot.cfg once the PCIe-driver hang is fixed upstream (see that file's
+# removal condition).
 
 # Skip the autoboot countdown on BOTH rpi5 machines (raspberrypi5-nvme carries
 # the raspberrypi5 override). The countdown's stdin poll wedges BCM2712 hard at

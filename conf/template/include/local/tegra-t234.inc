@@ -1,7 +1,7 @@
-# Tegra T234 (Orin / Orin Nano): wendyos-update OTA on JetPack 7.2 /
-# L4T R39.2.0 (blacksail). Symmetric with tegra-t264.inc (Thor).
+# Tegra T234 (Orin / Orin Nano): wendyos-update OTA on JetPack 7.2.1 /
+# L4T R39.2.1 (blacksail). Symmetric with tegra-t264.inc (Thor).
 #
-# This is the JP7.2 fleet-unification path: r39.2.0 is the first JetPack 7
+# This is the JP7.2 fleet-unification path: r39.2 is the first JetPack 7
 # line to support the Orin family alongside Thor, so all three Jetson boards
 # can share one Yocto series (blacksail) and one OTA stack (wendyos-update).
 
@@ -65,9 +65,9 @@ WENDYOS_EFI_DEBUG = "0"
 
 # DeepStream 8.0 (JetPack 7.2 / CUDA 13) — ENABLED. tegra-image.inc resolves
 # WENDYOS_DEEPSTREAM=1 to the deepstream-8.0 package on blacksail, provided by
-# our vendored recipe in meta-tegra-extensions-jp7 (DS8 is not yet on the
-# meta-tegra-community wip-l4t-r39.2.0 branch — see scripts/check-jp7.2-upstream.sh
-# for when to drop the vendored recipe). COMPATIBLE_MACHINE=(tegra), so the same
+# our vendored recipe in meta-tegra-extensions-jp7 (meta-tegra-community's
+# blacksail branch ships deepstream-9.1, not 8.0. The recipe header says when to
+# drop the vendored copy). COMPATIBLE_MACHINE=(tegra), so the same
 # recipe serves Orin (t234) and Thor (t264).
 WENDYOS_DEEPSTREAM = "1"
 

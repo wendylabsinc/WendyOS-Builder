@@ -79,7 +79,7 @@ RDEPENDS:${PN} = " \
     tegra-libraries-glescore \
     cudnn \
     cusparselt \
-    tensorrt-core \
+    tensorrt \
     tensorrt-plugins \
     libcufile \
     "
