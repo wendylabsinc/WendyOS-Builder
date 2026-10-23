@@ -50,7 +50,6 @@ WIC_CREATE_EXTRA_ARGS ?= "--no-fstab-update"
 do_image_wic[depends] += " \
     wic-tools:do_populate_sysroot \
     e2fsprogs-native:do_populate_sysroot \
-    gptfdisk-native:do_populate_sysroot \
     "
 
 # --- wendyos-update (wendy OTA) image deltas for x86 -----------------------
