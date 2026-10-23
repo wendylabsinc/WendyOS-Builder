@@ -708,10 +708,10 @@ find_cryptsetup_helper() {
 # Before=data.mount, so a tool that hangs now holds /data hostage with nothing
 # in `systemctl --failed` to see.
 #
-# One unit cannot carry two timeouts, so the split lives here: sgdisk, parted,
-# e2fsck and mkfs.ext4 run under `timeout $TOOL_TIMEOUT`, and blkdiscard and
-# the rest of the conversion deliberately do not. grow_partition() is shared
-# with the conversion path, so its parted and sgdisk are bounded there too --
+# One unit cannot carry two timeouts, so the split lives here: sgdisk, sfdisk,
+# parted, e2fsck and mkfs.ext4 run under `timeout $TOOL_TIMEOUT`, and blkdiscard
+# and the rest of the conversion deliberately do not. grow_partition() is shared
+# with the conversion path, so its partition tools are bounded there too --
 # that is the intent, not an oversight: a wedged parted on a conversion boot
 # would stall forever under an infinite unit timeout, where failing rolls the
 # conversion back and leaves /data plain (C7).
@@ -803,7 +803,10 @@ grow_partition() {
         _ext_num=$(sysblk "$(basename "$_ext_dev")" partition)
         if [ -n "$_ext_num" ]; then
             announce "growing the MBR extended container, partition #$_ext_num on $DISK, so the logical /data inside it can grow"
-            timeout "$TOOL_TIMEOUT" parted -s "$DISK" resizepart "$_ext_num" 100% \
+            # Not parted: it refuses while a logical inside is mounted. --no-reread
+            # skips sfdisk's whole-disk busy check, which / on this disk always trips.
+            # No type field: re-typing an extended entry drops its logicals.
+            printf ',+\n' | timeout "$TOOL_TIMEOUT" sfdisk -q --no-reread --no-tell-kernel -N "$_ext_num" "$DISK" \
                 || announce "WARN: growing the extended container failed ($(exit_reason $?))"
             partprobe "$DISK" 2>/dev/null || true
             udevadm settle -t 10 2>/dev/null || true
