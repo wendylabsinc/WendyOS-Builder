@@ -166,7 +166,7 @@ FILES:${PN}:append:raspberrypi3-64 = " \
 #
 # blkdiscard is the exception and used to be listed above as though it were
 # gated too. It is not: oe-core appends every split util-linux binary package
-# to RRECOMMENDS of the util-linux metapackage (util-linux_2.42.2.bb:63), and
+# to RRECOMMENDS of the util-linux metapackage (oe-core's util-linux recipe), and
 # packagegroup-wendyos-base pulls util-linux, so util-linux-blkdiscard lands on
 # every board whatever WENDYOS_DATA_ENCRYPTED says. Confirmed on a Thor built
 # at the default: cryptsetup and systemd-cryptenroll absent, blkdiscard present

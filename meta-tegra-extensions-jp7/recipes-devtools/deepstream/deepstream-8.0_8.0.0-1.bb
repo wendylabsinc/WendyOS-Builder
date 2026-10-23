@@ -2,11 +2,11 @@
 # (branch master-l4t-r38.4.x, recipes-devtools/deepstream/deepstream-8.0_8.0.0-1.bb).
 #
 # Why vendored: meta-tegra-community ships this recipe on the r38.4 (JP7.1)
-# branches but has NOT yet forward-ported it to wip-l4t-r39.2.0 (the blacksail
-# branch we build from — that branch still only has deepstream-7.1). This is a
-# verbatim copy with the minimal blacksail/r39.2 reconciliations noted below.
+# branches but not on its blacksail branch, which we build from and which only
+# has deepstream-9.1. This is a verbatim copy with the minimal blacksail/r39.2
+# reconciliations noted below.
 #
-# CUTOVER: when wip-l4t-r39.2.0 gains deepstream-8.0, DELETE this file — the
+# CUTOVER: if blacksail gains deepstream-8.0, DELETE this file — the
 # upstream recipe takes over (same PN), and the companion deepstream-8.0_%.bbappend
 # keeps applying our headless/container fixups to it. tegra-image.inc + the
 # container CSVs key on the package name / install path, so no other change.
@@ -15,10 +15,12 @@
 # NEWER than r38.4's, so several patchelf TARGET sonames differ):
 #   * jsoncpp: upstream hardcodes libjsoncpp.so.26 (jsoncpp 1.9.6); blacksail
 #     has jsoncpp 1.9.7 -> read the target dynamically from staging instead.
-#   * libgpr:  upstream hardcodes libgpr.so.46; blacksail has grpc 1.80.0 ->
+#   * libgpr:  upstream hardcodes libgpr.so.46; blacksail has grpc 1.84.0 ->
 #     read dynamically from staging.
 #   * abseil:  upstream targets libabsl_synchronization.so.2505.0.0; blacksail
 #     abseil-cpp 20260107.1 builds .so.2601.0.0 (confirmed) -> use that.
+#   * tensorrt: meta-tegra renamed the tensorrt-core recipe to tensorrt. The
+#     old name still works at build time only, so use the new one.
 #   CUDA fixups (libcublas.so.13 / libcufft.so.12 / libnpp*.so.13) are CUDA-13
 #   and identical on r38.4 and r39.2, so kept verbatim.
 #
@@ -65,7 +67,7 @@ PACKAGECONFIG[realsense] = ""
 # r38.4 recipe used plain yaml-cpp because r38.4 meta-oe was still 0.8.)
 # Keep in sync with packagegroup-nvidia-container.bb's DS yaml-cpp choice.
 DEPENDS = "glib-2.0 gstreamer1.0 gstreamer1.0-plugins-base gstreamer1.0-rtsp-server \
-    tensorrt-core tensorrt-plugins libnvvpi4 libcufft libcublas libnpp json-glib \
+    tensorrt tensorrt-plugins libnvvpi4 libcufft libcublas libnpp json-glib \
     tegra-libraries-multimedia-ds tegra-libraries-multimedia yaml-cpp-080 \
     grpc protobuf tegra-libraries-nvdsseimeta libgstnvcustomhelper mosquitto jsoncpp cuda-nvrtc \
 "
