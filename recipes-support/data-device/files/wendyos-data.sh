@@ -708,10 +708,10 @@ find_cryptsetup_helper() {
 # Before=data.mount, so a tool that hangs now holds /data hostage with nothing
 # in `systemctl --failed` to see.
 #
-# One unit cannot carry two timeouts, so the split lives here: sgdisk, parted,
-# e2fsck and mkfs.ext4 run under `timeout $TOOL_TIMEOUT`, and blkdiscard and
-# the rest of the conversion deliberately do not. grow_partition() is shared
-# with the conversion path, so its parted and sgdisk are bounded there too --
+# One unit cannot carry two timeouts, so the split lives here: sgdisk, sfdisk,
+# parted, e2fsck and mkfs.ext4 run under `timeout $TOOL_TIMEOUT`, and blkdiscard
+# and the rest of the conversion deliberately do not. grow_partition() is shared
+# with the conversion path, so its partition tools are bounded there too --
 # that is the intent, not an oversight: a wedged parted on a conversion boot
 # would stall forever under an infinite unit timeout, where failing rolls the
 # conversion back and leaves /data plain (C7).

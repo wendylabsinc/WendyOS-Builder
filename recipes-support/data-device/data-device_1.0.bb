@@ -125,13 +125,12 @@ FILES:${PN}:append:raspberrypi3-64 = " \
 # outranks busybox's for the alternative (priority 100 against 50), which is
 # what makes timeout's exit 124 the status the script actually sees.
 #
-# util-linux-sfdisk is the odd one out: it is only ever used to READ the
-# partition table -- which label it carries, and whether it has an MBR extended
-# container that has to be grown before the logical /data inside it can grow.
-# Only raspberrypi3-64 has such a container, but the recipe ships fleet-wide
-# and the script is one program on every board, so the dependency does too. The
-# `sfdisk -d` dump is also what keeps `sgdisk -e` off an MBR disk, where it
-# cannot succeed.
+# util-linux-sfdisk reads the partition table -- which label it carries, and
+# whether it has an MBR extended container -- and grows that container so
+# the logical /data inside it can grow. Only raspberrypi3-64 has such a
+# container, but the recipe ships fleet-wide and the script is one program on
+# every board, so the dependency does too. The `sfdisk -d` dump is also what
+# keeps `sgdisk -e` off an MBR disk, where it cannot succeed.
 #
 # e2fsprogs-dumpe2fs is what makes that guard work at all, and its absence is
 # the expensive one: with no dumpe2fs the superblock cannot be read, the guard
