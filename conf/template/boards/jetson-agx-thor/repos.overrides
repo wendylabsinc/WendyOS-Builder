@@ -12,6 +12,5 @@
 # needs to differ.
 #
 # WENDYOS_LAYER_TREE="blacksail" makes bootstrap.sh clone every upstream repo
-# under repos/blacksail/, parallel to repos/wrynose/ — the validated r38.4 /
-# JP7.1 Thor fallback tree. Switching trees never touches the other one.
+# under repos/blacksail/, the shared tree used by the whole fleet.
 WENDYOS_LAYER_TREE="blacksail"
