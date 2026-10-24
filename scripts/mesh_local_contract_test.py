@@ -69,6 +69,20 @@ class MeshLocalContractTest(unittest.TestCase):
             values[symbol] = 'm'
             self.assertNotEqual(self.run_gate(values).returncode, 0)
 
+    def test_mesh_identity_interface_requires_builtin_dummy_driver(self):
+        # LAN and BLE both create wlmesh0 before starting. The deployed IQ8
+        # and IQ9 kernels passed the old contract but could not create it.
+        for state in (None, 'n', 'm'):
+            with self.subTest(state=state):
+                values = self.all_values()
+                if state is None:
+                    values.pop('CONFIG_DUMMY', None)
+                else:
+                    values['CONFIG_DUMMY'] = state
+                result = self.run_gate(values)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('CONFIG_DUMMY must be built in', result.stderr)
+
     def test_missing_config_or_empty_contract_is_fatal(self):
         self.assertNotEqual(self.run_gate({}, missing=True).returncode, 0)
         for name in ('WENDYOS_MESH_LOCAL_BUILTIN', 'WENDYOS_MESH_LOCAL_MODULES'):

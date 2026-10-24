@@ -1,6 +1,7 @@
 # Local mesh is an IPv6 routed underlay even when container applications use
 # IPv4 VIPs. Keep the resolved kernel and installed-module contracts together.
 WENDYOS_MESH_LOCAL_BUILTIN = " \
+    CONFIG_DUMMY \
     CONFIG_IP_ADVANCED_ROUTER \
     CONFIG_IP_MULTIPLE_TABLES \
     CONFIG_IPV6_MULTIPLE_TABLES \
