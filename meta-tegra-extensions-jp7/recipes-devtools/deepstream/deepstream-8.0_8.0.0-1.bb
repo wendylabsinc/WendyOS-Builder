@@ -13,12 +13,11 @@
 #
 # r39.2 RECONCILIATIONS vs the upstream r38.4 source (blacksail meta-oe is
 # NEWER than r38.4's, so several patchelf TARGET sonames differ):
-#   * jsoncpp: upstream hardcodes libjsoncpp.so.26 (jsoncpp 1.9.6); blacksail
-#     has jsoncpp 1.9.7 -> read the target dynamically from staging instead.
-#   * libgpr:  upstream hardcodes libgpr.so.46; blacksail has grpc 1.84.0 ->
-#     read dynamically from staging.
-#   * abseil:  upstream targets libabsl_synchronization.so.2505.0.0; blacksail
-#     abseil-cpp 20260107.1 builds .so.2601.0.0 (confirmed) -> use that.
+#   * jsoncpp: upstream hardcodes libjsoncpp.so.26 -> read the target from
+#     staging instead.
+#   * libgpr:  upstream hardcodes libgpr.so.46 -> read from staging.
+#   * abseil:  upstream hardcodes libabsl_synchronization.so.2505.0.0 -> read
+#     from staging. abseil-cpp is in DEPENDS for this.
 #   * tensorrt: meta-tegra renamed the tensorrt-core recipe to tensorrt. The
 #     old name still works at build time only, so use the new one.
 #   CUDA fixups (libcublas.so.13 / libcufft.so.12 / libnpp*.so.13) are CUDA-13
@@ -70,6 +69,7 @@ DEPENDS = "glib-2.0 gstreamer1.0 gstreamer1.0-plugins-base gstreamer1.0-rtsp-ser
     tensorrt tensorrt-plugins libnvvpi4 libcufft libcublas libnpp json-glib \
     tegra-libraries-multimedia-ds tegra-libraries-multimedia yaml-cpp-080 \
     grpc protobuf tegra-libraries-nvdsseimeta libgstnvcustomhelper mosquitto jsoncpp cuda-nvrtc \
+    abseil-cpp \
 "
 # XXX--- see hack in do_install
 DEPENDS += "patchelf-native"
@@ -138,15 +138,15 @@ do_install() {
     # Some of the libraries carry the wrong SONAME in their DT_NEEDED ELF
     # header, so rewrite them to prevent broken runtime dependencies. The
     # grpc/grpc++/protobuf/protobuf-lite targets are read dynamically from
-    # staging (so they track whatever meta-oe ships); jsoncpp and gpr are read
-    # the same way here (blacksail meta-oe is newer than the r38.4 the upstream
-    # recipe hardcoded for); abseil uses the confirmed blacksail soname.
+    # staging (so they track whatever meta-oe ships); jsoncpp, gpr and abseil
+    # are read the same way here (upstream hardcoded them for r38.4).
     grpc_soname=$(${OBJDUMP} -p ${STAGING_LIBDIR}/libgrpc.so | grep SONAME | awk '{print $2}')
     grpcpp_soname=$(${OBJDUMP} -p ${STAGING_LIBDIR}/libgrpc++.so | grep SONAME | awk '{print $2}')
     protobuf_soname=$(${OBJDUMP} -p ${STAGING_LIBDIR}/libprotobuf.so | grep SONAME | awk '{print $2}')
     libprotobuf_lite_soname=$(${OBJDUMP} -p ${STAGING_LIBDIR}/libprotobuf-lite.so | grep SONAME | awk '{print $2}')
     jsoncpp_soname=$(${OBJDUMP} -p ${STAGING_LIBDIR}/libjsoncpp.so | grep SONAME | awk '{print $2}')
     gpr_soname=$(${OBJDUMP} -p ${STAGING_LIBDIR}/libgpr.so | grep SONAME | awk '{print $2}')
+    absl_sync_soname=$(${OBJDUMP} -p ${STAGING_LIBDIR}/libabsl_synchronization.so | grep SONAME | awk '{print $2}')
     patchelf --replace-needed libcufft.so libcufft.so.12 ${D}${DEEPSTREAM_PATH}/lib/libnvds_nvmultiobjecttracker.so
     patchelf --replace-needed libcublas.so libcublas.so.13 ${D}${DEEPSTREAM_PATH}/lib/libnvds_nvmultiobjecttracker.so
     patchelf --replace-needed libcufft.so libcufft.so.12 ${D}${DEEPSTREAM_PATH}/lib/libnvds_audiotransform.so
@@ -171,10 +171,9 @@ do_install() {
     bbnote "Patching libgpr NEEDED to $gpr_soname"
     patchelf --replace-needed libgpr.so.31 $gpr_soname ${D}${DEEPSTREAM_PATH}/lib/libnvds_riva_asr_grpc.so
     patchelf --replace-needed libgpr.so.31 $gpr_soname ${D}${DEEPSTREAM_PATH}/lib/libnvds_riva_tts.so
-    # abseil-cpp 20260107.1 on blacksail builds libabsl_synchronization.so.2601.0.0
-    # (upstream r38.4 targeted .2505.0.0).
-    patchelf --replace-needed libabsl_synchronization.so.2301.0.0 libabsl_synchronization.so.2601.0.0 ${D}${DEEPSTREAM_PATH}/lib/libnvds_riva_asr_grpc.so
-    patchelf --replace-needed libabsl_synchronization.so.2301.0.0 libabsl_synchronization.so.2601.0.0 ${D}${DEEPSTREAM_PATH}/lib/libnvds_riva_tts.so
+    bbnote "Patching libabsl_synchronization NEEDED to $absl_sync_soname"
+    patchelf --replace-needed libabsl_synchronization.so.2301.0.0 $absl_sync_soname ${D}${DEEPSTREAM_PATH}/lib/libnvds_riva_asr_grpc.so
+    patchelf --replace-needed libabsl_synchronization.so.2301.0.0 $absl_sync_soname ${D}${DEEPSTREAM_PATH}/lib/libnvds_riva_tts.so
     # Optical-flow plugin links VPI 3 (gone on r39.2, which has VPI 4 only) —
     # drop it, as upstream does, rather than ship a broken NEEDED.
     rm -f ${D}${DEEPSTREAM_PATH}/lib/libnvds_opticalflow_orin.so
