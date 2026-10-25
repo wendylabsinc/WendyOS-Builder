@@ -1,0 +1,56 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ChristosNtokos <chrisdokos1@gmail.com>
+Date: Sun, 25 Oct 2026 21:00:00 +0200
+Subject: [PATCH] rtl8822ce: turn on the driver's silent reset
+
+Every 2 s, xmit_status_check() reads REG_TXDMA_STATUS. When it is
+non-zero, it calls rtw_hal_sreset_reset() to recover. NVIDIA's
+autoconf.h leaves DBG_CONFIG_ERROR_RESET inside a comment, so
+sreset_reset() compiles to an empty function. A TX DMA error then
+stays set until the module is reloaded or the board is power-cycled.
+The radio still receives but cannot send, and every association
+attempt fails.
+
+Seen on a Jetson Orin Nano devkit: REG_TXDMA_STATUS=0x00000c00
+(UNKNOWN_QSEL | EP_QSEL_DIFF), 161 failed associations in an hour,
+fixed only by a power cycle.
+
+Define DBG_CONFIG_ERROR_RESET. sreset_reset() then stops the
+interface, power-cycles the MAC through IPS (the same path the driver
+uses for idle power save), and restores the association and keys.
+
+What else the define turns on in this build (PCI, no concurrent mode):
+- sreset_inprogress() reports the real flag, so the TX queue is not
+  woken and BT-coex notifications are skipped while a reset runs.
+- drv_conf.h forces CONFIG_IPS, which CONFIG_POWER_SAVING already sets.
+- The firmware-hang check (H2C mailbox not read: "fw read cmd failed")
+  now also resets, through linked_status_check().
+- rtw_iface_bcmc_sec_cam_map_restore() is compiled but has no caller
+  without CONFIG_CONCURRENT_MODE.
+- The USB-only and concurrent-mode branches stay compiled out.
+
+Upstream-Status: Pending
+Signed-off-by: ChristosNtokos <chrisdokos1@gmail.com>
+---
+ drivers/net/wireless/realtek/rtl8822ce/include/autoconf.h | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/net/wireless/realtek/rtl8822ce/include/autoconf.h b/drivers/net/wireless/realtek/rtl8822ce/include/autoconf.h
+index 9d0858e..d46371f 100644
+--- a/drivers/net/wireless/realtek/rtl8822ce/include/autoconf.h
++++ b/drivers/net/wireless/realtek/rtl8822ce/include/autoconf.h
+@@ -286,9 +286,10 @@
+ #define CONFIG_DBG_COUNTER
+ 
+ #define DBG_CONFIG_ERROR_DETECT
++/* Without this, sreset_reset() is empty and a TX DMA error is never cleared. */
++#define DBG_CONFIG_ERROR_RESET
+ /*
+ #define DBG_CONFIG_ERROR_DETECT_INT
+-#define DBG_CONFIG_ERROR_RESET
+ 
+ #define DBG_IO
+ #define DBG_DELAY_OS
+-- 
+2.50.1 (Apple Git-155)
+
