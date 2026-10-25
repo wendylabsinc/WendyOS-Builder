@@ -53,6 +53,9 @@ SRC_URI:append:qcom-wendyos = " file://sensor-loopback.cfg"
 SRC_URI:append:iq-8275-evk-wendyos = " file://intel-be200.cfg"
 SRC_URI:append:iq-9075-evk-wendyos = " file://intel-be200.cfg"
 
+# IQ8's M.2 Bluetooth USB path needs the internal hub selected and enabled.
+SRC_URI:append:iq-8275-evk-wendyos = " file://0005-arm64-dts-monaco-evk-enable-m2-usb-bluetooth.patch"
+
 python __anonymous() {
     if d.getVar('MACHINE') in ('iq-8275-evk-wendyos', 'iq-9075-evk-wendyos'):
         d.appendVarFlag('do_configure', 'postfuncs', ' wendyos_check_intel_be200')

@@ -51,8 +51,8 @@ WENDYOS_EFI_DEBUG = "0"
 # NVIDIA-only stacks.
 WENDYOS_DEEPSTREAM = "0"
 
-# More than one dwc3 controller is dual-role and registers a UDC, and the one the
-# gadget wants does not sort first, so the controller has to be named explicitly.
+# Name the gadget controller explicitly on boards with multiple USB controllers.
+# IQ8 overrides this for USB2 while its primary controller hosts the M.2 hub.
 # The Tegra-only gadget helper recipes that wendyos-image.bb pairs with this
 # setting are dropped in conf/distro/include/qcom-image.inc, exactly as the RPi
 # include does.

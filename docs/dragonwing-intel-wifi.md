@@ -3,7 +3,13 @@
 The IQ-8275 EVK (IQ8) and IQ-9075 EVK (IQ9) images include native Intel
 BE200/BE202 support for a replacement card in the M.2 Key-E slot.
 Both full image builds passed on 2026-10-26, including checks of installed
-modules, dependencies, firmware and licenses. Hardware testing is pending.
+modules, dependencies, firmware and licenses. IQ8 with a BE202 also passed
+hardware tests: 2.4/5/6 GHz traffic in both directions, WPA3-SAE, DNS/HTTPS,
+reconnect, Bluetooth LE discovery and pairing/audio with a Bose speaker.
+The bond persisted through OTA and a warm reboot; the Bose's A2DP profile
+was explicitly reconnected after the warm reboot.
+The IQ8 USB fix below was rebuilt and OTA-tested. IQ9 and BE200 hardware
+testing remain pending.
 
 ## Driver and firmware
 
@@ -29,10 +35,17 @@ license dependencies and together add about 261 MiB uncompressed.
 ## Bluetooth wiring
 
 Intel Bluetooth needs USB 2.0; the Qualcomm card's UART connection cannot
-carry it. IQ9's device tree identifies USB hub port 4 as connected to M.2.
-IQ8's connector graph describes PCIe and UART without establishing USB wiring.
-Confirm USB enumeration on both carriers, especially IQ8. Wi-Fi can work over
-PCIe even if Bluetooth has no USB connection.
+carry it. Both EVKs route M.2 USB through internal hub port 4. On IQ8, WendyOS
+selects that hub with the HS/SS routing GPIOs, releases its reset and runs the
+primary USB controller as host. These settings follow
+[Qualcomm's host-mode proposal](https://www.spinics.net/lists/devicetree/msg921693.html)
+and are scoped to `monaco-evk.dts`.
+
+**IQ8's Wendy USB gadget now uses USB2 (micro-USB), `a400000.usb`.** USB0
+remains the recovery/fastboot port. The primary controller cannot serve the
+USB0 gadget and host M.2 Bluetooth simultaneously. IQ9's gadget selection
+is unchanged. External USB enumeration on the new IQ8 gadget port still needs
+a cable test.
 
 ## Build and hardware checks
 
@@ -54,4 +67,5 @@ revision, kernel release and loaded firmware version.
    checking the carrier wiring.
 4. Refit the original Qualcomm card and verify Wi-Fi and Bluetooth still work.
 
-Wi-Fi 7 throughput, MLO, AP mode and Wi-Fi Aware/NAN need separate validation.
+Cold boots, WPA2-only APs, Wi-Fi 7 throughput, MLO, AP mode and
+Wi-Fi Aware/NAN need separate validation.

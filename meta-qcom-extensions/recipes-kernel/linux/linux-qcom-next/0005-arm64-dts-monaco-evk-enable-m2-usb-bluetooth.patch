@@ -1,0 +1,56 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Thomas Karpiniec <tom.karpiniec@outlook.com>
+Date: Mon, 26 Oct 2026 10:00:00 +1100
+Subject: [PATCH] arm64: dts: qcom: monaco-evk: enable the M.2 USB path
+
+The M.2 Bluetooth USB connection is behind port 4 of the GL3590 hub.
+Select the hub path for both USB speeds, release its reset and run the
+primary controller as host. Without these GPIO settings, switching the
+controller to host exposes only its root hubs, leaving Intel Bluetooth
+unreachable even with btusb and firmware installed.
+
+Adapt the routing and reset GPIOs from Swati Agarwal's Qualcomm host-mode
+proposal to monaco-evk.dts, keeping other Monaco carriers unchanged. The
+secondary controller remains available for the USB2 gadget port; WendyOS
+must select a400000.usb instead of a600000.usb on this board.
+
+Link: https://lore.kernel.org/all/20260430142000.3707614-1-swati.agarwal@oss.qualcomm.com/
+Upstream-Status: Pending [board-scoped adaptation of the linked Qualcomm proposal]
+Signed-off-by: Thomas Karpiniec <tom.karpiniec@outlook.com>
+---
+ arch/arm64/boot/dts/qcom/monaco-evk.dts | 27 +++++++++++++++++++++++++++
+ 1 file changed, 27 insertions(+)
+
+--- a/arch/arm64/boot/dts/qcom/monaco-evk.dts
++++ b/arch/arm64/boot/dts/qcom/monaco-evk.dts
+@@ -110 +110,28 @@
+ };
++
++&expander5 {
++	usb1-ss-select-hog {
++		gpio-hog;
++		gpios = <5 GPIO_ACTIVE_HIGH>;
++		output-high;
++	};
++};
++
++&tlmm {
++	usb1-hub-reset-hog {
++		gpio-hog;
++		gpios = <7 GPIO_ACTIVE_HIGH>;
++		output-high;
++	};
++
++	usb1-hs-select-hog {
++		gpio-hog;
++		gpios = <14 GPIO_ACTIVE_HIGH>;
++		output-high;
++	};
++};
++
++/* USB1 feeds the hub and M.2; USB2 remains available for the gadget. */
++&usb_1 {
++	dr_mode = "host";
++};
+--
+2.43.0
