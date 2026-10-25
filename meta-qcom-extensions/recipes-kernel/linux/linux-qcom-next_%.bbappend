@@ -49,11 +49,12 @@ SRC_URI:append:qcom-wendyos = " file://sensor-loopback.cfg"
 
 # Native Intel Wi-Fi 7 support for either card fitted to the EVK's M.2 Key-E
 # slot. Keep the existing ath11k stack: no out-of-tree wireless replacement is
-# needed on this kernel. qcom-wendyos excludes the Uno Q using this same recipe.
-SRC_URI:append:qcom-wendyos = " file://intel-be200.cfg"
+# needed on this kernel. Uno Q also uses qcom-wendyos, so scope this to the EVKs.
+SRC_URI:append:iq-8275-evk-wendyos = " file://intel-be200.cfg"
+SRC_URI:append:iq-9075-evk-wendyos = " file://intel-be200.cfg"
 
 python __anonymous() {
-    if 'qcom-wendyos' in (d.getVar('MACHINEOVERRIDES') or '').split(':'):
+    if d.getVar('MACHINE') in ('iq-8275-evk-wendyos', 'iq-9075-evk-wendyos'):
         d.appendVarFlag('do_configure', 'postfuncs', ' wendyos_check_intel_be200')
 }
 
