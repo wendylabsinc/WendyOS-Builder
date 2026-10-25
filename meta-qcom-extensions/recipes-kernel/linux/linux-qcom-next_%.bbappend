@@ -47,6 +47,25 @@ require recipes-kernel/linux/mesh-internet.inc
 # Remote SensorLink camera and microphone endpoints need local loopback drivers.
 SRC_URI:append:qcom-wendyos = " file://sensor-loopback.cfg"
 
+# Native Intel Wi-Fi 7 support for either card fitted to the EVK's M.2 Key-E
+# slot. Keep the existing ath11k stack: no out-of-tree wireless replacement is
+# needed on this kernel. qcom-wendyos excludes the Uno Q using this same recipe.
+SRC_URI:append:qcom-wendyos = " file://intel-be200.cfg"
+
+python __anonymous() {
+    if 'qcom-wendyos' in (d.getVar('MACHINEOVERRIDES') or '').split(':'):
+        d.appendVarFlag('do_configure', 'postfuncs', ' wendyos_check_intel_be200')
+}
+
+wendyos_check_intel_be200() {
+    config="${B}/.config"
+    [ -f "$config" ] || bbfatal "Intel BE200/BE202: no resolved kernel config at $config"
+    for symbol in CONFIG_IWLWIFI CONFIG_IWLMLD CONFIG_BT_HCIBTUSB CONFIG_BT_INTEL; do
+        grep -q "^$symbol=m$" "$config" || \
+            bbfatal "Intel BE200/BE202: $symbol must be modular for ${MACHINE}"
+    done
+}
+
 python __anonymous() {
     if 'qcom-wendyos' in (d.getVar('MACHINEOVERRIDES') or '').split(':'):
         d.appendVarFlag('do_configure', 'postfuncs', ' wendyos_check_sensor_loopback')

@@ -233,6 +233,10 @@ make setup BOARD=arduino-uno-q
 make build MACHINE=arduino-uno-q-wendyos
 ```
 
+The IQ8/IQ9 images also include native drivers and firmware for an Intel
+BE200/BE202 replacement card. See [Dragonwing Intel Wi-Fi support](docs/dragonwing-intel-wifi.md)
+for the kernel requirements, Bluetooth wiring limits, and hardware acceptance checks.
+
 > `BOARD` must be set to a board id matching a directory
 > `conf/template/boards/<board-id>/`. There is no silent default — pick the
 > correct board id up front. Each board directory contains `local.conf` and
