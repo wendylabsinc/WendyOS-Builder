@@ -32,12 +32,32 @@ python __anonymous() {
     d.appendVarFlag('do_configure', 'prefuncs', ' wendyos_install_module_sign_key')
     if d.getVar('WENDYOS_DRIVER_DEVKIT_MODULES'):
         d.appendVarFlag('do_compile_kernelmodules', 'postfuncs', ' wendyos_export_driver_modules')
+        d.appendVar('SRC_URI', ' file://kernel-config-identity.py')
+        d.appendVarFlag('do_configure', 'postfuncs', ' wendyos_set_kernel_config_identity')
     key = d.getVar('WENDYOS_MODULE_SIGN_KEY')
     if key:
         # Hash the key's contents, not just its path. Secrets are normally rotated in
         # place, and without this the kernel would restore from sstate still trusting the
         # old certificate while the pipeline signs with the new one.
         d.appendVarFlag('do_configure', 'file-checksums', ' %s:True' % key)
+}
+
+# Run after olddefconfig has resolved all fragments. Updating CONFIG_LOCALVERSION
+# here lets kbuild syncconfig generate the final release before compilation;
+# .config then carries the same identity into shared_workdir and the devkit.
+# CONFIG_LOCALVERSION_AUTO continues to identify source and patch changes.
+python wendyos_set_kernel_config_identity() {
+    import pathlib
+    import subprocess
+    import sys
+
+    helper = pathlib.Path(d.getVar('UNPACKDIR')) / 'kernel-config-identity.py'
+    config = pathlib.Path(d.getVar('B')) / '.config'
+    result = subprocess.run([sys.executable, str(helper), str(config)], text=True,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    if result.returncode:
+        bb.fatal('Native driver kernel config identity failed:\n%s' % result.stdout)
+    bb.note('Native driver kernel config identity: %s' % result.stdout.strip())
 }
 
 # Export in-tree modules, stopping at dependencies guaranteed by the base image.

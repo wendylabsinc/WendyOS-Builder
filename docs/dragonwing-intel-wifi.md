@@ -27,6 +27,12 @@ Jetson/Pi builds of the same package use
 their existing Intel backport instead. The original Qualcomm radio packages
 remain in the base image.
 
+IQ kernel releases include a deterministic fingerprint of the resolved kernel
+configuration as well as the existing source/patch Git identity. Config-only
+changes therefore select a new matching devkit and add-on automatically. The
+same release travels through the kernel, devkit, published metadata and module
+vermagic; no hand-maintained ABI suffix is required.
+
 The pinned qcom-next 7.2 kernel needs `CONFIG_IWLMLD` for these cards
 (`8086:272b`) and accepts firmware c102–c106. The IQ package fetches c106 and
 PNVM from the manifest's pinned linux-firmware commit and verifies their
