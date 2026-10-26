@@ -1,5 +1,5 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: Thomas Karpiniec <tom.karpiniec@outlook.com>
+From: Wendy Labs <engineering@wendy.dev>
 Date: Mon, 26 Oct 2026 12:30:00 +1100
 Subject: [PATCH] wifi: iwlwifi: mld: advertise secure NAN capability
 
@@ -12,7 +12,7 @@ it only when iwl_mld_nan_supported() enables NAN, preserving that function's
 firmware command-version and NVM checks.
 
 Upstream-Status: Backport [https://kernel.googlesource.com/pub/scm/linux/kernel/git/iwlwifi/backport-iwlwifi/+/070e486a6d462c79bf6356832af28e45c1b94519/drivers/net/wireless/intel/iwlwifi/mld/mac80211.c]
-Signed-off-by: Thomas Karpiniec <tom.karpiniec@outlook.com>
+Signed-off-by: Wendy Labs <engineering@wendy.dev>
 ---
  drivers/net/wireless/intel/iwlwifi/mld/mac80211.c | 2 ++
  1 file changed, 2 insertions(+)
