@@ -14,6 +14,7 @@ sys.path.insert(0, str(SCRIPT.parent))
 spec = importlib.util.spec_from_file_location('sensor_loopback_check', SCRIPT)
 check = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(check)
+GATED_IMAGES = ('conf/distro/include/qcom-image.inc', 'conf/distro/include/rpi-image.inc')
 
 
 class SensorLoopbackImageTests(unittest.TestCase):
@@ -89,6 +90,33 @@ class SensorLoopbackImageTests(unittest.TestCase):
                 config = {key: value for key, value in self.config.items() if key != symbol}
                 self.assertTrue(any(symbol in error for error in check.validate(config, self.root, self.release)))
 
+    def test_builtin_sound_core_passes(self):
+        # Pi 4/5: the USB gadget fragment builds the sound core in, so snd-aloop has no deps.
+        self.release = '6.18.33-v8-16k-wendy-mesh2'
+        self.modules = self.root / 'lib/modules' / self.release
+        self.config = {
+            'CONFIG_SND': 'y',
+            'CONFIG_SND_ALOOP': 'm',
+            'CONFIG_VIDEO_DEV': 'm',
+            'CONFIG_VIDEOBUF2_VMALLOC': 'm',
+        }
+        media = 'kernel/drivers/media'
+        self.files = {
+            'extra/v4l2loopback.ko.xz': [f'{media}/v4l2-core/videodev.ko.xz', f'{media}/mc/mc.ko.xz'],
+            f'{media}/v4l2-core/videodev.ko.xz': [f'{media}/mc/mc.ko.xz'],
+            f'{media}/mc/mc.ko.xz': [],
+            f'{media}/common/videobuf2/videobuf2-vmalloc.ko.xz': [
+                f'{media}/common/videobuf2/videobuf2-memops.ko.xz',
+                f'{media}/common/videobuf2/videobuf2-common.ko.xz',
+                f'{media}/mc/mc.ko.xz'],
+            f'{media}/common/videobuf2/videobuf2-memops.ko.xz': [
+                f'{media}/common/videobuf2/videobuf2-common.ko.xz', f'{media}/mc/mc.ko.xz'],
+            f'{media}/common/videobuf2/videobuf2-common.ko.xz': [f'{media}/mc/mc.ko.xz'],
+            'kernel/sound/drivers/snd-aloop.ko.xz': [],
+        }
+        self.write_modules()
+        self.assertEqual(self.validate(), [])
+
     def test_audio_must_remain_modular(self):
         self.config['CONFIG_SND_ALOOP'] = 'y'
         self.assertTrue(any('CONFIG_SND_ALOOP must be modular' in error for error in self.validate()))
@@ -108,12 +136,14 @@ class SensorLoopbackImageTests(unittest.TestCase):
 
 class SensorLoopbackBuildContractTests(unittest.TestCase):
     def test_every_gated_image_installs_both_drivers(self):
-        image = (ROOT / 'conf/distro/include/qcom-image.inc').read_text()
-        self.assertIn('inherit sensor-loopback-check', image)
-        installed = re.findall(r'^IMAGE_INSTALL:append = "([^"]*)"', image, re.M)
-        packages = ' '.join(installed).split()
-        self.assertIn('v4l2loopback', packages)
-        self.assertIn('kernel-module-snd-aloop', packages)
+        for path in GATED_IMAGES:
+            with self.subTest(image=path):
+                image = (ROOT / path).read_text()
+                self.assertIn('inherit sensor-loopback-check', image)
+                installed = re.findall(r'^IMAGE_INSTALL:append = "([^"]*)"', image, re.M)
+                packages = ' '.join(installed).split()
+                self.assertIn('v4l2loopback', packages)
+                self.assertIn('kernel-module-snd-aloop', packages)
         gate = (ROOT / 'classes/sensor-loopback-check.bbclass').read_text()
         self.assertIn('do_rootfs[postfuncs] += "wendyos_check_sensor_loopback_rootfs"', gate)
         self.assertIn('do_rootfs[depends] += "${WENDYOS_KERNEL_OUTPUTS_DEPENDS}"', gate)
@@ -123,7 +153,7 @@ class SensorLoopbackBuildContractTests(unittest.TestCase):
 
     def test_shared_recipe_and_visible_kconfig_selectors(self):
         recipe = ROOT / 'recipes-kernel/v4l2loopback/v4l2loopback_0.15.4.bb'
-        self.assertIn('COMPATIBLE_MACHINE = "(tegra|qcom-wendyos)"', recipe.read_text())
+        self.assertIn('COMPATIBLE_MACHINE = "(tegra|qcom-wendyos|rpi)"', recipe.read_text())
         self.assertFalse((ROOT / 'meta-tegra-extensions-jp7/recipes-kernel/v4l2loopback' / recipe.name).exists())
         fragment = ROOT / 'meta-qcom-extensions/recipes-kernel/linux/linux-qcom-next/sensor-loopback.cfg'
         config = check.read_config(fragment)

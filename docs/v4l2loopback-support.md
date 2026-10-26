@@ -1,9 +1,9 @@
 # V4L2 and ALSA loopback support
 
-WendyOS includes `v4l2loopback` on Tegra and Qualcomm images. The agent uses
-its control device to create virtual cameras for IP cameras and SensorLink
-sources. Qualcomm images also include `snd-aloop`, which exposes SensorLink
-microphones through ALSA PCM devices.
+WendyOS includes `v4l2loopback` on Tegra, Qualcomm and Raspberry Pi images.
+The agent uses its control device to create virtual cameras for IP cameras and
+SensorLink sources. Qualcomm and Raspberry Pi images also include `snd-aloop`,
+which exposes SensorLink microphones through ALSA PCM devices.
 
 ## Packages and loading
 
@@ -17,6 +17,7 @@ must check the agent's definitions against the new header.
 Tegra images require the package through `packagegroup-wendyos-tegra`.
 `qcom-image.inc` explicitly installs `v4l2loopback` and
 `kernel-module-snd-aloop` on every `qcom-wendyos` target, including Uno Q.
+`rpi-image.inc` does the same on every `rpi` target (Pi 3, Pi 4 and Pi 5).
 These are required image packages. Missing drivers fail the image build.
 
 The v4l2loopback recipe generates module loading and modprobe configuration
@@ -31,6 +32,9 @@ The agent loads `snd-aloop` on demand using `modprobe snd-aloop`.
 The Qualcomm kernel fragment preserves the BSP's modular sound and media
 stacks and requires `CONFIG_SND_ALOOP=m`. ALSA selects the PCM and timer
 dependencies. No ALSA card is created by an additional boot autoload rule.
+Raspberry Pi kernels need no fragment: the RPi defconfigs set
+`CONFIG_SND_ALOOP=m` and build media and UVC as modules, which resolves
+`CONFIG_VIDEO_DEV` and `CONFIG_VIDEOBUF2_VMALLOC` to `m`.
 
 ## Build checks
 
@@ -40,8 +44,9 @@ append also checks those settings and requires `CONFIG_SND_ALOOP=m`
 after Kconfig resolves its fragments.
 
 After `do_rootfs` generates `modules.dep`, `sensor-loopback-check.bbclass`
-validates each Qualcomm image. It checks both loopback driver files and
-every module dependency against the compiled kernel release. A module tree
+validates each Qualcomm and Raspberry Pi image. It checks both loopback
+driver files and every module dependency against the compiled kernel
+release. A module tree
 for a different kernel, a missing dependency, or an absent driver fails
 before image and OTA artifacts are produced. This catches the IQ9 failure
 where the kernel enabled ALSA loopback but the image omitted its package,
