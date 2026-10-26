@@ -15,7 +15,7 @@ Signed-off-by: Thomas Karpiniec <tom.karpiniec@outlook.com>
 --- a/drivers/net/wireless/intel/iwlwifi/mld/nan.c
 +++ b/drivers/net/wireless/intel/iwlwifi/mld/nan.c
 @@ -339,3 +339,4 @@
- 
+
 -	cfg80211_nan_cluster_joined(wdev, cluster_id, new_cluster, GFP_KERNEL);
 +	ieee80211_nan_cluster_joined(mld->nan_device_vif, cluster_id,
 +				     new_cluster, GFP_KERNEL);
