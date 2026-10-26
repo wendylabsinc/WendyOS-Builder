@@ -48,7 +48,8 @@ pinned recipe. The broad Intel firmware bundles stay out of the base OS.
 The manifest's `variants_by_device` selects these build inputs; both the build
 and pack steps require a device identity matching the devkit. The IQ kernel
 backports the secure-NAN capability and cluster notification fixes needed by
-`wendyos-nan`; it does not replace cfg80211/mac80211.
+`wendyos-nan` and the Wendy Net NAN carrier; it does not replace cfg80211/mac80211.
+Carrier use also requires a compatible agent; see the validation notes below.
 
 Both EVKs route M.2 Bluetooth through an internal USB hub. IQ8's base image
 configures that hub and moves its Wendy USB gadget to USB2 (micro-USB); USB0

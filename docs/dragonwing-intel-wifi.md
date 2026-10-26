@@ -82,10 +82,31 @@ with five TCP and five UDP exchanges in each direction per run. Sockets were
 bound to the dedicated NAN data interfaces, preventing LAN fallback. IQ8
 remained associated on 6 GHz in the first run and 5 GHz in the second. Twelve
 consecutive start/stop cycles passed without kernel errors. This establishes
-basic NAN transport; secure NDP, Wendy Net integration, throughput and
-long-duration operation remain unqualified. After OTA to the final image, the
+basic NAN transport; secure NDP, throughput and long-duration operation
+remain unqualified. After OTA to the final image, the
 peer TCP/UDP check also passed while IQ8 maintained 5 GHz station Wi-Fi and
 streamed A2DP audio to Bose.
+
+Actual Wendy Net NAN routing also passed between IQ8 and Thor: five IPv6 pings
+with 1,200-byte payloads in each direction, with no loss. IQ8 had only the NAN
+carrier enabled, no established LAN-carrier sockets, and increasing NAN data
+interface counters; both boards retained 6 GHz station Wi-Fi. Thor initially
+reported `NAN_PUBLISH: FAIL`, then recovered automatically. This checks routed
+carrier traffic; application-service discovery and a long soak remain untested.
+
+These carrier tests used a development agent combining
+[WendyOS #2466](https://github.com/wendylabsinc/WendyOS/pull/2466) and
+[#2488](https://github.com/wendylabsinc/WendyOS/pull/2488). The stock
+2026.10.25 agent failed with `mldsa: invalid SignerOpts` after IQ8's fresh
+ML-DSA enrollment. The OS/driver package does not supply that agent fix.
+
+The image includes [Builder #318](https://github.com/wendylabsinc/WendyOS-Builder/pull/318):
+`CONFIG_DUMMY=m`, with installed-module validation. On a fresh IQ8 boot, dummy
+was initially unloaded; enabling mesh automatically loaded it and created
+`wlmesh0`. Authenticated LAN and BLE-only routing each passed three IPv6 pings
+without loss using the compatible agent. No manual module loading was needed.
+[WendyOS #2482](https://github.com/wendylabsinc/WendyOS/pull/2482) is an alternative
+loopback-based mesh identity design and was not included in these tests.
 
 Use the [normal board build commands](../README.md), or run
 `bitbake wendyos-image` in a prepared environment for either machine:
