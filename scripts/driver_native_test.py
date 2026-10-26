@@ -4,7 +4,10 @@ import hashlib
 import json
 from pathlib import Path
 import tempfile
+import textwrap
+from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 from scripts.resolve_driver_manifest import resolve
 from scripts.stage_native_driver import stage
@@ -81,6 +84,17 @@ class NativeTests(unittest.TestCase):
         with self.assertRaises(KeyError):
             self.run_stage()
 
+    def test_base_image_dependency_is_not_copied(self):
+        self.index["bus"] = {"provided_by": "base-image"}
+        # A stale binary in the devkit must not make the base marker a payload.
+        self.run_stage()
+        self.assertEqual({p.name for p in self.out.iterdir()}, {"card.ko"})
+
+    def test_unknown_provider_does_not_silently_skip_dependency(self):
+        self.index["bus"] = {"provided_by": "unknown"}
+        with self.assertRaises(KeyError):
+            self.run_stage()
+
     def test_corrupt_module_fails(self):
         (self.devkit / "native-modules/card.ko").write_bytes(b"corrupt")
         with self.assertRaisesRegex(ValueError, "checksum"):
@@ -90,6 +104,64 @@ class NativeTests(unittest.TestCase):
         self.index["card"]["file"] = "../outside.ko"
         with self.assertRaisesRegex(ValueError, "unsafe"):
             self.run_stage()
+
+
+def bitbake_function(path, name):
+    source = (ROOT / path).read_text()
+    return textwrap.dedent(source.split('python ' + name + '() {\n', 1)[1].split('\n}', 1)[0])
+
+
+class ExportTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.build = self.root / 'build'
+        self.build.mkdir()
+        self.deps = {'card': 'helper,mac80211', 'helper': 'bluetooth',
+                     'mac80211': 'cfg80211', 'cfg80211': '', 'bluetooth': 'crypto'}
+        for name in self.deps:
+            (self.build / (name + '.ko')).write_bytes(name.encode())
+        (self.build / 'modules.order').write_text(''.join(name + '.o\n' for name in self.deps))
+        self.values = {'B': str(self.build), 'STAGING_KERNEL_BUILDDIR': str(self.root / 'shared'),
+                       'RECIPE_SYSROOT_NATIVE': str(self.root),
+                       'WENDYOS_DRIVER_DEVKIT_MODULES': 'card',
+                       'WENDYOS_DRIVER_BASE_MODULES': 'cfg80211 mac80211 bluetooth'}
+        self.code = bitbake_function('recipes-kernel/linux/driver-extensions.inc',
+                                    'wendyos_export_driver_modules')
+
+    def export(self):
+        def fatal(message):
+            raise ValueError(message)
+
+        with patch('subprocess.check_output', side_effect=lambda args, **kw: self.deps[Path(args[-1]).stem]):
+            exec(self.code, {'d': SimpleNamespace(getVar=self.values.get),
+                             'bb': SimpleNamespace(fatal=fatal)})
+        return self.root / 'shared/wendyos-driver-modules'
+
+    def test_export_and_stage_stop_at_base_image_boundary(self):
+        payload = self.export()
+        index = json.loads((payload / 'index.json').read_text())
+        self.assertEqual({p.name for p in payload.iterdir()}, {'index.json', 'card.ko', 'helper.ko'})
+        self.assertEqual(index['mac80211'], {'provided_by': 'base-image'})
+        self.assertEqual(index['bluetooth'], {'provided_by': 'base-image'})
+        self.assertNotIn('cfg80211', index)
+        devkit = self.root / 'devkit'
+        devkit.mkdir()
+        payload.rename(devkit / 'native-modules')
+        output = self.root / 'output'
+        stage(devkit, {'build': {'modules': ['card']}}, output)
+        self.assertEqual({p.name for p in output.iterdir()}, {'card.ko', 'helper.ko'})
+
+    def test_unprovided_dependency_cannot_be_omitted(self):
+        self.deps['helper'] = 'missing'
+        with self.assertRaisesRegex(ValueError, 'expected one built module for missing'):
+            self.export()
+
+    def test_module_cannot_belong_to_both_image_and_addon(self):
+        self.values['WENDYOS_DRIVER_DEVKIT_MODULES'] = 'card mac80211'
+        with self.assertRaisesRegex(ValueError, 'also belong to the base image'):
+            self.export()
 
 
 if __name__ == "__main__":

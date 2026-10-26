@@ -2,6 +2,7 @@
 # Required from wendyos-image.bb when MACHINEOVERRIDES contains 'qcom-wendyos'.
 
 inherit sensor-loopback-check
+inherit native-driver-check
 
 # SensorLink mounts remote cameras and microphones as local V4L2/ALSA devices.
 # Hard image requirements apply to every qcom-wendyos target, including boards

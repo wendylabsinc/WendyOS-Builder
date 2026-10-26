@@ -23,6 +23,9 @@ def stage(devkit, manifest, output):
         if name in selected:
             return
         entry = index[name]
+        if entry.get("provided_by") == "base-image":
+            selected.add(name)
+            return
         filename = entry["file"]
         if Path(filename).name != filename or not filename.endswith(".ko"):
             raise ValueError("unsafe native module filename")

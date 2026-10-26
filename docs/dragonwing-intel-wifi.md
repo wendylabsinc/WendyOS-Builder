@@ -19,8 +19,11 @@ A locally built package can instead be installed with
 workflow to stage a package matching the target kernel.
 
 The IQ packages contain native `iwlwifi`, `iwlmld`, `btusb` and `btintel`
-modules from the exact kernel build, with their dependencies. They keep the
-base kernel's cfg80211/mac80211 stack. Jetson/Pi builds of the same package use
+modules from the exact kernel build, with dependencies absent from the base
+image. The base image supplies cfg80211, mac80211 and bluetooth, including
+their dependency closure; image acceptance checks require these installed
+modules for the matching kernel. The add-on never shadows these shared stacks.
+Jetson/Pi builds of the same package use
 their existing Intel backport instead. The original Qualcomm radio packages
 remain in the base image.
 
@@ -29,8 +32,7 @@ The pinned qcom-next 7.2 kernel needs `CONFIG_IWLMLD` for these cards
 PNVM from the manifest's pinned linux-firmware commit and verifies their
 SHA-256 hashes. Bluetooth firmware comes from the image's pinned recipe:
 the BE202 `ibt-0291-0291` pair and BE200 controller variants. Both redistribution notices are included.
-The IQ8 package is about 3.5 MiB compressed (10.5 MiB of modules and firmware),
-stored on `/data` for each installed kernel version. Retaining a rollback
+The package is stored on `/data` for each installed kernel version. Retaining a rollback
 kernel can retain another package; it does not consume either rootfs slot.
 The general Intel firmware bundles stay out of the base image. The Jetson/Pi
 package's c107 firmware must not be substituted for the IQ payload. Recheck

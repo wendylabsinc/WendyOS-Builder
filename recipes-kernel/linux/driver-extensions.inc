@@ -40,7 +40,7 @@ python __anonymous() {
         d.appendVarFlag('do_configure', 'file-checksums', ' %s:True' % key)
 }
 
-# Export configured in-tree modules with their complete module dependency closure.
+# Export in-tree modules, stopping at dependencies guaranteed by the base image.
 # The devkit packages these exact binaries instead of rebuilding a wireless stack
 # against a different source tree. This task runs after shared_workdir and modules.
 python wendyos_export_driver_modules() {
@@ -60,10 +60,17 @@ python wendyos_export_driver_modules() {
         path = build / Path(relative).with_suffix('.ko')
         available.setdefault(path.stem.replace('-', '_'), []).append(path)
     exported = {}
+    base_modules = set((d.getVar('WENDYOS_DRIVER_BASE_MODULES') or '').replace('-', '_').split())
+    requested = d.getVar('WENDYOS_DRIVER_DEVKIT_MODULES').replace('-', '_').split()
+    if base_modules.intersection(requested):
+        bb.fatal('Driver devkit: requested add-on modules also belong to the base image')
 
     def export(name):
         name = name.replace('-', '_')
         if name in exported:
+            return
+        if name in base_modules:
+            exported[name] = {'provided_by': 'base-image'}
             return
         paths = available.get(name, [])
         if len(paths) != 1 or not paths[0].is_file():
@@ -77,7 +84,7 @@ python wendyos_export_driver_modules() {
         for dependency in dependencies:
             export(dependency)
 
-    for name in d.getVar('WENDYOS_DRIVER_DEVKIT_MODULES').split():
+    for name in requested:
         export(name)
     (dest / 'index.json').write_text(json.dumps(exported, indent=2) + '\n')
 }

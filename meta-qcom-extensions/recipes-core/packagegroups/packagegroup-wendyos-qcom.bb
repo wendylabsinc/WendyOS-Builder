@@ -39,6 +39,10 @@ RDEPENDS:${PN} = " \
     kernel-module-uvcvideo \
     "
 
+# The native Intel add-on delegates these shared stacks to the image. Require
+# packages rather than relying on recommendations or incidental dependencies.
+RDEPENDS:${PN} += "${@' '.join('kernel-module-' + name.replace('_', '-') for name in (d.getVar('WENDYOS_DRIVER_BASE_MODULES') or '').split())}"
+
 # The Wi-Fi stack for the WCN6855 in the M.2 slot. meta-qcom supplies all three
 # through RRECOMMENDS, which bitbake drops in silence; without regulatory.db
 # cfg80211 also falls back to the world domain and 5 GHz goes passive-only.

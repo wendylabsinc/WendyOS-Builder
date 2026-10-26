@@ -119,10 +119,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--kernel-release", required=True)
     parser.add_argument("--builtin", action="append", default=[])
     parser.add_argument("--module", action="append", default=[])
+    parser.add_argument("--external-module", action="append", default=[])
     args = parser.parse_args(argv)
     try:
         errors = validate(read_config(args.config), args.rootfs, args.kernel_release,
-                          args.builtin, module_contract(args.module))
+                          args.builtin,
+                          module_contract(args.module) if args.module or not args.external_module else {},
+                          args.external_module)
     except (OSError, ValueError) as error:
         errors = [str(error)]
     for error in errors:
