@@ -14,13 +14,20 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class VariantTests(unittest.TestCase):
-    def test_iq_uses_native_binaries_and_sdk_firmware(self):
+    def test_iq_uses_native_modules_and_nan_firmware(self):
         manifest = json.loads((ROOT / "drivers/intel-be202/driver.json").read_text())
         for device in ("dragonwing-iq-8275", "dragonwing-iq-9075"):
             resolved = resolve(manifest, device)
             self.assertEqual(resolved["build"]["kind"], "kernel-modules")
             self.assertEqual(resolved["patches"], [])
-            self.assertEqual(resolved["firmware"], [])
+            self.assertEqual({entry["path"] for entry in resolved["firmware"]}, {
+                "iwlwifi-gl-c0-fm-c0-c106.ucode", "iwlwifi-gl-c0-fm-c0.pnvm",
+                "LICENCE.iwlwifi_firmware",
+            })
+            # Keep IQ below this kernel's c106 API ceiling, with the same
+            # NAN-capable firmware and notice already pinned for Jetson.
+            for entry in resolved["firmware"]:
+                self.assertIn(entry, manifest["firmware"])
             self.assertTrue(resolved["source"]["devkit"])
         for device in ("jetson-agx-thor", "jetson-orin-nano", "raspberry-pi-5"):
             resolved = resolve(manifest, device)

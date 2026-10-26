@@ -105,7 +105,23 @@
         "firmware_from_devkit": true
       },
       "patches": [],
-      "firmware": []
+      "firmware": [
+        {
+          "path": "iwlwifi-gl-c0-fm-c0-c106.ucode",
+          "sha256": "39a016632105fb327ba45f084a9d7f3775f3d238c20830ec9825d1773affde4d",
+          "url": "https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/plain/intel/iwlwifi/iwlwifi-gl-c0-fm-c0-c106.ucode?id=e981caea6ed33c48d25b7dbf473327dbd01df163"
+        },
+        {
+          "path": "iwlwifi-gl-c0-fm-c0.pnvm",
+          "sha256": "f481e3b0403ca43a0a444b01c04fa4d1582868afcb026b1e697905f0039ccfa3",
+          "url": "https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/plain/intel/iwlwifi/iwlwifi-gl-c0-fm-c0.pnvm?id=e981caea6ed33c48d25b7dbf473327dbd01df163"
+        },
+        {
+          "path": "LICENCE.iwlwifi_firmware",
+          "sha256": "16d5040c7cf851fc693b7542e20870935b99802533ea1bfd231c377a2305e5c5",
+          "url": "https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/plain/LICENSES/LICENCE.iwlwifi_firmware?id=e981caea6ed33c48d25b7dbf473327dbd01df163"
+        }
+      ]
     },
     "dragonwing-iq-9075": {
       "source": {
@@ -117,7 +133,23 @@
         "firmware_from_devkit": true
       },
       "patches": [],
-      "firmware": []
+      "firmware": [
+        {
+          "path": "iwlwifi-gl-c0-fm-c0-c106.ucode",
+          "sha256": "39a016632105fb327ba45f084a9d7f3775f3d238c20830ec9825d1773affde4d",
+          "url": "https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/plain/intel/iwlwifi/iwlwifi-gl-c0-fm-c0-c106.ucode?id=e981caea6ed33c48d25b7dbf473327dbd01df163"
+        },
+        {
+          "path": "iwlwifi-gl-c0-fm-c0.pnvm",
+          "sha256": "f481e3b0403ca43a0a444b01c04fa4d1582868afcb026b1e697905f0039ccfa3",
+          "url": "https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/plain/intel/iwlwifi/iwlwifi-gl-c0-fm-c0.pnvm?id=e981caea6ed33c48d25b7dbf473327dbd01df163"
+        },
+        {
+          "path": "LICENCE.iwlwifi_firmware",
+          "sha256": "16d5040c7cf851fc693b7542e20870935b99802533ea1bfd231c377a2305e5c5",
+          "url": "https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/plain/LICENSES/LICENCE.iwlwifi_firmware?id=e981caea6ed33c48d25b7dbf473327dbd01df163"
+        }
+      ]
     }
   }
 }

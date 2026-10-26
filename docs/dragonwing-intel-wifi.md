@@ -26,14 +26,23 @@ their existing Intel backport instead. The original Qualcomm radio packages
 remain in the base image.
 
 The pinned qcom-next 7.2 kernel needs `CONFIG_IWLMLD` for these cards
-(`8086:272b`) and accepts firmware c102–c106. The IQ package includes c103 and
-PNVM from the pinned linux-firmware recipe, the BE202 `ibt-0291-0291`
-Bluetooth pair, BE200 controller variants and both redistribution notices.
-The IQ8 package is about 3.5 MiB compressed (10.6 MiB of modules and firmware),
-stored on `/data` rather than duplicated in the OS slots. The general Intel
-firmware bundles stay out of the base image. The Jetson/Pi package's c107
+(`8086:272b`) and accepts firmware c102–c106. The IQ package fetches c106 and
+PNVM from the manifest's pinned linux-firmware commit and verifies their
+SHA-256 hashes. Bluetooth firmware
+comes from the image's pinned recipe: the BE202 `ibt-0291-0291` pair and BE200
+controller variants. Both redistribution notices are included.
+The IQ8 package is about 3.5 MiB compressed (10.5 MiB of modules and firmware),
+stored on `/data` for each installed kernel version. Retaining a rollback
+kernel can retain another package; it does not consume either rootfs slot.
+The general Intel firmware bundles stay out of the base image. The Jetson/Pi package's c107
 firmware must not be substituted for the IQ payload.
 Recheck compatibility when updating either pin.
+
+For NAN, c103 lacks the firmware command versions required by IWLMLD. The
+IQ kernel backports two fixes from the pinned Intel backport: advertise the
+secure-NAN capability needed to install management keys, and update mac80211's
+cluster ID so its receive filter accepts peer discovery and data frames. The
+package continues to use the native wireless stack.
 
 ## Bluetooth wiring
 
@@ -67,6 +76,17 @@ the device to the lean base; reinstallation restored both radios. A2DP was
 explicitly selected for audio; automatic profile selection and listening
 confirmation remain pending. IQ9 and BE200 hardware testing remain pending.
 
+NAN discovery and open data paths passed between IQ8/BE202 and an AGX Thor
+with BE202 using `wendyos-nan`. IQ8 was tested as both initiator and responder,
+with five TCP and five UDP exchanges in each direction per run. Sockets were
+bound to the dedicated NAN data interfaces, preventing LAN fallback. IQ8
+remained associated on 6 GHz in the first run and 5 GHz in the second. Twelve
+consecutive start/stop cycles passed without kernel errors. This establishes
+basic NAN transport; secure NDP, Wendy Net integration, throughput and
+long-duration operation remain unqualified. After OTA to the final image, the
+peer TCP/UDP check also passed while IQ8 maintained 5 GHz station Wi-Fi and
+streamed A2DP audio to Bose.
+
 Use the [normal board build commands](../README.md), or run
 `bitbake wendyos-image` in a prepared environment for either machine:
 `iq-8275-evk-wendyos` or `iq-9075-evk-wendyos`.
@@ -85,5 +105,5 @@ revision, kernel release and loaded firmware version.
    checking the carrier wiring.
 4. Refit the original Qualcomm card and verify Wi-Fi and Bluetooth still work.
 
-Cold boots, WPA2-only APs, Wi-Fi 7 throughput, MLO, AP mode and
-Wi-Fi Aware/NAN need separate validation.
+Cold boots, WPA2-only APs, Wi-Fi 7 throughput, MLO and AP mode need
+separate validation. NAN coverage is described above.

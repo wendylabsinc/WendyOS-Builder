@@ -1,0 +1,30 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Thomas Karpiniec <tom.karpiniec@outlook.com>
+Date: Mon, 26 Oct 2026 12:30:00 +1100
+Subject: [PATCH] wifi: iwlwifi: mld: advertise secure NAN capability
+
+The driver implements NAN key handling but does not advertise SECURE_NAN.
+Consequently nl80211_key_allowed() rejects NAN keys, and wpa_supplicant
+2.12 fails NAN startup while installing its own IGTK.
+
+Match the capability declaration in Intel's pinned backport driver. Set
+it only when iwl_mld_nan_supported() enables NAN, preserving that function's
+firmware command-version and NVM checks.
+
+Upstream-Status: Backport [https://kernel.googlesource.com/pub/scm/linux/kernel/git/iwlwifi/backport-iwlwifi/+/070e486a6d462c79bf6356832af28e45c1b94519/drivers/net/wireless/intel/iwlwifi/mld/mac80211.c]
+Signed-off-by: Thomas Karpiniec <tom.karpiniec@outlook.com>
+---
+ drivers/net/wireless/intel/iwlwifi/mld/mac80211.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+--- a/drivers/net/wireless/intel/iwlwifi/mld/mac80211.c
++++ b/drivers/net/wireless/intel/iwlwifi/mld/mac80211.c
+@@ -272,2 +272,4 @@ static void iwl_mld_hw_set_nan(struct iwl_mld *mld)
+-	hw->wiphy->interface_modes |= BIT(NL80211_IFTYPE_NAN);
+-	hw->wiphy->interface_modes |= BIT(NL80211_IFTYPE_NAN_DATA);
++	hw->wiphy->interface_modes |= BIT(NL80211_IFTYPE_NAN);
++	hw->wiphy->interface_modes |= BIT(NL80211_IFTYPE_NAN_DATA);
++
++	wiphy_ext_feature_set(hw->wiphy, NL80211_EXT_FEATURE_SECURE_NAN);
+--
+2.43.0

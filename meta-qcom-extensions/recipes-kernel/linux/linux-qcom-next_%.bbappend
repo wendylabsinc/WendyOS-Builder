@@ -51,8 +51,8 @@ SRC_URI:append:qcom-wendyos = " file://sensor-loopback.cfg"
 # Native Intel Wi-Fi 7 support for either card fitted to the EVK's M.2 Key-E
 # slot. Keep the existing ath11k stack: no out-of-tree wireless replacement is
 # needed on this kernel. Uno Q also uses qcom-wendyos, so scope this to the EVKs.
-SRC_URI:append:iq-8275-evk-wendyos = " file://intel-be200.cfg"
-SRC_URI:append:iq-9075-evk-wendyos = " file://intel-be200.cfg"
+SRC_URI:append:iq-8275-evk-wendyos = " file://intel-be200.cfg file://0006-iwlwifi-mld-advertise-secure-nan.patch file://0007-iwlwifi-mld-update-nan-cluster.patch"
+SRC_URI:append:iq-9075-evk-wendyos = " file://intel-be200.cfg file://0006-iwlwifi-mld-advertise-secure-nan.patch file://0007-iwlwifi-mld-update-nan-cluster.patch"
 
 # IQ8's M.2 Bluetooth USB path needs the internal hub selected and enabled.
 SRC_URI:append:iq-8275-evk-wendyos = " file://0005-arm64-dts-monaco-evk-enable-m2-usb-bluetooth.patch"

@@ -60,16 +60,16 @@ WENDYOS_USB_GADGET = "1"
 WENDYOS_USB_UDC = "a600000.usb"
 
 # Install Intel support through the same optional driver add-on path as Jetson.
-# The devkit carries the native modules and only the firmware for these cards;
-# neither the Intel modules nor the broad firmware bundles enter the base image.
+# The devkit carries the native modules and selected Bluetooth firmware;
+# the driver manifest pins newer Wi-Fi firmware with the required NAN APIs.
+# Neither the Intel modules nor the broad firmware bundles enter the base image.
 WENDYOS_DRIVER_EXTENSIONS ?= "1"
 WENDYOS_DRIVER_DEVKIT_MODULES = "iwlwifi iwlmld btusb btintel"
 WENDYOS_DRIVER_DEVKIT_FIRMWARE = " \
-    iwlwifi-gl-c0-fm-c0-c103.ucode iwlwifi-gl-c0-fm-c0.pnvm \
     intel/ibt-0291-0291.sfi intel/ibt-0291-0291.ddc \
     intel/ibt-0040-0041.sfi intel/ibt-0040-0041.ddc \
     intel/ibt-0041-0041.sfi intel/ibt-0041-0041.ddc \
-    LICENCE.iwlwifi_firmware LICENCE.ibt_firmware \
+    LICENCE.ibt_firmware \
     "
 
 # Package stripping skips signed modules. Strip in kbuild before signing, for
