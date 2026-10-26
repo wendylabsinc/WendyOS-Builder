@@ -14,6 +14,24 @@
 # moving either version.
 #
 # Unconditional because this layer is only in BBLAYERS for the Dragonwing boards
-# (conf/template/include/bblayers/qcom.inc). Delete this file once SRCREV_OECORE
-# moves past linux-firmware 20260810.
+# (conf/template/include/bblayers/qcom.inc). Remove this workaround once
+# SRCREV_OECORE moves past linux-firmware 20260810.
 SRC_URI:remove = "file://0001-qcom-sa8775p-update-signature-on-cdsp1-firmware.patch"
+
+WENDYOS_DRIVER_DEVKIT_FIRMWARE ?= ""
+
+# linux-firmware deliberately excludes its payload from the sysroot. Export
+# only the optional driver bundle's selected files for the kernel devkit.
+python __anonymous() {
+    if d.getVar('WENDYOS_DRIVER_DEVKIT_FIRMWARE'):
+        d.appendVar('SYSROOT_PREPROCESS_FUNCS', ' wendyos_stage_driver_firmware')
+}
+
+wendyos_stage_driver_firmware() {
+    for firmware in ${WENDYOS_DRIVER_DEVKIT_FIRMWARE}; do
+        source=${D}${nonarch_base_libdir}/firmware/$firmware
+        [ -f "$source" ] || bbfatal "driver firmware is missing: $firmware"
+        install -D -m 0644 "$source" \
+            ${SYSROOT_DESTDIR}/sysroot-only/wendyos-driver-firmware/$firmware
+    done
+}

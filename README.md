@@ -234,7 +234,7 @@ make build MACHINE=arduino-uno-q-wendyos
 ```
 
 See [Intel BE200/BE202 support on IQ8/IQ9](docs/dragonwing-intel-wifi.md)
-for firmware requirements, Bluetooth wiring limits and hardware testing status.
+for optional driver installation, Bluetooth wiring and hardware testing status.
 
 > `BOARD` must be set to a board id matching a directory
 > `conf/template/boards/<board-id>/`. There is no silent default — pick the

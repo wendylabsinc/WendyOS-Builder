@@ -14,6 +14,8 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 # Same mapping kernel.bbclass and module.bbclass use, so a devkit build and an in-tree
 # module build cannot disagree about the arch directory name.
 KARCH = "${@oe.kernel.map_kernel_arch(d)}"
+WENDYOS_DRIVER_DEVKIT_MODULES ?= ""
+WENDYOS_DRIVER_DEVKIT_FIRMWARE ?= ""
 
 # Every other input is staged by another recipe, so there is nothing to fetch or build.
 SRC_URI = "file://setup.sh"
@@ -22,6 +24,7 @@ INHIBIT_DEFAULT_DEPS = "1"
 # openssl-native: sign-file links against libcrypto and is copied out of this recipe's
 # own sysroot below.
 DEPENDS = "virtual/cross-cc virtual/cross-binutils zstd-native squashfs-tools-native openssl-native"
+DEPENDS += "${@'linux-firmware' if d.getVar('WENDYOS_DRIVER_DEVKIT_FIRMWARE') else ''}"
 
 do_configure[noexec] = "1"
 
@@ -87,6 +90,22 @@ do_compile() {
         bbfatal "Module.symvers absent; a devkit without it produces unloadable modules"
     fi
     cp -a ${STAGING_KERNEL_BUILDDIR}/Module.symvers ${DEVKIT_KBUILD}/
+
+    # Optional native driver payload, exported after do_compile_kernelmodules.
+    if [ -n "${WENDYOS_DRIVER_DEVKIT_MODULES}" ]; then
+        [ -f ${STAGING_KERNEL_BUILDDIR}/wendyos-driver-modules/index.json ] || \
+            bbfatal "native driver module export is missing"
+        cp -a ${STAGING_KERNEL_BUILDDIR}/wendyos-driver-modules ${DEVKIT_ROOT}/native-modules
+    fi
+
+    # Firmware comes from the image's pinned linux-firmware recipe, with the
+    # redistribution notices included explicitly. Only the selected files enter
+    # the devkit; these are not installed into the base image.
+    for firmware in ${WENDYOS_DRIVER_DEVKIT_FIRMWARE}; do
+        source=${RECIPE_SYSROOT}/sysroot-only/wendyos-driver-firmware/$firmware
+        [ -f "$source" ] || bbfatal "native driver firmware is missing: $firmware"
+        install -D -m 0644 "$source" ${DEVKIT_ROOT}/native-firmware/$firmware
+    done
 
     # Missing any of these still packs cleanly and then fails deep inside kbuild on the
     # consumer, with an error that names nothing useful.

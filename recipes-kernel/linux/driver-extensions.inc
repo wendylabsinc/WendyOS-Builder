@@ -30,12 +30,56 @@ WENDYOS_MODULE_SIGN_KEY ?= ""
 # machine, including those where the function does nothing.
 python __anonymous() {
     d.appendVarFlag('do_configure', 'prefuncs', ' wendyos_install_module_sign_key')
+    if d.getVar('WENDYOS_DRIVER_DEVKIT_MODULES'):
+        d.appendVarFlag('do_compile_kernelmodules', 'postfuncs', ' wendyos_export_driver_modules')
     key = d.getVar('WENDYOS_MODULE_SIGN_KEY')
     if key:
         # Hash the key's contents, not just its path. Secrets are normally rotated in
         # place, and without this the kernel would restore from sstate still trusting the
         # old certificate while the pipeline signs with the new one.
         d.appendVarFlag('do_configure', 'file-checksums', ' %s:True' % key)
+}
+
+# Export configured in-tree modules with their complete module dependency closure.
+# The devkit packages these exact binaries instead of rebuilding a wireless stack
+# against a different source tree. This task runs after shared_workdir and modules.
+python wendyos_export_driver_modules() {
+    import hashlib
+    import json
+    from pathlib import Path
+    import shutil
+    import subprocess
+
+    build = Path(d.getVar('B'))
+    dest = Path(d.getVar('STAGING_KERNEL_BUILDDIR')) / 'wendyos-driver-modules'
+    shutil.rmtree(dest, ignore_errors=True)
+    dest.mkdir(parents=True)
+    modinfo = str(Path(d.getVar('RECIPE_SYSROOT_NATIVE')) / 'sbin/modinfo')
+    available = {}
+    for relative in (build / 'modules.order').read_text().splitlines():
+        path = build / Path(relative).with_suffix('.ko')
+        available.setdefault(path.stem.replace('-', '_'), []).append(path)
+    exported = {}
+
+    def export(name):
+        name = name.replace('-', '_')
+        if name in exported:
+            return
+        paths = available.get(name, [])
+        if len(paths) != 1 or not paths[0].is_file():
+            bb.fatal('Driver devkit: expected one built module for %s, got %s' % (name, paths))
+        path = paths[0]
+        deps = subprocess.check_output([modinfo, '-F', 'depends', str(path)], text=True).strip()
+        dependencies = [dep.replace('-', '_') for dep in deps.split(',') if dep]
+        shutil.copy2(path, dest / path.name)
+        exported[name] = {'file': path.name, 'depends': dependencies,
+                          'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}
+        for dependency in dependencies:
+            export(dependency)
+
+    for name in d.getVar('WENDYOS_DRIVER_DEVKIT_MODULES').split():
+        export(name)
+    (dest / 'index.json').write_text(json.dumps(exported, indent=2) + '\n')
 }
 
 wendyos_install_module_sign_key() {

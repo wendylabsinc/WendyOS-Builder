@@ -1,36 +1,39 @@
 # Intel BE200/BE202 on Dragonwing IQ8 and IQ9
 
-The IQ-8275 EVK (IQ8) and IQ-9075 EVK (IQ9) images include native Intel
-BE200/BE202 support for a replacement card in the M.2 Key-E slot.
-Both full image builds passed on 2026-10-26, including checks of installed
-modules, dependencies, firmware and licenses. IQ8 with a BE202 also passed
-hardware tests: 2.4/5/6 GHz traffic in both directions, WPA3-SAE, DNS/HTTPS,
-reconnect, Bluetooth LE discovery and pairing/audio with a Bose speaker.
-The bond persisted through OTA and a warm reboot; the Bose's A2DP profile
-was explicitly reconnected after the warm reboot.
-The IQ8 USB fix below was rebuilt and OTA-tested. IQ9 and BE200 hardware
-testing remain pending.
+The IQ-8275 EVK (IQ8) and IQ-9075 EVK (IQ9) support replacement Intel
+BE200/BE202 cards through the optional `intel-be202` driver package. The base
+image supplies the driver runtime and carrier configuration; Intel modules and
+firmware are installed only when requested.
 
-## Driver and firmware
+## Installation and payload
 
-The pinned qcom-next 7.2 kernel requires `CONFIG_IWLMLD` for these cards
-(`8086:272b`). The Qualcomm defconfig enables `IWLWIFI` and `IWLMVM` but
-disables `IWLMLD`. WendyOS enables the missing opmode and checks the resolved
-configuration during the build.
+Update to a matching WendyOS image, keep wired management connected, then run:
 
-The image installs `iwlwifi`, `iwlmld`, `btusb` and `btintel` with their
-dependencies. PCI/USB modaliases load them automatically. The original
-Qualcomm radio packages remain installed. Use the native driver on these
-boards; the Jetson/Pi `intel-be202` system extension is not needed.
+```sh
+wendy device drivers install intel-be202
+wendy device wifi list
+```
 
-The pinned kernel accepts firmware c102–c106. `linux-firmware-iwlwifi-misc`
-supplies `iwlwifi-gl-c0-fm-c0-c103.ucode` and PNVM; the driver falls back to
-c103. The Jetson add-on's c107 firmware exceeds this kernel's supported range.
-Recheck compatibility when updating the kernel or firmware pin.
+For this draft PR, install its OS image first and add `--pr 321` to the driver
+install command. A locally built package can instead be installed with
+`--file /path/to/intel-be202.raw`. Subsequent OS updates use the existing driver
+workflow to stage a package matching the target kernel.
 
-`linux-firmware-ibt-misc` supplies the Bluetooth `intel/ibt-0291-0291.sfi`
-and `.ddc` pair and other controller revisions. Both firmware packages include
-license dependencies and together add about 261 MiB uncompressed.
+The IQ packages contain native `iwlwifi`, `iwlmld`, `btusb` and `btintel`
+modules from the exact kernel build, with their dependencies. They keep the
+base kernel's cfg80211/mac80211 stack. Jetson/Pi builds of the same package use
+their existing Intel backport instead. The original Qualcomm radio packages
+remain in the base image.
+
+The pinned qcom-next 7.2 kernel needs `CONFIG_IWLMLD` for these cards
+(`8086:272b`) and accepts firmware c102–c106. The IQ package includes c103 and
+PNVM from the pinned linux-firmware recipe, the BE202 `ibt-0291-0291`
+Bluetooth pair, BE200 controller variants and both redistribution notices.
+The IQ8 package is about 3.5 MiB compressed (10.6 MiB of modules and firmware),
+stored on `/data` rather than duplicated in the OS slots. The general Intel
+firmware bundles stay out of the base image. The Jetson/Pi package's c107
+firmware must not be substituted for the IQ payload.
+Recheck compatibility when updating either pin.
 
 ## Bluetooth wiring
 
@@ -48,6 +51,21 @@ is unchanged. External USB enumeration on the new IQ8 gadget port still needs
 a cable test.
 
 ## Build and hardware checks
+
+The normal image build also exports a kernel devkit containing the selected
+native modules and firmware. The driver workflow builds the installable package
+from that devkit; it does not fetch another kernel or wireless backport.
+
+Full IQ8/IQ9 image and driver-package builds passed on 2026-10-26. On IQ8
+with a BE202, the lean image was OTA-installed and checked for absent Intel
+modules/firmware before installing the package through the normal CLI. Tests
+passed for bidirectional 64 MiB transfers on 2.4/5/6 GHz, WPA3-SAE on 6 GHz,
+DNS/HTTPS, LE discovery, Bose A2DP audio and concurrent Wi-Fi traffic on
+2.4/5 GHz. After a warm reboot, the package loaded automatically, Wi-Fi
+reconnected and the Bose bond remained. Removal followed by reboot returned
+the device to the lean base; reinstallation restored both radios. A2DP was
+explicitly selected for audio; automatic profile selection and listening
+confirmation remain pending. IQ9 and BE200 hardware testing remain pending.
 
 Use the [normal board build commands](../README.md), or run
 `bitbake wendyos-image` in a prepared environment for either machine:

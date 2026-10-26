@@ -48,20 +48,6 @@ RDEPENDS:${PN} += " \
     wireless-regdb-static \
     "
 
-# Optional replacement card in the same M.2 Key-E slot. qcom-next already has
-# the BE200/BE202 PCI IDs, but requires iwlmld (not just iwlmvm). The pinned
-# firmware recipe puts the compatible gl-c0-fm-c0 c102/c103 payloads and PNVM in
-# -iwlwifi-misc, and the USB Bluetooth ibt-0291-0291 pair in -ibt-misc. These
-# packages also retain the upstream firmware license dependencies.
-RDEPENDS:${PN} += " \
-    kernel-module-iwlwifi \
-    kernel-module-iwlmld \
-    kernel-module-btusb \
-    kernel-module-btintel \
-    linux-firmware-iwlwifi-misc \
-    linux-firmware-ibt-misc \
-    "
-
 # Hardware only the 8275 carries.
 #
 #  lontium-lt8713sx    the DP bridge on i2c. Without it the displayport

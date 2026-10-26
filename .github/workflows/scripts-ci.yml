@@ -62,6 +62,9 @@ on:
       - 'meta-*/conf/layer.conf'
       - 'recipes-core/wendyos-agent/files/*.sh'
       - 'scripts/build-driver.sh'
+      - 'scripts/resolve_driver_manifest.py'
+      - 'scripts/stage_native_driver.py'
+      - 'scripts/driver_native_test.py'
       - 'scripts/pack-sysext.sh'
       - 'scripts/driver_supports_device.py'
       - 'scripts/driver_supports_device_test.py'
@@ -166,6 +169,9 @@ on:
       - 'meta-*/conf/layer.conf'
       - 'recipes-core/wendyos-agent/files/*.sh'
       - 'scripts/build-driver.sh'
+      - 'scripts/resolve_driver_manifest.py'
+      - 'scripts/stage_native_driver.py'
+      - 'scripts/driver_native_test.py'
       - 'scripts/pack-sysext.sh'
       - 'scripts/driver_supports_device.py'
       - 'scripts/driver_supports_device_test.py'
@@ -382,7 +388,7 @@ jobs:
         run: python3 -m unittest scripts/driver_supports_device_test.py
 
       - name: Run driver build and pack validation tests
-        run: python3 -m unittest scripts/driver_manifest_test.py
+        run: python3 -m unittest scripts/driver_manifest_test.py scripts/driver_native_test.py
 
       - name: Run driver activation tests
         run: python3 -m unittest scripts/driver_activation_test.py

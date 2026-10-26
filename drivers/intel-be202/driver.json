@@ -1,9 +1,17 @@
 {
   "name": "intel-be202",
-  "version": "2026.09.23-fw107",
-  "summary": "Intel BE202 Wi-Fi and Bluetooth for Jetson and Raspberry Pi 5",
+  "version": "2026.10.26",
+  "summary": "Intel BE200/BE202 Wi-Fi and Bluetooth for Jetson, Raspberry Pi 5 and Dragonwing IQ8/IQ9",
   "license": "GPL-2.0-only AND LicenseRef-iwlwifi-firmware AND LicenseRef-ibt-firmware",
-  "devices": ["jetson-agx-thor", "jetson-agx-orin", "jetson-agx-orin-emmc", "jetson-orin-nano", "raspberry-pi-5"],
+  "devices": [
+    "jetson-agx-thor",
+    "jetson-agx-orin",
+    "jetson-agx-orin-emmc",
+    "jetson-orin-nano",
+    "raspberry-pi-5",
+    "dragonwing-iq-8275",
+    "dragonwing-iq-9075"
+  ],
   "source": {
     "git": "https://kernel.googlesource.com/pub/scm/linux/kernel/git/iwlwifi/backport-iwlwifi",
     "rev": "070e486a6d462c79bf6356832af28e45c1b94519"
@@ -13,8 +21,12 @@
     "configure": "defconfig-iwlwifi-be202"
   },
   "patches": [
-    {"file": "0001-add-be202-defconfig.patch"},
-    {"file": "0002-disable-no-snoop-on-thor-root-port.patch"}
+    {
+      "file": "0001-add-be202-defconfig.patch"
+    },
+    {
+      "file": "0002-disable-no-snoop-on-thor-root-port.patch"
+    }
   ],
   "modules_load": ["iwlmld"],
   "activation": {
@@ -30,6 +42,18 @@
       "modules_replace": ["iwlmld", "iwlmvm", "iwldvm", "iwlwifi", "brcmfmac_cyw", "brcmfmac", "mac80211", "cfg80211", "compat"],
       "modules_reload": ["btusb"],
       "services_restart": ["wpa_supplicant.service"],
+      "wifi_pci_devices_restore": ["8086:272b"]
+    },
+    "dragonwing-iq-8275": {
+      "pci_devices": ["8086:272b"],
+      "modules_replace": ["iwlmld", "iwlmvm", "iwldvm", "iwlwifi"],
+      "modules_reload": ["btusb"],
+      "wifi_pci_devices_restore": ["8086:272b"]
+    },
+    "dragonwing-iq-9075": {
+      "pci_devices": ["8086:272b"],
+      "modules_replace": ["iwlmld", "iwlmvm", "iwldvm", "iwlwifi"],
+      "modules_reload": ["btusb"],
       "wifi_pci_devices_restore": ["8086:272b"]
     }
   },
@@ -69,5 +93,31 @@
       "sha256": "5181b0b51efc79d5acb2c9bb92042878fdbad97a92114d4ab5e32e2b5b52fce4",
       "url": "https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/plain/LICENSES/LICENCE.ibt_firmware?id=e981caea6ed33c48d25b7dbf473327dbd01df163"
     }
-  ]
+  ],
+  "variants_by_device": {
+    "dragonwing-iq-8275": {
+      "source": {
+        "devkit": true
+      },
+      "build": {
+        "kind": "kernel-modules",
+        "modules": ["iwlwifi", "iwlmld", "btusb", "btintel"],
+        "firmware_from_devkit": true
+      },
+      "patches": [],
+      "firmware": []
+    },
+    "dragonwing-iq-9075": {
+      "source": {
+        "devkit": true
+      },
+      "build": {
+        "kind": "kernel-modules",
+        "modules": ["iwlwifi", "iwlmld", "btusb", "btintel"],
+        "firmware_from_devkit": true
+      },
+      "patches": [],
+      "firmware": []
+    }
+  }
 }
