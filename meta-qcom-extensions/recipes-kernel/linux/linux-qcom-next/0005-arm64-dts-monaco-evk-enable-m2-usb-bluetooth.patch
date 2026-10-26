@@ -1,5 +1,5 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: Thomas Karpiniec <tom.karpiniec@outlook.com>
+From: Wendy Labs <engineering@wendy.dev>
 Date: Mon, 26 Oct 2026 10:00:00 +1100
 Subject: [PATCH] arm64: dts: qcom: monaco-evk: enable the M.2 USB path
 
@@ -16,7 +16,7 @@ must select a400000.usb instead of a600000.usb on this board.
 
 Link: https://lore.kernel.org/all/20260430142000.3707614-1-swati.agarwal@oss.qualcomm.com/
 Upstream-Status: Pending [board-scoped adaptation of the linked Qualcomm proposal]
-Signed-off-by: Thomas Karpiniec <tom.karpiniec@outlook.com>
+Signed-off-by: Wendy Labs <engineering@wendy.dev>
 ---
  arch/arm64/boot/dts/qcom/monaco-evk.dts | 27 +++++++++++++++++++++++++++
  1 file changed, 27 insertions(+)
