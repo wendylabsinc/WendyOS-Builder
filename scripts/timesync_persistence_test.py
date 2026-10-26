@@ -129,11 +129,14 @@ class TimesyncPersistenceTest(unittest.TestCase):
             if path.exists():
                 text = re.sub(r"^(Exec\w+)=.*$", r"\1=/bin/true", path.read_text(), flags=re.M)
                 path.write_text(text)
+        # Force ASCII glyphs: the "-> Unit" dump header parsed below otherwise
+        # depends on the systemd version and locale.
         result = subprocess.run([
             "systemd-analyze", "verify", "--man=no", f"--root={self.root}",
             "systemd-timesyncd.service", "var-lib-systemd-timesync.mount",
             "wendyos-timesync-state.service",
-        ], text=True, capture_output=True, env={**os.environ, "SYSTEMD_LOG_LEVEL": "debug"})
+        ], text=True, capture_output=True,
+            env={**os.environ, "SYSTEMD_LOG_LEVEL": "debug", "SYSTEMD_UTF8": "0"})
         output = result.stdout + result.stderr
         self.assertEqual(result.returncode, 0, output)
         # Without the prep service in the transaction the cycle check is vacuous.
