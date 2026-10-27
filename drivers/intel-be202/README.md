@@ -1,8 +1,9 @@
 # Intel BE202 Wi-Fi and Bluetooth driver add-on
 
-This package supports Intel BE202 on Jetson and Raspberry Pi 5, and BE200/BE202
-on Dragonwing IQ8/IQ9. IQ packages supply native modules and selected firmware
-from the matching kernel devkit. Jetson/Pi packages use the Intel backport pinned
+This package supports Intel BE202 on Jetson and Raspberry Pi 5, and targets
+BE200/BE202 on Dragonwing IQ8/IQ9. Dragonwing hardware validation covers IQ8 with
+BE202; BE200 and IQ9 remain untested. IQ packages supply native modules and
+selected firmware from the matching kernel devkit. Jetson/Pi packages use the Intel backport pinned
 in `driver.json` and replace the kernel's cfg80211/mac80211 stack; Bluetooth uses
 their base `btusb`/`btintel` modules with firmware from the package.
 
@@ -43,8 +44,10 @@ behind NVIDIA root port `10de:22d8`.
 The IQ package installs native `iwlwifi`, `iwlmld`, `btusb` and `btintel` modules
 and their dependencies without replacing cfg80211/mac80211. Its c106 Wi-Fi
 firmware and PNVM are fetched and hash-checked from the manifest's pinned
-linux-firmware commit. BE200/BE202 Bluetooth firmware comes from the image's
-pinned recipe. The broad Intel firmware bundles stay out of the base OS.
+linux-firmware commit. The shared BE200/BE202 Bluetooth firmware pair,
+`intel/ibt-0291-0291.sfi` and `.ddc`, comes from the image's pinned recipe.
+The package omits AX210/AX211 firmware and makes no support claim for those cards.
+The broad Intel firmware bundles stay out of the base OS.
 The manifest's `variants_by_device` selects these build inputs; both the build
 and pack steps require a device identity matching the devkit. The IQ kernel
 backports the secure-NAN capability and cluster notification fixes needed by

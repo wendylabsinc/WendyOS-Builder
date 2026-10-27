@@ -68,10 +68,9 @@ WENDYOS_DRIVER_DEVKIT_MODULES = "iwlwifi iwlmld btusb btintel"
 # Shared stacks belong to the image, including their signed dependency closure.
 # The native add-on must not shadow these through updates/wendyos.
 WENDYOS_DRIVER_BASE_MODULES = "cfg80211 mac80211 bluetooth"
+# BE200 and BE202 share this Bluetooth firmware pair.
 WENDYOS_DRIVER_DEVKIT_FIRMWARE = " \
     intel/ibt-0291-0291.sfi intel/ibt-0291-0291.ddc \
-    intel/ibt-0040-0041.sfi intel/ibt-0040-0041.ddc \
-    intel/ibt-0041-0041.sfi intel/ibt-0041-0041.ddc \
     LICENCE.ibt_firmware \
     "
 

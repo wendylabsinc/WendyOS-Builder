@@ -1,9 +1,10 @@
 # Intel BE200/BE202 on Dragonwing IQ8 and IQ9
 
-The IQ-8275 EVK (IQ8) and IQ-9075 EVK (IQ9) support replacement Intel
-BE200/BE202 cards through the optional `intel-be202` driver package. The base
-image supplies the driver runtime and carrier configuration; Intel modules and
-firmware are installed only when requested.
+The optional `intel-be202` driver package targets replacement Intel BE200/BE202
+cards on the IQ-8275 EVK (IQ8) and IQ-9075 EVK (IQ9). Hardware validation covers
+IQ8 with BE202; BE200 and IQ9 remain untested. The base image supplies the driver
+runtime and carrier configuration; Intel modules and firmware are installed only
+when requested.
 
 ## Installation and payload
 
@@ -37,7 +38,11 @@ The pinned qcom-next 7.2 kernel needs `CONFIG_IWLMLD` for these cards
 (`8086:272b`) and accepts firmware c102–c106. The IQ package fetches c106 and
 PNVM from the manifest's pinned linux-firmware commit and verifies their
 SHA-256 hashes. Bluetooth firmware comes from the image's pinned recipe:
-the BE202 `ibt-0291-0291` pair and BE200 controller variants. Both redistribution notices are included.
+the shared BE200/BE202 `intel/ibt-0291-0291.sfi` and `.ddc` pair. The mapping is
+documented by Intel's [BE200 firmware update](https://git.ti.com/cgit/processor-firmware/ti-linux-firmware/commit/WHENCE?id=ba1aa06f37477a702ebabf14b5753378460c9343)
+and Ubuntu's [BE202 support record](https://bugs.launchpad.net/bugs/2033455/comments/8).
+AX210/AX211 are outside this package's supported scope; their `ibt-0041-0041`
+and `ibt-0040-0041` firmware pairs are omitted. Both redistribution notices are included.
 The package is stored on `/data` for each installed kernel version. Retaining a rollback
 kernel can retain another package; it does not consume either rootfs slot.
 The general Intel firmware bundles stay out of the base image. The Jetson/Pi
