@@ -12,6 +12,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 CONTRACT = ROOT / 'conf/distro/include/mesh-local.inc'
 KERNEL = ROOT / 'recipes-kernel/linux/mesh-local.inc'
+FRAGMENT = ROOT / 'recipes-kernel/linux/mesh-local/mesh-local.cfg'
 
 
 def contract(name):
@@ -69,14 +70,17 @@ class MeshLocalContractTest(unittest.TestCase):
             values[symbol] = 'm'
             self.assertNotEqual(self.run_gate(values).returncode, 0)
 
+    def test_dummy_driver_is_required_but_stays_modular(self):
+        self.assertIn('CONFIG_DUMMY:dummy', contract('WENDYOS_MESH_LOCAL_MODULES'))
+        self.assertIn('CONFIG_DUMMY=m', FRAGMENT.read_text().splitlines())
+
     def test_missing_config_or_empty_contract_is_fatal(self):
         self.assertNotEqual(self.run_gate({}, missing=True).returncode, 0)
         for name in ('WENDYOS_MESH_LOCAL_BUILTIN', 'WENDYOS_MESH_LOCAL_MODULES'):
             self.assertNotEqual(self.run_gate(self.all_values(), empty=name).returncode, 0)
 
     def test_fragment_covers_contract_and_all_active_bsp_recipes_require_it(self):
-        fragment = ROOT / 'recipes-kernel/linux/mesh-local/mesh-local.cfg'
-        values = dict(line.split('=', 1) for line in fragment.read_text().splitlines()
+        values = dict(line.split('=', 1) for line in FRAGMENT.read_text().splitlines()
                       if line.startswith('CONFIG_'))
         self.assertEqual(self.run_gate(values).returncode, 0)
         for layer, recipe in [('meta-tegra-extensions-jp7', 'linux-noble-nvidia-tegra'),
@@ -106,7 +110,7 @@ class MeshLocalContractTest(unittest.TestCase):
         data = Data()
         exec(textwrap.dedent(body), {'d': data})
         self.assertEqual(data.values['RRECOMMENDS:packagegroup-wendyos-kernel'].split(),
-                         ['kernel-module-ipv6', 'kernel-module-tun',
+                         ['kernel-module-dummy', 'kernel-module-ipv6', 'kernel-module-tun',
                           'kernel-module-xt-tproxy', 'kernel-module-nf-tproxy-ipv4'])
 
     def test_installed_nm_policy_owns_mesh_and_preserves_physical_interfaces(self):

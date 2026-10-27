@@ -9,6 +9,7 @@ WENDYOS_MESH_LOCAL_BUILTIN = " \
 # Symbol:kernel_module_name. Built-ins need no package; modular features must
 # have their module and dependencies in the image, not merely in the devkit.
 WENDYOS_MESH_LOCAL_MODULES = " \
+    CONFIG_DUMMY:dummy \
     CONFIG_IPV6:ipv6 \
     CONFIG_TUN:tun \
     CONFIG_NETFILTER_XT_TARGET_TPROXY:xt_TPROXY \
