@@ -116,7 +116,7 @@ class SensorLoopbackBuildContractTests(unittest.TestCase):
         self.assertIn('kernel-module-snd-aloop', packages)
         gate = (ROOT / 'classes/sensor-loopback-check.bbclass').read_text()
         self.assertIn('do_rootfs[postfuncs] += "wendyos_check_sensor_loopback_rootfs"', gate)
-        self.assertIn('virtual/kernel:do_shared_workdir', gate)
+        self.assertIn('do_rootfs[depends] += "${WENDYOS_KERNEL_OUTPUTS_DEPENDS}"', gate)
         checksums = re.search(r'^do_rootfs\[file-checksums\] \+= "([^"]*)"', gate, re.M)[1]
         self.assertIn('${WENDYOS_SENSOR_LOOPBACK_CHECKER}:True', checksums)
         self.assertIn('${WENDYOS_SENSOR_LOOPBACK_KERNEL_CHECKER}:True', checksums)

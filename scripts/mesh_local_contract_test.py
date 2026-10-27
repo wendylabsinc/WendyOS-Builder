@@ -7,6 +7,7 @@ import textwrap
 import re
 import subprocess
 import tempfile
+import types
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -141,6 +142,41 @@ class MeshLocalContractTest(unittest.TestCase):
             for name in ('eth0', 'enp1s0', 'wlan0', 'usb0'):
                 self.assertFalse(unmanaged(name), name)
             self.assertIn('file://50-wendy-local-mesh.conf', text)
+
+    def test_image_checks_read_cached_kernel_outputs(self):
+        # Only sstate-backed kernel tasks: any other recompiles the kernel for every image.
+        depends = contract('WENDYOS_KERNEL_OUTPUTS_DEPENDS')
+        self.assertIn('virtual/kernel:do_deploy', depends)
+        self.assertLessEqual(set(depends), {'virtual/kernel:do_deploy', 'virtual/kernel:do_packagedata'})
+        self.assertEqual(contract('WENDYOS_KERNEL_RELEASE_FILE'),
+                         ['${PKGDATA_DIR}/kernel-depmod/kernel-abiversion'])
+        deployed = re.search(r'"\$\{DEPLOYDIR\}/([^"]+\.config)"', KERNEL.read_text())
+        self.assertIsNotNone(deployed, 'the kernel no longer deploys its config')
+        self.assertEqual(contract('WENDYOS_KERNEL_CONFIG'), ['${DEPLOY_DIR_IMAGE}/' + deployed[1]])
+        for name in ('mesh-kernel-check', 'sensor-loopback-check'):
+            gate = (ROOT / 'classes' / (name + '.bbclass')).read_text()
+            self.assertIn('do_rootfs[depends] += "${WENDYOS_KERNEL_OUTPUTS_DEPENDS}"', gate)
+            for uncached in ('do_shared_workdir', 'STAGING_KERNEL_BUILDDIR'):
+                self.assertNotIn(uncached, gate, name)
+
+    def test_image_checks_reject_unset_kernel_outputs(self):
+        names = ('WENDYOS_KERNEL_CONFIG', 'WENDYOS_KERNEL_RELEASE_FILE', 'WENDYOS_KERNEL_OUTPUTS_DEPENDS')
+
+        def fatal(message):
+            raise RuntimeError(message)
+
+        def parse(body, values):
+            exec(body, {'d': types.SimpleNamespace(getVar=values.get),
+                        'bb': types.SimpleNamespace(fatal=fatal)})
+
+        for name in ('mesh-kernel-check', 'sensor-loopback-check'):
+            gate = (ROOT / 'classes' / (name + '.bbclass')).read_text()
+            body = textwrap.dedent(re.search(r'^python \(\) \{\n(.*?)^\}', gate, re.M | re.S)[1])
+            parse(body, dict.fromkeys(names, 'set'))
+            for unset in names:
+                with self.subTest(gate=name, unset=unset):
+                    with self.assertRaisesRegex(RuntimeError, unset):
+                        parse(body, {var: 'set' for var in names if var != unset})
 
 
 if __name__ == '__main__':
