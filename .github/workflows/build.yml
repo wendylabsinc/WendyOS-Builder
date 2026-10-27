@@ -234,9 +234,9 @@ jobs:
             exit 0
           fi
 
-          # Any other PR builds every device, so --pr installs resolve.
-          echo "Trigger=pull_request: force-building all devices for --pr installs."
-          emit_all
+          # Temporary: bank Thor's sstate on the 64 GiB runner after the cache wipe.
+          echo "Trigger=pull_request: building jetson-agx-thor only."
+          emit_one jetson-agx-thor
           exit 0
   build:
     name: Build ${{ matrix.device }} (${{ matrix.storages }})
@@ -247,7 +247,7 @@ jobs:
       # GitHub mints the OIDC token (not the runner), so GCP Workload Identity
       # Federation still works on the self-hosted platform.
       id-token: write
-    runs-on: [self-hosted, linux, x64, wendyos-builder]
+    runs-on: [self-hosted, linux, x64, wendyos-builder-warm]
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.detect-changes.outputs.matrix) }}
