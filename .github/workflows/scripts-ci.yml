@@ -106,6 +106,9 @@ on:
       - 'scripts/qcom-npu.test.sh'
       - '.github/device-artifacts.json'
       - '.github/workflows/scripts-ci.yml'
+      - '.github/workflows/build.yml'
+      - 'scripts/lab_device_map_test.py'
+      - 'conf/machine/*.conf'
   push:
     branches: [main]
     paths:
@@ -210,6 +213,9 @@ on:
       - 'scripts/qcom-npu.test.sh'
       - '.github/device-artifacts.json'
       - '.github/workflows/scripts-ci.yml'
+      - '.github/workflows/build.yml'
+      - 'scripts/lab_device_map_test.py'
+      - 'conf/machine/*.conf'
 
 jobs:
   nan:
@@ -395,3 +401,8 @@ jobs:
 
       - name: Run local agent packaging tests
         run: python3 -m unittest scripts/package_local_agent_test.py
+
+      # A lab-board pattern that matches nothing reads the same as a PR that
+      # touched nothing: the hardware run goes green on the wrong board.
+      - name: Run lab device map tests
+        run: python3 -m unittest scripts/lab_device_map_test.py

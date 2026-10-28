@@ -68,6 +68,7 @@ jobs:
     outputs:
       matrix: ${{ steps.set.outputs.matrix }}
       devices: ${{ steps.set.outputs.devices }}
+      lab-devices: ${{ steps.lab.outputs.lab-devices }}
       version: ${{ steps.version.outputs.version }}
       is-release: ${{ steps.version.outputs.is-release }}
     steps:
@@ -92,6 +93,51 @@ jobs:
               - '!drivers/**'
               - '!scripts/build-driver.sh'
               - '!scripts/pack-sysext.sh'
+            # One entry per SoC family that the lab has a board for. These pick
+            # which board a PR is tried on; they do NOT narrow the build matrix.
+            # scripts/lab_device_map_test.py holds them to the layers on disk.
+            rpi:
+              - 'meta-rpi-extensions/**'
+              - 'conf/machine/raspberrypi*'
+            tegra:
+              - 'meta-tegra-extensions*/**'
+              - 'conf/machine/jetson-*'
+            qcom:
+              - 'meta-qcom-extensions/**'
+              - 'conf/machine/iq-*'
+            arduino:
+              - 'meta-arduino-extensions/**'
+              - 'conf/machine/arduino-*'
+
+      # Which lab board a PR is tried on: one per SoC family it touches. The
+      # build matrix is untouched -- every PR still builds every device so
+      # `wendy os install --pr` resolves; this only narrows the hardware run.
+      - id: lab
+        if: github.event_name == 'pull_request'
+        env:
+          RPI: ${{ steps.filter.outputs.rpi }}
+          TEGRA: ${{ steps.filter.outputs.tegra }}
+          QCOM: ${{ steps.filter.outputs.qcom }}
+          ARDUINO: ${{ steps.filter.outputs.arduino }}
+        run: |
+          set -euo pipefail
+          # `if` rather than `[[ ]] && …`: under set -e a false test ends the
+          # step, and it would only ever fail on the branch nobody watches.
+          BOARDS=()
+          if [[ "${RPI:-}" == "true" ]]; then BOARDS+=(raspberry-pi-5); fi
+          # The Orin Nano stands in for every Jetson: same tegrauefi connector,
+          # and the lab's most dependable one.
+          if [[ "${TEGRA:-}" == "true" ]]; then BOARDS+=(jetson-orin-nano); fi
+          if [[ "${QCOM:-}" == "true" ]]; then BOARDS+=(dragonwing-iq-9075); fi
+          if [[ "${ARDUINO:-}" == "true" ]]; then BOARDS+=(arduino-uno-q); fi
+          # No family: a common change, proven on one board. Deliberately
+          # uncapped above -- a PR across every layer is the likeliest to break
+          # one, so it earns the widest run, and that is 2% of PRs.
+          if (( ${#BOARDS[@]} == 0 )); then
+            BOARDS=(raspberry-pi-5)
+          fi
+          echo "Lab boards for this PR: ${BOARDS[*]}"
+          echo "lab-devices=${BOARDS[*]}" >> "$GITHUB_OUTPUT"
 
       - id: version
         env:
@@ -1421,9 +1467,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.WENDY_LAB_DISPATCH_TOKEN }}
           LAB: wendylabsinc/wendy-lab
-          # Every PR builds every device, so this names the board rather than
-          # inheriting the build matrix: one is enough to prove the image.
-          DEVICES: raspberry-pi-5
+          # One board per SoC family the PR touches, from detect-changes. The
+          # fallback covers a trigger where that step did not run.
+          DEVICES: ${{ needs.detect-changes.outputs.lab-devices || 'raspberry-pi-5' }}
           PR: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
