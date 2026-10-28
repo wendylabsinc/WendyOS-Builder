@@ -20,6 +20,7 @@ on:
       - 'meta-tegra-extensions/recipes-bsp/uefi/tegra-espimage.bbappend'
       - 'meta-qcom-extensions/recipes-core/images/wendyos-esp-image.bb'
       - 'scripts/resolve-artifacts*'
+      - 'scripts/resolve-agent-release*'
       - 'scripts/make-t234-flashpack.sh'
       - 'scripts/t234_flashpack_manifest*'
       - 'scripts/make-jetson-disk-img.py'
@@ -124,6 +125,7 @@ on:
       - 'meta-tegra-extensions/recipes-bsp/uefi/tegra-espimage.bbappend'
       - 'meta-qcom-extensions/recipes-core/images/wendyos-esp-image.bb'
       - 'scripts/resolve-artifacts*'
+      - 'scripts/resolve-agent-release*'
       - 'scripts/make-t234-flashpack.sh'
       - 'scripts/t234_flashpack_manifest*'
       - 'scripts/make-jetson-disk-img.py'
@@ -272,6 +274,7 @@ jobs:
       - name: shellcheck
         run: |
           shellcheck scripts/resolve-artifacts.sh scripts/resolve-artifacts.test.sh scripts/make-t234-flashpack.sh
+          shellcheck scripts/resolve-agent-release.sh scripts/resolve-agent-release.test.sh
           shellcheck recipes-core/wendyos-agent/files/wendyos-agent-updater.sh \
                      recipes-core/wendyos-agent/files/wendyos-agent-updater.test.sh \
                      recipes-core/wendyos-agent/files/download-wendyos-agent.sh
@@ -309,6 +312,9 @@ jobs:
 
       - name: Run resolver tests
         run: bash scripts/resolve-artifacts.test.sh
+
+      - name: Run agent release resolver tests
+        run: bash scripts/resolve-agent-release.test.sh
 
       # The agent updater ships in the image and decides which agent every
       # device runs; a comparison bug there silently moves the whole fleet
