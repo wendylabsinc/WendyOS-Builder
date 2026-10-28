@@ -68,6 +68,7 @@ jobs:
     outputs:
       matrix: ${{ steps.set.outputs.matrix }}
       devices: ${{ steps.set.outputs.devices }}
+      lab-devices: ${{ steps.lab.outputs.lab-devices }}
       version: ${{ steps.version.outputs.version }}
       is-release: ${{ steps.version.outputs.is-release }}
     steps:
@@ -92,6 +93,51 @@ jobs:
               - '!drivers/**'
               - '!scripts/build-driver.sh'
               - '!scripts/pack-sysext.sh'
+            # One entry per SoC family that the lab has a board for. These pick
+            # which board a PR is tried on; they do NOT narrow the build matrix.
+            # scripts/lab_device_map_test.py holds them to the layers on disk.
+            rpi:
+              - 'meta-rpi-extensions/**'
+              - 'conf/machine/raspberrypi*'
+            tegra:
+              - 'meta-tegra-extensions*/**'
+              - 'conf/machine/jetson-*'
+            qcom:
+              - 'meta-qcom-extensions/**'
+              - 'conf/machine/iq-*'
+            arduino:
+              - 'meta-arduino-extensions/**'
+              - 'conf/machine/arduino-*'
+
+      # Which lab board a PR is tried on: one per SoC family it touches. The
+      # build matrix is untouched -- every PR still builds every device so
+      # `wendy os install --pr` resolves; this only narrows the hardware run.
+      - id: lab
+        if: github.event_name == 'pull_request'
+        env:
+          RPI: ${{ steps.filter.outputs.rpi }}
+          TEGRA: ${{ steps.filter.outputs.tegra }}
+          QCOM: ${{ steps.filter.outputs.qcom }}
+          ARDUINO: ${{ steps.filter.outputs.arduino }}
+        run: |
+          set -euo pipefail
+          # `if` rather than `[[ ]] && …`: under set -e a false test ends the
+          # step, and it would only ever fail on the branch nobody watches.
+          BOARDS=()
+          if [[ "${RPI:-}" == "true" ]]; then BOARDS+=(raspberry-pi-5); fi
+          # The Orin Nano stands in for every Jetson: same tegrauefi connector,
+          # and the lab's most dependable one.
+          if [[ "${TEGRA:-}" == "true" ]]; then BOARDS+=(jetson-orin-nano); fi
+          if [[ "${QCOM:-}" == "true" ]]; then BOARDS+=(dragonwing-iq-9075); fi
+          if [[ "${ARDUINO:-}" == "true" ]]; then BOARDS+=(arduino-uno-q); fi
+          # No family: a common change, proven on one board. Deliberately
+          # uncapped above -- a PR across every layer is the likeliest to break
+          # one, so it earns the widest run, and that is 2% of PRs.
+          if (( ${#BOARDS[@]} == 0 )); then
+            BOARDS=(raspberry-pi-5)
+          fi
+          echo "Lab boards for this PR: ${BOARDS[*]}"
+          echo "lab-devices=${BOARDS[*]}" >> "$GITHUB_OUTPUT"
 
       - id: version
         env:
@@ -1394,6 +1440,103 @@ jobs:
           [[ -x "$RUNNER_TEMP/publisher" ]] || go build -o "$RUNNER_TEMP/publisher" .
           jq -s '[.[] | . as $entry | (.device, .aliases[]?) as $device | $entry | {device: $device, version, nightly: true, stability}]' "${entries[@]}" > "$RUNNER_TEMP/master-updates.json"
           "$RUNNER_TEMP/publisher" --master-manifest-batch "$RUNNER_TEMP/master-updates.json" --pr "$PR_NUMBER" --access-token "$TOKEN" </dev/null
+
+  # ---------------------------------------------------------------------------
+  # device-tests: OTA this PR's image onto real hardware and run the lab suite.
+  # Dispatched rather than called: a called workflow runs on the CALLER's
+  # runners, and the lab's runner is registered to the lab repo.
+  # Needs publish-pr, because the device fetches the payload itself.
+  # One board: the image installs, then the device it left is checked over.
+  # The full sweep is a manual run in the lab repo.
+  # ---------------------------------------------------------------------------
+  device-tests:
+    name: Device tests
+    needs: [detect-changes, publish-pr]
+    # Only a branch pushed to this repo carries secrets, and only a member with
+    # write access can push one, so this is also the org-member gate: a fork's PR
+    # skips rather than failing on a secret it was never going to receive.
+    if: >-
+      ${{ github.event_name == 'pull_request'
+          && github.event.pull_request.head.repo.full_name == github.repository
+          && needs.detect-changes.outputs.devices != '' }}
+    runs-on: ubuntu-latest
+    # An install, a reboot and a second boot to rule out a silent rollback.
+    timeout-minutes: 90
+    steps:
+      - name: Run the lab suite on hardware
+        env:
+          GH_TOKEN: ${{ secrets.WENDY_LAB_DISPATCH_TOKEN }}
+          LAB: wendylabsinc/wendy-lab
+          # One board per SoC family the PR touches, from detect-changes. The
+          # fallback covers a trigger where that step did not run.
+          DEVICES: ${{ needs.detect-changes.outputs.lab-devices || 'raspberry-pi-5' }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          title="Device Tests - PR #${PR}"
+
+          # A dispatch hands back no run id, so note the time first and then
+          # match the run by the name the lab builds from the pr input.
+          since=$(date -u -d '-2 minutes' +%Y-%m-%dT%H:%M:%SZ)
+          # The bundle installs and commits, then asserts the device came back
+          # with nothing failed; the rest of the suite is an hour of writes.
+          # --ref is explicit so gh never looks up the default branch, which
+          # needs a repository read the dispatch itself does not.
+          # Direct transport: the runner dials the board over the LAN rather
+          # than through the cloud relay, which has been the steadier of the
+          # two. The inventory carries both addresses, so this is one flag to
+          # flip back.
+          gh workflow run device-test.yml --repo "$LAB" --ref main \
+            -f device="$DEVICES" \
+            -f category=ota \
+            -f tests=install-and-health \
+            -f ota_source=pr \
+            -f pr="$PR" \
+            -f transport=direct \
+            -f allow_no_device=true
+
+          run_id=""
+          for _ in $(seq 1 30); do
+            run_id=$(gh run list --repo "$LAB" --workflow device-test.yml \
+                       --json databaseId,displayTitle,createdAt --limit 30 \
+                     | jq -r --arg since "$since" --arg title "$title" \
+                         'first(.[] | select(.createdAt >= $since)
+                                    | select(.displayTitle == $title))
+                          | .databaseId // empty')
+            [ -n "$run_id" ] && break
+            sleep 10
+          done
+          [ -n "$run_id" ] || { echo "::error::the lab run never appeared"; exit 1; }
+
+          url="https://github.com/$LAB/actions/runs/$run_id"
+          echo "LAB_RUN_ID=$run_id" >> "$GITHUB_ENV"
+          echo "Lab run: $url"
+
+          status=""; conclusion=""
+          for _ in $(seq 1 300); do
+            info=$(gh run view "$run_id" --repo "$LAB" --json status,conclusion)
+            status=$(jq -r '.status' <<<"$info")
+            conclusion=$(jq -r '.conclusion // ""' <<<"$info")
+            [ "$status" = "completed" ] && break
+            sleep 45
+          done
+
+          {
+            echo "### Device tests"
+            echo "- devices: \`$DEVICES\`"
+            echo "- result: \`${conclusion:-$status}\`"
+            echo "- [full run]($url)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          [ "$status" = "completed" ] || { echo "::error::lab run did not finish - $url"; exit 1; }
+          [ "$conclusion" = "success" ] || { echo "::error::lab run $conclusion - $url"; exit 1; }
+
+      # A cancelled PR must not leave a board mid-OTA with nobody watching.
+      - name: Cancel the lab run if this job was cancelled
+        if: cancelled() && env.LAB_RUN_ID != ''
+        env:
+          GH_TOKEN: ${{ secrets.WENDY_LAB_DISPATCH_TOKEN }}
+        run: gh run cancel "$LAB_RUN_ID" --repo wendylabsinc/wendy-lab || true
 
   # ---------------------------------------------------------------------------
   # drivers: rebuild every add-on against the devkit this run published. A kernel
