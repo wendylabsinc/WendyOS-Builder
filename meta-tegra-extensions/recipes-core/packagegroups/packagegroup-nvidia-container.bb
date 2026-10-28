@@ -20,11 +20,10 @@ inherit packagegroup
 # - cuda-cufft (libcufft)
 # - cuda-nvrtc (libnvrtc, libnvrtc-builtins)
 # - cuda-nvjitlink (libnvJitLink)
-# - cuda-nvtx (libnvToolsExt)
+# - cuda-nvtx (libnvtx3interop)
 # - cuda-cupti (libcupti)
 # - cuda-nvjpeg (libnvjpeg)
 # - cuda-npp (libnpp* - image processing)
-# - cuda-cudla (libcudla - DLA runtime)
 # - cuda-cufile (libcufile - GPUDirect Storage)
 #
 # cuDNN (Deep Learning primitives):
