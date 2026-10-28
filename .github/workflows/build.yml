@@ -1400,7 +1400,8 @@ jobs:
   # Dispatched rather than called: a called workflow runs on the CALLER's
   # runners, and the lab's runner is registered to the lab repo.
   # Needs publish-pr, because the device fetches the payload itself.
-  # Gated on an approval, so a PR spends the boards only when asked to.
+  # One board, one install: enough to catch an image that cannot be installed
+  # or booted. The full sweep is a manual run in the lab repo.
   # ---------------------------------------------------------------------------
   device-tests:
     name: Device tests
@@ -1413,18 +1414,16 @@ jobs:
           && github.event.pull_request.head.repo.full_name == github.repository
           && needs.detect-changes.outputs.devices != '' }}
     runs-on: ubuntu-latest
-    # An approval gate, not a deployment target: the job waits here until
-    # someone decides this PR has earned an hour of exclusive board time.
-    environment: device-lab
-    # One lab runner takes one job at a time, so a multi-device ota sweep is
-    # serial. This only has to outlast that.
-    timeout-minutes: 240
+    # An install, a reboot and a second boot to rule out a silent rollback.
+    timeout-minutes: 90
     steps:
       - name: Run the lab suite on hardware
         env:
           GH_TOKEN: ${{ secrets.WENDY_LAB_DISPATCH_TOKEN }}
           LAB: wendylabsinc/wendy-lab
-          DEVICES: ${{ needs.detect-changes.outputs.devices }}
+          # Every PR builds every device, so this names the board rather than
+          # inheriting the build matrix: one is enough to prove the image.
+          DEVICES: raspberry-pi-5
           PR: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
@@ -1433,13 +1432,14 @@ jobs:
           # A dispatch hands back no run id, so note the time first and then
           # match the run by the name the lab builds from the pr input.
           since=$(date -u -d '-2 minutes' +%Y-%m-%dT%H:%M:%SZ)
-          # ota is affordable because the approval above makes it a choice: an
-          # interrupted install can still cost a slot, so nothing runs unasked.
+          # Narrowed to the one case that proves the image installs, commits and
+          # survives a second boot; the rest is an hour of writes per board.
           # --ref is explicit so gh never looks up the default branch, which
           # needs a repository read the dispatch itself does not.
           gh workflow run device-test.yml --repo "$LAB" --ref main \
             -f device="$DEVICES" \
             -f category=ota \
+            -f tests=installs-and-commits \
             -f ota_source=pr \
             -f pr="$PR" \
             -f allow_no_device=true
