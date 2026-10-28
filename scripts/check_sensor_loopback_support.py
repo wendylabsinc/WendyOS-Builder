@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify Dragonwing SensorLink loopback drivers in the completed image."""
+"""Verify SensorLink loopback drivers in the completed image."""
 
 from __future__ import annotations
 

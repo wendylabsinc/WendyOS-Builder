@@ -2,6 +2,11 @@
 # This file is included when building for RPi machines (MACHINEOVERRIDES contains 'rpi')
 
 inherit partuuid-rpi
+inherit sensor-loopback-check
+
+# SensorLink needs both drivers. snd-aloop also arrives via the kernel-modules
+# recommendation, but only an explicit install makes it a requirement.
+IMAGE_INSTALL:append = " v4l2loopback kernel-module-snd-aloop"
 
 # RPi-specific packages
 IMAGE_INSTALL:append = " \
