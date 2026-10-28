@@ -1482,12 +1482,17 @@ jobs:
           # with nothing failed; the rest of the suite is an hour of writes.
           # --ref is explicit so gh never looks up the default branch, which
           # needs a repository read the dispatch itself does not.
+          # Direct transport: the runner dials the board over the LAN rather
+          # than through the cloud relay, which has been the steadier of the
+          # two. The inventory carries both addresses, so this is one flag to
+          # flip back.
           gh workflow run device-test.yml --repo "$LAB" --ref main \
             -f device="$DEVICES" \
             -f category=ota \
             -f tests=install-and-health \
             -f ota_source=pr \
             -f pr="$PR" \
+            -f transport=direct \
             -f allow_no_device=true
 
           run_id=""
