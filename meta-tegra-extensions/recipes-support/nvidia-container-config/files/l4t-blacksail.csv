@@ -39,6 +39,11 @@ sym, /usr/local/cuda-13.2/lib/libcublas.so
 sym, /usr/local/cuda-13.2/lib/libcublasLt.so
 
 # =============================================================================
+# nvBLAS - Standard BLAS interface that runs on cuBLAS
+# =============================================================================
+sym, /usr/local/cuda-13.2/lib/libnvblas.so
+
+# =============================================================================
 # cuSPARSE - Sparse matrix operations (used by PyTorch sparse tensors)
 # =============================================================================
 sym, /usr/local/cuda-13.2/lib/libcusparse.so.12
@@ -79,7 +84,17 @@ sym, /usr/local/cuda-13.2/lib/libnvrtc-builtins.so
 # =============================================================================
 sym, /usr/local/cuda-13.2/lib/libnvJitLink.so
 
-# CUDA 13.2's NVTX package ships only libnvtx3interop, not libnvToolsExt.
+# =============================================================================
+# nvFatbin - Builds CUDA fat binaries at run time
+# =============================================================================
+sym, /usr/local/cuda-13.2/lib/libnvfatbin.so
+
+# =============================================================================
+# NVTX - Code annotation for profilers
+# =============================================================================
+# CUDA 13.2's NVTX package ships only libnvtx3interop, not libnvToolsExt, and
+# no link without a version for it.
+sym, /usr/local/cuda-13.2/lib/libnvtx3interop.so.1
 
 # =============================================================================
 # CUPTI - CUDA Profiling Tools Interface (used by PyTorch profiler)
@@ -96,6 +111,11 @@ sym, /usr/local/cuda-13.2/lib/libcufile.so
 
 # No blacksail recipe installs libcudla (the CUDA cuDLA runtime). NVIDIA's
 # drivers.csv mounts the driver part, libnvcudla.so.
+
+# =============================================================================
+# nvJPEG - JPEG decoding and encoding on the GPU
+# =============================================================================
+sym, /usr/local/cuda-13.2/lib/libnvjpeg.so
 
 # =============================================================================
 # NPP - Image processing primitives (used by vision operations)
@@ -137,6 +157,7 @@ sym, /usr/lib/libcudnn_heuristic.so.9
 # =============================================================================
 sym, /usr/lib/libnvinfer.so.10
 sym, /usr/lib/libnvinfer_plugin.so.10
+sym, /usr/lib/libnvinfer_vc_plugin.so.10
 
 # TensorRT loads this builder library when it builds an engine. The meta-tegra
 # TensorRT recipe installs only the file for the board's own GPU (sm110 on Thor,
