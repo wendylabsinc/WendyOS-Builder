@@ -16,3 +16,7 @@ WENDYOS_QCOM_DSP_SOCS ?= "qcs8300 sa8775p"
 # The linux-firmware version oe-core ships. A bump must fail the build until the DSP
 # build above has been re-checked against it.
 WENDYOS_QCOM_DSP_FW_PV ?= "20260622"
+
+# SocketCAN off: no Qualcomm board we ship has an on-board CAN controller Linux
+# can drive. Turning it on later is this one line; the kernel side is wired.
+WENDYOS_CAN ?= "0"

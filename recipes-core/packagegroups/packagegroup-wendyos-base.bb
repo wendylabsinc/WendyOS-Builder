@@ -69,6 +69,12 @@ RDEPENDS:${PN}:append = " \
         )} \
     "
 
+# SocketCAN (kernel modules, plus can-utils in debug images). Gated on
+# WENDYOS_CAN, which each board family sets; see conf/distro/wendyos.conf.
+RDEPENDS:${PN}:append = " \
+    ${@oe.utils.ifelse(d.getVar('WENDYOS_CAN') == '1', 'packagegroup-wendyos-can', '')} \
+    "
+
 # Include hardware-specific packagegroup configuration
 require ${@'qemu-packagegroup-base.inc'  if 'qemuall' in d.getVar('MACHINEOVERRIDES').split(':') else ''}
 require ${@'tegra-packagegroup-base.inc' if 'tegra'   in d.getVar('MACHINEOVERRIDES').split(':') else ''}

@@ -68,3 +68,7 @@ wendyos_check_sensor_loopback() {
 # The newer callback releases its reference after the unlock label.
 BLUETOOTH_LE_PENDING_PATCH = "0001-bluetooth-clean-up-rejected-pending-le-connection-qcom.patch"
 require recipes-kernel/linux/bluetooth-le-pending.inc
+
+# SocketCAN, shared with the other kernel bbappends. Off on Qualcomm boards
+# (see qcom-distro.inc).
+require ${@'recipes-kernel/linux/can.inc' if d.getVar('WENDYOS_CAN') == '1' else ''}

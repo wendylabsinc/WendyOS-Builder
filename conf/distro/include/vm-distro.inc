@@ -1,16 +1,15 @@
 # WendyOS VM distro configuration.
 # Required from wendyos.conf when MACHINEOVERRIDES contains "vm-wendyos".
 
-# No firmware-update, USB-gadget or GPU story in a VM.
-# These four are read by nothing on the VM path, but all four are in
-# wendyos-image.bb's BUILDCFG_VARS, so setting them keeps the build banner
-# truthful (the distro otherwise defaults WENDYOS_UPDATE_BOOTLOADER to "1", which
-# would be a lie for a VM). WENDYOS_EFI_DEBUG is deliberately NOT set: it is
-# Tegra-only and is not even in BUILDCFG_VARS, so a value here would be dead text.
+# No firmware-update, USB-gadget, GPU or CAN in a VM.
+# These are set so the build banner shows the right values. A machine conf or
+# local.conf still overrides them. WENDYOS_EFI_DEBUG is not set: it is
+# Tegra-only.
 WENDYOS_UPDATE_BOOTLOADER ?= "0"
 WENDYOS_USB_GADGET ?= "0"
 WENDYOS_DEEPSTREAM ?= "0"
 WENDYOS_NVIDIA_DGPU ?= "0"
+WENDYOS_CAN ?= "0"
 
 # The VM is discovered over the host network, not a direct USB gadget link, so
 # do not restrict Avahi to usb0.
