@@ -27,7 +27,7 @@ Upstream-Status: Inappropriate [wendy-specific]
  2 files changed, 89 insertions(+), 25 deletions(-)
 
 diff --git a/init-flash.sh b/init-flash.sh
-index 5681feb..432122a 100644
+index 1081b71..3507da2 100644
 --- a/init-flash.sh
 +++ b/init-flash.sh
 @@ -38,6 +38,10 @@ if [ -z "$UDC" ]; then
@@ -127,9 +127,9 @@ index 5681feb..432122a 100644
 +# Re-reads and logs the partition table the host wrote to an exported device.
 +post_export() {
 +    local log=/tmp/flashpkg/flashpkg/logs/export-$1.log
-+    partprobe /dev/$1 2>&1 >> $log
-+    sgdisk /dev/$1 --verify 2>&1 >> $log
-+    sgdisk /dev/$1 --print 2>&1 >> $log
++    partprobe /dev/$1 >> $log 2>&1
++    sfdisk --verify /dev/$1 >> $log 2>&1
++    sfdisk -l /dev/$1 >> $log 2>&1
 +}
 +
  write_device_identity() {
@@ -181,19 +181,19 @@ index 5681feb..432122a 100644
  		;;
  	    export-devices)
  		for dev in $args; do
--		    if setup_usb_export /dev/$dev $dev 2>&1 > /tmp/flashpkg/flashpkg/logs/export-$dev.log; then
+-		    if setup_usb_export /dev/$dev $dev > /tmp/flashpkg/flashpkg/logs/export-$dev.log 2>&1; then
 +		    if [ -n "$single_mode" ]; then
 +			if load_lun 1 /dev/$dev 2>&1 > /tmp/flashpkg/flashpkg/logs/export-$dev.log; then
 +			    wait_for_lun_eject 1 2>&1 >> /tmp/flashpkg/flashpkg/logs/export-$dev.log
 +			    post_export $dev
 +			    continue
 +			fi
-+		    elif setup_usb_export /dev/$dev $dev 2>&1 > /tmp/flashpkg/flashpkg/logs/export-$dev.log; then
- 			if wait_for_connect 2>&1 >> /tmp/flashpkg/flashpkg/logs/export-$dev.log; then
- 			    if wait_for_disconnect 2>&1 >> /tmp/flashpkg/flashpkg/logs/export-$dev.log; then
--				partprobe /dev/$dev 2>&1 >> /tmp/flashpkg/flashpkg/logs/export-$dev.log
--				sgdisk /dev/$dev --verify 2>&1 >> /tmp/flashpkg/flashpkg/logs/export-$dev.log
--				sgdisk /dev/$dev --print 2>&1 >> /tmp/flashpkg/flashpkg/logs/export-$dev.log
++		    elif setup_usb_export /dev/$dev $dev > /tmp/flashpkg/flashpkg/logs/export-$dev.log 2>&1; then
+ 			if wait_for_connect >> /tmp/flashpkg/flashpkg/logs/export-$dev.log 2>&1; then
+ 			    if wait_for_disconnect >> /tmp/flashpkg/flashpkg/logs/export-$dev.log 2>&1; then
+-				partprobe /dev/$dev >> /tmp/flashpkg/flashpkg/logs/export-$dev.log 2>&1
+-				sfdisk --verify /dev/$dev >> /tmp/flashpkg/flashpkg/logs/export-$dev.log 2>&1
+-				sfdisk -l /dev/$dev >> /tmp/flashpkg/flashpkg/logs/export-$dev.log 2>&1
 +				post_export $dev
  				continue
  			    fi

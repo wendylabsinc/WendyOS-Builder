@@ -93,19 +93,13 @@ WENDYOS_QCOM_NPU_INSTALL = " \
     "
 RDEPENDS:${PN} += "${@d.getVar('WENDYOS_QCOM_NPU_INSTALL') if d.getVar('WENDYOS_QCOM_NPU') == '1' else ''}"
 
-# Both mistakes are otherwise silent: an unset variable ships a package name
-# containing ${...}, and an unretargeted SoC builds green and refuses offload.
+# Otherwise silent: an unset variable ships a package name containing ${...}.
 python () {
     if d.getVar('WENDYOS_QCOM_NPU') != '1':
         return
-    for var in ('WENDYOS_QCOM_NPU_BOARD', 'WENDYOS_QCOM_NPU_DSP_ARCH',
-                'WENDYOS_QCOM_NPU_SOC'):
+    for var in ('WENDYOS_QCOM_NPU_BOARD', 'WENDYOS_QCOM_NPU_DSP_ARCH'):
         if not d.getVar(var):
             bb.fatal("%s is unset; the machine conf must name it" % var)
-    soc = d.getVar('WENDYOS_QCOM_NPU_SOC')
-    if soc not in (d.getVar('WENDYOS_QCOM_DSP_SOCS') or '').split():
-        bb.fatal("WENDYOS_QCOM_NPU_SOC '%s' is not in WENDYOS_QCOM_DSP_SOCS; the "
-                 "DSP userspace would not be retargeted for it" % soc)
 }
 
 COMPATIBLE_MACHINE = "qcom-wendyos"

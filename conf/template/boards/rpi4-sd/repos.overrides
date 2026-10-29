@@ -9,7 +9,7 @@
 # irrelevant here — RPi never layers them.
 WENDYOS_LAYER_TREE="blacksail"
 
-# NOTE: unlike rpi5, rpi4 (BCM2711) gets NO U-Boot override — the rc4 bump + NVMe
-# patch in u-boot_%.bbappend are raspberrypi5-scoped, so rpi4 builds STOCK blacksail
-# U-Boot 2026.04. Go 1.26 is native on blacksail too, so no backport layer is
-# cloned.
+# NOTE: unlike rpi5, rpi4 (BCM2711) gets NO U-Boot change — the NVMe patch and
+# config fragments in u-boot_%.bbappend are raspberrypi5-scoped, so rpi4 builds
+# STOCK blacksail U-Boot 2026.07. Go is native on blacksail too, so no backport
+# layer is cloned.

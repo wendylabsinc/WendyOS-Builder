@@ -37,12 +37,13 @@ if lsblk -rno PARTLABEL "$DISK" 2>/dev/null | grep -qiE 'root[a-b]'; then
 fi
 
 # Fix GPT backup header when image is flashed to a larger card.
-# Skip on MBR-partitioned disks — sgdisk -e on MBR can write GPT structures
-# and corrupt the partition table before exiting.
+# Skip on MBR-partitioned disks — there is no GPT backup header to move. On a
+# healthy MBR sfdisk --relocate writes nothing, but it still reports the
+# partition table as altered.
 PTTYPE="$(blkid -o value -s PTTYPE "$DISK" 2>/dev/null || true)"
-if [[ "$PTTYPE" == "gpt" ]] && command -v sgdisk >/dev/null 2>&1; then
-  echo "[expand-rootfs] sgdisk -e $DISK (fix GPT backup at end)"
-  sgdisk -e "$DISK" || true
+if [[ "$PTTYPE" == "gpt" ]] && command -v sfdisk >/dev/null 2>&1; then
+  echo "[expand-rootfs] sfdisk --relocate gpt-bak-std $DISK (fix GPT backup at end)"
+  sfdisk --relocate gpt-bak-std "$DISK" || true
   command -v partprobe >/dev/null 2>&1 && partprobe "$DISK" || true
   udevadm settle || true
 fi

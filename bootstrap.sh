@@ -679,7 +679,9 @@ clone_repos || {
 # Summarise the active tree + each layer's branch/revision.
 report_tree
 
-image_name=$(basename "${META_LAYER_DIR}")
+# meta layer path relative to WORK_DIR (just the folder name when directly inside it)
+image_name="$(absolute_path "${META_LAYER_DIR}")"
+image_name="${image_name#"$(absolute_path "${WORK_DIR}")/"}"
 
 printf "\nPrepare the Yocto build environment...\n"
 cd "${PROJECT_DIR}"

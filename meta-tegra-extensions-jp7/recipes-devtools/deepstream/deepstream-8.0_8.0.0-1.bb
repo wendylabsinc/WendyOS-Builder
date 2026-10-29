@@ -2,23 +2,31 @@
 # (branch master-l4t-r38.4.x, recipes-devtools/deepstream/deepstream-8.0_8.0.0-1.bb).
 #
 # Why vendored: meta-tegra-community ships this recipe on the r38.4 (JP7.1)
-# branches but has NOT yet forward-ported it to wip-l4t-r39.2.0 (the blacksail
-# branch we build from — that branch still only has deepstream-7.1). This is a
-# verbatim copy with the minimal blacksail/r39.2 reconciliations noted below.
+# branches but not on its blacksail branch, which we build from and which only
+# has deepstream-9.1. This is a verbatim copy with the minimal blacksail/r39.2
+# reconciliations noted below.
 #
-# CUTOVER: when wip-l4t-r39.2.0 gains deepstream-8.0, DELETE this file — the
+# CUTOVER: if blacksail gains deepstream-8.0, DELETE this file — the
 # upstream recipe takes over (same PN), and the companion deepstream-8.0_%.bbappend
 # keeps applying our headless/container fixups to it. tegra-image.inc + the
 # container CSVs key on the package name / install path, so no other change.
 #
 # r39.2 RECONCILIATIONS vs the upstream r38.4 source (blacksail meta-oe is
 # NEWER than r38.4's, so several patchelf TARGET sonames differ):
-#   * jsoncpp: upstream hardcodes libjsoncpp.so.26 (jsoncpp 1.9.6); blacksail
-#     has jsoncpp 1.9.7 -> read the target dynamically from staging instead.
-#   * libgpr:  upstream hardcodes libgpr.so.46; blacksail has grpc 1.80.0 ->
-#     read dynamically from staging.
-#   * abseil:  upstream targets libabsl_synchronization.so.2505.0.0; blacksail
-#     abseil-cpp 20260107.1 builds .so.2601.0.0 (confirmed) -> use that.
+#   * jsoncpp: upstream hardcodes libjsoncpp.so.26 -> read the target from
+#     staging instead.
+#   * libgpr:  upstream hardcodes libgpr.so.46 -> read from staging.
+#   * abseil:  upstream hardcodes libabsl_synchronization.so.2505.0.0 -> read
+#     from staging. abseil-cpp is in DEPENDS for this.
+#   * openssl: DS8 libnvds_inferutils/libnvds_mqtt_proto link OpenSSL 3;
+#     blacksail ships OpenSSL 4. Three steps (see do_install): NEEDED
+#     rewritten to the staging soname, the OPENSSL_3.0.0 version tags cleared
+#     on the 8 functions they use (same functions, same declarations in
+#     4.0.3), and the leftover OPENSSL_3.0.0 required-version entry marked
+#     optional with optional-version.py, because the loader still refuses
+#     the library while that entry is required. openssl is in DEPENDS for this.
+#   * tensorrt: meta-tegra renamed the tensorrt-core recipe to tensorrt. The
+#     old name still works at build time only, so use the new one.
 #   CUDA fixups (libcublas.so.13 / libcufft.so.12 / libnpp*.so.13) are CUDA-13
 #   and identical on r38.4 and r39.2, so kept verbatim.
 #
@@ -37,6 +45,8 @@ LIC_FILES_CHKSUM = " \
 "
 
 inherit l4t_deb_pkgfeed
+
+SRC_URI += "file://optional-version.py"
 
 SRC_COMMON_DEBS = "${BPN}_${PV}_arm64.deb;subdir=${BPN}"
 SRC_URI[sha256sum] = "1eb5ad4550d43416a561a318f53c5c2a4a166f828b9dcc8e50c321d6e6055c31"
@@ -65,9 +75,11 @@ PACKAGECONFIG[realsense] = ""
 # r38.4 recipe used plain yaml-cpp because r38.4 meta-oe was still 0.8.)
 # Keep in sync with packagegroup-nvidia-container.bb's DS yaml-cpp choice.
 DEPENDS = "glib-2.0 gstreamer1.0 gstreamer1.0-plugins-base gstreamer1.0-rtsp-server \
-    tensorrt-core tensorrt-plugins libnvvpi4 libcufft libcublas libnpp json-glib \
+    tensorrt tensorrt-plugins libnvvpi4 libcufft libcublas libnpp json-glib \
     tegra-libraries-multimedia-ds tegra-libraries-multimedia yaml-cpp-080 \
     grpc protobuf tegra-libraries-nvdsseimeta libgstnvcustomhelper mosquitto jsoncpp cuda-nvrtc \
+    abseil-cpp \
+    openssl \
 "
 # XXX--- see hack in do_install
 DEPENDS += "patchelf-native"
@@ -136,15 +148,16 @@ do_install() {
     # Some of the libraries carry the wrong SONAME in their DT_NEEDED ELF
     # header, so rewrite them to prevent broken runtime dependencies. The
     # grpc/grpc++/protobuf/protobuf-lite targets are read dynamically from
-    # staging (so they track whatever meta-oe ships); jsoncpp and gpr are read
-    # the same way here (blacksail meta-oe is newer than the r38.4 the upstream
-    # recipe hardcoded for); abseil uses the confirmed blacksail soname.
+    # staging (so they track whatever meta-oe ships); jsoncpp, gpr and abseil
+    # are read the same way here (upstream hardcoded them for r38.4).
     grpc_soname=$(${OBJDUMP} -p ${STAGING_LIBDIR}/libgrpc.so | grep SONAME | awk '{print $2}')
     grpcpp_soname=$(${OBJDUMP} -p ${STAGING_LIBDIR}/libgrpc++.so | grep SONAME | awk '{print $2}')
     protobuf_soname=$(${OBJDUMP} -p ${STAGING_LIBDIR}/libprotobuf.so | grep SONAME | awk '{print $2}')
     libprotobuf_lite_soname=$(${OBJDUMP} -p ${STAGING_LIBDIR}/libprotobuf-lite.so | grep SONAME | awk '{print $2}')
     jsoncpp_soname=$(${OBJDUMP} -p ${STAGING_LIBDIR}/libjsoncpp.so | grep SONAME | awk '{print $2}')
     gpr_soname=$(${OBJDUMP} -p ${STAGING_LIBDIR}/libgpr.so | grep SONAME | awk '{print $2}')
+    absl_sync_soname=$(${OBJDUMP} -p ${STAGING_LIBDIR}/libabsl_synchronization.so | grep SONAME | awk '{print $2}')
+    crypto_soname=$(${OBJDUMP} -p ${STAGING_LIBDIR}/libcrypto.so | grep SONAME | awk '{print $2}')
     patchelf --replace-needed libcufft.so libcufft.so.12 ${D}${DEEPSTREAM_PATH}/lib/libnvds_nvmultiobjecttracker.so
     patchelf --replace-needed libcublas.so libcublas.so.13 ${D}${DEEPSTREAM_PATH}/lib/libnvds_nvmultiobjecttracker.so
     patchelf --replace-needed libcufft.so libcufft.so.12 ${D}${DEEPSTREAM_PATH}/lib/libnvds_audiotransform.so
@@ -169,10 +182,33 @@ do_install() {
     bbnote "Patching libgpr NEEDED to $gpr_soname"
     patchelf --replace-needed libgpr.so.31 $gpr_soname ${D}${DEEPSTREAM_PATH}/lib/libnvds_riva_asr_grpc.so
     patchelf --replace-needed libgpr.so.31 $gpr_soname ${D}${DEEPSTREAM_PATH}/lib/libnvds_riva_tts.so
-    # abseil-cpp 20260107.1 on blacksail builds libabsl_synchronization.so.2601.0.0
-    # (upstream r38.4 targeted .2505.0.0).
-    patchelf --replace-needed libabsl_synchronization.so.2301.0.0 libabsl_synchronization.so.2601.0.0 ${D}${DEEPSTREAM_PATH}/lib/libnvds_riva_asr_grpc.so
-    patchelf --replace-needed libabsl_synchronization.so.2301.0.0 libabsl_synchronization.so.2601.0.0 ${D}${DEEPSTREAM_PATH}/lib/libnvds_riva_tts.so
+    bbnote "Patching libabsl_synchronization NEEDED to $absl_sync_soname"
+    patchelf --replace-needed libabsl_synchronization.so.2301.0.0 $absl_sync_soname ${D}${DEEPSTREAM_PATH}/lib/libnvds_riva_asr_grpc.so
+    patchelf --replace-needed libabsl_synchronization.so.2301.0.0 $absl_sync_soname ${D}${DEEPSTREAM_PATH}/lib/libnvds_riva_tts.so
+    # These two libraries ask for OpenSSL 3 functions by version tag
+    # OPENSSL_3.0.0. OpenSSL 4 has the same functions but only under
+    # OPENSSL_4.0.0, so the loader would refuse to load them ("version
+    # OPENSSL_3.0.0 not found"). Three steps are needed:
+    #   1. point them at the OpenSSL 4 library,
+    #   2. remove the version tag from each OpenSSL function they use,
+    #   3. mark the leftover OPENSSL_3.0.0 entry in their list of required
+    #      versions as optional, with optional-version.py.
+    # Step 3 is needed because the library also keeps that list, separate
+    # from the functions, and the loader still refuses it after step 2.
+    # patchelf cannot change that list.
+    bbnote "Patching libcrypto NEEDED to $crypto_soname"
+    patchelf --replace-needed libcrypto.so.3 $crypto_soname ${D}${DEEPSTREAM_PATH}/lib/libnvds_inferutils.so
+    patchelf --clear-symbol-version EVP_aes_256_ctr ${D}${DEEPSTREAM_PATH}/lib/libnvds_inferutils.so
+    patchelf --clear-symbol-version EVP_CIPHER_CTX_new ${D}${DEEPSTREAM_PATH}/lib/libnvds_inferutils.so
+    patchelf --clear-symbol-version EVP_CIPHER_CTX_reset ${D}${DEEPSTREAM_PATH}/lib/libnvds_inferutils.so
+    patchelf --clear-symbol-version EVP_DecryptInit_ex ${D}${DEEPSTREAM_PATH}/lib/libnvds_inferutils.so
+    patchelf --clear-symbol-version EVP_DecryptUpdate ${D}${DEEPSTREAM_PATH}/lib/libnvds_inferutils.so
+    patchelf --clear-symbol-version EVP_sha256 ${D}${DEEPSTREAM_PATH}/lib/libnvds_inferutils.so
+    patchelf --clear-symbol-version PKCS5_PBKDF2_HMAC ${D}${DEEPSTREAM_PATH}/lib/libnvds_inferutils.so
+    python3 ${UNPACKDIR}/optional-version.py ${D}${DEEPSTREAM_PATH}/lib/libnvds_inferutils.so OPENSSL_3.0.0
+    patchelf --replace-needed libcrypto.so.3 $crypto_soname ${D}${DEEPSTREAM_PATH}/lib/libnvds_mqtt_proto.so
+    patchelf --clear-symbol-version SHA256 ${D}${DEEPSTREAM_PATH}/lib/libnvds_mqtt_proto.so
+    python3 ${UNPACKDIR}/optional-version.py ${D}${DEEPSTREAM_PATH}/lib/libnvds_mqtt_proto.so OPENSSL_3.0.0
     # Optical-flow plugin links VPI 3 (gone on r39.2, which has VPI 4 only) —
     # drop it, as upstream does, rather than ship a broken NEEDED.
     rm -f ${D}${DEEPSTREAM_PATH}/lib/libnvds_opticalflow_orin.so

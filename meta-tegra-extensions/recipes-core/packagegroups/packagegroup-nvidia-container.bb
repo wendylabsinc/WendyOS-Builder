@@ -6,10 +6,8 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 inherit packagegroup
 
-# This package group is designed for L4T ${L4T_VERSION}
-# CUDA ${CUDA_VERSION}, cuDNN ${CUDNN_VERSION}, TensorRT ${TENSORRT_VERSION}
-# The versions come from meta-tegra itself on the blacksail tree; only the
-# wrynose fallback pins them, in conf/distro/include/l4t-r38-4-0.conf.
+# This package group is designed for the L4T, CUDA, cuDNN and TensorRT
+# versions that meta-tegra itself provides. We pin none of them.
 
 # Based on l4t.csv analysis, these are the required NVIDIA packages:
 #
@@ -79,7 +77,7 @@ RDEPENDS:${PN} = " \
     tegra-libraries-glescore \
     cudnn \
     cusparselt \
-    tensorrt-core \
+    tensorrt \
     tensorrt-plugins \
     libcufile \
     "

@@ -115,22 +115,25 @@ FILES:${PN}:append:raspberrypi3-64 = " \
 #
 # Preparing it, all of which the resolver now does itself (C57) and none of
 # which is optional, because it runs on every board and on every boot:
-# gptfdisk for sgdisk -e (relocating the GPT backup header), parted for parted
-# and partprobe, e2fsprogs-mke2fs for the mkfs.ext4 that makes a filesystem on
-# a partition that carries no signature at all, e2fsprogs-e2fsck for the
-# clean-flag fsck before the mount, e2fsprogs-resize2fs for the online resize
-# afterwards, and util-linux-blockdev for the device size the stale-superblock
-# guard compares the superblock against. coreutils appears in both lists: it
-# also provides the `timeout` that bounds each of those tools (C59), and it
-# outranks busybox's for the alternative (priority 100 against 50), which is
-# what makes timeout's exit 124 the status the script actually sees.
+# util-linux-sfdisk for sfdisk --relocate (moving the GPT backup header),
+# parted for parted and partprobe, e2fsprogs-mke2fs for the mkfs.ext4 that
+# makes a filesystem on a partition that carries no signature at all,
+# e2fsprogs-e2fsck for the clean-flag fsck before the mount, e2fsprogs-resize2fs
+# for the online resize afterwards, and util-linux-blockdev for the device size
+# the stale-superblock guard compares the superblock against. coreutils appears
+# in both lists: it also provides the `timeout` that bounds each of those tools
+# (C59), and it outranks busybox's for the alternative (priority 100 against
+# 50), which is what makes timeout's exit 124 the status the script actually
+# sees.
 #
-# util-linux-sfdisk reads the partition table -- which label it carries, and
-# whether it has an MBR extended container -- and grows that container so
-# the logical /data inside it can grow. Only raspberrypi3-64 has such a
-# container, but the recipe ships fleet-wide and the script is one program on
-# every board, so the dependency does too. The `sfdisk -d` dump is also what
-# keeps `sgdisk -e` off an MBR disk, where it cannot succeed.
+
+# util-linux-sfdisk is also used to READ the partition table, with `sfdisk -d`:
+# which label it carries, and whether it has an MBR extended container that has
+# to be grown before the logical /data inside it can grow. Only raspberrypi3-64
+# has such a container, but the recipe ships fleet-wide and the script is one
+# program on every board, so the dependency does too. The dump is also what
+# keeps the relocate off an MBR disk, where there is no GPT backup header to
+# move.
 #
 # e2fsprogs-dumpe2fs is what makes that guard work at all, and its absence is
 # the expensive one: with no dumpe2fs the superblock cannot be read, the guard
@@ -163,7 +166,7 @@ FILES:${PN}:append:raspberrypi3-64 = " \
 #
 # blkdiscard is the exception and used to be listed above as though it were
 # gated too. It is not: oe-core appends every split util-linux binary package
-# to RRECOMMENDS of the util-linux metapackage (util-linux_2.42.2.bb:63), and
+# to RRECOMMENDS of the util-linux metapackage (oe-core's util-linux recipe), and
 # packagegroup-wendyos-base pulls util-linux, so util-linux-blkdiscard lands on
 # every board whatever WENDYOS_DATA_ENCRYPTED says. Confirmed on a Thor built
 # at the default: cryptsetup and systemd-cryptenroll absent, blkdiscard present
@@ -178,7 +181,6 @@ RDEPENDS:${PN} = " \
     e2fsprogs-e2fsck \
     e2fsprogs-mke2fs \
     e2fsprogs-resize2fs \
-    gptfdisk \
     parted \
     udev \
     util-linux-blkid \

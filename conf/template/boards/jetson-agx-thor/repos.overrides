@@ -6,12 +6,11 @@
 # Thor was the canary for moving every Jetson board onto JetPack 7.2 / L4T
 # R39.2.0. That line is the first to support Thor and the Orin family at once
 # (see meta-tegra's docs/release-notes/JetPack-7.2-L4T-R39.2.0-Notes.md) and the
-# first to declare LAYERSERIES_COMPAT = "blacksail", the in-development series
+# first to declare LAYERSERIES_COMPAT = "blacksail" (Yocto 6.1), the series
 # after wrynose (6.0). The rest of the fleet followed, so every pin now comes
 # from the shared blacksail set in scripts/upstream-repos.env and nothing here
 # needs to differ.
 #
 # WENDYOS_LAYER_TREE="blacksail" makes bootstrap.sh clone every upstream repo
-# under repos/blacksail/, parallel to repos/wrynose/ — the validated r38.4 /
-# JP7.1 Thor fallback tree. Switching trees never touches the other one.
+# under repos/blacksail/, the shared tree used by the whole fleet.
 WENDYOS_LAYER_TREE="blacksail"

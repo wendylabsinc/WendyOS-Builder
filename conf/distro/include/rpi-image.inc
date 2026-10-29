@@ -33,7 +33,6 @@ do_image_wic[depends] += " \
     rpi-cmdline:do_deploy \
     wic-tools:do_populate_sysroot \
     e2fsprogs-native:do_populate_sysroot \
-    gptfdisk-native:do_populate_sysroot \
     "
 
 do_image_wic[depends] += "${PN}:do_generate_partuuids"
