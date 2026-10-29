@@ -54,8 +54,9 @@ SRC_URI:append:qcom-wendyos = " file://sensor-loopback.cfg"
 SRC_URI:append:iq-8275-evk-wendyos = " file://intel-be200.cfg file://0006-iwlwifi-mld-advertise-secure-nan.patch file://0007-iwlwifi-mld-update-nan-cluster.patch"
 SRC_URI:append:iq-9075-evk-wendyos = " file://intel-be200.cfg file://0006-iwlwifi-mld-advertise-secure-nan.patch file://0007-iwlwifi-mld-update-nan-cluster.patch"
 
-# IQ8's M.2 Bluetooth USB path needs the internal hub selected and enabled.
-SRC_URI:append:iq-8275-evk-wendyos = " file://0005-arm64-dts-monaco-evk-enable-m2-usb-bluetooth.patch"
+# IQ8's M.2 Bluetooth USB path needs the internal hub selected and enabled;
+# the external USB1 host connector also needs its Type-C controller and VBUS.
+SRC_URI:append:iq-8275-evk-wendyos = " file://0005-arm64-dts-monaco-evk-enable-m2-usb-bluetooth.patch file://0008-arm64-dts-monaco-evk-enable-usb1-host-port.patch"
 
 python __anonymous() {
     if d.getVar('MACHINE') in ('iq-8275-evk-wendyos', 'iq-9075-evk-wendyos'):

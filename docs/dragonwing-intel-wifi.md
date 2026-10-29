@@ -64,11 +64,25 @@ primary USB controller as host. These settings follow
 [Qualcomm's host-mode proposal](https://www.spinics.net/lists/devicetree/msg921693.html)
 and are scoped to `monaco-evk.dts`.
 
+The external USB1 Type-C connector uses port 1 of the same hub. Its HD3SS3220
+Type-C controller detects attached peripherals and controls a separate 5 V VBUS
+regulator through GPIO 3 of expander 1. The IQ8 base image includes the
+`hd3ss3220` module and describes that connector, supply and hub graph. USB1 runs
+as a host/source; M.2 Bluetooth remains on the hub's independent port 4.
+Bluetooth enumeration alone does not verify the external connector's power.
+
 **IQ8's Wendy USB gadget now uses USB2 (micro-USB), `a400000.usb`.** USB0
 remains the recovery/fastboot port. The primary controller cannot serve the
 USB0 gadget and host M.2 Bluetooth simultaneously. IQ9's gadget selection
 is unchanged. External USB enumeration on the new IQ8 gadget port still needs
 a cable test.
+
+USB1 was not an enabled host port in stock WendyOS 0.20.1. On IQ8, that image
+selected the primary controller's USB0 gadget path. A C922 webcam on USB1 did
+not enumerate, including after manually selecting host mode, which exposed
+only the root hubs. The unmodified published PR #321 image enabled the internal
+hub and M.2 Bluetooth, but still lacked the external connector's Type-C/VBUS
+configuration. These checks establish a pre-existing USB1 support gap.
 
 ## Build and runtime requirements
 
@@ -93,6 +107,17 @@ IQ8 with BE202 has passed package installation/removal, warm reboot, Wi-Fi on
 Wendy Net NAN routing with a compatible development agent. IQ8/IQ9 image and
 package builds passed. Detailed qualification evidence is in
 [PR #321](https://github.com/wendylabsinc/WendyOS-Builder/pull/321).
+
+USB1 host support was qualified with a directly attached Logitech C922
+(`046d:085c`) on top of the published PR #321 image, using the candidate device
+tree and an HD3SS3220 module built against its exact kernel devkit. The webcam
+appeared in `wendy device camera list`; a 1280x720 JPEG and 300 decoded frames
+passed. The driver, connector power and webcam returned automatically after a
+warm reboot. Physical unplug disabled VBUS; reconnection enabled it and restored
+the webcam, followed by another 30 decoded frames. Intel Bluetooth and 5 GHz
+station Wi-Fi remained available. This is
+functional qualification; it does not establish sustained throughput or cold
+power-cycle behavior.
 
 IQ9 and BE200 hardware remain untested. Cold power cycles, IQ8 USB2 gadget
 cable enumeration, original Qualcomm-card regression, automatic Bluetooth audio

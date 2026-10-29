@@ -60,7 +60,11 @@ RDEPENDS:${PN} += " \
 #                      from native DP and has no such bridge.
 #  pinctrl-*-lpass-lpi the LPI pins monaco's sound card routes over; lemans
 #                      routes the same two codecs over plain tlmm.
+#  hd3ss3220           USB1's Type-C controller switches the external connector's
+#                      5 V supply. The internal M.2 Bluetooth hub port does not
+#                      depend on it, so Bluetooth alone cannot validate USB1.
 RDEPENDS:${PN}:append:iq-8275-evk = " \
+    kernel-module-hd3ss3220 \
     kernel-module-lontium-lt8713sx \
     kernel-module-pinctrl-lpass-lpi \
     kernel-module-pinctrl-sm8450-lpass-lpi \
