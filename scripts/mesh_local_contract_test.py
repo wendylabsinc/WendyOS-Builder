@@ -153,9 +153,12 @@ class MeshLocalContractTest(unittest.TestCase):
         deployed = re.search(r'"\$\{DEPLOYDIR\}/([^"]+\.config)"', KERNEL.read_text())
         self.assertIsNotNone(deployed, 'the kernel no longer deploys its config')
         self.assertEqual(contract('WENDYOS_KERNEL_CONFIG'), ['${DEPLOY_DIR_IMAGE}/' + deployed[1]])
-        for name in ('mesh-kernel-check', 'sensor-loopback-check'):
+        for name in ('mesh-kernel-check', 'sensor-loopback-check', 'native-driver-check'):
             gate = (ROOT / 'classes' / (name + '.bbclass')).read_text()
-            self.assertIn('do_rootfs[depends] += "${WENDYOS_KERNEL_OUTPUTS_DEPENDS}"', gate)
+            if name == 'native-driver-check':
+                self.assertIn("d.appendVarFlag('do_rootfs', 'depends', ' ' + d.getVar('WENDYOS_KERNEL_OUTPUTS_DEPENDS'))", gate)
+            else:
+                self.assertIn('do_rootfs[depends] += "${WENDYOS_KERNEL_OUTPUTS_DEPENDS}"', gate)
             for uncached in ('do_shared_workdir', 'STAGING_KERNEL_BUILDDIR'):
                 self.assertNotIn(uncached, gate, name)
 
@@ -166,17 +169,34 @@ class MeshLocalContractTest(unittest.TestCase):
             raise RuntimeError(message)
 
         def parse(body, values):
-            exec(body, {'d': types.SimpleNamespace(getVar=values.get),
-                        'bb': types.SimpleNamespace(fatal=fatal)})
+            flags = {}
 
-        for name in ('mesh-kernel-check', 'sensor-loopback-check'):
+            def append_flag(task, flag, value):
+                flags[(task, flag)] = flags.get((task, flag), '') + value
+
+            exec(body, {'d': types.SimpleNamespace(getVar=values.get, appendVarFlag=append_flag),
+                        'bb': types.SimpleNamespace(fatal=fatal)})
+            return flags
+
+        for name in ('mesh-kernel-check', 'sensor-loopback-check', 'native-driver-check'):
             gate = (ROOT / 'classes' / (name + '.bbclass')).read_text()
-            body = textwrap.dedent(re.search(r'^python \(\) \{\n(.*?)^\}', gate, re.M | re.S)[1])
-            parse(body, dict.fromkeys(names, 'set'))
+            body = textwrap.dedent(re.search(r'^python (?:__anonymous)?\(\) \{\n(.*?)^\}', gate, re.M | re.S)[1])
+            values = dict.fromkeys(names, 'set')
+            if name == 'native-driver-check':
+                self.assertEqual(parse(body, {}), {})
+                values.update(WENDYOS_DRIVER_BASE_MODULES='cfg80211 mac80211 bluetooth',
+                              WENDYOS_NATIVE_DRIVER_CHECKER='checker',
+                              WENDYOS_KERNEL_OUTPUTS_DEPENDS=' '.join(contract('WENDYOS_KERNEL_OUTPUTS_DEPENDS')))
+            flags = parse(body, values)
+            if name == 'native-driver-check':
+                self.assertEqual(flags[('do_rootfs', 'depends')].split(),
+                                 contract('WENDYOS_KERNEL_OUTPUTS_DEPENDS'))
+                self.assertEqual(flags[('do_rootfs', 'postfuncs')].split(),
+                                 ['wendyos_check_native_driver_base'])
             for unset in names:
                 with self.subTest(gate=name, unset=unset):
                     with self.assertRaisesRegex(RuntimeError, unset):
-                        parse(body, {var: 'set' for var in names if var != unset})
+                        parse(body, {var: value for var, value in values.items() if var != unset})
 
 
 if __name__ == '__main__':

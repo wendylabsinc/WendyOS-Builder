@@ -111,6 +111,53 @@ def bitbake_function(path, name):
     return textwrap.dedent(source.split('python ' + name + '() {\n', 1)[1].split('\n}', 1)[0])
 
 
+class ImageCheckTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.release = '7.2.0-wendyos-cached'
+        self.modules = self.root / 'rootfs/usr/lib/modules' / self.release
+        self.modules.mkdir(parents=True)
+        # Only deployed/packaged outputs and the rootfs exist, as after an
+        # sstate restore into a fresh TMPDIR. There is no kernel build tree.
+        config = self.root / 'deployed.config'
+        config.write_text('CONFIG_MAC80211=m\nCONFIG_CFG80211=m\n')
+        self.release_file = self.root / 'kernel-abiversion'
+        self.release_file.write_text(self.release + '\n')
+        (self.modules / 'mac80211.ko').write_bytes(b'module fixture')
+        (self.modules / 'cfg80211.ko').write_bytes(b'dependency fixture')
+        (self.modules / 'modules.dep').write_text('mac80211.ko: cfg80211.ko\ncfg80211.ko:\n')
+        self.values = {'WENDYOS_KERNEL_CONFIG': str(config),
+                       'WENDYOS_KERNEL_RELEASE_FILE': str(self.release_file),
+                       'WENDYOS_NATIVE_DRIVER_CHECKER': str(ROOT / 'scripts/check_mesh_kernel_support.py'),
+                       'WENDYOS_DRIVER_BASE_MODULES': 'mac80211 cfg80211',
+                       'IMAGE_ROOTFS': str(self.root / 'rootfs')}
+        self.code = bitbake_function('classes/native-driver-check.bbclass',
+                                    'wendyos_check_native_driver_base')
+
+    def check(self):
+        def fatal(message):
+            raise ValueError(message)
+
+        # Run the actual checker subprocess, not a mocked successful result.
+        exec(self.code, {'d': SimpleNamespace(getVar=self.values.get),
+                         'bb': SimpleNamespace(fatal=fatal, note=lambda message: None)})
+
+    def test_cached_outputs_pass_without_kernel_build_tree(self):
+        self.check()
+
+    def test_cached_outputs_still_reject_missing_dependency(self):
+        (self.modules / 'cfg80211.ko').unlink()
+        with self.assertRaisesRegex(ValueError, 'requires missing or invalid module file'):
+            self.check()
+
+    def test_other_kernel_modules_cannot_satisfy_cached_release(self):
+        self.release_file.write_text('7.2.0-wendyos-other\n')
+        with self.assertRaisesRegex(ValueError, 'missing installed module directory'):
+            self.check()
+
+
 class ExportTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
