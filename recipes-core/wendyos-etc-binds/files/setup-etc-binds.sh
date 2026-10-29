@@ -28,6 +28,44 @@ log_error() {
     echo "[ERROR] $1" >&2
 }
 
+# BOARD is consumed by wendyos-update. Read it as data, never source a
+# persistent file as shell code. Reject empty, malformed or duplicate entries.
+valid_device_type() {
+    local line board="" count=0
+    [ -f "$1" ] || return 1
+    while IFS= read -r line || [ -n "$line" ]; do
+        case "$line" in
+            BOARD=*)
+                board="${line#BOARD=}"
+                count=$((count + 1))
+                ;;
+        esac
+    done < "$1"
+    [ "$count" -eq 1 ] && [[ "$board" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]
+}
+
+restore_device_type() {
+    local source="$1" target="$2" stage
+    valid_device_type "$target" && return 0
+    if ! valid_device_type "$source" || [ -d "$target" ]; then
+        log_error "Cannot restore device type from ${source} to ${target}"
+        return 1
+    fi
+
+    # Stage beside the target so rename is atomic. A failed/interrupted copy
+    # must not leave a partial identity that the next boot treats as valid.
+    stage=$(mktemp "${target}.XXXXXX") || return 1
+    if cp "$source" "$stage" && valid_device_type "$stage" &&
+        chmod 0644 "$stage" && sync && mv -f "$stage" "$target"
+    then
+        log_info "Restored device type from ${source}"
+        return 0
+    fi
+    rm -f "$stage"
+    log_error "Failed to restore device type to ${target}"
+    return 1
+}
+
 # Verify /data is mounted
 if ! mountpoint -q /data
 then
@@ -102,13 +140,14 @@ then
     chmod 755 "${DATA_ETC}/wendyos"
 fi
 
-# Seed device-type to /data on first boot only. Hardware identity is
-# immutable for the life of the unit, so this copy runs once and the
-# /data copy persists across every subsequent boot and OTA.
-if [ -f /etc/wendyos/device-type ] && [ ! -f "${DATA_ETC}/wendyos/device-type" ]
+# The rootfs copy remains accessible even when /etc/wendyos is already
+# bind-mounted. Repair invalid persisted metadata, including an empty file
+# left by an interrupted seed, without replacing a valid board identity.
+if ! restore_device_type /usr/lib/wendyos/device-type "${DATA_ETC}/wendyos/device-type"
 then
-    log_info "Seeding device-type to ${DATA_ETC}/wendyos/"
-    cp -p /etc/wendyos/device-type "${DATA_ETC}/wendyos/device-type"
+    # Keep networking and enrollment mounts available so the device can be
+    # diagnosed remotely even if its build-time metadata is missing or invalid.
+    log_error "Device type remains unavailable; continuing with configuration mounts"
 fi
 
 # Bind-mount entire /etc/wendyos/ directory
