@@ -23,6 +23,7 @@ PATCH_DIRS = (
 
 def preimages(patch):
     files = collections.defaultdict(dict)
+    context_free_paths = set()
     filename = None
     old_left = new_left = 0
     for line in patch.read_text().splitlines(keepends=True):
@@ -35,6 +36,10 @@ def preimages(patch):
                 old_left -= 1
             if line.startswith((' ', '+')):
                 new_left -= 1
+            if line.startswith(' '):
+                has_context = True
+            if not old_left and not new_left and not has_context:
+                context_free_paths.add(filename)
         elif line.startswith('--- a/'):
             filename = line[6:].strip().split('\t')[0]
         elif line.startswith('@@ '):
@@ -43,8 +48,15 @@ def preimages(patch):
                 raise ValueError(f'Unsupported hunk in {patch}: {line}')
             position = int(match[1])
             old_left, new_left = int(match[2] or 1), int(match[4] or 1)
+            has_context = False
     if old_left or new_left or not files:
         raise ValueError(f'Incomplete patch fixture: {patch}')
+    # A context-free replacement must not gain special EOF treatment because
+    # its reconstructed fixture happens to end there. Keep real append-at-EOF
+    # patches at their boundary, while giving these replacements a file tail.
+    for filename in context_free_paths:
+        lines = files[filename]
+        lines[max(lines) + 8] = '/* omitted trailing kernel source */\n'
     return files
 
 

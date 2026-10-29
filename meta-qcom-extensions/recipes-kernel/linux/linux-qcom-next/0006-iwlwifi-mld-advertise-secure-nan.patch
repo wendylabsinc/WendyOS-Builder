@@ -19,12 +19,14 @@ Signed-off-by: Wendy Labs <engineering@wendy.dev>
 
 --- a/drivers/net/wireless/intel/iwlwifi/mld/mac80211.c
 +++ b/drivers/net/wireless/intel/iwlwifi/mld/mac80211.c
-@@ -272,2 +272,4 @@ static void iwl_mld_hw_set_nan(struct iwl_mld *mld)
--	hw->wiphy->interface_modes |= BIT(NL80211_IFTYPE_NAN);
--	hw->wiphy->interface_modes |= BIT(NL80211_IFTYPE_NAN_DATA);
-+	hw->wiphy->interface_modes |= BIT(NL80211_IFTYPE_NAN);
-+	hw->wiphy->interface_modes |= BIT(NL80211_IFTYPE_NAN_DATA);
+@@ -271,6 +271,8 @@
+ 
+ 	hw->wiphy->interface_modes |= BIT(NL80211_IFTYPE_NAN);
+ 	hw->wiphy->interface_modes |= BIT(NL80211_IFTYPE_NAN_DATA);
 +
 +	wiphy_ext_feature_set(hw->wiphy, NL80211_EXT_FEATURE_SECURE_NAN);
+ 
+ 	hw->wiphy->nan_supported_bands = BIT(NL80211_BAND_2GHZ);
+ 	if (mld->nvm_data->bands[NL80211_BAND_5GHZ].n_channels)
 --
 2.43.0

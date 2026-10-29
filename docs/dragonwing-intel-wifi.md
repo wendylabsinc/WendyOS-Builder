@@ -113,13 +113,14 @@ USB1 host support was qualified with a directly attached Logitech C922
 tree and an HD3SS3220 module built against its exact kernel devkit. The webcam
 appeared in `wendy device camera list`; a 1280x720 JPEG and 300 decoded frames
 passed. The driver, connector power and webcam returned automatically after a
-warm reboot. Physical unplug disabled VBUS; reconnection enabled it and restored
+warm reboot and a full power cycle with the webcam already attached. Physical
+unplug disabled VBUS; reconnection enabled it and restored
 the webcam, followed by another 30 decoded frames. Intel Bluetooth and 5 GHz
 station Wi-Fi remained available. This is
-functional qualification; it does not establish sustained throughput or cold
-power-cycle behavior.
+functional qualification; it does not establish sustained throughput or
+long-duration power-cycle reliability.
 
-IQ9 and BE200 hardware remain untested. Cold power cycles, IQ8 USB2 gadget
+IQ9 and BE200 hardware remain untested. Repeated cold power cycles, IQ8 USB2 gadget
 cable enumeration, original Qualcomm-card regression, automatic Bluetooth audio
 profile selection, secure NDP, NAN application-service discovery, MLO, AP mode
 and throughput/stability qualification remain outstanding.
