@@ -1,0 +1,24 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Wendy Labs <engineering@wendy.dev>
+Date: Mon, 26 Oct 2026 13:20:00 +1100
+Subject: [PATCH] wifi: iwlwifi: mld: update mac80211 on NAN cluster join
+
+Report cluster changes through mac80211 so its NAN receive filter sees the
+current cluster ID. Calling cfg80211 directly leaves that ID all zeroes,
+causing incoming discovery and data frames to be rejected by the NAN vif.
+
+Backport the notification path from the pinned Intel backport driver.
+
+Upstream-Status: Backport [https://kernel.googlesource.com/pub/scm/linux/kernel/git/iwlwifi/backport-iwlwifi/+/070e486a6d462c79bf6356832af28e45c1b94519/drivers/net/wireless/intel/iwlwifi/mld/nan.c]
+Signed-off-by: Wendy Labs <engineering@wendy.dev>
+---
+--- a/drivers/net/wireless/intel/iwlwifi/mld/nan.c
++++ b/drivers/net/wireless/intel/iwlwifi/mld/nan.c
+@@ -339,3 +339,4 @@
+
+-	cfg80211_nan_cluster_joined(wdev, cluster_id, new_cluster, GFP_KERNEL);
++	ieee80211_nan_cluster_joined(mld->nan_device_vif, cluster_id,
++				     new_cluster, GFP_KERNEL);
+ }
+--
+2.43.0

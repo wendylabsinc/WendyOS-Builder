@@ -110,6 +110,19 @@ class ImageAcceptanceTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('empty mesh module contract', result.stderr)
 
+    def test_cli_checks_base_image_modules_and_their_dependencies(self):
+        config = self.root / '.config'
+        config.write_text('CONFIG_IPV6_TUNNEL=m\n')
+        args = [sys.executable, str(SCRIPT), '--config', str(config),
+                '--rootfs', str(self.root), '--kernel-release', self.release,
+                '--external-module', 'ip6_tunnel']
+        result = subprocess.run(args, text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        (self.modules / 'kernel/net/ipv6/tunnel6.ko.xz').unlink()
+        result = subprocess.run(args, text=True, capture_output=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('requires missing or invalid module file', result.stderr)
+
 
 if __name__ == '__main__':
     unittest.main()

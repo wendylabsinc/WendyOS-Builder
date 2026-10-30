@@ -51,13 +51,34 @@ WENDYOS_EFI_DEBUG = "0"
 # NVIDIA-only stacks.
 WENDYOS_DEEPSTREAM = "0"
 
-# More than one dwc3 controller is dual-role and registers a UDC, and the one the
-# gadget wants does not sort first, so the controller has to be named explicitly.
+# Name the gadget controller explicitly on boards with multiple USB controllers.
+# IQ8 overrides this for USB2 while its primary controller hosts the M.2 hub.
 # The Tegra-only gadget helper recipes that wendyos-image.bb pairs with this
 # setting are dropped in conf/distro/include/qcom-image.inc, exactly as the RPi
 # include does.
 WENDYOS_USB_GADGET = "1"
 WENDYOS_USB_UDC = "a600000.usb"
+
+# Install Intel support through the same optional driver add-on path as Jetson.
+# The devkit carries the native modules and selected Bluetooth firmware;
+# the driver manifest pins newer Wi-Fi firmware with the required NAN APIs.
+# Neither the Intel modules nor the broad firmware bundles enter the base image.
+WENDYOS_DRIVER_EXTENSIONS ?= "1"
+WENDYOS_DRIVER_DEVKIT_MODULES = "iwlwifi iwlmld btusb btintel"
+# Shared stacks belong to the image, including their signed dependency closure.
+# The native add-on must not shadow these through updates/wendyos.
+WENDYOS_DRIVER_BASE_MODULES = "cfg80211 mac80211 bluetooth"
+# BE200 and BE202 share this Bluetooth firmware pair.
+WENDYOS_DRIVER_DEVKIT_FIRMWARE = " \
+    intel/ibt-0291-0291.sfi intel/ibt-0291-0291.ddc \
+    LICENCE.ibt_firmware \
+    "
+
+# Package stripping skips signed modules. Strip in kbuild before signing, for
+# both the kernel's modules and the two external module recipes used on IQ.
+EXTRA_OEMAKE:append:pn-linux-qcom-next = " INSTALL_MOD_STRIP=1"
+EXTRA_OEMAKE:append:pn-qps615-dlkm = " INSTALL_MOD_STRIP=1"
+EXTRA_OEMAKE:append:pn-v4l2loopback = " INSTALL_MOD_STRIP=1"
 
 # /data encryption stays off: turning it on is a separate decision with its own
 # rollback hazard, and not every board here has usable TPM firmware to enroll to.

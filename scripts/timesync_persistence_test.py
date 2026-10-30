@@ -135,8 +135,12 @@ class TimesyncPersistenceTest(unittest.TestCase):
             "systemd-analyze", "verify", "--man=no", f"--root={self.root}",
             "systemd-timesyncd.service", "var-lib-systemd-timesync.mount",
             "wendyos-timesync-state.service",
-        ], text=True, capture_output=True,
-            env={**os.environ, "SYSTEMD_LOG_LEVEL": "debug", "SYSTEMD_UTF8": "0"})
+        ], text=True, capture_output=True, env={
+            **os.environ, "SYSTEMD_LOG_LEVEL": "debug",
+            # Newer systemd uses Unicode arrows in unit dumps. Keep the
+            # dependency parser independent of the runner's locale and colors.
+            "SYSTEMD_UTF8": "0", "SYSTEMD_COLORS": "0",
+        })
         output = result.stdout + result.stderr
         self.assertEqual(result.returncode, 0, output)
         # Without the prep service in the transaction the cycle check is vacuous.

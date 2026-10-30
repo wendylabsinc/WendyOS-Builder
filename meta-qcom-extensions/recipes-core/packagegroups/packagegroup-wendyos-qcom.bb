@@ -39,6 +39,10 @@ RDEPENDS:${PN} = " \
     kernel-module-uvcvideo \
     "
 
+# The native Intel add-on delegates these shared stacks to the image. Require
+# packages rather than relying on recommendations or incidental dependencies.
+RDEPENDS:${PN} += "${@' '.join('kernel-module-' + name.replace('_', '-') for name in (d.getVar('WENDYOS_DRIVER_BASE_MODULES') or '').split())}"
+
 # The Wi-Fi stack for the WCN6855 in the M.2 slot. meta-qcom supplies all three
 # through RRECOMMENDS, which bitbake drops in silence; without regulatory.db
 # cfg80211 also falls back to the world domain and 5 GHz goes passive-only.
@@ -56,7 +60,11 @@ RDEPENDS:${PN} += " \
 #                      from native DP and has no such bridge.
 #  pinctrl-*-lpass-lpi the LPI pins monaco's sound card routes over; lemans
 #                      routes the same two codecs over plain tlmm.
+#  hd3ss3220           USB1's Type-C controller switches the external connector's
+#                      5 V supply. The internal M.2 Bluetooth hub port does not
+#                      depend on it, so Bluetooth alone cannot validate USB1.
 RDEPENDS:${PN}:append:iq-8275-evk = " \
+    kernel-module-hd3ss3220 \
     kernel-module-lontium-lt8713sx \
     kernel-module-pinctrl-lpass-lpi \
     kernel-module-pinctrl-sm8450-lpass-lpi \

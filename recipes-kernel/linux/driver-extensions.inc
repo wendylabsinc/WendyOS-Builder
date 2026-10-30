@@ -30,12 +30,83 @@ WENDYOS_MODULE_SIGN_KEY ?= ""
 # machine, including those where the function does nothing.
 python __anonymous() {
     d.appendVarFlag('do_configure', 'prefuncs', ' wendyos_install_module_sign_key')
+    if d.getVar('WENDYOS_DRIVER_DEVKIT_MODULES'):
+        d.appendVarFlag('do_compile_kernelmodules', 'postfuncs', ' wendyos_export_driver_modules')
+        d.appendVar('SRC_URI', ' file://kernel-config-identity.py')
+        d.appendVarFlag('do_configure', 'postfuncs', ' wendyos_set_kernel_config_identity')
     key = d.getVar('WENDYOS_MODULE_SIGN_KEY')
     if key:
         # Hash the key's contents, not just its path. Secrets are normally rotated in
         # place, and without this the kernel would restore from sstate still trusting the
         # old certificate while the pipeline signs with the new one.
         d.appendVarFlag('do_configure', 'file-checksums', ' %s:True' % key)
+}
+
+# Run after olddefconfig has resolved all fragments. Updating CONFIG_LOCALVERSION
+# here lets kbuild syncconfig generate the final release before compilation;
+# .config then carries the same identity into shared_workdir and the devkit.
+# CONFIG_LOCALVERSION_AUTO continues to identify source and patch changes.
+python wendyos_set_kernel_config_identity() {
+    import pathlib
+    import subprocess
+    import sys
+
+    helper = pathlib.Path(d.getVar('UNPACKDIR')) / 'kernel-config-identity.py'
+    config = pathlib.Path(d.getVar('B')) / '.config'
+    result = subprocess.run([sys.executable, str(helper), str(config)], text=True,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    if result.returncode:
+        bb.fatal('Native driver kernel config identity failed:\n%s' % result.stdout)
+    bb.note('Native driver kernel config identity: %s' % result.stdout.strip())
+}
+
+# Export in-tree modules, stopping at dependencies guaranteed by the base image.
+# The devkit packages these exact binaries instead of rebuilding a wireless stack
+# against a different source tree. This task runs after shared_workdir and modules.
+python wendyos_export_driver_modules() {
+    import hashlib
+    import json
+    from pathlib import Path
+    import shutil
+    import subprocess
+
+    build = Path(d.getVar('B'))
+    dest = Path(d.getVar('STAGING_KERNEL_BUILDDIR')) / 'wendyos-driver-modules'
+    shutil.rmtree(dest, ignore_errors=True)
+    dest.mkdir(parents=True)
+    modinfo = str(Path(d.getVar('RECIPE_SYSROOT_NATIVE')) / 'sbin/modinfo')
+    available = {}
+    for relative in (build / 'modules.order').read_text().splitlines():
+        path = build / Path(relative).with_suffix('.ko')
+        available.setdefault(path.stem.replace('-', '_'), []).append(path)
+    exported = {}
+    base_modules = set((d.getVar('WENDYOS_DRIVER_BASE_MODULES') or '').replace('-', '_').split())
+    requested = d.getVar('WENDYOS_DRIVER_DEVKIT_MODULES').replace('-', '_').split()
+    if base_modules.intersection(requested):
+        bb.fatal('Driver devkit: requested add-on modules also belong to the base image')
+
+    def export(name):
+        name = name.replace('-', '_')
+        if name in exported:
+            return
+        if name in base_modules:
+            exported[name] = {'provided_by': 'base-image'}
+            return
+        paths = available.get(name, [])
+        if len(paths) != 1 or not paths[0].is_file():
+            bb.fatal('Driver devkit: expected one built module for %s, got %s' % (name, paths))
+        path = paths[0]
+        deps = subprocess.check_output([modinfo, '-F', 'depends', str(path)], text=True).strip()
+        dependencies = [dep.replace('-', '_') for dep in deps.split(',') if dep]
+        shutil.copy2(path, dest / path.name)
+        exported[name] = {'file': path.name, 'depends': dependencies,
+                          'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}
+        for dependency in dependencies:
+            export(dependency)
+
+    for name in requested:
+        export(name)
+    (dest / 'index.json').write_text(json.dumps(exported, indent=2) + '\n')
 }
 
 wendyos_install_module_sign_key() {

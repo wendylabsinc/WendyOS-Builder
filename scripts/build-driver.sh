@@ -6,19 +6,20 @@
 # this needs only make, tar, patch, git, curl and python3, so adding or rebuilding a driver
 # never requires a kernel build.
 #
-#   build-driver.sh --devkit <dir> --driver <dir> [--out <dir>] [--sign-key <pem>]
+#   build-driver.sh --devkit <dir> --driver <dir> [--out <dir>] [--sign-key <pem>] [--device <id>]
 #
 set -euo pipefail
 
 err() { echo "build-driver: $*" >&2; exit 1; }
 
-DEVKIT="" DRIVER="" OUT="" SIGN_KEY=""
+DEVKIT="" DRIVER="" OUT="" SIGN_KEY="" DEVICE=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --devkit)   DEVKIT=$2; shift 2 ;;
         --driver)   DRIVER=$2; shift 2 ;;
         --out)      OUT=$2; shift 2 ;;
         --sign-key) SIGN_KEY=$2; shift 2 ;;
+        --device)   DEVICE=$2; shift 2 ;;
         -h|--help)  awk 'NR>1 && /^#/{print} NR>1 && !/^#/{exit}' "$0"; exit 0 ;;
         *)          err "unknown argument: $1" ;;
     esac
@@ -51,9 +52,13 @@ PY
 # Assigned then eval'd rather than eval'd inline: `eval "$(cmd)"` reports eval's status,
 # so a failed read would look like success and leave every field empty.
 devkit_vars=$(read_json "$DEVKIT/devkit.json" \
-    KVER=kernel_version ARCH=arch CROSS=cross_compile TC_BINDIR=toolchain_bindir) \
+    KVER=kernel_version ARCH=arch CROSS=cross_compile TC_BINDIR=toolchain_bindir DEVKIT_DEVICE=device) \
     || err "cannot read $DEVKIT/devkit.json"
 eval "$devkit_vars"
+if [ -n "$DEVICE" ] && [ -n "$DEVKIT_DEVICE" ] && [ "$DEVICE" != "$DEVKIT_DEVICE" ]; then
+    err "--device $DEVICE does not match devkit device $DEVKIT_DEVICE"
+fi
+DEVICE=${DEVICE:-$DEVKIT_DEVICE}
 
 KBUILD="$DEVKIT/kernel-build"
 TC_BIN="$DEVKIT/$TC_BINDIR"
@@ -73,9 +78,16 @@ STRINGS="$TC_BIN/${CROSS}strings"
 "$TC_BIN/${CROSS}gcc" --version >/dev/null 2>&1 \
     || err "cross gcc will not start even after sourcing env.sh; re-run $DEVKIT/setup.sh"
 
+# Resolve board-specific build inputs before selecting a source or firmware.
+SCRIPTDIR=$(cd "$(dirname "$0")" && pwd)
+rm -rf "$OUT"; mkdir -p "$OUT"
+python3 "$SCRIPTDIR/resolve_driver_manifest.py" "$MANIFEST" --device "$DEVICE" \
+    --output "$OUT/driver.json" || err "invalid driver build variant"
+MANIFEST="$OUT/driver.json"
+
 # --- source -------------------------------------------------------------------------
-# `local` builds the directory in place, `git` clones a pinned revision; anything else is
-# rejected rather than guessed at.
+# Native builds copy the devkit's module closure; other builds use a local tree
+# or clone a pinned git revision.
 driver_vars=$(read_json "$MANIFEST" \
     NAME=name SRC_LOCAL=source.local SRC_GIT=source.git SRC_REV=source.rev \
     BUILD_KIND=build.kind BUILD_CONFIGURE=build.configure) \
@@ -83,9 +95,10 @@ driver_vars=$(read_json "$MANIFEST" \
 eval "$driver_vars"
 [ -n "$NAME" ] || err "driver.json has no name"
 
-rm -rf "$OUT"; mkdir -p "$OUT"
 SRCDIR="$OUT/src"
-if [ -n "$SRC_LOCAL" ]; then
+if [ "$BUILD_KIND" = "kernel-modules" ]; then
+    python3 "$SCRIPTDIR/stage_native_driver.py" "$DEVKIT" "$MANIFEST" "$SRCDIR"
+elif [ -n "$SRC_LOCAL" ]; then
     mkdir -p "$SRCDIR"
     # Anchored with ./: bare --exclude=build is unanchored and would also drop a nested
     # tools/build/ that the driver needs to compile.
@@ -156,6 +169,11 @@ case "${BUILD_KIND:-kbuild}" in
         make -C "$SRCDIR" KLIB_BUILD="$KBUILD" "$BUILD_CONFIGURE"
         make -C "$SRCDIR" -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)" \
             KLIB_BUILD="$KBUILD" modules
+        ;;
+    kernel-modules)
+        # Exact in-tree binaries from this kernel, with their dependency closure.
+        # Strip before the common signing step so the resulting signature is valid.
+        find "$SRCDIR" -name '*.ko' -exec "$TC_BIN/${CROSS}strip" --strip-debug {} +
         ;;
     *)
         err "unsupported build.kind: $BUILD_KIND"
@@ -242,5 +260,5 @@ echo
 echo "driver:  $NAME"
 echo "kernel:  $KVER"
 echo "modules: ${KOS[*]##*/}"
-[ -z "$FIRMWARE" ] || echo "firmware: $OUT/firmware"
+[ ! -d "$OUT/firmware" ] || echo "firmware: $OUT/firmware"
 echo "output:  $OUT/modules"

@@ -1,9 +1,11 @@
 # Intel BE202 Wi-Fi and Bluetooth driver add-on
 
-This add-on replaces the running kernel's cfg80211/mac80211 stack and supplies
-Intel's `iwlwifi` + `iwlmld` modules. It is pinned to the Intel backport revision
-in `driver.json`. Bluetooth uses the base OS's `btusb`/`btintel` drivers with
-the controller firmware supplied by this add-on.
+This package supports Intel BE202 on Jetson and Raspberry Pi 5, and targets
+BE200/BE202 on Dragonwing IQ8/IQ9. Dragonwing hardware validation covers IQ8 with
+BE202; BE200 and IQ9 remain untested. IQ packages supply native modules and
+selected firmware from the matching kernel devkit. Jetson/Pi packages use the Intel backport pinned
+in `driver.json` and replace the kernel's cfg80211/mac80211 stack; Bluetooth uses
+their base `btusb`/`btintel` modules with firmware from the package.
 
 ## Installation
 
@@ -36,6 +38,28 @@ The BE202's Bluetooth function needs a separate USB 2.0 connection from the M.2
 socket. A PCIe-only HAT can provide Wi-Fi but cannot expose BE202 Bluetooth.
 The Thor package applies a PCIe No-Snoop workaround limited to Intel `8086:272b`
 behind NVIDIA root port `10de:22d8`.
+
+## Dragonwing IQ8/IQ9
+
+The IQ package installs native `iwlwifi`, `iwlmld`, `btusb` and `btintel` modules
+and their dependencies without replacing cfg80211/mac80211. Its c106 Wi-Fi
+firmware and PNVM are fetched and hash-checked from the manifest's pinned
+linux-firmware commit. The shared BE200/BE202 Bluetooth firmware pair,
+`intel/ibt-0291-0291.sfi` and `.ddc`, comes from the image's pinned recipe.
+The package omits AX210/AX211 firmware and makes no support claim for those cards.
+The broad Intel firmware bundles stay out of the base OS.
+The manifest's `variants_by_device` selects these build inputs; both the build
+and pack steps require a device identity matching the devkit. The IQ kernel
+backports the secure-NAN capability and cluster notification fixes needed by
+`wendyos-nan` and the Wendy Net NAN carrier; it does not replace cfg80211/mac80211.
+Carrier use also requires a compatible agent; see the validation notes below.
+
+Both EVKs route M.2 Bluetooth through an internal USB hub. IQ8's base image
+configures that hub and moves its Wendy USB gadget to USB2 (micro-USB); USB0
+remains the recovery port. IQ9 uses its separate host controller and retains its
+gadget selection. See [IQ8/IQ9 validation and wiring](../../docs/dragonwing-intel-wifi.md).
+
+## Jetson/Pi firmware and activation
 
 The firmware payload is fetched from the official linux-firmware repository and
 verified by SHA-256. Wi-Fi firmware c107 is preferred, with c106 retained as a

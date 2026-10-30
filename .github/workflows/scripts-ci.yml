@@ -63,6 +63,13 @@ on:
       - 'meta-*/conf/layer.conf'
       - 'recipes-core/wendyos-agent/files/*.sh'
       - 'scripts/build-driver.sh'
+      - 'scripts/resolve_driver_manifest.py'
+      - 'scripts/stage_native_driver.py'
+      - 'scripts/driver_native_test.py'
+      - 'recipes-kernel/linux/driver-extensions.inc'
+      - 'recipes-kernel/linux/driver-extensions/**'
+      - 'scripts/kernel_config_identity_test.py'
+      - 'classes/native-driver-check.bbclass'
       - 'scripts/pack-sysext.sh'
       - 'scripts/driver_supports_device.py'
       - 'scripts/driver_supports_device_test.py'
@@ -168,6 +175,13 @@ on:
       - 'meta-*/conf/layer.conf'
       - 'recipes-core/wendyos-agent/files/*.sh'
       - 'scripts/build-driver.sh'
+      - 'scripts/resolve_driver_manifest.py'
+      - 'scripts/stage_native_driver.py'
+      - 'scripts/driver_native_test.py'
+      - 'recipes-kernel/linux/driver-extensions.inc'
+      - 'recipes-kernel/linux/driver-extensions/**'
+      - 'scripts/kernel_config_identity_test.py'
+      - 'classes/native-driver-check.bbclass'
       - 'scripts/pack-sysext.sh'
       - 'scripts/driver_supports_device.py'
       - 'scripts/driver_supports_device_test.py'
@@ -377,6 +391,14 @@ jobs:
       - name: Verify reproducible kernel patch commit identities
         run: python3 -m unittest scripts/kernel_patch_dates_test.py
 
+      - name: Verify config-only kernel release identities
+        run: |
+          curl --fail --silent --show-error --location --retry 3 \
+            https://raw.githubusercontent.com/qualcomm-linux/kernel/d49c33864d06e9672dce57738be8851384578fcf/scripts/setlocalversion \
+            -o "$RUNNER_TEMP/qcom-setlocalversion"
+          WENDY_KERNEL_SETLOCALVERSION="$RUNNER_TEMP/qcom-setlocalversion" \
+            python3 -m unittest scripts/kernel_config_identity_test.py
+
       - name: Run game-controller support validator tests
         run: python3 -m unittest scripts/check_game_controller_support_test.py
 
@@ -384,7 +406,7 @@ jobs:
         run: python3 -m unittest scripts/driver_supports_device_test.py
 
       - name: Run driver build and pack validation tests
-        run: python3 -m unittest scripts/driver_manifest_test.py
+        run: python3 -m unittest scripts/driver_manifest_test.py scripts/driver_native_test.py
 
       - name: Run driver activation tests
         run: python3 -m unittest scripts/driver_activation_test.py

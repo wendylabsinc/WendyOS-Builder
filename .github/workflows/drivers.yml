@@ -214,9 +214,10 @@ jobs:
       - name: Build the module
         env:
           DRIVER: ${{ matrix.driver }}
+          DEVICE: ${{ matrix.device }}
         run: |
           set -euo pipefail
-          scripts/build-driver.sh --devkit "$DEVKIT_DIR" --driver "drivers/$DRIVER"
+          scripts/build-driver.sh --devkit "$DEVKIT_DIR" --driver "drivers/$DRIVER" --device "$DEVICE"
 
       - name: Pack the add-on image
         env:

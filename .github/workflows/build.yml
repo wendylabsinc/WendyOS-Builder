@@ -87,11 +87,17 @@ jobs:
               - 'drivers/**'
               - 'scripts/build-driver.sh'
               - 'scripts/pack-sysext.sh'
+              - 'scripts/resolve_driver_manifest.py'
+              - 'scripts/stage_native_driver.py'
+              - 'scripts/driver_native_test.py'
             os:
               - '**'
               - '!drivers/**'
               - '!scripts/build-driver.sh'
               - '!scripts/pack-sysext.sh'
+              - '!scripts/resolve_driver_manifest.py'
+              - '!scripts/stage_native_driver.py'
+              - '!scripts/driver_native_test.py'
 
       - id: version
         env:
