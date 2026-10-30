@@ -8,4 +8,13 @@ do_install:append() {
     grep -qx 'ConnectionSupervisionTimeout=200' \
         "${D}${sysconfdir}/bluetooth/main.conf" || \
         bbfatal "BlueZ main.conf did not accept ConnectionSupervisionTimeout=200; check the upstream template"
+
+    # Battery monitoring reads protected peer GATT characteristics and can
+    # trigger bonding, then tear down an otherwise unpaired LE CoC connection.
+    # Disable that plugin on every image while retaining reverse discovery and
+    # the other Bluetooth profiles. Fail rather than overwrite new daemon args.
+    bluetooth_service="${D}${systemd_system_unitdir}/bluetooth.service"
+    grep -Eq '^ExecStart=[^[:space:]]*/bluetoothd$' "$bluetooth_service" || \
+        bbfatal "Unexpected BlueZ ExecStart; preserve its arguments when disabling the battery plugin"
+    sed -i '/^ExecStart=/s/$/ --noplugin=battery/' "$bluetooth_service"
 }
