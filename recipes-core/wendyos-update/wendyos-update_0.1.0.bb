@@ -22,7 +22,7 @@ GO_IMPORT = "github.com/wendylabsinc/wendyos-update"
 # on any tree. ?= defers to go.bbclass where it already sets this.
 GO_SRCURI_DESTSUFFIX ?= "${@os.path.join(os.path.basename(d.getVar('S')), 'src', d.getVar('GO_IMPORT')) + '/'}"
 
-SRC_URI = "git://${GO_IMPORT};protocol=https;branch=main;destsuffix=${GO_SRCURI_DESTSUFFIX}"
+SRC_URI = "git://${GO_IMPORT};protocol=https;nobranch=1;destsuffix=${GO_SRCURI_DESTSUFFIX}"
 # 2ef50a95 (main): add the grubenv connector (generic x86-64 GRUB-EFI A/B) — the
 # third connector, wiring up x86 A/B OTA Phase 2. Jetson
 # (tegrauefi) and RPi (ubootenv) are unaffected and each board still selects its
@@ -101,7 +101,12 @@ SRC_URI = "git://${GO_IMPORT};protocol=https;branch=main;destsuffix=${GO_SRCURI_
 # it reads capsules from, and refuses a capsule install while a boot-chain
 # switch is unsettled; rollback always disarms a staged capsule. grubenv status
 # scans only the boot disk and reads the environment once.
-SRCREV = "1f160d407833783755af153a64f1b386e8f922ac"
+#
+# 9cf1541: a rollback to the running slot withdraws BootChainFwNext instead
+# of requesting that slot again, so the capsule check no longer refuses every
+# later install until a reboot. The exact pin builds before the updater PR
+# merges; nobranch avoids requiring it to be an ancestor of main.
+SRCREV = "9cf1541d38a0c2b55ef764e9dfd59060028395d8"
 
 inherit go-mod systemd
 
