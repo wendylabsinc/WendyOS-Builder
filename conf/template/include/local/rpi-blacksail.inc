@@ -3,12 +3,12 @@
 # Volatile journal logs in tmpfs (no /data partition).
 WENDYOS_PERSIST_JOURNAL_LOGS = "0"
 
-# U-Boot: blacksail-native oe-core U-Boot 2026.04, no version pin needed.
+# U-Boot: blacksail-native oe-core U-Boot 2026.07, no version pin needed.
 #
-# It boots the Pi 5 fine (confirmed via the dedicated debug connector). The
+# 2026.04 booted the Pi 5 fine (confirmed via the dedicated debug connector). The
 # earlier "2026.04 won't boot" was a console-routing red herring: on the newer
 # DTB the effective console is on serial10 (the 3-pin debug connector), not
-# serial0/GPIO14-15 where we were watching. oe-core 2026.04 is the only U-Boot
+# serial0/GPIO14-15 where we were watching. oe-core's U-Boot is the only U-Boot
 # provider. See the memory note project_rpi5_blacksail_uboot_silent.
 
 # ffmpeg provider: pin to the blacksail-native oe-core `ffmpeg`, NOT meta-
