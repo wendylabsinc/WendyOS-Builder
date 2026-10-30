@@ -101,7 +101,11 @@ SRC_URI = "git://${GO_IMPORT};protocol=https;branch=main;destsuffix=${GO_SRCURI_
 # it reads capsules from, and refuses a capsule install while a boot-chain
 # switch is unsettled; rollback always disarms a staged capsule. grubenv status
 # scans only the boot disk and reads the environment once.
-SRCREV = "1f160d407833783755af153a64f1b386e8f922ac"
+#
+# 347a3c1 (main, wendyos-update#16): a rollback to the running slot withdraws
+# BootChainFwNext instead of requesting that slot again, so the capsule check
+# no longer refuses every later install until a reboot.
+SRCREV = "347a3c1af9eceb3736e950872c9b2a54c3c86c57"
 
 inherit go-mod systemd
 
