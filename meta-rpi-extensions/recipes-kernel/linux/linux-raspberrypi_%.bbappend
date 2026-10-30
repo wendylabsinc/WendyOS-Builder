@@ -7,6 +7,8 @@ SRC_URI:append:rpi = "${@' file://container.cfg' if d.getVar('WENDYOS_CONTAINER_
 
 # Add USB gadget kernel config when WENDYOS_USB_GADGET is enabled
 SRC_URI:append:rpi = "${@' file://usb-gadget.cfg' if d.getVar('WENDYOS_USB_GADGET') == '1' else ''}"
+# Pi 4: a usable CMA pool when the DT reservation fails (see cma-fallback.cfg)
+SRC_URI:append:raspberrypi4-64 = " file://cma-fallback.cfg"
 SRC_URI += "file://0001-dwc2-force-g_dma-false-for-BCM2712-in-peripheral-mod.patch"
 SRC_URI += "file://0002-bluetooth-l2cap-release-ident-for-le-credits.patch"
 SRC_URI += "file://0003-bluetooth-preserve-legacy-advertising-on-central-connect.patch"
