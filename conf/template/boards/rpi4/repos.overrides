@@ -1,6 +1,6 @@
-# Per-board repo overrides for rpi4-sd (blacksail tree).
+# Per-board repo overrides for rpi4 (blacksail tree).
 #
-# RPi4 (SD) on the blacksail OE series (fleet unification with rpi5 + the Jetsons).
+# RPi4 on the blacksail OE series (fleet unification with rpi5 + the Jetsons).
 # See docs/plans/wendyos-update-rpi.md.
 #
 # WENDYOS_LAYER_TREE="blacksail" makes bootstrap clone every upstream repo under
@@ -11,5 +11,5 @@ WENDYOS_LAYER_TREE="blacksail"
 
 # NOTE: unlike rpi5, rpi4 (BCM2711) gets NO U-Boot override — the rc4 bump + NVMe
 # patch in u-boot_%.bbappend are raspberrypi5-scoped, so rpi4 builds STOCK blacksail
-# U-Boot 2026.04. Go 1.26 is native on blacksail too, so no backport layer is
+# U-Boot. Go 1.26 is native on blacksail too, so no backport layer is
 # cloned.
