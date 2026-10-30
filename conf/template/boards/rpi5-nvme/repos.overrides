@@ -16,5 +16,5 @@ WENDYOS_LAYER_TREE="blacksail"
 # SRCREV_OECORE will NOT move rpi5 U-Boot — revisit/repin that bbappend's SRCREV
 # when you want rpi5 on a newer U-Boot.
 #
-# No REPOS_EXTRA: blacksail oe-core ships Go 1.26 and U-Boot 2026.04 natively, so
+# No REPOS_EXTRA: blacksail oe-core ships Go 1.26 and U-Boot 2026.07 natively, so
 # nothing has to be backported.

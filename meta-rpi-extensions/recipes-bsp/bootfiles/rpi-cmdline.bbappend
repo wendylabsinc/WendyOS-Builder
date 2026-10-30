@@ -32,7 +32,14 @@ inherit partuuid-rpi
 # bring-up can watch the boot again. "serial0" is the RPi firmware alias that
 # resolves to the correct UART per board (ttyAMA0 on RPi5, ttyS0 on RPi3/4 —
 # see SERIAL_CONSOLES above), so no per-machine override is needed here.
-WENDYOS_RPI_CMDLINE_EXTRAS = "${@' console=serial0,115200' if d.getVar('WENDYOS_DEBUG_UART') == '1' else ''}${@' modules-load=dwc2' if d.getVar('WENDYOS_USB_GADGET') == '1' else ''}"
+#
+# `cgroup_enable=memory`: the RPi firmware prepends cgroup_disable=memory to the
+# kernel cmdline, which turns the memory cgroup controller off, so containerd's
+# MemoryMax/MemoryHigh and every per-container memory limit are silently
+# ignored. The downstream RPi kernel has a cgroup_enable= handler that turns
+# the controller back on, and handlers run in cmdline order, so this entry
+# (after the firmware's) wins.
+WENDYOS_RPI_CMDLINE_EXTRAS = "${@' console=serial0,115200' if d.getVar('WENDYOS_DEBUG_UART') == '1' else ''}${@' modules-load=dwc2' if d.getVar('WENDYOS_USB_GADGET') == '1' else ''} cgroup_enable=memory"
 CMDLINE_ROOTFS:append:rpi = "${WENDYOS_RPI_CMDLINE_EXTRAS}"
 
 do_deploy[depends] += "${PN}:do_generate_partuuids"

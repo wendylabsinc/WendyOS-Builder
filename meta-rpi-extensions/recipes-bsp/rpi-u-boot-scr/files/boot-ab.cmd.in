@@ -117,6 +117,19 @@ fdt addr ${fdt_addr} && fdt get value bootargs /chosen bootargs
 @@BOOTDEV@@    reset
 @@BOOTDEV@@fi
 
+# Keep the DTB out of the kernel's CMA window. Stock U-Boot sets
+# bootm_size=0x20000000 and no fdt_high (board/raspberrypi/rpi/rpi.env), so
+# booti copies the DTB to just below 512 MB. On the Pi 4, bcm2711-rpi-ds.dtsi
+# confines CMA to the first 768 MB and the vc4-kms-v3d-pi4 overlay asks for
+# 508 MB of it; a DTB at 512 MB splits that window into holes of roughly 480 MB
+# and 256 MB, the reservation fails, and the kernel falls back to a 5 MB pool
+# that vc4 cannot allocate a framebuffer from. fdt_high is an upper bound:
+# U-Boot puts the DTB in the highest free block below it, under its own
+# relocated copy at the top of the first bank. This runs after every saveenv
+# above, so it is never persisted to uboot.env. Boards with no bound get no
+# setenv line here and keep the stock behaviour.
+setenv fdt_high @@WENDYOS_UBOOT_FDT_HIGH@@
+
 # Load the kernel from the SELECTED slot's rootfs /boot (A/B-safe: each slot
 # carries its own kernel). A failed load or a returning boot falls through to
 # reset, which during a trial advances bootcount toward the fall-back above.
