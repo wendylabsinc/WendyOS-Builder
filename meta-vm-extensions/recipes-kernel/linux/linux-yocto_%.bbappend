@@ -29,3 +29,4 @@ require ${@'recipes-kernel/linux/game-controller.inc' if d.getVar('WENDYOS_GAME_
 
 require recipes-kernel/linux/mesh-local.inc
 require recipes-kernel/linux/mesh-internet.inc
+require recipes-kernel/linux/cve-2026-98432.inc

@@ -64,6 +64,7 @@ class KernelPatchDatesTest(unittest.TestCase):
     def test_patch_commit_identity_is_reproducible(self):
         patches = [p for directory in PATCH_DIRS for p in sorted((ROOT / directory).glob('*.patch'))]
         patches += sorted((ROOT / 'recipes-kernel/linux/bluetooth-le-pending').glob('*qcom.patch'))
+        patches.append(ROOT / 'recipes-kernel/linux/cve-2026-98432/cve-2026-98432-6.18.patch')
         self.assertGreaterEqual(len(patches), 6)
         env = os.environ | {
             'GIT_CONFIG_NOSYSTEM': '1', 'GIT_CONFIG_GLOBAL': os.devnull,
