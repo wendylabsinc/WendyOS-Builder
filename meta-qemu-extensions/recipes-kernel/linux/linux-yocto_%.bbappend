@@ -23,3 +23,4 @@ KMACHINE:qemuarm64-wendyos = "qemuarm64"
 
 require recipes-kernel/linux/mesh-local.inc
 require recipes-kernel/linux/mesh-internet.inc
+require recipes-kernel/linux/cve-2026-98432.inc
