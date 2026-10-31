@@ -1005,7 +1005,7 @@ above have different refresh semantics and are seeded differently:
 
 | File | Installed by recipe to | Runtime lifecycle |
 |---|---|---|
-| `device-type` | `/etc/wendyos/device-type` (rootfs) | `setup-etc-binds.sh` seeds to `/data` on first boot only — hardware identity, never changes |
+| `device-type` | `/etc/wendyos/device-type` + authoritative `/usr/lib/wendyos/device-type` | `setup-etc-binds.sh` atomically restores missing or invalid persistent metadata from `/usr/lib/`; valid board identities are preserved |
 | `version.txt` | `/usr/lib/wendyos/version.txt` (authoritative) + `/etc/wendyos/version.txt` symlink | `setup-etc-binds.sh` overwrites `/etc/wendyos/version.txt` from `/usr/lib/` on every boot — stays current across OTA |
 
 On RPi and QEMU (no `/data`), `setup-etc-binds.sh` doesn't run. `device-type`
