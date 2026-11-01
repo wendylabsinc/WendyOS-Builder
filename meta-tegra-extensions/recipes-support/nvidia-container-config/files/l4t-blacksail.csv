@@ -210,3 +210,12 @@ sym, /usr/lib/libnvidia-ml.so
 # PTX JIT Compiler
 # =============================================================================
 sym, /usr/lib/libnvidia-ptxjitcompiler.so.1
+
+# =============================================================================
+# L4T Multimedia
+# =============================================================================
+# The camera element (nvarguscamerasrc) and the JPEG element (nvjpeg) load
+# libnvmm_jpeg in containers. Without it they failed on Thor with
+# "libnvmm_jpeg.so: cannot open shared object file". tegra-libraries-multimedia
+# installs it on the device, and meta-tegra's drivers.csv does not name it.
+lib, /usr/lib/libnvmm_jpeg.so
