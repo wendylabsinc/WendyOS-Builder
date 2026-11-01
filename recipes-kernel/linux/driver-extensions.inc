@@ -45,7 +45,10 @@ python __anonymous() {
 # Run after olddefconfig has resolved all fragments. Updating CONFIG_LOCALVERSION
 # here lets kbuild syncconfig generate the final release before compilation;
 # .config then carries the same identity into shared_workdir and the devkit.
-# CONFIG_LOCALVERSION_AUTO continues to identify source and patch changes.
+# The source is the kernel recipe's job. On Qualcomm, today the only kernel that
+# sets WENDYOS_DRIVER_DEVKIT_MODULES, meta-qcom turns CONFIG_LOCALVERSION_AUTO off
+# and adds the commit and the number of patches through KERNEL_LOCALVERSION. A
+# patch edited without changing the patch count leaves the release unchanged.
 python wendyos_set_kernel_config_identity() {
     import pathlib
     import subprocess

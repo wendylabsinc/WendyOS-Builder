@@ -421,7 +421,7 @@ jobs:
       - name: Verify config-only kernel release identities
         run: |
           curl --fail --silent --show-error --location --retry 3 \
-            https://raw.githubusercontent.com/qualcomm-linux/kernel/d49c33864d06e9672dce57738be8851384578fcf/scripts/setlocalversion \
+            https://raw.githubusercontent.com/qualcomm-linux/kernel/1a0586064ee1fbcefe49b6382ee17a236c590879/scripts/setlocalversion \
             -o "$RUNNER_TEMP/qcom-setlocalversion"
           WENDY_KERNEL_SETLOCALVERSION="$RUNNER_TEMP/qcom-setlocalversion" \
             python3 -m unittest scripts/kernel_config_identity_test.py
