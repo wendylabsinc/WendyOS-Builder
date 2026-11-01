@@ -15,20 +15,14 @@ ExecStartPre=/bin/sleep 2
 ExecStartPre=/bin/mkdir -p /etc/cdi
 # Generate CDI spec using CSV mode with explicit CSV file list
 # Includes: devices.csv (meta-tegra), drivers.csv (meta-tegra), l4t.csv (ours),
-#           devices-wendyos.csv (sysfs entries), and l4t-deepstream.csv (if present)
+#           devices-wendyos.csv (sysfs entries)
 ExecStart=/bin/sh -c '\
     ARGS="--mode=csv --output=/etc/cdi/nvidia.yaml"; \
     ARGS="$ARGS --csv.file=/etc/nvidia-container-runtime/host-files-for-container.d/devices.csv"; \
     ARGS="$ARGS --csv.file=/etc/nvidia-container-runtime/host-files-for-container.d/drivers.csv"; \
     ARGS="$ARGS --csv.file=/etc/nvidia-container-runtime/host-files-for-container.d/l4t.csv"; \
     ARGS="$ARGS --csv.file=/etc/nvidia-container-runtime/host-files-for-container.d/devices-wendyos.csv"; \
-    if [ -f /etc/nvidia-container-runtime/host-files-for-container.d/l4t-deepstream.csv ]; then \
-        ARGS="$ARGS --csv.file=/etc/nvidia-container-runtime/host-files-for-container.d/l4t-deepstream.csv"; \
-    fi; \
     /usr/bin/nvidia-ctk cdi generate $ARGS'
-# Post-process CDI spec to fix GStreamer plugin paths for container compatibility
-# (Yocto uses /usr/lib/ but containers expect /usr/lib/aarch64-linux-gnu/)
-ExecStartPost=/usr/bin/fix-cdi-gstreamer-paths.sh
 StandardOutput=journal
 StandardError=journal
 

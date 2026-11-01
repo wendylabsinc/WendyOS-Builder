@@ -54,10 +54,6 @@ TEGRA_BLBLOCKSIZE:pn-wendyos-image = "4096"
 #   "1" - DEBUG (verbose boot/capsule debug output)
 WENDYOS_EFI_DEBUG = "0"
 
-# DeepStream is off. Apps bring DeepStream in their own container image, as
-# NVIDIA intends. CUDA, TensorRT and the GPU driver stay on the device.
-WENDYOS_DEEPSTREAM = "0"
-
 # The ability to encrypt /data: LUKS2, with the key sealed to the fTPM (OP-TEE).
 # Default ON. It adds the crypt tools to the image (tegra-image.inc), systemd's
 # cryptsetup support, and a wait for the fTPM before the /data service runs. It
