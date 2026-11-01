@@ -27,6 +27,9 @@ on:
       - 'scripts/make_jetson_disk_img_test.py'
       - 'scripts/tegra_boot_efi_generator_test.py'
       - 'meta-tegra-extensions/recipes-bsp/tools/**'
+      - 'scripts/tegra_minimal_init_test.py'
+      - 'meta-tegra-extensions/recipes-core/initrdscripts/tegra-minimal-init_%.bbappend'
+      - 'meta-tegra-extensions/recipes-core/initrdscripts/tegra-minimal-init/**'
       - 'scripts/check_game_controller_support*'
       - 'scripts/kernel_patch_dates_test.py'
       - 'meta-qcom-extensions/recipes-kernel/linux/**'
@@ -142,6 +145,9 @@ on:
       - 'scripts/make_jetson_disk_img_test.py'
       - 'scripts/tegra_boot_efi_generator_test.py'
       - 'meta-tegra-extensions/recipes-bsp/tools/**'
+      - 'scripts/tegra_minimal_init_test.py'
+      - 'meta-tegra-extensions/recipes-core/initrdscripts/tegra-minimal-init_%.bbappend'
+      - 'meta-tegra-extensions/recipes-core/initrdscripts/tegra-minimal-init/**'
       - 'scripts/check_game_controller_support*'
       - 'scripts/kernel_patch_dates_test.py'
       - 'meta-qcom-extensions/recipes-kernel/linux/**'
@@ -385,6 +391,14 @@ jobs:
         run: |
           shellcheck meta-tegra-extensions/recipes-bsp/tools/files/wendyos-boot-efi-generator.sh
           python3 -m unittest scripts/tegra_boot_efi_generator_test.py -v
+
+      # The initramfs root lookup runs as PID 1: a mistake there is a unit that never boots.
+      - name: Check Jetson initramfs root-disk lookup
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y busybox
+          shellcheck -s sh meta-tegra-extensions/recipes-core/initrdscripts/tegra-minimal-init/*.sh
+          python3 -m unittest scripts/tegra_minimal_init_test.py -v
 
       - name: Test installed mesh bridge policy with systemd
         run: |
