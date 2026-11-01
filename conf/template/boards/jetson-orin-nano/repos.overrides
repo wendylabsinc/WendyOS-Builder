@@ -1,4 +1,4 @@
-# Per-board repo version overrides for jetson-orin-nano-nvme.
+# Per-board repo version overrides for jetson-orin-nano.
 #
 # Sourced by bootstrap.sh after the default URL_*/SRCREV_* values are set, but
 # before the repos[] array is built.

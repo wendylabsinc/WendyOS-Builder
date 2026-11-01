@@ -196,7 +196,7 @@ type VersionMetadata struct {
 	SBOMSizeBytes int64  `json:"sbom_size_bytes,omitempty"`
 	BmapPath      string `json:"bmap_path,omitempty"`
 	// Storage-specific image paths for devices that produce multiple artifacts
-	// (e.g. jetson-orin-nano which ships both an NVMe and an SD card image).
+	// (e.g. raspberry-pi-5, which ships both an NVMe and an SD card image).
 	// Path above stays set to the NVMe image for backwards compatibility with
 	// older CLI versions that only know about the single Path field.
 	NVMEPath        string `json:"nvme_path,omitempty"`
@@ -215,9 +215,9 @@ type VersionMetadata struct {
 	// offline image, hence no bmap.
 	NVMEBmapPath   string `json:"nvme_bmap_path,omitempty"`
 	SDCardBmapPath string `json:"sd_bmap_path,omitempty"`
-	// Storage-specific OTA artifacts. The NVMe and SD/eMMC builds
-	// produce distinct OTA artifacts whose embedded device_type differs,
-	// so they cannot share a single ota_update_path. The CLI selects
+	// Storage-specific OTA artifacts. A device built as one image per disk
+	// publishes a different OTA artifact per disk, so they cannot share a
+	// single ota_update_path. The CLI selects
 	// nvme_ota_update_path when the device reports storage_medium=nvme;
 	// otherwise it uses ota_update_path.
 	NVMEOTAUpdatePath      string `json:"nvme_ota_update_path,omitempty"`
@@ -251,9 +251,9 @@ type VersionMetadata struct {
 	SDRootfsOnlyZstPath        string `json:"sd_rootfs_only_zst_path,omitempty"`
 	SDRootfsOnlyZstChecksum    string `json:"sd_rootfs_only_zst_checksum,omitempty"`
 	SDRootfsOnlyZstSizeBytes   int64  `json:"sd_rootfs_only_zst_size_bytes,omitempty"`
-	// Storage-specific flashpacks. A flashpack is built per MACHINE, and the
-	// AGX Orin nvme and emmc machines share one device manifest, so each
-	// storage variant gets its own fields. The top-level FlashpackPath above
+	// Storage-specific flashpacks. A flashpack is built per install target, and
+	// the AGX Orin's nvme and emmc flashpacks share one device manifest, so each
+	// storage gets its own fields. The top-level FlashpackPath above
 	// mirrors the NVMe flashpack (and is the only field on single-storage
 	// devices like Thor, which passes no --storage).
 	NVMEFlashpackPath      string `json:"nvme_flashpack_path,omitempty"`
@@ -2344,14 +2344,13 @@ func setBmapPath(meta *VersionMetadata, storageType, bmapPath string) {
 }
 
 // applyOTAUpdate records an OTA artifact in the version metadata,
-// routing NVMe artifacts to the NVMe-specific fields. The NVMe and SD/eMMC
-// builds emit distinct OTA artifacts whose embedded device_type differs,
-// so they must not share ota_update_path — otherwise whichever variant
-// publishes last wins and the other variant's devices reject the artifact
-// ("Artifact device type doesn't match"). For "nvme" the artifact also
-// populates ota_update_path as a default, but only when it is unset, so a
-// single-variant NVMe board still exposes an OTA without clobbering a
-// previously published SD/eMMC artifact.
+// routing NVMe artifacts to the NVMe-specific fields. A device built as one
+// image per disk publishes a different OTA artifact per disk, so they must
+// not share ota_update_path — otherwise whichever variant publishes last wins
+// and the other variant's devices get an image built for another disk. For
+// "nvme" the artifact also populates ota_update_path as a default, but only
+// when it is unset, so a single-variant NVMe board still exposes an OTA
+// without clobbering a previously published SD/eMMC artifact.
 func applyOTAUpdate(meta *VersionMetadata, storageType, otaPath, otaChecksum string, otaSize int64) {
 	if otaPath == "" {
 		return
@@ -2408,7 +2407,7 @@ func setZstPath(meta *VersionMetadata, storageType, zstPath, zstChecksum string,
 }
 
 // applyFlashpack records a flashpack on the version metadata. Flashpacks are
-// per-MACHINE artifacts, so multi-storage devices route to storage-specific
+// per-target-disk artifacts, so multi-storage devices route to storage-specific
 // fields; the top-level FlashpackPath mirrors the NVMe one so a CLI that only
 // knows the single field flashes the NVMe variant. Single-storage devices
 // (Thor, no --storage) land directly on the top-level fields. An empty

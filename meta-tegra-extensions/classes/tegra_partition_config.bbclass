@@ -261,19 +261,18 @@ python do_modify_partition_layout() {
     #
     # PARTITION_LAYOUT_EXTERNAL: NVMe layout filename.
     #   Set by tegra-common.inc from PARTITION_LAYOUT_EXTERNAL_DEFAULT.
-    #   For NVMe machines: 'flash_l4t_t234_nvme_rootfs_ab.xml'
+    #   e.g. 'flash_l4t_t234_nvme_rootfs_ab.xml'
     #   Contains a single <device type="external"> with all NVMe partitions.
     #
     # PARTITION_LAYOUT_TEMPLATE: internal/QSPI/SD card layout filename.
     #   Set by the machine config via PARTITION_LAYOUT_TEMPLATE_DEFAULT.
-    #   For NVMe machines: 'flash_t234_qspi.xml' (QSPI only, no APP_b -> skipped)
-    #   For SD card machines: 'flash_t234_qspi_sd_rootfs_ab.xml' (has sdcard
-    #     device block with APP_b -> modified)
+    #   Every Jetson here uses a QSPI-only one (no APP_b -> skipped); a template
+    #   with an sdcard or sdmmc_user device holding APP_b would be modified too.
     #
     # This means:
-    #   NVMe machine:    only external layout modified
-    #   SD card machine: both external AND template layout modified
-    #   Unknown machine: nothing modified, note logged
+    #   Every Jetson here: only the external layout modified (the Orin SD and
+    #                      eMMC targets are made from it too)
+    #   Unknown machine:   nothing modified, note logged
     layout_external = d.getVar('PARTITION_LAYOUT_EXTERNAL')
     layout_template = d.getVar('PARTITION_LAYOUT_TEMPLATE')
 
@@ -302,8 +301,8 @@ python do_modify_partition_layout() {
     #
     # Only modify if the template has a sdcard/sdmmc_user device block
     # containing APP_b (i.e., it's an A/B layout needing our partitions).
-    # For NVMe machines, the template is QSPI-only (device type="spi",
-    # no APP_b) and is correctly skipped.
+    # Every Jetson here has a QSPI-only template (device type="spi",
+    # no APP_b), so it is correctly skipped.
     if layout_template:
         layout_path = os.path.join(layout_dir, layout_template)
         if os.path.exists(layout_path):

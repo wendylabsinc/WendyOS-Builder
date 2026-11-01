@@ -42,11 +42,13 @@ class ManifestV2Tests(unittest.TestCase):
             stream.truncate(128 << 20)
         (root / "stage2/flashpkg/status").write_text("PENDING")
         (root / "stage2/flashpkg/conf").mkdir(parents=True, exist_ok=True)
+        (root / "stage2/flashpkg/conf/command_sequence").write_text(
+            "bootloader\nextra-pre-wipe\nexport-devices nvme0n1\nextra\nreboot\n")
         return root
 
     def generate(self, root, **overrides):
         args = dict(version="0.18.0", device="jetson-orin-nano", storage="nvme",
-                    machine="jetson-orin-nano-devkit-nvme-wendyos",
+                    machine="jetson-orin-nano-wendyos",
                     board_id="3767", board_sku="0005",
                     board_fab="300", board_rev="", chip_sku="00:00:00:D3",
                     rootfs_device="nvme0n1", boot_device_type="spi",
@@ -91,6 +93,21 @@ class ManifestV2Tests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "does not match supported"):
             self.generate(self.fixture(), machine="custom-carrier-machine")
 
+    def test_targets_name_the_bundle_machine(self):
+        # The bundle's .env.initrd-flash carries TNSPEC_MACHINE, not the Yocto MACHINE.
+        confs = {"jetson-orin-nano": "jetson-orin-nano-devkit-wendyos.conf",
+                 "jetson-agx-orin": "jetson-agx-orin-devkit-wendyos.conf"}
+        for (device, _), target in manifest.TARGETS.items():
+            conf = pathlib.Path(__file__).resolve().parents[1] / "conf/machine" / confs[device]
+            self.assertIn(f'\nTNSPEC_MACHINE = "{target["machine"]}"\n', conf.read_text())
+
+    def test_export_of_another_disk_is_rejected(self):
+        root = self.fixture()
+        sequence = root / "stage2/flashpkg/conf/command_sequence"
+        sequence.write_text(sequence.read_text().replace("nvme0n1", "mmcblk0"))
+        with self.assertRaisesRegex(ValueError, "does not export nvme0n1"):
+            self.generate(root)
+
     def test_missing_partition_image_is_rejected(self):
         root = self.fixture()
         (root / "stage2/flash/rootfs.img").unlink()
@@ -123,12 +140,14 @@ class ManifestV2Tests(unittest.TestCase):
     def test_agx_storage_specific_identity(self):
         root = self.fixture()
         result = self.generate(root, device="jetson-agx-orin", storage="nvme",
-                               machine="jetson-agx-orin-devkit-nvme-wendyos",
+                               machine="jetson-agx-orin-wendyos",
                                board_id="3701", board_sku="0005")
         self.assertEqual(result["target"]["carrier_id"], "3737")
 
+        sequence = root / "stage2/flashpkg/conf/command_sequence"
+        sequence.write_text(sequence.read_text().replace("nvme0n1", "mmcblk0"))
         emmc = self.generate(root, device="jetson-agx-orin", storage="emmc",
-                             machine="jetson-agx-orin-devkit-emmc-wendyos",
+                             machine="jetson-agx-orin-wendyos",
                              board_id="3701", board_sku="0005",
                              rootfs_device="mmcblk0")
         self.assertEqual(emmc["target"]["storage"], "emmc")

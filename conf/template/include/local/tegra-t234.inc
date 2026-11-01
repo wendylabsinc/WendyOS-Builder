@@ -40,16 +40,12 @@ TEGRA_BLBLOCKSIZE:pn-wendyos-image = "4096"
 # Orin -- the default was simply never flipped, and testing ran with a
 # local.conf override.
 #
-# t234 keeps the prebuilt UEFI firmware (both AGX Orin machine confs pin
+# The AGX Orin keeps the prebuilt UEFI firmware (its machine conf pins
 # tegra-uefi-prebuilt; source-built edk2-firmware-tegra is recorded as
-# boot-looping there), so capsule generation depends on the FMP GUID file
-# supplied by
+# boot-looping there), so its capsule takes the FMP GUID file from
 # meta-tegra-extensions/recipes-bsp/tegra-binaries/tegra-uefi-prebuilt_%.bbappend.
-#
-# UNVERIFIED ON DEVICE: the tegra234 GUID in that bbappend
-# (bf0d4599-20d4-414e-b2c5-3595b1cda402) comes from upstream's documentation,
-# not from an Orin. Only the tegra264 value has been confirmed against a live
-# ESRT. Before trusting a capsule update on Orin, check on the device:
+# The Orin Nano builds edk2-firmware-tegra. Both Orin devkits report the same
+# GUID, bf0d4599-20d4-414e-b2c5-3595b1cda402, in
 #   cat /sys/firmware/efi/esrt/entries/entry0/fw_class
 # A mismatch does not fail the build -- the firmware rejects the capsule at
 # update time.

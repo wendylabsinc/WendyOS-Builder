@@ -14,8 +14,9 @@
 # to deploy files they built themselves and skip unknown names, so they do not
 # need this file. Require it exactly once per recipe.
 
-# UEFI boot-priority overlay (NVMe first on NVMe machines).
-TEGRA_BOOTCONTROL_OVERLAYS:append = " boot-priority.dtbo"
+# Boot-priority overlay, Thor only, so Thor's boot chain is unchanged. UEFI reads DefaultBootPriority
+# under another GUID, so it sets no order; Orin boots in L4TConfiguration.dtbo's "usb,nvme,emmc,sd,ufs".
+TEGRA_BOOTCONTROL_OVERLAYS:append:tegra264 = " boot-priority.dtbo"
 
 # fTPM device-tree overlay, gated on WENDYOS_ENABLE_TPM (default on; opt out
 # via local.conf). Thor's kernel DTB has no firmware/ftpm node, so

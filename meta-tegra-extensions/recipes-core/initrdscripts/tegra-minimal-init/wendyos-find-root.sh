@@ -1,5 +1,5 @@
 #!/bin/sh
-# Usage: wendyos-find-root <slot-suffix> <build-time-bootdrive|""> <none|undecided|bootdrive|any>
+# Usage: wendyos-find-root <slot-suffix> <build-time-bootdrive|""> <none|undecided|bootdrive|any|late>
 # Prints "root <dev> <bootcurrent|bootdrive|single-disk>" or "wait <reason>", and exits 0.
 
 efivars=/sys/firmware/efi/efivars
@@ -87,24 +87,35 @@ nvme_matches() {
     [ "$(tr -d ' :' <"$sysblock/$1/eui" | tr A-F a-f)" = "$3" ]
 }
 
+# True when whole disk $2 is media $1; only device/type tells an SD card from eMMC.
+is_media() {
+    case "$1:$2" in
+        nvme:nvme*) ;;
+        mmc:mmcblk*) [ "$(cat "$sysblock/$2/device/type" 2>/dev/null)" = MMC ] ;;
+        sd:mmcblk*) [ "$(cat "$sysblock/$2/device/type" 2>/dev/null)" = SD ] ;;
+        *) return 1 ;;
+    esac
+}
+
+# True when disk $1 sits behind controller $2: Linux names a platform device
+# "<address>.<node>", e.g. 14160000.pcie.
+behind() {
+    case "$(readlink -f "$sysblock/$1")/" in
+        */"$2".*) ;;
+        *) return 1 ;;
+    esac
+}
+
 # Sets ncand and cand from the whole disks behind controller $2 that match media $1.
-# Linux names a platform device "<address>.<node>", e.g. 14160000.pcie.
 candidates() {
     ncand=0
     cand=""
     for p in "$sysblock"/*; do
         d=${p##*/}
         is_disk "$d" || continue
-        case "$(readlink -f "$p")/" in
-            */"$2".*) ;;
-            *) continue ;;
-        esac
-        case "$1:$d" in
-            nvme:nvme*) nvme_matches "$d" "$3" "$4" || continue ;;
-            mmc:mmcblk*) [ "$(cat "$p/device/type" 2>/dev/null)" = MMC ] || continue ;;
-            sd:mmcblk*) [ "$(cat "$p/device/type" 2>/dev/null)" = SD ] || continue ;;
-            *) continue ;;
-        esac
+        behind "$d" "$2" || continue
+        is_media "$1" "$d" || continue
+        [ "$1" != nvme ] || nvme_matches "$d" "$3" "$4" || continue
         ncand=$((ncand + 1))
         cand=$d
     done
@@ -157,6 +168,7 @@ usable() {
 }
 
 e1=undecided
+near=no
 info=$(bootdisk)
 read -r kind ctrl nsid eui <<EOF
 $info
@@ -170,8 +182,10 @@ case "$kind" in
             why="no usable APP$slot on $cand"
         elif [ "$ncand" -eq 0 ]; then
             e1=absent
+            near=yes
             why="boot disk not found"
         else
+            near=yes
             why="$ncand disks match the boot option"
         fi
         ;;
@@ -179,7 +193,7 @@ case "$kind" in
 esac
 
 # "undecided" keeps the build-time disk from beating a boot disk that is still enumerating.
-if [ "$fallbacks" = bootdrive ] || [ "$fallbacks" = any ] ||
+if [ "$fallbacks" = bootdrive ] || [ "$fallbacks" = any ] || [ "$fallbacks" = late ] ||
     { [ "$fallbacks" = undecided ] && [ "$e1" = undecided ]; }; then
     case "$bootdrive" in
         /dev/*/* | /dev/) ;;
@@ -190,12 +204,21 @@ if [ "$fallbacks" = bootdrive ] || [ "$fallbacks" = any ] ||
     esac
 fi
 
-# Only an undecided boot option falls back to the one WendyOS disk; JetPack has no config/data.
-if [ "$fallbacks" = any ] && [ -z "$bootdrive" ] && [ "$e1" = undecided ]; then
+# An undecided option, or late a boot disk never found, uses the one WendyOS disk (not JetPack).
+# A lost or ambiguous boot disk takes only its media (NVMe: its controller); a stale install would confirm the trial slot.
+single=no
+case "$fallbacks:$e1" in
+    any:undecided | late:undecided | late:absent) single=yes ;;
+esac
+if [ "$single" = yes ] && [ -z "$bootdrive" ]; then
     nwos=0
     for p in "$sysblock"/*; do
         d=${p##*/}
         is_disk "$d" || continue
+        if [ "$near" = yes ]; then
+            is_media "$kind" "$d" || continue
+            [ "$kind" != nvme ] || behind "$d" "$ctrl" || continue
+        fi
         scan "$d"
         if [ "$napp" -gt 0 ] && [ "$cfg$dat$esp" = 111 ]; then
             nwos=$((nwos + 1))

@@ -211,23 +211,34 @@ jobs:
           # mksquashfs actually run, so a broken devkit fails here and not mid-build.
           "$DEVKIT_DIR/setup.sh"
 
-      - name: Build the module
+      # An alias shares its canonical device's devkit, so it builds for the id
+      # that devkit records and still publishes under the alias.
+      - name: Resolve the build device
         env:
-          DRIVER: ${{ matrix.driver }}
           DEVICE: ${{ matrix.device }}
         run: |
           set -euo pipefail
-          scripts/build-driver.sh --devkit "$DEVKIT_DIR" --driver "drivers/$DRIVER" --device "$DEVICE"
+          BUILD_DEVICE=$DEVICE
+          if jq -e --arg d "$DEVICE" 'any(.[]; .manifest_alias == $d)' .github/device-artifacts.json >/dev/null; then
+            BUILD_DEVICE=$(jq -r '.device // empty' "$DEVKIT_DIR/devkit.json")
+          fi
+          echo "BUILD_DEVICE=${BUILD_DEVICE:-$DEVICE}" >> "$GITHUB_ENV"
+
+      - name: Build the module
+        env:
+          DRIVER: ${{ matrix.driver }}
+        run: |
+          set -euo pipefail
+          scripts/build-driver.sh --devkit "$DEVKIT_DIR" --driver "drivers/$DRIVER" --device "$BUILD_DEVICE"
 
       - name: Pack the add-on image
         env:
           DRIVER: ${{ matrix.driver }}
-          DEVICE: ${{ matrix.device }}
         run: |
           set -euo pipefail
           scripts/pack-sysext.sh --devkit "$DEVKIT_DIR" --driver "drivers/$DRIVER" \
             --modules "drivers/$DRIVER/build/modules" --out "$GITHUB_WORKSPACE/$DRIVER.raw" \
-            --device "$DEVICE"
+            --device "$BUILD_DEVICE"
           ls -l "$GITHUB_WORKSPACE/$DRIVER.raw"
 
       - name: Check the devkit matches the manifest

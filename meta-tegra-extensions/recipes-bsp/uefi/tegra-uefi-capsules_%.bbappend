@@ -10,9 +10,20 @@ require conf/distro/include/tegra-overlays.inc
 
 # The overlays are deployed by our recipes, so the capsule build must wait for
 # them (a missing file fails the hard cp loudly):
-#   - boot-priority.dtbo    (tegra-bootcontrol-overlay, all Jetsons)
+#   - boot-priority.dtbo    (tegra-bootcontrol-overlay, Thor only)
 #   - the fTPM overlay      (tegra-ftpm-overlay, only when WENDYOS_ENABLE_TPM=1
 #                            and the SoC has a validated overlay)
-do_compile[depends] += "tegra-bootcontrol-overlay:do_deploy"
+do_compile[depends] += "${@bb.utils.contains('TEGRA_BOOTCONTROL_OVERLAYS', 'boot-priority.dtbo', 'tegra-bootcontrol-overlay:do_deploy', '', d)}"
 do_compile[depends] += "${@' tegra-ftpm-overlay:do_deploy' if d.getVar('WENDYOS_ENABLE_TPM') == '1' and d.getVar('WENDYOS_FTPM_DTBO') else ''}"
 
+inherit tegra_tnspec_legacy
+
+# A unit whose name the capsule lacks rejects it, and its OTA rolls back.
+do_compile:append:tegra234() {
+    # Whole names after the six board tokens: a substring match would pass a name that is only a suffix.
+    capsule_machines=$(grep -aoE '[0-9]{4}-[0-9A-Za-z.]*-[0-9A-Za-z.]*-[0-9A-Za-z.]*-[0-9]+-[0-9]+-[a-z0-9-]+-' ${B}/tegra-bl.cap | \
+        cut -d- -f7- | sed 's/-$//')
+    for m in ${TNSPEC_MACHINE} ${WENDYOS_TNSPEC_LEGACY_MACHINES}; do
+        printf '%s\n' "$capsule_machines" | grep -qxF -- "$m" || bbfatal "tegra-bl.cap carries no TnSpec for $m"
+    done
+}
