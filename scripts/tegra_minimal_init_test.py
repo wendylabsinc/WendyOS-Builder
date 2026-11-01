@@ -534,6 +534,78 @@ class FindRootTests(InitramfsCase):
         self.nano()
         self.assert_root("nvme0n1p2", "bootdrive", bootdrive="/dev/nvme0n1", fallbacks="undecided")
 
+    def test_late_single_disk_covers_a_boot_disk_decoded_wrongly(self):
+        self.boot(load_option(VENDOR, memory_mapped(0x14160000), nvme_node(eui="11" * 8), END))
+        self.nano()
+        self.agx_emmc()
+        self.assertEqual(self.find_root(fallbacks="any"), "wait boot disk not found")
+        # The eMMC is another medium: it neither stands in nor counts as a second WendyOS disk.
+        self.assert_root("nvme0n1p2", "single-disk", fallbacks="late")
+        # A build-time disk keeps today's lookup instead.
+        self.assert_wait("boot disk not found", bootdrive="/dev/mmcblk1", fallbacks="late")
+
+    def test_late_single_disk_is_only_of_the_media_uefi_booted(self):
+        # Options whose controller or EUI no disk has, as when Linux never finds the boot disk.
+        options = {"nvme": load_option(VENDOR, memory_mapped(0x14160000), nvme_node(eui="11" * 8), END),
+                   "mmc": load_option(VENDOR, memory_mapped(0x3410000), node(3, 0x1d, b"\0"), END),
+                   "sd": load_option(VENDOR, memory_mapped(0x3410000), SD_NODE, END)}
+        disks = {"nvme": ("nvme0n1", NANO_NVME), "mmc": ("mmcblk0", AGX_EMMC),
+                 "sd": ("mmcblk1", SD_CARD)}
+        self.nano(link=False)
+        self.disk("mmcblk0", AGX_EMMC, WENDYOS_ORIN, card="MMC", link=False)
+        self.disk("mmcblk1", SD_CARD, WENDYOS_ORIN, card="SD", link=False)
+        for booted, option in options.items():
+            self.boot(option)
+            for media, (name, devpath) in disks.items():
+                with self.subTest(booted=booted, disk=media):
+                    link = self.root / "sys/block" / name
+                    link.symlink_to("../" + devpath)
+                    try:
+                        if media == booted:
+                            self.assert_root(f"{name}p2", "single-disk", fallbacks="late")
+                        else:
+                            self.assertEqual(self.find_root(fallbacks="late"), "wait boot disk not found")
+                    finally:
+                        link.unlink()
+
+    def test_late_nvme_stand_in_is_behind_the_boot_controller(self):
+        self.boot(load_option(VENDOR, memory_mapped(0x14160000), nvme_node(eui="11" * 8), END))
+        # A second NVMe on another controller is not the disk UEFI booted.
+        self.disk("nvme1n1", NANO_NVME.replace("14160000", "141a0000").replace("nvme0", "nvme1"),
+                  WENDYOS_ORIN, nsid="1", eui="22" * 8)
+        self.assertEqual(self.find_root(fallbacks="late"), "wait boot disk not found")
+        # One behind the boot controller stands in, and the other is not a second WendyOS disk.
+        self.nano()
+        self.assert_root("nvme0n1p2", "single-disk", fallbacks="late")
+
+    def ambiguous_nvme(self, partitions=None):
+        """Two namespace-1 NVMe disks behind the boot controller, an option with no EUI to tell them apart."""
+        self.boot(load_option(VENDOR, memory_mapped(0x14160000), nvme_node(eui="00" * 8), END))
+        self.disk("nvme0n1", NANO_NVME, partitions or JETPACK, nsid="1")
+        self.disk("nvme1n1", NANO_NVME.replace("nvme0/nvme0n1", "nvme1/nvme1n1"), JETPACK, nsid="1")
+
+    def test_ambiguous_boot_disk_takes_no_other_media(self):
+        self.ambiguous_nvme()
+        self.agx_emmc()
+        self.disk("mmcblk1", SD_CARD, WENDYOS_ORIN, card="SD")
+        for fallbacks in ("any", "late"):
+            self.assertEqual(self.find_root(fallbacks=fallbacks), "wait 2 disks match the boot option",
+                             fallbacks)
+
+    def test_ambiguous_boot_disk_takes_its_one_wendyos_candidate(self):
+        self.ambiguous_nvme(WENDYOS_ORIN)
+        # WendyOS on another medium neither stands in nor counts as a second disk.
+        self.agx_emmc()
+        self.assertEqual(self.find_root(), "wait 2 disks match the boot option")
+        self.assert_root("nvme0n1p2", "single-disk", fallbacks="any")
+        self.assert_root("nvme0n1p2", "single-disk", fallbacks="late")
+
+    def test_late_single_disk_never_replaces_a_boot_disk_linux_found(self):
+        self.boot(NANO_BOOT0001)
+        self.disk("nvme0n1", NANO_NVME, {}, nsid="1", eui=NANO_EUI)
+        self.agx_emmc()
+        self.assertEqual(self.find_root(fallbacks="late"), "wait no usable APP_b on nvme0n1")
+
     def test_single_wendyos_disk_needs_an_undecided_option_and_no_bootdrive(self):
         self.boot(NANO_BOOT0000)
         self.nano()
@@ -713,6 +785,19 @@ class PrebootTests(InitramfsCase):
         self.nano(link=False)
         self.after_sleep(3, f"ln -s ../{NANO_NVME} {self.root}/sys/block/nvme0n1")
         self.assert_resolves(f"{self.dev}/nvme0n1p2", "bootcurrent", 3)
+
+    def test_boot_disk_decoded_wrongly_falls_back_to_the_single_disk_after_a_minute(self):
+        self.preboot_with("")
+        self.boot(load_option(VENDOR, memory_mapped(0x14160000), nvme_node(eui="11" * 8), END))
+        self.nano()
+        self.assert_resolves(f"{self.dev}/nvme0n1p2", "single-disk", 120)
+
+    def test_lost_boot_disk_never_falls_back_to_another_medium(self):
+        # Booting the stale eMMC would confirm the trial slot, so the unit could never roll back.
+        self.preboot_with("")
+        self.boot(NANO_BOOT0001)
+        self.agx_emmc()
+        self.assertIn("boot disk not found", self.assert_gives_up())
 
     def test_single_wendyos_disk_after_settling(self):
         self.preboot_with("")

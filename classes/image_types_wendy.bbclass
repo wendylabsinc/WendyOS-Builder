@@ -25,12 +25,15 @@ do_image_wendy[depends] += "wendyos-update-native:do_populate_sysroot"
 # Artifact identity. Reproducible across rebuilds — use DISTRO_VERSION,
 # NOT IMAGE_VERSION_SUFFIX (oe-core defaults the latter to "-${DATETIME}",
 # which would make every rebuild a new artifact with a malformed name).
-# --device is the value the device records in /etc/wendyos/device-type
+# Each --device is a value a device records in /etc/wendyos/device-type
 # (BOARD=), which the client matches against the artifact's
 # compatible_devices at install time.
 WENDY_ARTIFACT_VERSION ?= "${DISTRO_VERSION}"
 WENDY_ARTIFACT_NAME ?= "${IMAGE_BASENAME}-${MACHINE}-${WENDY_ARTIFACT_VERSION}"
 WENDY_ARTIFACT_COMPRESSION ?= "zstd"
+# Device types the artifact also installs on, besides WENDYOS_BOARD_ID: ids that
+# units of this board were first installed with.
+WENDYOS_EXTRA_BOARD_IDS ?= ""
 
 # Output is ${IMAGE_NAME}.wendy (NOT ${IMAGE_NAME}${IMAGE_NAME_SUFFIX}). Modern
 # oe-core already folds IMAGE_NAME_SUFFIX into IMAGE_NAME (IMAGE_LINK_NAME =
@@ -44,6 +47,10 @@ IMAGE_CMD:wendy () {
     if [ -z "${WENDYOS_BOARD_ID}" ]; then
         bbfatal "image_types_wendy: WENDYOS_BOARD_ID is unset; cannot set the artifact's compatible device"
     fi
+    device_args=""
+    for id in ${WENDYOS_BOARD_ID} ${WENDYOS_EXTRA_BOARD_IDS}; do
+        device_args="$device_args --device $id"
+    done
     # The payload must be exactly the pinned rootfs size (wendyos-rootfs-size.inc):
     # the on-device A/B slots are sized to it, and nightly/release artifacts must
     # be byte-identical in size (see wendyos-rootfs-size.inc). This catches
@@ -60,7 +67,7 @@ IMAGE_CMD:wendy () {
         --image ${IMGDEPLOYDIR}/${IMAGE_LINK_NAME}.${WENDY_ARTIFACTIMG_FSTYPE} \
         --name ${WENDY_ARTIFACT_NAME} \
         --version ${WENDY_ARTIFACT_VERSION} \
-        --device ${WENDYOS_BOARD_ID} \
+        $device_args \
         --compression ${WENDY_ARTIFACT_COMPRESSION} \
         -o ${IMGDEPLOYDIR}/${IMAGE_NAME}.wendy
 }

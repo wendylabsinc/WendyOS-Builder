@@ -6,6 +6,8 @@ import subprocess
 import tempfile
 import unittest
 
+from scripts.driver_supports_device import supports
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -109,6 +111,21 @@ class DriverManifestTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("activation_by_device must map", result.stderr)
                 self.assertEqual(result.stdout, "")
+
+    def test_an_alias_is_built_as_its_canonical_device(self):
+        # Alias legs build with the canonical device's id, so per-device keys on an alias never apply.
+        # Discover gates each leg on its own id, so listing only one of the two silently drops the other.
+        artifacts = json.loads((ROOT / ".github/device-artifacts.json").read_text())
+        aliases = {entry["manifest_alias"]: key.split("/")[0]
+                   for key, entry in artifacts.items() if entry.get("manifest_alias")}
+        for path in sorted((ROOT / "drivers").glob("*/driver.json")):
+            manifest = json.loads(path.read_text())
+            for alias, device in aliases.items():
+                with self.subTest(driver=path.parent.name, alias=alias):
+                    self.assertEqual(supports(manifest, alias), supports(manifest, device),
+                                     f"list both {device} and {alias} in devices, or neither")
+                    for key in ("variants_by_device", "activation_by_device"):
+                        self.assertNotIn(alias, manifest.get(key, {}))
 
     def test_invalid_wifi_restore_pci_id_is_rejected(self):
         result = self.validate("pack-sysext.sh",

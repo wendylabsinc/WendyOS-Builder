@@ -28,7 +28,8 @@
 #   --version     WendyOS version string recorded in the manifest (e.g. 0.16.0
 #                 or nightly-20260629T...). Names the output tar.
 #   --device      published device name (e.g. jetson-agx-orin).
-#   --storage     rootfs storage (nvme or emmc). Names the output tar.
+#   --storage     target disk (nvme or emmc): picks the exported disk and the
+#                 layout device tag. Names the output tar.
 #
 # Output:
 #   <out>/flashpack/                                              the assembled tree
@@ -74,6 +75,14 @@ set +u
 set -u
 [ "${CHIPID:-}" = "0x23" ] || err "bundle is not T234 (CHIPID=${CHIPID:-unset}); use make-thor-flashpack.sh for T264"
 [ -f "$FLASH_HELPER" ]     || err "$FLASH_HELPER missing from bundle"
+[ -f external-flash.xml.in ] || err "bundle has no external-flash.xml.in"
+
+# One bundle serves every target disk, so --storage picks the disk; the
+# bundle's own ROOTFS_DEVICE names only the disk the machine was built for.
+case "$STORAGE" in
+    nvme) ROOTFS_DEVICE=nvme0n1 ;;
+    emmc) ROOTFS_DEVICE=mmcblk0 ;;
+esac
 
 # Board identity pinned at build time; with BOARDID/FAB set the helper skips
 # its EEPROM/ECID device queries and signing runs fully offline. Empty
@@ -137,29 +146,26 @@ BOOT_DEVICE_TYPE="$(cat bootloader_staging/boot_device_type)"
 # ---------------------------------------------------------------------------
 log "Step 3: external layout (sign or copy)"
 # ---------------------------------------------------------------------------
-if [ -e external-flash.xml.in ]; then
-    if grep -q 'oem_sign="true"' external-flash.xml.in 2>/dev/null; then
-        "./$FLASH_HELPER" --no-flash --sign --external-device -u "" -v "" \
-            external-flash.xml.in "$LNXFILE" "$ROOTFS_IMAGE" \
-            2>&1 | tee -a "$logfile" || err "external signing failed"
-        mv secureflash.xml external-secureflash.xml
-    else
-        cp external-flash.xml.in external-secureflash.xml
-    fi
+if grep -q 'oem_sign="true"' external-flash.xml.in; then
+    "./$FLASH_HELPER" --no-flash --sign --external-device -u "" -v "" \
+        external-flash.xml.in "$LNXFILE" "$ROOTFS_IMAGE" \
+        2>&1 | tee -a "$logfile" || err "external signing failed"
+    mv secureflash.xml external-secureflash.xml
+else
+    cp external-flash.xml.in external-secureflash.xml
 fi
 
 # ---------------------------------------------------------------------------
-log "Step 4: build the final flash layout XML (what write_to_device_t234 builds)"
+log "Step 4: build the final flash layout XML (write_to_device_t234's, retagged for eMMC)"
 # ---------------------------------------------------------------------------
-: "${EXTERNAL_ROOTFS_DRIVE:=0}"
-if [ "$EXTERNAL_ROOTFS_DRIVE" = 1 ]; then
-    layout=external-flash.xml.in
-else
-    layout=flash.xml.in
+./nvflashxmlparse --rewrite-contents-from=external-secureflash.xml,internal-secureflash.xml \
+    -o initrd-flash.xml external-flash.xml.in
+# eMMC takes the same partitions as NVMe, tagged as the onboard device.
+if [ "$STORAGE" = emmc ]; then
+    ./nvflashxmlparse --extract -t external --change-device-type sdmmc_user \
+        -o initrd-flash.xml.emmc initrd-flash.xml
+    mv initrd-flash.xml.emmc initrd-flash.xml
 fi
-rewritefiles="internal-secureflash.xml"
-[ ! -e external-secureflash.xml ] || rewritefiles="external-secureflash.xml,$rewritefiles"
-./nvflashxmlparse --rewrite-contents-from=$rewritefiles -o initrd-flash.xml "$layout"
 if [ -n "${DATAFILE:-}" ]; then
     datased="-es,DATAFILE,$DATAFILE,"
 else
@@ -226,10 +232,9 @@ while read -r line; do
 done < <(./nvflashxmlparse -t rootfs initrd-flash.xml)
 [ "$missing" = 0 ] || err "$missing partition file(s) referenced by initrd-flash.xml are missing"
 
-# stage2/secureflash XMLs — reference copies for hosts that rebuild the layout
-# themselves instead of using initrd-flash.xml.
-cp internal-secureflash.xml "$FP/stage2/"
-[ ! -e external-secureflash.xml ] || cp external-secureflash.xml "$FP/stage2/"
+# stage2/secureflash XMLs — reference copies of the signed layouts. Only
+# initrd-flash.xml targets the selected disk; an eMMC pack's external XML does not.
+cp internal-secureflash.xml external-secureflash.xml "$FP/stage2/"
 
 # stage2/flashpkg — the tree the flashing initrd expects on its "flashpkg" LUN:
 # conf/command_sequence drives the device-side steps, bootloader/ is the boot

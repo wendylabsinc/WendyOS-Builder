@@ -10,8 +10,9 @@
 #
 # Only edk2-firmware-tegra was taught to deploy it -- it writes the GUID that
 # its own EDK2 build resolved. tegra-uefi-prebuilt was not, so pairing NVIDIA's
-# prebuilt firmware with capsule updates now breaks. We use the prebuilt
-# firmware on every Jetson (see the machine confs), so restore the file here.
+# prebuilt firmware with capsule updates now breaks. The AGX Orin and Thor use
+# the prebuilt firmware (see their machine confs), so restore the file here; the
+# Orin Nano builds edk2-firmware-tegra, which deploys it itself.
 #
 # For prebuilt firmware the GUID is a fixed property of the binary NVIDIA
 # ships, not something our build chooses, so hardcoding is correct here in a

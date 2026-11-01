@@ -37,6 +37,10 @@ while [ "$pass" -lt 240 ]; do
         # A disk BootCurrent names gets 5 s to appear before the build-time disk is trusted.
         fallbacks=undecided
         [ "$pass" -lt 10 ] || fallbacks=bootdrive
+    elif [ "$pass" -ge 120 ]; then
+        # A boot disk unseen after a minute gives way to the one WendyOS disk of its media; for an
+        # NVMe only one behind the same controller, so a wrongly decoded controller waits.
+        fallbacks=late
     elif [ "$pass" -ge 30 ]; then
         # Let a second disk enumerate before trusting the only WendyOS disk seen.
         fallbacks=any

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Create a raw GPT disk image from a Jetson tegraflash layout.
 
-The r38+ tegraflash bundle no longer ships doexternal.sh/dosdcard.sh. This
-implements their offline-only work for the raw artifacts retained behind
+The bundle's doexternal.sh signs the layout and then writes it with make-sdcard.
+This does only the write, offline, for the raw artifacts retained behind
 ``wendy install --rootfs-only``. It never signs or talks to a Jetson.
 
 Requires ``sgdisk`` and, when a layout references Android sparse images,

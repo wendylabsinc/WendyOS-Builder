@@ -141,15 +141,9 @@ jobs:
         run: |
           set -euo pipefail
 
-          # One matrix entry per DEVICE. A device with several storage variants
-          # (jetson-agx-orin: nvme+emmc; jetson-orin-nano: nvme+sd) builds them
-          # all in a SINGLE job, one after another, in one build tree: the
-          # storage variants of a device share identical layers and repo SRCREVs
-          # and differ only in DEVICE/STORAGE/MACHINE (all in the board
-          # local.conf; the real per-disk differences live in
-          # conf/machine/${MACHINE}.conf). So the first variant populates sstate
-          # and the rest reuse it via the persistent NVMe cache — the heavy
-          # MACHINE-independent compile is done once, not once per disk.
+          # One matrix entry per DEVICE. "storages" lists its install targets, one
+          # manifest entry each. Targets that share a MACHINE build it once; only
+          # the flashpack or raw image differs per target.
           #
           # Ordered longest-pole-first. The self-hosted builder pool cannot run
           # all matrix jobs at once, so queued jobs are picked up in this
@@ -159,10 +153,7 @@ jobs:
           # (~14 min warm vs ~5 min for a Pi; heavier still on release builds,
           # which add tegraflash + flashpack + upload), then the other Jetsons,
           # then dragonwing-iq-8275 and generic-x86-64 (coldest sstate — newest boards),
-          # then the Raspberry Pis. The merged multi-storage jobs (agx-orin, orin-nano)
-          # are heavier than a single-variant build of the same device
-          # (one full build + a mostly-cached second variant) but lighter than
-          # two separate jobs. Do NOT sort this alphabetically.
+          # then the Raspberry Pis. Do NOT sort this alphabetically.
           #
           # dragonwing-iq-9075 sits behind the 8275 rather than beside it: they
           # share a DEFAULTTUNE, so a later wave reuses that tune from sstate
@@ -295,12 +286,9 @@ jobs:
 
       # ---------- Build ----------
 
-      # Resolve every storage variant of this device to its (board, machine).
-      # Emits a single-line 'map' of space-separated 'storage|board|machine'
-      # tokens consumed by the build loop and the per-variant post-build steps,
-      # plus 'first-board' for the one-time bootstrap below. The map preserves
-      # the storage order from the matrix entry, so the first variant listed is
-      # the one that seeds sstate for the rest.
+      # Resolve every install target of this device to its (board, machine).
+      # 'map' holds one 'storage|board|machine' token per target for the
+      # per-target steps; 'builds' holds each 'board|machine' once.
       - name: Derive build variables
         id: vars
         env:
@@ -309,15 +297,14 @@ jobs:
         run: |
           set -euo pipefail
           MAP=""
+          BUILDS=""
           for STORAGE in $STORAGES; do
             case "$DEVICE:$STORAGE" in
               raspberry-pi-3:disk)  BOARD=rpi3;                  MACHINE=raspberrypi3-64-wendyos ;;
               raspberry-pi-4:disk)  BOARD=rpi4;                  MACHINE=raspberrypi4-64-wendyos ;;
               raspberry-pi-5:disk)  BOARD=rpi5;                  MACHINE=raspberrypi5-wendyos ;;
-              jetson-agx-orin:nvme) BOARD=jetson-agx-orin;       MACHINE=jetson-agx-orin-devkit-nvme-wendyos ;;
-              jetson-agx-orin:emmc) BOARD=jetson-agx-orin-emmc;  MACHINE=jetson-agx-orin-devkit-emmc-wendyos ;;
-              jetson-orin-nano:nvme) BOARD=jetson-orin-nano-nvme; MACHINE=jetson-orin-nano-devkit-nvme-wendyos ;;
-              jetson-orin-nano:sd)   BOARD=jetson-orin-nano-sd;   MACHINE=jetson-orin-nano-devkit-wendyos ;;
+              jetson-agx-orin:nvme|jetson-agx-orin:emmc)  BOARD=jetson-agx-orin;  MACHINE=jetson-agx-orin-devkit-wendyos ;;
+              jetson-orin-nano:nvme|jetson-orin-nano:sd)  BOARD=jetson-orin-nano; MACHINE=jetson-orin-nano-devkit-wendyos ;;
               jetson-agx-thor:nvme) BOARD=jetson-agx-thor;       MACHINE=jetson-agx-thor-devkit-nvme-wendyos ;;
               generic-x86-64:disk)  BOARD=generic-x86-64;       MACHINE=genericx86-64-wendyos ;;
               dragonwing-iq-8275:ufs) BOARD=dragonwing-iq8275;   MACHINE=iq-8275-evk-wendyos ;;
@@ -328,10 +315,16 @@ jobs:
               *) echo "Unknown device/storage: $DEVICE/$STORAGE"; exit 1 ;;
             esac
             MAP="$MAP $STORAGE|$BOARD|$MACHINE"
+            case " $BUILDS " in
+              *" $BOARD|$MACHINE "*) ;;
+              *) BUILDS="$BUILDS $BOARD|$MACHINE" ;;
+            esac
           done
           MAP="${MAP# }"
+          BUILDS="${BUILDS# }"
           FIRST_BOARD=$(echo "$MAP" | cut -d' ' -f1 | cut -d'|' -f2)
           echo "map=$MAP" >> "$GITHUB_OUTPUT"
+          echo "builds=$BUILDS" >> "$GITHUB_OUTPUT"
           echo "first-board=$FIRST_BOARD" >> "$GITHUB_OUTPUT"
           echo "Variants for $DEVICE: $MAP"
 
@@ -577,23 +570,14 @@ jobs:
             CHANNEL="$CHANNEL" ARCH="$ARCH" PUBLISHED_BY="$PUBLISHED_BY" \
             "$GITHUB_WORKSPACE/wendyos/scripts/resolve-agent-release.sh" >> "$GITHUB_ENV"
 
-      # Build every storage variant of this device, one after another, in the
-      # single build tree bootstrapped above. Each variant only needs its own
-      # DEVICE/STORAGE/MACHINE, which all live in the board local.conf; repos,
-      # bblayers, and auto.conf (the TMPDIR pin, provenance, debug/dev flags, and
-      # resolved agent version) are storage-independent and stay put. So per
-      # variant we just re-point build/conf/local.conf at that variant's board
-      # and re-run the build: the first variant compiles the MACHINE-independent
-      # bulk and writes it to the shared NVMe sstate; every later variant
-      # restores that bulk from sstate and only builds its MACHINE-specific delta
-      # (kernel, bootloader, rootfs assembly, disk image). Switching MACHINE
-      # forces a bitbake re-parse but no recompile of cached tasks. The variants
-      # share one TMPDIR safely — they run sequentially and deploy under
+      # Build each MACHINE of this device once, in the single build tree
+      # bootstrapped above. Every board local.conf is re-pointed in turn; repos,
+      # bblayers and auto.conf stay put, and each build deploys under
       # tmp/deploy/images/<machine>/.
-      - name: Build image (all storage variants)
+      - name: Build image
         working-directory: ${{ github.workspace }}/wendyos
         env:
-          MAP: ${{ steps.vars.outputs.map }}
+          BUILDS: ${{ steps.vars.outputs.builds }}
         run: |
           set -euo pipefail
           # Mirror how bootstrap.sh composes build/conf/local.conf: prepend the
@@ -601,9 +585,9 @@ jobs:
           # common.inc) it recorded in build/.wendyos-env, then the board template.
           # shellcheck source=/dev/null
           TREE=$(. "$GITHUB_WORKSPACE/build/.wendyos-env"; echo "$WENDYOS_LAYER_TREE")
-          for token in $MAP; do
-            IFS='|' read -r storage board machine <<< "$token"
-            echo "::group::build $storage ($machine)"
+          for token in $BUILDS; do
+            IFS='|' read -r board machine <<< "$token"
+            echo "::group::build $machine"
             {
               printf 'WENDYOS_LAYER_TREE = "%s"\n\n' "$TREE"
               cat "conf/template/boards/$board/local.conf"
@@ -625,11 +609,11 @@ jobs:
       - name: Validate native game-controller support
         working-directory: ${{ github.workspace }}/wendyos
         env:
-          MAP: ${{ steps.vars.outputs.map }}
+          BUILDS: ${{ steps.vars.outputs.builds }}
         run: |
           set -euo pipefail
-          for token in $MAP; do
-            IFS='|' read -r storage board machine <<< "$token"
+          for token in $BUILDS; do
+            IFS='|' read -r board machine <<< "$token"
             DEPLOY_DIR="$GITHUB_WORKSPACE/build/tmp/deploy/images/$machine"
             CONFIG="$DEPLOY_DIR/wendyos-game-controller-$machine.config"
             if [[ ! -f "$CONFIG" ]]; then
@@ -662,6 +646,7 @@ jobs:
       - name: Verify pinned rootfs size
         env:
           DEVICE: ${{ matrix.device }}
+          BUILDS: ${{ steps.vars.outputs.builds }}
           MAP: ${{ steps.vars.outputs.map }}
         run: |
           set -euo pipefail
@@ -673,10 +658,10 @@ jobs:
           esac
           EXPECTED=$((EXPECTED_KB * 1024))
 
-          for token in $MAP; do
-            IFS='|' read -r storage board machine <<< "$token"
+          for token in $BUILDS; do
+            IFS='|' read -r board machine <<< "$token"
             DEPLOY_DIR="$GITHUB_WORKSPACE/build/tmp/deploy/images/$machine"
-            echo "::group::verify $storage ($machine)"
+            echo "::group::verify $machine"
             EXT4=$(find "$DEPLOY_DIR" -maxdepth 1 -name 'wendyos-image-*.ext4' ! -type l -print -quit)
             [[ -n "$EXT4" ]] || { echo "::error::no deployed wendyos-image ext4 found in $DEPLOY_DIR"; exit 1; }
             ACTUAL=$(stat -Lc %s "$EXT4")
@@ -687,11 +672,25 @@ jobs:
 
             WENDY=$(find "$DEPLOY_DIR" -maxdepth 1 -name 'wendyos-image-*.wendy' ! -type l -print -quit)
             [[ -n "$WENDY" ]] || { echo "::error::no .wendy OTA artifact found in $DEPLOY_DIR"; exit 1; }
-            PAYLOAD=$(tar -xOf "$WENDY" manifest.json | python3 -c 'import json,sys; print(json.load(sys.stdin)["payload"]["size"])')
+            MANIFEST=$(tar -xOf "$WENDY" manifest.json)
+            PAYLOAD=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["payload"]["size"])' <<<"$MANIFEST")
             if [[ "$PAYLOAD" != "$EXPECTED" ]]; then
               echo "::error::.wendy payload.size is $PAYLOAD bytes; the pinned size for $DEVICE is $EXPECTED"
               exit 1
             fi
+            # Every manifest key this artifact is published under must accept it:
+            # the device, plus the alias of each target built from this MACHINE.
+            WANT=$DEVICE
+            for target in $MAP; do
+              IFS='|' read -r storage _ target_machine <<< "$target"
+              [[ "$target_machine" == "$machine" ]] || continue
+              WANT="$WANT $(jq -r --arg k "$DEVICE/$storage" '.[$k].manifest_alias // empty' \
+                "$GITHUB_WORKSPACE/wendyos/.github/device-artifacts.json")"
+            done
+            HAVE=$(jq -r '.compatible_devices[]' <<<"$MANIFEST")
+            for id in $WANT; do
+              grep -qxF "$id" <<<"$HAVE" || { echo "::error::$WENDY does not accept $id, a manifest key it is published under"; exit 1; }
+            done
             echo "rootfs size OK for $machine: ext4 and .wendy payload are exactly $EXPECTED bytes ($((EXPECTED_KB / 1048576)) GiB)"
             echo "::endgroup::"
           done
@@ -705,20 +704,19 @@ jobs:
       - name: Stage SPDX SBOM artifacts
         id: sbom
         env:
-          MAP: ${{ steps.vars.outputs.map }}
+          BUILDS: ${{ steps.vars.outputs.builds }}
         run: |
           set -euo pipefail
           STAGE="$GITHUB_WORKSPACE/sbom"
           mkdir -p "$STAGE"
           found=0
-          # One deploy dir per storage variant; SBOM filenames embed the MACHINE
-          # so both variants' documents coexist in the flat stage dir. The upload
-          # step resolves each variant's bundle from its own deploy dir, so no
-          # single 'bundle' output is emitted here. '*.spdx.json' also matches the
-          # '*.spdx.index.json' index, so the bundle + both JSON documents are
+          # One deploy dir per MACHINE; SBOM filenames embed the MACHINE. The
+          # upload step resolves each target's bundle from its own deploy dir, so
+          # no single 'bundle' output is emitted here. '*.spdx.json' also matches
+          # the '*.spdx.index.json' index, so the bundle + both JSON documents are
           # captured by these two patterns.
-          for token in $MAP; do
-            IFS='|' read -r storage board machine <<< "$token"
+          for token in $BUILDS; do
+            IFS='|' read -r board machine <<< "$token"
             DEPLOY_DIR="$GITHUB_WORKSPACE/build/tmp/deploy/images/$machine"
             for pat in '*.spdx.tar.zst' '*.spdx.json'; do
               while IFS= read -r -d '' f; do
@@ -781,9 +779,9 @@ jobs:
           MAP: ${{ steps.vars.outputs.map }}
         run: |
           set -euo pipefail
-          # One iteration per storage variant of this Jetson (agx-orin: nvme+emmc;
-          # orin-nano: nvme+sd; thor: nvme). STORAGE/MACHINE/DEPLOY_DIR come from
-          # the per-variant map token; DEVICE is constant.
+          # One iteration per install target (agx-orin: nvme+emmc; orin-nano:
+          # nvme+sd; thor: nvme). Targets of one board share a MACHINE.
+          declare -A generated=()
           for token in $MAP; do
             IFS='|' read -r STORAGE board MACHINE <<< "$token"
             DEPLOY_DIR="$GITHUB_WORKSPACE/build/tmp/deploy/images/${MACHINE}"
@@ -793,7 +791,7 @@ jobs:
             # map (.github/device-artifacts.json) via the single resolver. This
             # replaces the inline glob + per-device if/elif that drifted ~11 times.
             # The resolver fails loudly (with df/ls diagnostics) if the tegraflash
-            # bundle is missing for a tegraflash-bundle device; for generated-nvme
+            # bundle is missing for a tegraflash-bundle device; for generated-raw
             # devices it resolves the bundle path and the MACHINE-scoped target
             # .img path without requiring the .img to exist yet (we make it below).
             RESOLVED=$(DEVICE="$DEVICE" STORAGE="$STORAGE" MACHINE="$MACHINE" \
@@ -801,22 +799,27 @@ jobs:
                        "$GITHUB_WORKSPACE/wendyos/scripts/resolve-artifacts.sh")
             eval "$RESOLVED"
 
-            # Per-MACHINE, freshly wiped staging dir. A fixed shared path
-            # ($GITHUB_WORKSPACE/flash-work) on persistent snapshot runners with no
-            # cleanup let one Jetson's extracted tegraflash-tar leak into the next
-            # build, so an AGX image could be assembled and shipped under the Orin
-            # Nano key. Scope by MACHINE and wipe so every build starts clean.
-            FLASH_WORKDIR="$GITHUB_WORKSPACE/flash-work/${MACHINE}"
+            # Another target already wrote this raw image, and this one ships no
+            # flashpack, so it needs no bundle copy.
+            if [[ "$IMAGE_KIND" == "generated-raw-img" && -n "${generated[$IMAGE_FILE]:-}" && "$FLASHPACK_REQUIRED" != "true" ]]; then
+              echo "::endgroup::"
+              continue
+            fi
+
+            # Per-target, freshly wiped staging dir: targets share a MACHINE and
+            # the flashpack step rewrites the extracted bundle in place.
+            FLASH_WORKDIR="$GITHUB_WORKSPACE/flash-work/${MACHINE}-${STORAGE}"
             rm -rf "$FLASH_WORKDIR"
             mkdir -p "$FLASH_WORKDIR"
 
             # All Jetsons run the wendy/blacksail OTA stack (WENDYOS_OTA=wendy):
-            # IMAGE_FSTYPES emits a single 'tegraflash-tar' bundle that does NOT
-            # ship the doexternal.sh / dosdcard.sh helper scripts.
-            # make-jetson-disk-img.py reimplements their offline GPT image creation
-            # by parsing the NVMe or SD device layout and writing each partition's
-            # binary at the correct sector offset. These raw images are retained
-            # only for explicit `wendy os install --rootfs-only`.
+            # IMAGE_FSTYPES emits a single 'tegraflash-tar' bundle. Its
+            # doexternal.sh signs the layout and then writes the image;
+            # make-jetson-disk-img.py does only the write, offline, by parsing
+            # the external (NVMe) device layout, which every Orin raw-image
+            # target shares, and writing each partition's binary at the correct
+            # sector offset. These raw images are retained only for explicit
+            # `wendy os install --rootfs-only`.
             #
             # The bundle must exist to extract it. The resolver already hard-fails
             # for tegraflash-bundle devices; this guards generated-image cases
@@ -829,21 +832,18 @@ jobs:
             echo "Extracting tegraflash bundle: $TEGRAFLASH_BUNDLE"
             tar -xf "$TEGRAFLASH_BUNDLE" -C "$FLASH_WORKDIR"
 
-            # Build the explicit rootfs-only raw artifact. NVMe lives in the
-            # external layout; Nano SD lives in flash.xml.in's sdcard device.
+            # Build the explicit rootfs-only raw artifact from the external
+            # layout. Targets that resolve to the same image file share it.
             # eMMC and Thor remain recovery-only and use the tegraflash bundle.
             case "$IMAGE_KIND" in
-              generated-nvme-img)
-                rm -f "$IMAGE_FILE"
-                python3 "$GITHUB_WORKSPACE/wendyos/scripts/make-jetson-disk-img.py" \
-                  "$FLASH_WORKDIR" "$IMAGE_FILE" \
-                  --layout external-flash.xml.in --device-type external
-                ;;
-              generated-sd-img)
-                rm -f "$IMAGE_FILE"
-                python3 "$GITHUB_WORKSPACE/wendyos/scripts/make-jetson-disk-img.py" \
-                  "$FLASH_WORKDIR" "$IMAGE_FILE" \
-                  --layout flash.xml.in --device-type sdcard
+              generated-raw-img)
+                if [[ -z "${generated[$IMAGE_FILE]:-}" ]]; then
+                  rm -f "$IMAGE_FILE"
+                  python3 "$GITHUB_WORKSPACE/wendyos/scripts/make-jetson-disk-img.py" \
+                    "$FLASH_WORKDIR" "$IMAGE_FILE" \
+                    --layout external-flash.xml.in --device-type external
+                  generated[$IMAGE_FILE]=1
+                fi
                 ;;
               *)
                 echo "No offline raw image for $DEVICE (storage=$STORAGE); the tegraflash-tar is the flash artifact."
@@ -862,7 +862,7 @@ jobs:
             echo "== post-generate scratch state for ${MACHINE} =="
             df -h "$DEPLOY_DIR" 2>/dev/null || true
             ls -la "$DEPLOY_DIR" 2>/dev/null || true
-            if [[ "$IMAGE_KIND" == "generated-nvme-img" || "$IMAGE_KIND" == "generated-sd-img" ]]; then
+            if [[ "$IMAGE_KIND" == "generated-raw-img" ]]; then
               [[ -s "$IMAGE_FILE" ]] || {
                 echo "::error::offline raw image $IMAGE_FILE missing/empty immediately after generation (see df/ls above — suspect /wendy scratch exhaustion)"
                 exit 1
@@ -882,7 +882,7 @@ jobs:
         # flow against sandboxed pr/<N>/ flashpacks before merge. Cost: each PR
         # push now builds + zstd-compresses + uploads ~3 GB per Jetson flashpack.
         # Narrow to a label gate here if that per-PR cost becomes a problem.
-        if: contains(fromJSON('["jetson-agx-thor", "jetson-agx-orin", "jetson-orin-nano"]'), matrix.device)
+        if: startsWith(matrix.device, 'jetson-')
         env:
           UPLOAD_VERSION: ${{ needs.detect-changes.outputs.version }}
           DEVICE: ${{ matrix.device }}
@@ -891,16 +891,19 @@ jobs:
           set -euo pipefail
           for token in $MAP; do
             IFS='|' read -r STORAGE board MACHINE <<< "$token"
-            # SD Jetsons (orin-nano sd) ship no flashpack (device map flashpack=false).
-            if [[ "$STORAGE" == "sd" ]]; then
+            # The device map decides which targets ship a flashpack, as in the generate step.
+            RESOLVED=$(DEVICE="$DEVICE" STORAGE="$STORAGE" MACHINE="$MACHINE" \
+                       DEPLOY_DIR="$GITHUB_WORKSPACE/build/tmp/deploy/images/${MACHINE}" \
+                       "$GITHUB_WORKSPACE/wendyos/scripts/resolve-artifacts.sh")
+            eval "$RESOLVED"
+            if [[ "$FLASHPACK_REQUIRED" != "true" ]]; then
               echo "no flashpack for $STORAGE ($MACHINE)"; continue
             fi
             echo "::group::flashpack $STORAGE ($MACHINE)"
-            FLASH_WORKDIR="$GITHUB_WORKSPACE/flash-work/${MACHINE}"   # MACHINE-scoped, matches the generate step
-            # Per-MACHINE out dir so a multi-variant job (agx-orin nvme+emmc)
-            # keeps each variant's flashpack isolated and the exactly-one check
-            # below stays valid; the upload step re-discovers it by machine.
-            FLASHPACK_OUT="$GITHUB_WORKSPACE/flashpack-out/${MACHINE}"
+            FLASH_WORKDIR="$GITHUB_WORKSPACE/flash-work/${MACHINE}-${STORAGE}"   # matches the generate step
+            # Per-target out dir: agx-orin nvme and emmc share a MACHINE, and the
+            # upload step re-discovers each flashpack by this same key.
+            FLASHPACK_OUT="$GITHUB_WORKSPACE/flashpack-out/${MACHINE}-${STORAGE}"
             rm -rf "$FLASHPACK_OUT"; mkdir -p "$FLASHPACK_OUT"
             if [[ "$DEVICE" == "jetson-agx-thor" ]]; then
               "$GITHUB_WORKSPACE/wendyos/scripts/make-thor-flashpack.sh" \
@@ -937,15 +940,18 @@ jobs:
         run: |
           set -euo pipefail
           TOKEN=$(gcloud auth print-access-token)
-          # Build the publisher once, then invoke it per storage variant. Each
-          # variant uploads to unique per-version/per-storage GCS paths and emits
-          # its own manifest-entry JSON. Upload-only: ALL manifest writes stay
+          # Build the publisher once, then invoke it per storage variant. Targets
+          # of one MACHINE share their recovery bundle, OTA, SBOM and devkit
+          # objects (the Orin Nano's nvme and sd targets also share one raw image
+          # and bmap); the publisher skips re-uploading identical bytes. Each
+          # variant emits its own manifest-entry JSON. Upload-only: ALL manifest writes stay
           # deferred to the single serialised publish / publish-pr job — parallel
           # entries must never read-modify-write shared manifests (412 races,
           # lost updates).
           cd "$GITHUB_WORKSPACE/wendyos/tools/publisher"
           go build -o "$RUNNER_TEMP/publisher" .
 
+          declare -A bmapped=()
           for token in $MAP; do
             IFS='|' read -r STORAGE board MACHINE <<< "$token"
             DEPLOY_DIR="$GITHUB_WORKSPACE/build/tmp/deploy/images/${MACHINE}"
@@ -964,7 +970,7 @@ jobs:
             # Do the non-resolution work (bmaptool / gzip) the map says applies.
             BMAP_FILE=""
             case "$IMAGE_KIND" in
-              generated-nvme-img|generated-sd-img)
+              generated-raw-img)
                 # MACHINE-scoped image written by the generate step (never a fixed
                 # shared path). The resolver cannot check it — it is produced after
                 # Yocto deploy — so keep the stale-image guard and its df/ls
@@ -976,7 +982,11 @@ jobs:
                   ls -la "$DEPLOY_DIR" 2>/dev/null || true
                   exit 1
                 fi
-                bmaptool create "$IMAGE_FILE" > "${IMAGE_FILE}.bmap"
+                # Targets that share this image share its bmap too.
+                if [[ -z "${bmapped[$IMAGE_FILE]:-}" ]]; then
+                  bmaptool create "$IMAGE_FILE" > "${IMAGE_FILE}.bmap"
+                  bmapped[$IMAGE_FILE]=1
+                fi
                 BMAP_FILE="${IMAGE_FILE}.bmap"
                 ;;
               tegraflash-bundle)
@@ -1032,13 +1042,13 @@ jobs:
             # Attach the flashpack built in the previous step. FLASHPACK_REQUIRED
             # (from the device map) is the single source of truth for which
             # variants carry a flashpack; when set, the build-flashpack step wrote
-            # exactly one into flashpack-out/<machine>, which we re-discover here
+            # exactly one into flashpack-out/<machine>-<storage>, which we re-discover here
             # (rather than threading a var across steps through a per-job loop).
             # On PRs the flashpack rides into the pr/<N>/ subtree via --pr above.
             if [[ "$FLASHPACK_REQUIRED" == "true" ]]; then
-              mapfile -t FPKS < <(find "$GITHUB_WORKSPACE/flashpack-out/${MACHINE}" -maxdepth 1 -name '*.flashpack.tar.zst' 2>/dev/null)
+              mapfile -t FPKS < <(find "$GITHUB_WORKSPACE/flashpack-out/${MACHINE}-${STORAGE}" -maxdepth 1 -name '*.flashpack.tar.zst' 2>/dev/null)
               if [[ ${#FPKS[@]} -ne 1 ]]; then
-                echo "::error::expected exactly 1 flashpack for ${MACHINE} in flashpack-out/${MACHINE}, found ${#FPKS[@]}" >&2
+                echo "::error::expected exactly 1 flashpack for ${MACHINE} in flashpack-out/${MACHINE}-${STORAGE}, found ${#FPKS[@]}" >&2
                 exit 1
               fi
               ARGS+=(--flashpack-file "${FPKS[0]}")
