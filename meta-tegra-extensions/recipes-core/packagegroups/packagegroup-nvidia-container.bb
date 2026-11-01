@@ -54,6 +54,11 @@ inherit packagegroup
 # - nvidia-container-runtime
 
 # Core packages required for l4t.csv container support (always included)
+# - tensorrt-trtexec-prebuilt: trtexec is TensorRT's test tool, and TensorRT
+#   stays on the device.
+# - tegra-libraries-multimedia-ds: provides libnvdsbufferpool. meta-tegra's
+#   drivers.csv mounts it from /usr/lib into containers, so DeepStream apps in
+#   containers need it on the device.
 RDEPENDS:${PN} = " \
     nvidia-container-config \
     nvidia-container-toolkit \
@@ -79,6 +84,8 @@ RDEPENDS:${PN} = " \
     tensorrt \
     tensorrt-plugins \
     libcufile \
+    tensorrt-trtexec-prebuilt \
+    tegra-libraries-multimedia-ds \
     "
 
 # DeepStream-specific packages (only when WENDYOS_DEEPSTREAM=1)
@@ -92,10 +99,8 @@ WENDYOS_DEEPSTREAM ?= "0"
 # RDEPEND that renamed name itself — with no build-time dep here, bitbake
 # fails to resolve it at graph time ("Nothing RPROVIDES libyaml-cpp").
 RDEPENDS:${PN} += "${@bb.utils.contains('WENDYOS_DEEPSTREAM', '1', ' \
-    tegra-libraries-multimedia-ds \
     tegra-libraries-nvdsseimeta \
     libgstnvcustomhelper \
-    tensorrt-trtexec-prebuilt \
     ', '', d)}"
 
 # Note: cuda-libraries likely includes:

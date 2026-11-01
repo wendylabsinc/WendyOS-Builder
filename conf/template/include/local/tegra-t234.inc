@@ -59,13 +59,9 @@ WENDYOS_UPDATE_BOOTLOADER = "1"
 #   "1" - DEBUG (verbose boot/capsule debug output)
 WENDYOS_EFI_DEBUG = "0"
 
-# DeepStream 8.0 (JetPack 7.2 / CUDA 13) — ENABLED. tegra-image.inc resolves
-# WENDYOS_DEEPSTREAM=1 to the deepstream-8.0 package on blacksail, provided by
-# our vendored recipe in meta-tegra-extensions-jp7 (meta-tegra-community's
-# blacksail branch ships deepstream-9.1, not 8.0. The recipe header says when to
-# drop the vendored copy). COMPATIBLE_MACHINE=(tegra), so the same
-# recipe serves Orin (t234) and Thor (t264).
-WENDYOS_DEEPSTREAM = "1"
+# DeepStream is off. Apps bring DeepStream in their own container image, as
+# NVIDIA intends. CUDA, TensorRT and the GPU driver stay on the device.
+WENDYOS_DEEPSTREAM = "0"
 
 # The ability to encrypt /data: LUKS2, with the key sealed to the fTPM (OP-TEE).
 # Default ON. It adds the crypt tools to the image (tegra-image.inc), systemd's
