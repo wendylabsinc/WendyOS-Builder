@@ -112,7 +112,7 @@ create_wendyos_dirs() {
     install -d -m 0755 ${IMAGE_ROOTFS}/data
 }
 
-ROOTFS_POSTPROCESS_COMMAND:append:x86-wendyos = " create_wendyos_dirs;"
+ROOTFS_POSTPROCESS_COMMAND:append:x86-wendyos = " create_wendyos_dirs"
 
 # NVIDIA's prebuilt userspace binaries (nvidia-smi, nvidia-modprobe) use the
 # x86-64 ABI loader path /lib64/ld-linux-x86-64.so.2, but OE only provides /lib.
@@ -122,4 +122,4 @@ create_lib64_compat() {
     [ -e ${IMAGE_ROOTFS}/lib64 ] || ln -sf lib ${IMAGE_ROOTFS}/lib64
 }
 
-ROOTFS_POSTPROCESS_COMMAND:append:x86-wendyos = " ${@oe.utils.ifelse(d.getVar('WENDYOS_NVIDIA_DGPU') == '1', 'create_lib64_compat;', '')}"
+ROOTFS_POSTPROCESS_COMMAND:append:x86-wendyos = " ${@oe.utils.ifelse(d.getVar('WENDYOS_NVIDIA_DGPU') == '1', 'create_lib64_compat', '')}"
