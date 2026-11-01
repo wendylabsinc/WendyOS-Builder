@@ -105,9 +105,9 @@ WENDYOS_CONSOLE_GETTY_KNOB = "${@d.getVar('WENDYOS_ENABLE_VT_LOGIN') if d.getVar
 
 # Each gate bakes its command in/out, so the do_rootfs signature tracks the knob
 # and the image rebuilds when a knob changes.
-ROOTFS_POSTPROCESS_COMMAND += "${@oe.utils.ifelse(d.getVar('WENDYOS_ENABLE_VT_LOGIN') == '1', '', 'disable_vt_login;')}"
-ROOTFS_POSTPROCESS_COMMAND += "${@oe.utils.ifelse(d.getVar('WENDYOS_ENABLE_UART_LOGIN') == '1', '', 'disable_uart_login;')}"
-ROOTFS_POSTPROCESS_COMMAND += "${@oe.utils.ifelse(d.getVar('WENDYOS_CONSOLE_GETTY_KNOB') == '1', '', 'disable_console_getty;')}"
+ROOTFS_POSTPROCESS_COMMAND += "${@oe.utils.ifelse(d.getVar('WENDYOS_ENABLE_VT_LOGIN') == '1', '', 'disable_vt_login')}"
+ROOTFS_POSTPROCESS_COMMAND += "${@oe.utils.ifelse(d.getVar('WENDYOS_ENABLE_UART_LOGIN') == '1', '', 'disable_uart_login')}"
+ROOTFS_POSTPROCESS_COMMAND += "${@oe.utils.ifelse(d.getVar('WENDYOS_CONSOLE_GETTY_KNOB') == '1', '', 'disable_console_getty')}"
 
 # Stamp build provenance onto the console boot screen (base-files' /etc/issue,
 # shown under the WendyOS logo before the login prompt). The build tag/ID is
@@ -124,7 +124,7 @@ stamp_boot_screen() {
         pr-*) [ -n "${WENDYOS_BUILD_COMMIT}" ] && printf 'Commit: %s\n' "${WENDYOS_BUILD_COMMIT}" >> "$issue" ;;
     esac
 }
-ROOTFS_POSTPROCESS_COMMAND += "stamp_boot_screen;"
+ROOTFS_POSTPROCESS_COMMAND += "stamp_boot_screen"
 
 # wendyos-data.service orders itself around two systemd instance units whose
 # names it spells out in full, systemd-fsck@dev-wendyos-data.service and
@@ -286,7 +286,7 @@ check_data_ordering() {
     fi
 }
 
-ROOTFS_POSTPROCESS_COMMAND += "check_data_ordering;"
+ROOTFS_POSTPROCESS_COMMAND += "check_data_ordering"
 
 # Optional runtime package management (rpm/dnf in the rootfs).
 # Disabled by default — image is updated atomically via the A/B OTA.
