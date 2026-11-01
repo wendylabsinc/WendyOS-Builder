@@ -9,49 +9,25 @@ inherit packagegroup
 # This package group is designed for the L4T, CUDA, cuDNN and TensorRT
 # versions that meta-tegra itself provides. We pin none of them.
 
-# Based on l4t.csv analysis, these are the required NVIDIA packages:
+# The libraries that l4t.csv mounts into containers must exist on the device.
+# The packages below provide them:
 #
-# CUDA Runtime and Math Libraries (from CUDA toolkit):
-# - cuda-cudart (libcudart)
-# - cuda-cublas (libcublas, libcublasLt)
-# - cuda-cusparse (libcusparse)
-# - cuda-cusolver (libcusolver, libcusolverMg)
-# - cuda-curand (libcurand)
-# - cuda-cufft (libcufft)
-# - cuda-nvrtc (libnvrtc, libnvrtc-builtins)
-# - cuda-nvjitlink (libnvJitLink)
-# - cuda-nvtx (libnvtx3interop)
-# - cuda-cupti (libcupti)
-# - cuda-nvjpeg (libnvjpeg)
-# - cuda-npp (libnpp* - image processing)
-# - cuda-cufile (libcufile - GPUDirect Storage)
+# - CUDA: cuda-cudart, cuda-nvrtc, cuda-nvtx, cuda-cupti, libcufile and
+#   cuda-libraries (the math libraries, listed below RDEPENDS). cuda-toolkit
+#   adds the compiler and the development files.
+# - cuDNN, cuSPARSELt and TensorRT: cudnn, cusparselt, tensorrt and
+#   tensorrt-plugins.
+# - Tegra driver libraries: the tegra-libraries-* packages (CUDA driver,
+#   multimedia, video decoding, camera, NvSci, EGL and OpenGL ES).
+# - Container runtime: nvidia-container-toolkit (nvidia-ctk, which writes the
+#   GPU description that containers use), libnvidia-container,
+#   nvidia-container-config (installs l4t.csv) and nerdctl.
 #
-# cuDNN (Deep Learning primitives):
-# - libcudnn9
-#
-# cuSPARSELt (Lightweight sparse operations):
-# - libcusparselt0
-#
-# Note: cuDSS (Direct sparse linear solver - required by PyTorch 2.8+) is NOT
-# included in the base OS. Install it in containers via pip when needed:
-#   pip install nvidia-cudss-cu12
-#
-# TensorRT (Inference optimization):
-# - libnvinfer10
-# - libnvinfer-plugin10
-# - libnvonnxparser10
-#
-# L4T Multimedia and Tegra Libraries:
-# - nvidia-l4t-multimedia (nvbufsurface, nvbufsurftransform, nvdsbufferpool, nvbuf_fdmap)
-# - nvidia-l4t-nvsci (nvscibuf, nvscicommon, nvscisync, nvscistream, nvscievent, nvsciipc)
-# - nvidia-l4t-camera (libnvv4l2, libtegrav4l2, libv4l2_nvvideocodec)
-# - nvidia-l4t-multimedia-utils (libnvmm, libnvmm_utils, libnvmmlite*)
-# - nvidia-l4t-graphics (EGL, OpenGL - libEGL_nvidia, libGLESv2_nvidia, libnvidia-eglcore, libnvidia-glcore)
-# - nvidia-l4t-cuda (libcuda driver)
-#
-# Container Runtime:
-# - nvidia-container-toolkit (nvidia-ctk for CDI generation)
-# - nvidia-container-runtime
+# Note: cuDSS (direct sparse linear solver) is NOT included in the base OS.
+# Install it in containers via pip when needed, matching the container's CUDA
+# major version:
+#   pip install nvidia-cudss-cu13   (CUDA 13, as on the device)
+#   pip install nvidia-cudss-cu12   (CUDA 12)
 
 # Core packages required for l4t.csv container support (always included)
 # - tensorrt-trtexec-prebuilt: trtexec is TensorRT's test tool, and TensorRT
@@ -88,16 +64,12 @@ RDEPENDS:${PN} = " \
     tegra-libraries-multimedia-ds \
     "
 
-# Note: cuda-libraries likely includes:
-#  - cuBLAS (cublas, cublasLt)
-#  - cuSPARSE (cusparse)
-#  - cuSOLVER (cusolver, cusolverMg)
-#  - cuRAND (curand)
-#  - cuFFT (cufft)
-#  - NPP (npp* image processing)
+# Note: cuda-libraries is an empty package that pulls in cuda-cudart,
+# cuda-nvrtc, libcublas, libcufft, libcufile, libcurand, libcusolver,
+# libcusparse, libnpp, libnvfatbin, libnvjitlink and libnvjpeg.
 #
-# cuSPARSELt (lightweight sparse ops) is packaged separately via the cusparselt
-# recipe in meta-wendyos-jetson/recipes-devtools/cusparselt/
+# cuSPARSELt (lightweight sparse operations) is packaged separately by the
+# cusparselt recipe in meta-tegra-extensions/recipes-devtools/cusparselt/
 
 # Note: TensorRT now included since opengl is enabled in distro config
 
