@@ -5,7 +5,7 @@ nerdctl consume for GPU access. Device enumeration goes through NVML, which is \
 shipped by nvidia-userspace, so the legacy libnvidia-container path is not needed."
 HOMEPAGE = "https://github.com/NVIDIA/nvidia-container-toolkit"
 
-LICENSE = "Apache-2.0 & MIT & ISC & MPL-2.0 & (Apache-2.0 | MIT) & BSD-3-Clause"
+LICENSE = "Apache-2.0 AND BSD-3-Clause AND ISC AND MIT AND MPL-2.0 AND (Apache-2.0 OR MIT)"
 LIC_FILES_CHKSUM = " \
     file://src/${GO_IMPORT}/LICENSE;md5=3b83ef96387f14655fc854ddc3c6bd57 \
     file://src/${GO_IMPORT}/vendor/tags.cncf.io/container-device-interface/LICENSE;md5=86d3f3a95c324c9479bd8986968f4327 \

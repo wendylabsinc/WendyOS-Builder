@@ -5,7 +5,7 @@ the RTX 5050 (10de:2d98) require these open modules; the matching proprietary \
 userspace (libcuda/NVML, provided by nvidia-userspace) must be the same PV."
 HOMEPAGE = "https://github.com/NVIDIA/open-gpu-kernel-modules"
 
-LICENSE = "MIT | GPL-2.0-only"
+LICENSE = "GPL-2.0-only OR MIT"
 LIC_FILES_CHKSUM = "file://COPYING;md5=1d5fa2a493e937d5a4b96e5e03b90f7c"
 
 inherit module
