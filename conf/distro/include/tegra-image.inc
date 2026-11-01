@@ -53,14 +53,13 @@ IMAGE_INSTALL:append = " \
     v4l-utils \
     "
 
-# Enable DeepStream SDK support (optional - adds ~1GB to image)
-# Tegra/NVIDIA hardware only - DeepStream requires NVIDIA GPUs
-# Also enables l4t-deepstream.csv which provides:
-# - GPU device nodes (/dev/nvhost-*) for tegrastats and GPU monitoring
-# - CUDA compilation toolchain (headers, binaries, nvvm) for Triton/JIT
-# - Additional libraries (libnuma) and monitoring paths
+# DeepStream in the OS image is off by default. Apps bring DeepStream in their
+# own container image. Setting it to "1" installs the DeepStream package below,
+# the extra DeepStream packages in packagegroup-nvidia-container, and, from
+# nvidia-container-config, the l4t-deepstream.csv list of host files to pass
+# into containers plus two /usr/lib/aarch64-linux-gnu symlinks.
 WENDYOS_USB_GADGET ?= "1"
-WENDYOS_DEEPSTREAM ?= "1"
+WENDYOS_DEEPSTREAM ?= "0"
 # The DeepStream package matches the BSP: JP7.2/r39.2 (CUDA 13) uses
 # deepstream-8.0, from meta-tegra-extensions-jp7.
 DEEPSTREAM_PKG = "deepstream-8.0"

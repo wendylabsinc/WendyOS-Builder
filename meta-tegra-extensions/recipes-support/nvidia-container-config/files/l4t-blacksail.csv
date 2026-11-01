@@ -33,6 +33,17 @@ dev, /dev/dri
 sym, /usr/local/cuda-13.2/lib/libcudart.so
 
 # =============================================================================
+# CUDA compiler folders - for apps that compile GPU code while they run
+# =============================================================================
+# These let an app compile GPU code while it runs, using the device's CUDA.
+# include: the CUDA header files (cuda.h, cuda_runtime.h, nvrtc.h, ...).
+# bin: the compiler tools, such as nvcc, ptxas and nvlink.
+# nvvm: NVVM, the compiler's code generator (cicc and libnvvm), and libdevice.
+dir, /usr/local/cuda-13.2/include
+dir, /usr/local/cuda-13.2/bin
+dir, /usr/local/cuda-13.2/nvvm
+
+# =============================================================================
 # cuBLAS - Linear algebra (REQUIRED by PyTorch)
 # =============================================================================
 sym, /usr/local/cuda-13.2/lib/libcublas.so
