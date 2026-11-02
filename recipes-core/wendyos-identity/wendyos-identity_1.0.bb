@@ -93,6 +93,10 @@ do_install:append() {
         printf 'STORAGE=%s\n' "${STORAGE}"      >> ${D}${sysconfdir}/wendyos/device-type
     fi
     chmod 0644 ${D}${sysconfdir}/wendyos/device-type
+    # Keep a recovery copy outside the persistent /etc/wendyos bind mount.
+    # Retain the regular /etc file for platforms without that mount.
+    install -d ${D}${nonarch_libdir}/wendyos
+    install -m 0644 ${D}${sysconfdir}/wendyos/device-type ${D}${nonarch_libdir}/wendyos/device-type
 }
 
 FILES:${PN} += "${bindir}/generate-uuid.sh"
@@ -106,6 +110,7 @@ FILES:${PN} += "${systemd_system_unitdir}/wendyos-device-name-generate.service"
 FILES:${PN} += "${systemd_system_unitdir}/wendyos-identity.service"
 FILES:${PN} += "${sysconfdir}/wendyos"
 FILES:${PN} += "${sysconfdir}/wendyos/device-type"
+FILES:${PN} += "${nonarch_libdir}/wendyos/device-type"
 FILES:${PN} += "${sysconfdir}/wendyos/version.txt"
 FILES:${PN} += "${nonarch_libdir}/wendyos/version.txt"
 FILES:${PN} += "${sysconfdir}/wendyos/commit"
