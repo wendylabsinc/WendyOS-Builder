@@ -14,6 +14,10 @@ SRC_URI += " \
     file://wendyos-dhcp-ntp.sh \
     "
 
+# Connectivity checking ([connectivity] in NetworkManager.conf). Built without
+# it, NM ignores that section and never applies the route-metric penalty.
+PACKAGECONFIG:append = " concheck"
+
 # Map WENDYOS_USB_NET_MODE to NetworkManager ipv4.method value
 def usb_net_nm_method(d):
     mode = d.getVar('WENDYOS_USB_NET_MODE') or 'link-local'
