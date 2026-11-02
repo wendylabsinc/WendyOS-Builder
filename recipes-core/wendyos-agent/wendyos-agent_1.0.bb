@@ -5,7 +5,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda
 
 # The wendyos-agent binary is published per-release in wendylabsinc/WendyOS.
 #
-# CI resolves the latest *stable* release (tag + asset sha256) and passes them
+# CI resolves the release (tag + asset sha256) and passes them
 # in via WENDYOS_AGENT_VERSION / WENDYOS_AGENT_SHA256 (whitelisted through
 # BB_ENV_PASSTHROUGH_ADDITIONS in the Makefile). Pinning both the version and
 # the checksum makes the fetch reproducible AND lets sstate notice a new
@@ -18,7 +18,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda
 # The ??= defaults are the fallback for local builds with no env override:
 # they pin a known-good version so local builds stay reproducible. Bump them
 # when you want local builds to track a newer agent; CI always overrides them
-# with the latest stable release.
+# with the release scripts/resolve-agent-release.sh picks.
 WENDYOS_AGENT_VERSION ??= "2026.07.03-194041"
 
 # The release publishes one tarball per arch (see WENDYOS_AGENT_RELEASE_ARCH

@@ -533,8 +533,10 @@ jobs:
       # by conf/template/include/local/common.inc, which resolve onto the NVMe
       # cache via the symlinks wired above — no auto.conf override needed.
 
-      # Resolve the latest *stable* wendyos-agent release (tag + asset sha256)
-      # and export them so the wendyos-agent recipe pins this exact version.
+      # Resolve the wendyos-agent release (tag + asset sha256) and export them
+      # so the wendyos-agent recipe pins this exact version: the latest stable
+      # release for release and PR images, the newest prerelease for nightly
+      # images (scripts/resolve-agent-release.sh).
       # This is what makes "ship the latest agent on every run" actually work:
       # the recipe embeds the version + checksum in SRC_URI, so a new release
       # changes the do_fetch signature and sstate re-fetches instead of reusing
@@ -550,6 +552,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           DEVICE: ${{ matrix.device }}
+          BUILD_VERSION: ${{ needs.detect-changes.outputs.version }}
         run: |
           set -euo pipefail
           case "$DEVICE" in
@@ -557,26 +560,24 @@ jobs:
             *)                        ARCH=arm64 ;;
           esac
 
-          release_json="$(curl -sSfL \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/wendylabsinc/WendyOS/releases/latest")"
-
-          version="$(jq -r '.tag_name' <<<"$release_json")"
-          sha="$(jq -r --arg arch "$ARCH" '.assets[]
-            | select(.name | test("^wendy-agent-linux-\($arch)-.*\\.tar\\.gz$"))
-            | .digest' <<<"$release_json" | sed 's/^sha256://')"
-
-          if [[ -z "$version" || "$version" == "null" || -z "$sha" || "$sha" == "null" ]]; then
-            echo "Failed to resolve wendyos-agent version/sha for arch '$ARCH' (version='$version' sha='$sha')" >&2
-            exit 1
+          PUBLISHED_BY=
+          if [[ "$BUILD_VERSION" == nightly-* ]]; then
+            CHANNEL=nightly
+            url="https://api.github.com/repos/wendylabsinc/WendyOS/releases?per_page=50"
+            # The run's start (nightly-YYYYMMDDTHHMMSS, UTC) as an ISO cutoff.
+            ts=${BUILD_VERSION#nightly-}
+            PUBLISHED_BY="${ts:0:4}-${ts:4:2}-${ts:6:2}T${ts:9:2}:${ts:11:2}:${ts:13:2}Z"
+          else
+            CHANNEL=stable
+            url="https://api.github.com/repos/wendylabsinc/WendyOS/releases/latest"
           fi
 
-          echo "Resolved wendyos-agent $version for $ARCH (sha256=$sha)"
-          {
-            echo "WENDYOS_AGENT_VERSION=$version"
-            echo "WENDYOS_AGENT_SHA256=$sha"
-          } >> "$GITHUB_ENV"
+          curl -sSfL \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "$url" |
+            CHANNEL="$CHANNEL" ARCH="$ARCH" PUBLISHED_BY="$PUBLISHED_BY" \
+            "$GITHUB_WORKSPACE/wendyos/scripts/resolve-agent-release.sh" >> "$GITHUB_ENV"
 
       # Build every storage variant of this device, one after another, in the
       # single build tree bootstrapped above. Each variant only needs its own
