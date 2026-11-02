@@ -44,6 +44,7 @@ PATCHTOOL:qcom-wendyos = "git"
 
 require recipes-kernel/linux/mesh-local.inc
 require recipes-kernel/linux/mesh-internet.inc
+require recipes-kernel/linux/cve-2026-98432.inc
 
 # Remote SensorLink camera and microphone endpoints need local loopback drivers.
 SRC_URI:append:qcom-wendyos = " file://sensor-loopback.cfg"

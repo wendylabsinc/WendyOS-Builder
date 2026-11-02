@@ -19,6 +19,7 @@ require ${@'recipes-kernel/linux/driver-extensions.inc' if d.getVar('WENDYOS_DRI
 
 require recipes-kernel/linux/mesh-local.inc
 require recipes-kernel/linux/mesh-internet.inc
+require recipes-kernel/linux/cve-2026-98432.inc
 
 # Config changes alter exported kernel symbols. Give kernels and driver add-ons
 # a new release key so an old sysext cannot masquerade as a matching build.

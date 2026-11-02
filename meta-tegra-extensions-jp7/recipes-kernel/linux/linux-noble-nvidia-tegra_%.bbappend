@@ -52,6 +52,10 @@ require ${@'recipes-kernel/linux/driver-extensions.inc' if d.getVar('WENDYOS_DRI
 require recipes-kernel/linux/mesh-local.inc
 require recipes-kernel/linux/mesh-internet.inc
 
+# The Jetson 6.8 kernel needs the 6.6 stable backport.
+CVE_2026_98432_PATCH = "cve-2026-98432-6.8.patch"
+require recipes-kernel/linux/cve-2026-98432.inc
+
 # Config changes alter exported kernel symbols. Give kernels and driver add-ons
 # a new release key so an old sysext cannot masquerade as a matching build.
 KERNEL_LOCALVERSION:append = "-wendy-mesh2"

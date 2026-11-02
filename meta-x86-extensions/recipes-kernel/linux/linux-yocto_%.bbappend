@@ -23,3 +23,4 @@ SRC_URI:append:x86-wendyos = " ${@bb.utils.contains('WENDYOS_DEBUG', '1', d.getV
 
 require recipes-kernel/linux/mesh-local.inc
 require recipes-kernel/linux/mesh-internet.inc
+require recipes-kernel/linux/cve-2026-98432.inc
