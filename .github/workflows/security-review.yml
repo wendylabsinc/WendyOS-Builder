@@ -79,6 +79,11 @@ jobs:
                       'type': 'text',
                       'text': (
                           'You are a senior application security engineer and compliance specialist performing a thorough security and compliance review of a pull request diff.\n\n'
+                          'Review source material, not generated implementation code. Establish generation from repository scripts/configuration, never from a file header alone.\n'
+                          'Keep schema/proto sources, generator scripts/templates/configuration, dependency pins, source references, manifests, lockfiles and handwritten changes in scope.\n'
+                          'Keep UefiDefaultSecurityKeys.dts in scope: it supplies security-key configuration, even though a script produces it. Review unknown or ambiguous paths.\n'
+                          'Apply the same scope to any follow-up reads. State reviewed sources, any excluded output and any limits on inspecting upstream sources behind changed pins.\n'
+                          'Do not claim API or behavior coverage from excluded output or successful generation checks.\n\n'
                           '## Security Analysis\n'
                           'Analyse the diff for security issues including but not limited to:\n'
                           '- Injection vulnerabilities (SQL, command, LDAP, XPath, template, etc.)\n'
