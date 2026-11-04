@@ -2,6 +2,7 @@
 
 import importlib.util
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -62,6 +63,33 @@ class ImageAcceptanceTests(unittest.TestCase):
     def test_missing_transitive_dependency_fails(self):
         (self.modules / 'kernel/net/netfilter/nf_nat.ko.xz').unlink()
         self.assertTrue(any('nf_nat.ko.xz' in x for x in self.validate()))
+
+    def test_isolated_tcp_requires_redirect_and_its_nat_dependency(self):
+        # WDY-4113: IQ8 configured REDIRECT=m and installed nf_nat, but omitted
+        # xt_REDIRECT. Read the real image contract so dropping the requirement
+        # cannot silently make this regression pass.
+        contract = (SCRIPT.parents[1] / 'conf/distro/include/mesh-local.inc').read_text()
+        entries = re.search(r'WENDYOS_MESH_LOCAL_MODULES = "(.*?)"', contract, re.S)[1]
+        modules = check.module_contract(entries.replace('\\', '').split())
+        symbol = 'CONFIG_NETFILTER_XT_TARGET_REDIRECT'
+        self.assertEqual(modules.get(symbol), 'xt_REDIRECT')
+        config = {symbol: 'm'}
+
+        def validate():
+            return check.validate(config, self.root, self.release, [], {symbol: modules[symbol]})
+
+        self.assertTrue(any('xt_REDIRECT.ko (found 0)' in e for e in validate()))
+        redirect = 'kernel/net/netfilter/xt_REDIRECT.ko.xz'
+        nat = 'kernel/net/netfilter/nf_nat.ko.xz'
+        self.files[redirect] = [nat]
+        self.write_modules()
+        self.assertEqual(validate(), [])
+        (self.modules / nat).unlink()
+        self.assertTrue(any('requires missing or invalid module file ' + nat in e for e in validate()))
+
+        # BSPs may build REDIRECT in; no loadable target is required then.
+        config[symbol] = 'y'
+        self.assertEqual(validate(), [])
 
     def test_stale_other_kernel_does_not_satisfy_image(self):
         self.release = '6.18.33-v8-16k-wendy-mesh1'
