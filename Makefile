@@ -90,7 +90,7 @@ help:
 	@printf "  make volumes-remove - Remove Docker volumes (deletes all build data)\n"
 	@printf "\n"
 	@printf "$(GREEN)Configuration:$(NC)\n"
-	@printf "  BOARD=$(BOARD)       (board-id for 'make setup', e.g. rpi5-sd, jetson-agx-orin)\n"
+	@printf "  BOARD=$(BOARD)       (board-id for 'make setup', e.g. rpi5, jetson-agx-orin)\n"
 	@printf "  MACHINE=$(MACHINE)   (yocto machine name for 'make build', e.g. raspberrypi5-wendyos)\n"
 	@printf "  IMAGE_TARGET=$(IMAGE_TARGET)\n"
 	@printf "  FLASH_IMAGE_SIZE=$(FLASH_IMAGE_SIZE)  (offline flash image size)\n"
@@ -98,7 +98,7 @@ help:
 	@printf "  FLASH_CONFIRM=       (set to 'yes' for non-interactive mode)\n"
 	@printf "\n"
 	@printf "$(YELLOW)Examples:$(NC)\n"
-	@printf "  make setup BOARD=rpi5-sd                      # First time setup (board-id)\n"
+	@printf "  make setup BOARD=rpi5                         # First time setup (board-id)\n"
 	@printf "  make build                                    # Build default image\n"
 	@printf "  make build MACHINE=jetson-orin-nano-devkit-wendyos  # Build for SD card (yocto name)\n"
 	@printf "  make build MACHINE=jetson-agx-orin-devkit-nvme-wendyos  # Build for AGX Orin NVMe\n"
@@ -347,7 +347,6 @@ deploy: _check-machine
 			for ARTIFACT in \
 				"$(IMAGE_TARGET)-$(MACHINE).rootfs.wic" \
 				"$(IMAGE_TARGET)-$(MACHINE).rootfs.wic.bmap" \
-				"$(IMAGE_TARGET)-$(MACHINE).sdimg" \
 				"$(IMAGE_TARGET)-$(MACHINE).tegraflash.tar.gz"; \
 			do \
 				if [ -f "$$OUTDIR/$$ARTIFACT" ]; then \
@@ -390,7 +389,6 @@ flash-to-external: _check-machine
 		cp "$$SRC" "$(PROJECT_DIR)/deploy/wendyos.img"; \
 		printf "$(GREEN)x86_64 wic image ready: $(PROJECT_DIR)/deploy/wendyos.img$(NC)\n\n"; \
 	elif echo "$(MACHINE)" | grep -q "raspberrypi"; then \
-		SDIMG="$(PROJECT_DIR)/build/tmp/deploy/images/$(MACHINE)/$(IMAGE_TARGET)-$(MACHINE).sdimg"; \
 		WIC_IMG="$(PROJECT_DIR)/build/tmp/deploy/images/$(MACHINE)/$(IMAGE_TARGET)-$(MACHINE).rootfs.wic"; \
 		if [ -f "$$WIC_IMG" ]; then \
 			SRC="$$WIC_IMG"; KIND="wic"; \

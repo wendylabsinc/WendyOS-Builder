@@ -16,7 +16,7 @@
 #
 # Inputs (env vars, matching build.yml's existing style):
 #   DEVICE      e.g. jetson-agx-orin
-#   STORAGE     e.g. nvme | emmc | sd
+#   STORAGE     e.g. nvme | emmc | sd | ufs | disk
 #   MACHINE     Yocto MACHINE, e.g. jetson-agx-orin-devkit-nvme-wendyos
 #   DEPLOY_DIR  build/tmp/deploy/images/<MACHINE>
 #   MAP_FILE    (optional) override the map path — used by the tests
@@ -24,12 +24,11 @@
 # Output: KEY=VALUE lines on stdout, safe to `eval` in a step or append to
 # $GITHUB_ENV. Diagnostics and errors go to stderr.
 #   IMAGE_KIND         generated-nvme-img | generated-sd-img | tegraflash-bundle |
-#                      qcomflash-bundle | sdimg-gz-with-wic-fallback | wic-disk
+#                      qcomflash-bundle | wic-disk
 #   IMAGE_FILE         primary artifact path. For generated-*-img this is the
 #                      MACHINE-scoped target path the "Generate flashable image"
 #                      step writes (it does NOT exist at Yocto deploy time, so it
-#                      is intentionally not existence-checked here). For sdimg it
-#                      is the readlink-resolved raw image the workflow gzips.
+#                      is intentionally not existence-checked here).
 #   TEGRAFLASH_BUNDLE  resolved tegraflash bundle (recovery/flash artifact), or
 #                      empty when the device has none (Raspberry Pi).
 #   RECOVERY_EXPECTED  true when a tegraflash bundle is expected (all Jetsons).
@@ -38,7 +37,6 @@
 #                      and supported Orin NVMe/eMMC recovery targets; Nano SD
 #                      remains rootfs-only).
 #   PASS_STORAGE       true when the publisher gets --storage (multi-storage device).
-#   RPI_NEEDS_GZIP     true when IMAGE_FILE is a raw sdimg the workflow must gzip.
 #
 # On a missing expected artifact the script exits non-zero. The df/ls dump in
 # deploy_dir_diagnostics() is kept for now to catch the /wendy scratch
@@ -115,7 +113,6 @@ if [[ "$IMAGE_KIND" == "qcomflash-bundle" ]]; then
   fi
 fi
 
-RPI_NEEDS_GZIP=false
 case "$IMAGE_KIND" in
   tegraflash-bundle)
     # eMMC and Thor NVMe ship no offline disk image; the tegraflash bundle IS
@@ -146,30 +143,11 @@ case "$IMAGE_KIND" in
     # sdcard device instead of external-flash.xml.in's external device.
     IMAGE_FILE="$DEPLOY_DIR/wendyos-image-${MACHINE}-sd.img"
     ;;
-  sdimg-gz-with-wic-fallback)
-    sdimg="$DEPLOY_DIR/wendyos-image-${MACHINE}.sdimg"
-    wic="$DEPLOY_DIR/wendyos-image-${MACHINE}.rootfs.wic"
-    if [[ -f "$sdimg" ]]; then
-      # .sdimg present: prefer it. Resolve the Yocto symlink chain now — gzip
-      # fails with ELOOP on deep chains, so the workflow must gzip the real
-      # file, not the symlink.
-      IMAGE_FILE=$(readlink -f "$sdimg")
-      RPI_NEEDS_GZIP=true
-    elif [[ -f "$wic" ]]; then
-      # Fallback to the .wic image.
-      IMAGE_FILE="$wic"
-    else
-      fail "no Raspberry Pi image for $KEY ($MACHINE): expected wendyos-image-${MACHINE}.sdimg (preferred) or wendyos-image-${MACHINE}.rootfs.wic in $DEPLOY_DIR (map entry image_kind=sdimg-gz-with-wic-fallback)"
-    fi
-    ;;
   wic-disk)
-    # Generic x86_64 PC and the VM machines: the primary flashable artifact is a
-    # directly-bootable UEFI .wic disk image — what a fresh install is written
-    # to, or what a VM boots. All three run the wendy A/B OTA stack, so they also
-    # build a .wendy payload, but that is published by the workflow's
-    # device-agnostic OTA glob (--ota-update), not resolved here; this kind only
-    # names the flashable image. No tegraflash bundle (not a Tegra board).
-    # Uploaded as-is (bmap generated in the workflow like the RPi wic path); the
+    # One directly-bootable .wic disk image: the generic x86_64 PC, the VM
+    # machines, the Pi 3/4 (SD or USB) and the Pi 5 (SD or NVMe). Their .wendy
+    # OTA payload is published by the workflow's OTA glob (--ota-update), not
+    # resolved here. Uploaded as-is (bmap generated in the workflow); the
     # publisher recompresses .wic. A missing wic here is fatal.
     wic="$DEPLOY_DIR/wendyos-image-${MACHINE}.rootfs.wic"
     if [[ ! -f "$wic" ]]; then
@@ -192,7 +170,6 @@ printf '%s=%q\n' \
   RECOVERY_EXPECTED "$RECOVERY_EXPECTED" \
   BMAP_REQUIRED "$BMAP_REQUIRED" \
   FLASHPACK_REQUIRED "$FLASHPACK_REQUIRED" \
-  PASS_STORAGE "$PASS_STORAGE" \
-  RPI_NEEDS_GZIP "$RPI_NEEDS_GZIP"
+  PASS_STORAGE "$PASS_STORAGE"
 
 echo "resolve-artifacts: $KEY -> kind=$IMAGE_KIND image=$IMAGE_FILE bundle=${TEGRAFLASH_BUNDLE:-<none>}" >&2

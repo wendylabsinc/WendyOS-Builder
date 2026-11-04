@@ -26,7 +26,7 @@ RDEPENDS:${PN} = " \
 # RPi5 to keep it out of RPi4/RPi3 builds.
 # The BE202 uses the hostap 2.12 NAN-capable wpa_supplicant from this layer.
 # Its package ships wendyos-nan and pulls in wpa_cli; make it an explicit image
-# dependency so the Pi 5 SD image has host-shell NAN control even if
+# dependency so the Pi 5 image has host-shell NAN control even if
 # NetworkManager changes its optional Wi-Fi backend dependencies.
 RDEPENDS:${PN}:append:raspberrypi5 = " rpi-eeprom-config wpa-supplicant"
 
