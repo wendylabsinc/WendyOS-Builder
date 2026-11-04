@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -183,6 +184,37 @@ func TestMasterManifestBatchSingleWrite(t *testing.T) {
 	}
 }
 
+func TestMasterManifestBatchAliasOf(t *testing.T) {
+	s := &manifestTestServer{manifest: MasterManifest{Devices: map[string]DeviceLatestInfo{}}}
+	updates := []MasterManifestUpdate{
+		{Device: "jetson-agx-orin", Version: "pr-1", Nightly: true},
+		{Device: "jetson-agx-orin-emmc", Version: "pr-1", Nightly: true, AliasOf: "jetson-agx-orin", AliasStorage: "emmc"},
+	}
+	if err := updateMasterManifestBatch(context.Background(), batchTestLogger(), s.bucket(t), "", updates, true); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.manifest.Devices["jetson-agx-orin-emmc"]; got.AliasOf != "jetson-agx-orin" || got.AliasStorage != "emmc" {
+		t.Fatalf("alias marker = %q/%q", got.AliasOf, got.AliasStorage)
+	}
+	if got := s.manifest.Devices["jetson-agx-orin"].AliasOf; got != "" {
+		t.Fatalf("canonical device got alias_of %q", got)
+	}
+	// The driver index batch carries no alias_of and must not clear it.
+	if err := updateMasterManifestBatch(context.Background(), batchTestLogger(), s.bucket(t), "", []MasterManifestUpdate{{Device: "jetson-agx-orin-emmc", Version: "pr-2", Nightly: true}}, true); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.manifest.Devices["jetson-agx-orin-emmc"]; got.AliasOf != "jetson-agx-orin" || got.AliasStorage != "emmc" || got.LatestNightly != "pr-2" {
+		t.Fatalf("after an update without alias_of: %+v", got)
+	}
+	content, err := json.Marshal(s.manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(content), `"alias_of":"jetson-agx-orin","alias_storage":"emmc"`) || strings.Count(string(content), `"alias_of"`) != 1 {
+		t.Fatalf("serialized master manifest: %s", content)
+	}
+}
+
 func TestMasterManifestBatchRetries(t *testing.T) {
 	for _, code := range []int{412, 429, 503} {
 		t.Run(fmt.Sprint(code), func(t *testing.T) {
@@ -230,7 +262,7 @@ func TestMasterManifestBatchReadFailures(t *testing.T) {
 }
 
 func TestMasterManifestBatchValidation(t *testing.T) {
-	for _, input := range []string{`null`, `{}`, `[] []`, `[{"device":"iq","version":"new","nighty":true}]`, `[{"device":"../bad","version":"new"}]`, `[{"device":"iq"}]`, `[{"device":"iq","version":"new","stability":"bad"}]`, `[{"device":"iq","version":"new"},{"device":"iq","version":"other"}]`, `[{"device":"iq","version":"new","nightly":true},{"device":"iq","version":"new"}]`} {
+	for _, input := range []string{`null`, `{}`, `[] []`, `[{"device":"iq","version":"new","nighty":true}]`, `[{"device":"../bad","version":"new"}]`, `[{"device":"iq"}]`, `[{"device":"iq","version":"new","stability":"bad"}]`, `[{"device":"iq","version":"new"},{"device":"iq","version":"other"}]`, `[{"device":"iq","version":"new","nightly":true},{"device":"iq","version":"new"}]`, `[{"device":"iq","version":"new","alias_of":"iq","alias_storage":"emmc"}]`, `[{"device":"iq","version":"new","alias_of":"../bad","alias_storage":"emmc"}]`, `[{"device":"iq","version":"new","alias_of":"agx"}]`, `[{"device":"iq","version":"new","alias_of":"agx","alias_storage":"usb"}]`, `[{"device":"iq","version":"new","alias_storage":"emmc"}]`} {
 		t.Run(input, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "batch.json")
 			os.WriteFile(path, []byte(input), 0600)

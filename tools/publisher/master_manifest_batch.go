@@ -20,10 +20,12 @@ import (
 // selects eligible devices after publishing their manifests and checking drivers.
 // The invocation's --pr flag selects the namespace for the entire batch.
 type MasterManifestUpdate struct {
-	Device    string `json:"device"`
-	Version   string `json:"version"`
-	Nightly   bool   `json:"nightly"`
-	Stability string `json:"stability,omitempty"`
+	Device       string `json:"device"`
+	Version      string `json:"version"`
+	Nightly      bool   `json:"nightly"`
+	Stability    string `json:"stability,omitempty"`
+	AliasOf      string `json:"alias_of,omitempty"`
+	AliasStorage string `json:"alias_storage,omitempty"`
 }
 
 func readMasterManifestBatch(path string) ([]MasterManifestUpdate, error) {
@@ -61,6 +63,19 @@ func normalizeMasterManifestBatch(updates []MasterManifestUpdate) ([]MasterManif
 		}
 		if err := validateStability(update.Stability); err != nil {
 			return nil, fmt.Errorf("%s: %w", update.Device, err)
+		}
+		if update.AliasOf != "" {
+			if err := validateDeviceType(update.AliasOf); err != nil {
+				return nil, fmt.Errorf("%s: alias_of: %w", update.Device, err)
+			}
+			if update.AliasOf == update.Device {
+				return nil, fmt.Errorf("%s: alias_of names the device itself", update.Device)
+			}
+			if update.AliasStorage != "nvme" && update.AliasStorage != "sd" && update.AliasStorage != "emmc" {
+				return nil, fmt.Errorf("%s: alias_storage %q must be nvme, sd, or emmc", update.Device, update.AliasStorage)
+			}
+		} else if update.AliasStorage != "" {
+			return nil, fmt.Errorf("%s: alias_storage requires alias_of", update.Device)
 		}
 		if previous, exists := seen[update.Device]; exists {
 			if previous != update {
@@ -123,6 +138,10 @@ func updateMasterManifestBatch(ctx context.Context, logger *logrus.Entry, bucket
 			previous := info
 			info.ManifestPath = deviceManifestPath(prefix, update.Device)
 			info.Stability = update.Stability
+			// Set, never cleared: driver index batches do not carry alias_of.
+			if update.AliasOf != "" {
+				info.AliasOf, info.AliasStorage = update.AliasOf, update.AliasStorage
+			}
 			if update.Nightly {
 				info.LatestNightly = update.Version
 			} else {

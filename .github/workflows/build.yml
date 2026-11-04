@@ -1399,7 +1399,7 @@ jobs:
           TOKEN=$(gcloud auth print-access-token)
           cd "$GITHUB_WORKSPACE/wendyos/tools/publisher"
           [[ -x "$RUNNER_TEMP/publisher" ]] || go build -o "$RUNNER_TEMP/publisher" .
-          jq -s '[.[] | . as $entry | (.device, .aliases[]?) as $device | $entry | {device: $device, version, nightly: true, stability}]' "${entries[@]}" > "$RUNNER_TEMP/master-updates.json"
+          jq -s '[.[] | . as $entry | (.device, .aliases[]?) as $device | $entry | {device: $device, version, nightly: true, stability} + (if $device == $entry.device then {} else {alias_of: $entry.device, alias_storage: $entry.storage} end)]' "${entries[@]}" > "$RUNNER_TEMP/master-updates.json"
           "$RUNNER_TEMP/publisher" --master-manifest-batch "$RUNNER_TEMP/master-updates.json" --pr "$PR_NUMBER" --access-token "$TOKEN" </dev/null
 
   # ---------------------------------------------------------------------------
@@ -1497,7 +1497,7 @@ jobs:
           # Failed/held-back devices keep their previous pointers. Identical
           # storage variants are deduplicated; conflicting rows reach the
           # publisher's batch validation instead of silently choosing one.
-          jq -sc '[.[] | . as $entry | (.device, .aliases[]?) as $device | $entry | {device: $device, version, nightly, stability}] | unique | .[]' "${entries[@]}" > "$RUNNER_TEMP/master-candidates.jsonl"
+          jq -sc '[.[] | . as $entry | (.device, .aliases[]?) as $device | $entry | {device: $device, version, nightly, stability} + (if $device == $entry.device then {} else {alias_of: $entry.device, alias_storage: $entry.storage} end)] | unique | .[]' "${entries[@]}" > "$RUNNER_TEMP/master-candidates.jsonl"
           readarray -t rows < "$RUNNER_TEMP/master-candidates.jsonl"
           : > "$RUNNER_TEMP/master-updates.jsonl"
           for row in "${rows[@]}"; do

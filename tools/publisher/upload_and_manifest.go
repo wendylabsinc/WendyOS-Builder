@@ -283,6 +283,9 @@ type DeviceLatestInfo struct {
 	LatestNightly string `json:"latest_nightly,omitempty"`
 	ManifestPath  string `json:"manifest_path"`
 	Stability     string `json:"stability,omitempty"` // "stable", "experimental", "deprecated"
+	// Fielded units still look updates up under an alias; install pickers list only AliasOf.
+	AliasOf      string `json:"alias_of,omitempty"`
+	AliasStorage string `json:"alias_storage,omitempty"` // the AliasOf storage the alias stands for
 }
 
 // FirmwareManifest represents a chip-specific firmware manifest
