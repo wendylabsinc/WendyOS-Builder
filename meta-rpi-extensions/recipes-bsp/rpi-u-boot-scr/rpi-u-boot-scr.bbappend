@@ -43,6 +43,15 @@ WENDYOS_UBOOT_PRECMD:raspberrypi5-nvme  = "nvme scan"
 WENDYOS_UBOOT_FOLLOW_BOOTDEV ?= "0"
 WENDYOS_UBOOT_FOLLOW_BOOTDEV:raspberrypi4-64 = "1"
 
+# Upper bound for U-Boot's DTB placement (see boot-ab.cmd.in). Empty drops the
+# setenv line, leaving fdt_high unset. Pi 4: 0x3e000000 is above the 768 MB CMA
+# window on every RAM size, because the first bank is the low 1 GB minus the
+# firmware's GPU memory on all of them; U-Boot never places the DTB above free
+# RAM, so the bound only has to be high enough. Pi 3/5 keep their
+# bench-validated layout.
+WENDYOS_UBOOT_FDT_HIGH ?= ""
+WENDYOS_UBOOT_FDT_HIGH:raspberrypi4-64 = "0x3e000000"
+
 # Must equal U-Boot's CONFIG_ENV_SIZE and the size in fw_env.config.
 WENDYOS_UBOOT_ENV_SIZE ?= "0x4000"
 
@@ -57,7 +66,8 @@ WENDYOS_ROOTFS_PART_B:raspberrypi3-64 = "3"
 do_compile[vardeps] += "WENDYOS_OTA WENDYOS_ROOTFS_PART_A WENDYOS_ROOTFS_PART_B \
                         WENDYOS_BOOTLIMIT WENDYOS_ROOT_DEV_BASE WENDYOS_UBOOT_IF \
                         WENDYOS_UBOOT_DEV WENDYOS_UBOOT_PRECMD \
-                        WENDYOS_UBOOT_FOLLOW_BOOTDEV WENDYOS_UBOOT_ENV_SIZE"
+                        WENDYOS_UBOOT_FOLLOW_BOOTDEV WENDYOS_UBOOT_ENV_SIZE \
+                        WENDYOS_UBOOT_FDT_HIGH"
 
 do_compile() {
     if [ "${WENDYOS_OTA}" = "wendy" ]; then
@@ -65,6 +75,11 @@ do_compile() {
             keep=BOOTDEV drop=FIXED
         else
             keep=FIXED drop=BOOTDEV
+        fi
+        if [ -n "${WENDYOS_UBOOT_FDT_HIGH}" ]; then
+            fdt_high='s/@@WENDYOS_UBOOT_FDT_HIGH@@/${WENDYOS_UBOOT_FDT_HIGH}/'
+        else
+            fdt_high='/@@WENDYOS_UBOOT_FDT_HIGH@@/d'
         fi
         # '#' delimiter for the device-base sub (it contains '/').
         sed -e "/^@@$drop@@/d" \
@@ -78,6 +93,7 @@ do_compile() {
             -e 's/@@WENDYOS_ROOTFS_PART_B@@/${WENDYOS_ROOTFS_PART_B}/' \
             -e 's/@@WENDYOS_BOOTLIMIT@@/${WENDYOS_BOOTLIMIT}/' \
             -e 's/@@WENDYOS_UBOOT_ENV_SIZE@@/${WENDYOS_UBOOT_ENV_SIZE}/g' \
+            -e "$fdt_high" \
             -e 's#@@WENDYOS_ROOT_DEV_BASE@@#${WENDYOS_ROOT_DEV_BASE}#' \
             "${UNPACKDIR}/boot-ab.cmd.in" > "${WORKDIR}/boot.cmd"
     else

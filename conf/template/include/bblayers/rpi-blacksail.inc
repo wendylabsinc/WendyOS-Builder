@@ -4,8 +4,8 @@
 # rpi-u-boot-scr.bbappend.
 #
 # Nothing is layered beyond meta-raspberrypi and meta-rpi-extensions. Both Go
-# 1.26 (needed by wendyos-update's go.mod) and U-Boot 2026.04 are native to
-# blacksail oe-core, so no backport layer is cloned or layered. 2026.04 boots the
+# 1.26 (needed by wendyos-update's go.mod) and U-Boot 2026.07 are native to
+# blacksail oe-core, so no backport layer is cloned or layered. 2026.04 booted the
 # Pi 5 fine (confirmed via the dedicated debug connector; the earlier "2026.04
 # won't boot" was a console-routing red herring — see local/rpi-blacksail.inc and
 # the memory note project_rpi5_blacksail_uboot_silent).
