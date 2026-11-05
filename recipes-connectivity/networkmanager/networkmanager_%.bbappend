@@ -11,8 +11,23 @@ SRC_URI += " \
     file://usb-gadget.nmconnection \
     file://99-interface-metrics.conf \
     file://50-wendy-local-mesh.conf \
+    file://30-connectivity.conf \
     file://wendyos-dhcp-ntp.sh \
     "
+
+# Built in unconditionally; WENDYOS_NM_CONNECTIVITY_URI decides whether it runs.
+PACKAGECONFIG:append = " concheck"
+
+# NM accepts a malformed check config and failover then quietly degrades.
+python () {
+    import re
+    uri = d.getVar('WENDYOS_NM_CONNECTIVITY_URI') or ''
+    interval = d.getVar('WENDYOS_NM_CONNECTIVITY_INTERVAL') or ''
+    if uri and not re.fullmatch(r'https?://[^\s"$`\\]+', uri):
+        bb.fatal("WENDYOS_NM_CONNECTIVITY_URI must be an http(s) URL, got '%s'" % uri)
+    if uri and not interval.isdigit():
+        bb.fatal("WENDYOS_NM_CONNECTIVITY_INTERVAL must be whole seconds, got '%s'" % interval)
+}
 
 # Map WENDYOS_USB_NET_MODE to NetworkManager ipv4.method value
 def usb_net_nm_method(d):
@@ -43,6 +58,13 @@ do_install:append() {
     install -m 0644 ${UNPACKDIR}/99-interface-metrics.conf ${D}${sysconfdir}/NetworkManager/conf.d/99-interface-metrics.conf
     install -m 0644 ${UNPACKDIR}/50-wendy-local-mesh.conf ${D}${sysconfdir}/NetworkManager/conf.d/50-wendy-local-mesh.conf
 
+    # Without a [connectivity] uri NM never checks and never penalises a link.
+    if [ -n "${WENDYOS_NM_CONNECTIVITY_URI}" ]; then
+        install -m 0644 ${UNPACKDIR}/30-connectivity.conf ${D}${sysconfdir}/NetworkManager/conf.d/30-connectivity.conf
+        printf 'uri=%s\ninterval=%s\n' "${WENDYOS_NM_CONNECTIVITY_URI}" "${WENDYOS_NM_CONNECTIVITY_INTERVAL}" \
+            >> ${D}${sysconfdir}/NetworkManager/conf.d/30-connectivity.conf
+    fi
+
     # Install distro-managed connection profile to /usr/lib (read-only on rootfs).
     # NM 1.46+ natively reads /usr/lib/NetworkManager/system-connections/ as a
     # read-only keyfile path. User modifications via nmcli create a writable copy
@@ -70,6 +92,7 @@ FILES:${PN} += " \
     ${sysconfdir}/NetworkManager/conf.d/20-ethernet-dhcp.conf \
     ${sysconfdir}/NetworkManager/conf.d/99-interface-metrics.conf \
     ${sysconfdir}/NetworkManager/conf.d/50-wendy-local-mesh.conf \
+    ${sysconfdir}/NetworkManager/conf.d/30-connectivity.conf \
     "
 
 # Ensure NetworkManager starts after USB gadget is set up
