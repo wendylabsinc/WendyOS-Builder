@@ -121,7 +121,9 @@ class MeshLocalContractTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             substitutions = {'D': tmp, 'UNPACKDIR': str(recipe.parent / 'files'),
                              'sysconfdir': '/etc', 'nonarch_libdir': '/usr/lib',
-                             '@usb_net_nm_method(d)': 'link-local'}
+                             '@usb_net_nm_method(d)': 'link-local',
+                             'WENDYOS_NM_CONNECTIVITY_URI': 'http://example.invalid/generate_204',
+                             'WENDYOS_NM_CONNECTIVITY_INTERVAL': '60'}
             for key, value in substitutions.items():
                 body = body.replace('${' + key + '}', value)
             subprocess.run(['sh', '-eu'], input=body, text=True, check=True)
