@@ -45,6 +45,8 @@ WENDYOS_AGENT_RELEASE_ARCH:x86-wendyos = "amd64"
 
 SRC_URI = "https://github.com/wendylabsinc/WendyOS/releases/download/${WENDYOS_AGENT_VERSION}/wendy-agent-linux-${WENDYOS_AGENT_RELEASE_ARCH}-${WENDYOS_AGENT_VERSION}.tar.gz;name=agent \
            file://wendyos-agent.service \
+           file://wendyos-agent-supervisor.conf \
+           file://wendyos-agent-updater-supervisor.conf \
            file://wendyos-agent-updater.service \
            file://wendyos-agent-updater.timer \
            file://wendyos-agent-updater.sh \
@@ -88,6 +90,21 @@ do_install() {
     # Install updater and download scripts
     install -m 0755 ${UNPACKDIR}/wendyos-agent-updater.sh ${D}/opt/wendyos/bin/
     install -m 0755 ${UNPACKDIR}/download-wendyos-agent.sh ${D}/opt/wendyos/bin/
+
+    # A release with the supervisor turns it on: the agent unit starts it, and
+    # the daily updater hands it new releases instead of overwriting this agent.
+    # It must come from the same release, as it asks this agent for
+    # `utils os-gate`. A release without it builds the image as before.
+    SUPERVISOR=$(find ${S} -type f -name wendy-agent-supervisor | head -1)
+    if [ -n "${SUPERVISOR}" ]; then
+        install -m 0755 "${SUPERVISOR}" ${D}/opt/wendyos/bin/wendy-agent-supervisor
+        install -d ${D}${systemd_system_unitdir}/wendyos-agent.service.d
+        install -m 0644 ${UNPACKDIR}/wendyos-agent-supervisor.conf ${D}${systemd_system_unitdir}/wendyos-agent.service.d/10-supervisor.conf
+        install -d ${D}${systemd_system_unitdir}/wendyos-agent-updater.service.d
+        install -m 0644 ${UNPACKDIR}/wendyos-agent-updater-supervisor.conf ${D}${systemd_system_unitdir}/wendyos-agent-updater.service.d/10-supervisor.conf
+    else
+        bbwarn "agent release ${WENDYOS_AGENT_VERSION} has no wendy-agent-supervisor; the image runs the agent without it"
+    fi
 
     # Create runtime directories
     install -d ${D}/var/lib/wendyos-agent

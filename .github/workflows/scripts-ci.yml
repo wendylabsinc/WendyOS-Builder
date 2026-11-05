@@ -36,7 +36,7 @@ on:
       - 'classes/mesh-local-policy-check.bbclass'
       - 'recipes-core/wendyos-mesh-policy/**'
       - 'recipes-core/wendyos-agent/wendyos-agent_1.0.bb'
-      - 'recipes-core/wendyos-agent/files/wendyos-agent.service'
+      - 'recipes-core/wendyos-agent/files/**'
       - 'recipes-core/images/wendyos-image.bb'
       - 'scripts/check_mesh_kernel_support*'
       - 'scripts/check_sensor_loopback_support*'
@@ -83,6 +83,7 @@ on:
       - 'scripts/driver_sdk_setup_test.py'
       - 'scripts/package_local_agent_test.py'
       - 'tools/mesh/package-local-agent.py'
+      - 'scripts/wendyos_agent_recipe_test.py'
       - 'scripts/select-driver-devkit.sh'
       - '.github/device-artifacts.json'
       - '.github/workflows/drivers.yml'
@@ -151,7 +152,7 @@ on:
       - 'classes/mesh-local-policy-check.bbclass'
       - 'recipes-core/wendyos-mesh-policy/**'
       - 'recipes-core/wendyos-agent/wendyos-agent_1.0.bb'
-      - 'recipes-core/wendyos-agent/files/wendyos-agent.service'
+      - 'recipes-core/wendyos-agent/files/**'
       - 'recipes-core/images/wendyos-image.bb'
       - 'scripts/check_mesh_kernel_support*'
       - 'scripts/check_sensor_loopback_support*'
@@ -198,6 +199,7 @@ on:
       - 'scripts/driver_sdk_setup_test.py'
       - 'scripts/package_local_agent_test.py'
       - 'tools/mesh/package-local-agent.py'
+      - 'scripts/wendyos_agent_recipe_test.py'
       - 'scripts/select-driver-devkit.sh'
       - '.github/device-artifacts.json'
       - '.github/workflows/drivers.yml'
@@ -429,3 +431,6 @@ jobs:
 
       - name: Run local agent packaging tests
         run: python3 -m unittest scripts/package_local_agent_test.py
+
+      - name: Run agent recipe tests
+        run: python3 -m unittest scripts/wendyos_agent_recipe_test.py
