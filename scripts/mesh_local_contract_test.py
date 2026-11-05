@@ -112,7 +112,8 @@ class MeshLocalContractTest(unittest.TestCase):
         exec(textwrap.dedent(body), {'d': data})
         self.assertEqual(data.values['RRECOMMENDS:packagegroup-wendyos-kernel'].split(),
                          ['kernel-module-dummy', 'kernel-module-ipv6', 'kernel-module-tun',
-                          'kernel-module-xt-tproxy', 'kernel-module-nf-tproxy-ipv4'])
+                          'kernel-module-xt-redirect', 'kernel-module-xt-tproxy',
+                          'kernel-module-nf-tproxy-ipv4'])
 
     def test_installed_nm_policy_owns_mesh_and_preserves_physical_interfaces(self):
         recipe = ROOT / 'recipes-connectivity/networkmanager/networkmanager_%.bbappend'
