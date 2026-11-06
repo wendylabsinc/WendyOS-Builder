@@ -111,6 +111,12 @@ class AgentRecipeTest(unittest.TestCase):
         self.assertIn('data.mount', unit['After'].split())
         self.assertNotIn('Requires', unit)
 
+    def test_the_agent_is_stopped_once_and_logs_as_itself(self):
+        service = section(FILES / 'wendyos-agent-supervisor.conf', 'Service')
+        # A second SIGTERM from systemd would cut the agent's stop of its apps short.
+        self.assertEqual(service['KillMode'], 'mixed')
+        self.assertEqual(service['SyslogIdentifier'], 'wendy-agent')
+
     def test_an_admins_override_still_wins(self):
         # Drop-ins apply in name order across /usr/lib and /etc; `systemctl edit`
         # writes override.conf, which must come after ours.
