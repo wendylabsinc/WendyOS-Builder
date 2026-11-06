@@ -12,7 +12,7 @@
                         gNVIDIAPublicVariableGuid {
                             /* Valid tokens include: sd, nvme, usb, emmc, sata, http, pxe, shell */
                             DefaultBootPriority {
-                                /* NVMe first so wendy os install works out of the box */
+                                /* UEFI reads DefaultBootPriority under gNVIDIATokenSpaceGuid, so this sets no order */
                                 data = "nvme, sd, usb, http, pxe";
                                 locked;
                             };

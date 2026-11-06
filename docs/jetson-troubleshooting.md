@@ -3,7 +3,7 @@
 Operational commands and fixes for WendyOS on NVIDIA Jetson Orin devices
 (Orin Nano DevKit and AGX Orin DevKit). The procedures below operate on
 chip-wide Tegra234 mechanisms (UEFI variables under the L4T RootfsStatus
-GUID, Mender data under `/data`) and apply to both boards unless explicitly
+GUID, WendyOS data under `/data`) and apply to both boards unless explicitly
 noted.
 
 ## CSI camera reports a firmware mismatch
@@ -23,22 +23,23 @@ updates QSPI.
 
 ### Fix
 
-Put the supported devkit in Force Recovery mode and run full recovery (do not
-pass `--rootfs-only`):
+Put the supported devkit in Force Recovery mode and run full recovery (pass
+`--rootfs-only=false`, or pick "Full flash over USB-C" when the CLI asks):
 
 ```bash
 # Orin Nano P3767-0005 on P3768-0000 (NVMe)
-wendy os install --device-type jetson-orin-nano
+wendy os install --device-type jetson-orin-nano --rootfs-only=false
 
 # AGX Orin P3701-0005 on P3737-0000
-wendy os install --device-type jetson-agx-orin --storage nvme
+wendy os install --device-type jetson-agx-orin --storage nvme --rootfs-only=false
 # or: --storage emmc
 ```
 
 Full recovery erases QSPI and all partitions on the chosen storage, including
-`/data`. The CLI does not fall back automatically to raw imaging. After it
-reports final `SUCCESS`, verify both commands report the same L4T family and
-then retry CSI streaming:
+`/data`. With `--rootfs-only=false` the CLI refuses a version that has no
+recovery flashpack instead of writing only its OS image, and a failed full
+recovery never falls back to raw imaging. After it reports final `SUCCESS`,
+verify both commands report the same L4T family and then retry CSI streaming:
 
 ```bash
 cat /etc/nv_tegra_release
@@ -48,8 +49,22 @@ wendy device camera view
 ```
 
 An unknown or unparseable firmware state produces an agent warning but does not
-block cameras. Capsule-based T234 boot-firmware OTA remains disabled; enabling
-and qualifying it is separate follow-up work.
+block cameras. An OS update also updates the boot firmware: wendyos-update stages
+the new image's `tegra-bl.cap` capsule and UEFI applies it on the next boot. The
+capsule applies only if it carries a spec for the unit's TnSpec machine name. To
+check after an update:
+
+```bash
+# The unit's TnSpec: six board fields, then the machine name
+tail -c +5 /sys/firmware/efi/efivars/TegraPlatformSpec-781e084c-a330-417c-b678-38e696380cb9; echo
+# The specs the capsule carries
+grep -aoE '[0-9]{4}-[0-9A-Za-z.]*-[0-9A-Za-z.]*-[0-9A-Za-z.]*-[0-9]+-[0-9]+-[a-z0-9-]+-' \
+  /opt/nvidia/UpdateCapsule/tegra-bl.cap | sort -u
+# Status 0 with a non-zero version: the last capsule applied; 0 with version 0:
+# none was attempted; status 6151 (0x1807): no spec for this unit
+cat /sys/firmware/efi/esrt/entries/entry0/last_attempt_status
+cat /sys/firmware/efi/esrt/entries/entry0/last_attempt_version
+```
 
 ---
 
@@ -63,7 +78,7 @@ and qualifying it is separate follow-up work.
 slot: 1,    retry_count: 0,    status: unbootable
 ```
 
-This blocks OTA updates — Mender will switch to the target slot, but UEFI
+This blocks OTA updates — wendyos-update will switch to the target slot, but UEFI
 firmware detects the `unbootable` status and falls back to the current slot
 before Linux even boots.
 
@@ -117,7 +132,7 @@ slot: 1,    retry_count: 0,    status: normal
   write above is the replacement.
 - The `retry_count` stays at 0 after this fix; it increments only on actual
   boot attempts. A successful OTA will reset it to the configured maximum.
-- If `/data/mender/tegra-bl-version-before` is still present after a completed
-  OTA cycle, it is safe to delete: `rm /data/mender/tegra-bl-version-before`
+- If `/data/wendyos-update/bl-version-before` is still present after a completed
+  OTA cycle, it is safe to delete: `rm /data/wendyos-update/bl-version-before`
 
 ---

@@ -14,10 +14,8 @@ This repository provides the meta-layer and build flow to build **WendyOS** — 
 
 | Hardware | SoC | RAM | Board id (`BOARD=`) | Machine Config | Boot Device | OTA |
 |----------|-----|-----|---------------------|----------------|-------------|-----|
-| Jetson Orin Nano DevKit | Tegra234 | 8GB | `jetson-orin-nano-sd` | `jetson-orin-nano-devkit-wendyos` | SD | Mender |
-| Jetson Orin Nano DevKit | Tegra234 | 8GB | `jetson-orin-nano-nvme` | `jetson-orin-nano-devkit-nvme-wendyos` | NVMe | Mender |
-| Jetson AGX Orin DevKit | Tegra234 | 64GB | `jetson-agx-orin` | `jetson-agx-orin-devkit-nvme-wendyos` | NVMe | Mender |
-| Jetson AGX Orin DevKit | Tegra234 | 64GB | `jetson-agx-orin-emmc` | `jetson-agx-orin-devkit-emmc-wendyos` | onboard eMMC | Mender |
+| Jetson Orin Nano DevKit | Tegra234 | 8GB | `jetson-orin-nano` | `jetson-orin-nano-devkit-wendyos` | SD or NVMe | wendyos-update |
+| Jetson AGX Orin DevKit | Tegra234 | 64GB | `jetson-agx-orin` | `jetson-agx-orin-devkit-wendyos` | onboard eMMC or NVMe | wendyos-update |
 | Jetson AGX Thor DevKit | Tegra264 | 128GB | `jetson-agx-thor` | `jetson-agx-thor-devkit-nvme-wendyos` | NVMe | _(coming, wendyos-update)_ |
 | Raspberry Pi 3 (B/B+) | Broadcom BCM2837 | 1GB | `rpi3` | `raspberrypi3-64-wendyos` | SD or USB | wendyos-update |
 | Raspberry Pi 4 | Broadcom BCM2711 | 1–8GB | `rpi4` | `raspberrypi4-64-wendyos` | SD or USB | wendyos-update |
@@ -37,7 +35,7 @@ git clone git@github.com:wendylabsinc/meta-wendyos-jetson.git
 cd meta-wendyos-jetson
 make setup              # First-time setup (~10 min)
 make build              # Build the image (~2-4 hours first time, uses cache after)
-make flash-to-external  # Flash to external NVMe/USB drive
+make flash-to-external  # Raspberry Pi / x86; Jetson: see Install on a Jetson
 ```
 ## Table of Contents
 
@@ -45,11 +43,9 @@ make flash-to-external  # Flash to external NVMe/USB drive
   - [Prerequisites](#prerequisites)
   - [Directory Structure Requirements](#directory-structure-requirements)
   - [Steps to Build](#steps-to-build)
-  - [Flash the SD Card or NVMe](#flash-the-sd-card-or-nvme)
-    - [For SD Card Builds](#for-sd-card-builds)
-    - [For NVMe Builds](#for-nvme-builds)
-    - [Flashing the .img File](#flashing-the-img-file)
-    - [Alternative: Flashing with initrd-flash (USB Recovery Mode)](#alternative-flashing-with-initrd-flash-usb-recovery-mode)
+  - [Install on a Jetson](#install-on-a-jetson)
+    - [Writing a local build](#writing-a-local-build)
+    - [Low-level alternative: Flashing with initrd-flash (USB Recovery Mode)](#low-level-alternative-flashing-with-initrd-flash-usb-recovery-mode)
   - [Available Images](#available-images)
 - [USB Gadget Networking](#usb-gadget-networking)
 - [Mender OTA Updates](#mender-ota-updates)
@@ -157,8 +153,8 @@ make shell
 |--------|-------------|
 | `make setup` | First-time setup: clone repos, create Docker image |
 | `make build` | Build the complete WendyOS image |
-| `make deploy` | Copy build artifacts from Docker volume to `./deploy/` (macOS only) |
-| `make flash-to-external` | Interactive flash to external NVMe/USB drive (macOS & Linux) |
+| `make deploy` | Copy build artifacts from Docker volume to `./deploy/` (macOS only; Raspberry Pi and x86) |
+| `make flash-to-external` | Interactive flash to external NVMe/USB drive (macOS & Linux; Raspberry Pi and x86) |
 | `make build-sdk` | Build the SDK for application development |
 | `make shell` | Open interactive shell in build container |
 | `make clean` | Remove build artifacts (keeps downloads/sstate) |
@@ -167,20 +163,12 @@ make shell
 
 **Build for different targets:**
 ```bash
-# Jetson Orin Nano (NVMe)
-make setup BOARD=jetson-orin-nano-nvme
+# Jetson Orin Nano (SD card or NVMe)
+make setup BOARD=jetson-orin-nano
 make build
 
-# Jetson Orin Nano (SD card)
-make setup BOARD=jetson-orin-nano-sd
-make build
-
-# Jetson AGX Orin (NVMe)
+# Jetson AGX Orin (onboard eMMC or NVMe)
 make setup BOARD=jetson-agx-orin
-make build
-
-# Jetson AGX Orin (onboard eMMC)
-make setup BOARD=jetson-agx-orin-emmc
 make build
 
 # Jetson AGX Thor (NVMe)
@@ -269,10 +257,8 @@ for optional driver installation, Bluetooth wiring and hardware testing status.
    `bootstrap.sh` change required. For example:
 
    ```bash
-   BOARD=jetson-orin-nano-nvme ./meta-wendyos/bootstrap.sh
-   BOARD=jetson-orin-nano-sd   ./meta-wendyos/bootstrap.sh
+   BOARD=jetson-orin-nano      ./meta-wendyos/bootstrap.sh
    BOARD=jetson-agx-orin       ./meta-wendyos/bootstrap.sh
-   BOARD=jetson-agx-orin-emmc  ./meta-wendyos/bootstrap.sh
    BOARD=jetson-agx-thor       ./meta-wendyos/bootstrap.sh
    BOARD=rpi3                  ./meta-wendyos/bootstrap.sh
    BOARD=rpi4                  ./meta-wendyos/bootstrap.sh
@@ -306,10 +292,8 @@ for optional driver installation, Bluetooth wiring and hardware testing status.
      by `bootstrap.sh` based on the board id you passed in. The board id must
      match a directory `conf/template/boards/<board-id>/`; that directory's
      `local.conf` sets the Yocto `MACHINE` variable. Current mapping:
-     - `jetson-orin-nano-nvme`   → `jetson-orin-nano-devkit-nvme-wendyos`
-     - `jetson-orin-nano-sd`     → `jetson-orin-nano-devkit-wendyos`
-     - `jetson-agx-orin`         → `jetson-agx-orin-devkit-nvme-wendyos`
-     - `jetson-agx-orin-emmc`    → `jetson-agx-orin-devkit-emmc-wendyos`
+     - `jetson-orin-nano`        → `jetson-orin-nano-devkit-wendyos`
+     - `jetson-agx-orin`         → `jetson-agx-orin-devkit-wendyos`
      - `jetson-agx-thor`         → `jetson-agx-thor-devkit-nvme-wendyos`
      - `rpi3`                    → `raspberrypi3-64-wendyos`
      - `rpi4`                    → `raspberrypi4-64-wendyos`
@@ -321,12 +305,6 @@ for optional driver installation, Bluetooth wiring and hardware testing status.
      - `dragonwing-iq8275`       → `iq-8275-evk-wendyos`
      - `dragonwing-iq9075`       → `iq-9075-evk-wendyos`
      - `arduino-uno-q`           → `arduino-uno-q-wendyos`
-   - `WENDYOS_FLASH_IMAGE_SIZE` - Flash image size: "64GB"):
-     - `"4GB"` - 3.2GB Mender storage (~1.3GB per rootfs partition)
-     - `"8GB"` - 6.4GB Mender storage (~2.9GB per rootfs partition)
-     - `"16GB"` - 12.8GB Mender storage (~6GB per rootfs partition)
-     - `"32GB"` - 25.7GB Mender storage (~12GB per rootfs partition)
-     - `"64GB"` - 51GB Mender storage (~25GB per rootfs partition) [**default**]
 
 4. **Build the image**
 
@@ -353,147 +331,75 @@ for optional driver installation, Bluetooth wiring and hardware testing status.
 
    Depending on the hardware configuration, the build process can take several hours on the first run (when the `download` and `sstate-cache` folders are empty!).
 
-### Flash the SD Card or NVMe
+### Install on a Jetson
 
-For released WendyOS artifacts, the supported default is `wendy install` full
-USB recovery. It updates T234 QSPI boot firmware and rootfs storage together and
-supports exactly Orin Nano P3767-0005/P3768-0000 with NVMe and AGX Orin
-P3701-0005/P3737-0000 with NVMe or eMMC. The raw-image procedures below are
-developer/builder workflows equivalent to `wendy install --rootfs-only`; they
-do **not** update QSPI and can leave boot firmware and rootfs on incompatible
-L4T families.
+`wendy install` is the supported way to install WendyOS on a Jetson Orin. Each
+Orin board has one image that boots from an SD card, onboard eMMC or NVMe drive
+(not USB); the CLI writes it to the disk you pick, in one of two modes:
+
+| Board | Full recovery over USB-C (boot firmware + OS) | OS image only (`--rootfs-only`) |
+|-------|-----------------------------------------------|---------------------------------|
+| Orin Nano DevKit (P3767-0005 on P3768-0000) | NVMe | NVMe (default) or SD card |
+| AGX Orin DevKit (P3701-0005 on P3737-0000) | NVMe or onboard eMMC | NVMe |
 
 ```bash
-wendy install --device-type jetson-orin-nano
-wendy install --device-type jetson-agx-orin --storage nvme
+# Full recovery: put the devkit in Force Recovery mode first (see below)
+wendy install --device-type jetson-orin-nano --rootfs-only=false
+wendy install --device-type jetson-agx-orin --storage nvme --rootfs-only=false
 wendy install --device-type jetson-agx-orin --storage emmc
-```
 
-The explicit raw-media escape hatch remains available for Nano SD/NVMe and
-AGX NVMe. It requires a removable target drive and never updates QSPI:
-
-```bash
+# OS image only, written to a drive attached to this computer
 wendy install --device-type jetson-orin-nano --rootfs-only --storage sd --drive /dev/sdX
-wendy install --device-type jetson-orin-nano --rootfs-only --storage nvme --drive /dev/nvmeXn1
-wendy install --device-type jetson-agx-orin --rootfs-only --storage nvme --drive /dev/nvmeXn1
+wendy install --device-type jetson-orin-nano --rootfs-only --storage nvme --drive /dev/sdX
+wendy install --device-type jetson-agx-orin --rootfs-only --drive /dev/sdX
 ```
 
-There is no eMMC rootfs-only mode.
+- In a terminal the CLI asks for the mode unless `--rootfs-only`,
+  `--rootfs-only=false` or `--storage emmc` sets it; without a terminal it
+  runs full recovery. AGX Orin recovery also asks for NVMe or eMMC, and needs
+  `--storage nvme` or `--storage emmc` without a terminal.
+- Full recovery runs on macOS, Linux and Windows. It erases QSPI and every
+  partition on the chosen disk, including `/data`. **`--storage emmc`
+  overwrites the factory JetPack image on the AGX Orin's onboard 64 GB eMMC.**
+- OS-image-only installs never update QSPI, so boot firmware and rootfs can come
+  from different L4T releases (see
+  [docs/jetson-troubleshooting.md](docs/jetson-troubleshooting.md)). eMMC has no
+  OS-image-only mode.
+- The OS image is 119537664 sectors (61.2 GB). `--rootfs-only` needs only a
+  drive that holds its partitions (about 28 GB) and rewrites the partition table
+  for that drive. Full recovery lays the partition table out for the actual
+  disk. First boot grows `/data` to fill the disk.
 
-Full recovery is destructive to QSPI and every partition on the selected
-NVMe/eMMC, including `/data`. It is supported from macOS and Linux; Windows can
-only use explicit rootfs-only imaging. Secure Boot/fused modules, custom
-carriers, and keyed flashpacks are not supported by the initial recovery flow.
+#### Writing a local build
 
-Current T234 builds produce a tegraflash bundle at:
-```
-build/tmp/deploy/images/<machine>/wendyos-image-<machine>.tegraflash-tar
-```
-
-CI derives the published Nano SD/NVMe and AGX NVMe rootfs-only images from that
-bundle with `scripts/make-jetson-disk-img.py`. The `doexternal.sh`/`dosdcard.sh`
-instructions below apply to older JP6 bundles that still include those helper
-scripts; they are not the supported release installation path.
-
-**Important**: The flashing script differs based on your target machine:
-- **NVMe** (`jetson-orin-nano-devkit-nvme-wendyos`, `jetson-agx-orin-devkit-nvme-wendyos`) → use `doexternal.sh`
-- **SD card** (`jetson-orin-nano-devkit-wendyos`) → use `dosdcard.sh`
-- **Onboard eMMC** (`jetson-agx-orin-devkit-emmc-wendyos`) → use `initrd-flash.sh` (eMMC is internal — `doexternal.sh` does not apply). **This will overwrite the factory NVIDIA JetPack image on the AGX Orin DevKit's onboard 64GB eMMC.**
-
-#### For SD Card Builds
-
-> **Requires a 64 GB (or larger) SD card.** The Orin Nano SD image uses a 64GB
-> layout (`WENDYOS_FLASH_IMAGE_SIZE = "64GB"`) so the A/B rootfs slots can hold
-> the 16GB rootfs.
-
-**Option 1: Directly Flash to SD Card**
-
-```bash
-cd /path/to/project
-mkdir ./deploy
-tar -xzf ./build/tmp/deploy/images/jetson-orin-nano-devkit-wendyos/wendyos-image-*.tegraflash.tar.gz -C ./deploy
-cd ./deploy
-sudo ./dosdcard.sh /dev/sdX
-```
-
-Replace `/dev/sdX` with the actual SD card device (e.g., `/dev/sdb`).
-
-**Warning**: This will erase all data on the device!
-
-**Option 2: Create a Flashable .img File**
-
-```bash
-cd /path/to/project
-mkdir ./deploy
-tar -xzf ./build/tmp/deploy/images/jetson-orin-nano-devkit-wendyos/wendyos-image-*.tegraflash.tar.gz -C ./deploy
-cd ./deploy
-sudo ./dosdcard.sh wendyos.img
-```
-
-This creates `wendyos.img`, which you can flash using dd or GUI tools (see below).
-
-#### For NVMe Builds
-
-Set `MACHINE` to match the build target — examples below work for both Orin Nano NVMe and AGX Orin DevKit:
+A build leaves its tegraflash bundle at
+`build/tmp/deploy/images/<machine>/wendyos-image-<machine>.tegraflash-tar`. CI
+makes the published OS image from it with `scripts/make-jetson-disk-img.py`
+(needs `sgdisk` and `simg2img`), and the same command works locally:
 
 ```bash
 # Pick one
-MACHINE=jetson-orin-nano-devkit-nvme-wendyos
-MACHINE=jetson-agx-orin-devkit-nvme-wendyos
+MACHINE=jetson-orin-nano-devkit-wendyos
+MACHINE=jetson-agx-orin-devkit-wendyos
+
+mkdir -p ./deploy/bundle
+tar -xf ./build/tmp/deploy/images/${MACHINE}/wendyos-image-${MACHINE}.tegraflash-tar -C ./deploy/bundle
+python3 ./meta-wendyos/scripts/make-jetson-disk-img.py ./deploy/bundle ./deploy/wendyos-${MACHINE}-raw.img \
+    --layout external-flash.xml.in --device-type external
+sudo dd if=./deploy/wendyos-${MACHINE}-raw.img of=/dev/sdX bs=4M status=progress conv=fsync
 ```
 
-**Option 1: Directly Flash to NVMe**
+Replace `/dev/sdX` with the SD card or NVMe drive; everything on it is erased.
+balenaEtcher or GNOME Disks can write the same file. The file is 61.2 GB, so
+these tools need a **64 GB or larger** SD card or NVMe drive. Like
+`--rootfs-only`, this does not update QSPI.
 
-```bash
-cd /path/to/project
-mkdir ./deploy
-tar -xzf ./build/tmp/deploy/images/${MACHINE}/wendyos-image-${MACHINE}.tegraflash.tar.gz -C ./deploy
-cd ./deploy
-sudo ./doexternal.sh /dev/nvme0n1
-```
-
-Replace `/dev/nvme0n1` with your actual NVMe device path.
-
-**Warning**: This will erase all data on the device!
-
-**Option 2: Create a Flashable .img File**
-
-```bash
-cd /path/to/project
-mkdir ./deploy
-tar -xzf ./build/tmp/deploy/images/${MACHINE}/wendyos-image-${MACHINE}.tegraflash.tar.gz -C ./deploy
-cd ./deploy
-sudo ./doexternal.sh -s 64G wendyos-nvme.img
-```
-
-**Important**: You **must** specify the size with `-s` parameter, and it **must match** your `WENDYOS_FLASH_IMAGE_SIZE` setting in `build/conf/local.conf`:
-- `-s 4G` for `WENDYOS_FLASH_IMAGE_SIZE = "4GB"`
-- `-s 8G` for `WENDYOS_FLASH_IMAGE_SIZE = "8GB"`
-- `-s 16G` for `WENDYOS_FLASH_IMAGE_SIZE = "16GB"`
-- `-s 32G` for `WENDYOS_FLASH_IMAGE_SIZE = "32GB"`
-- `-s 64G` for `WENDYOS_FLASH_IMAGE_SIZE = "64GB"`
-
-**Warning**: Using a mismatched size will result in a corrupted or non-bootable image!
-
-This creates `wendyos-nvme.img`, which you can flash using dd or GUI tools (see below).
-
-#### Flashing the .img File
-
-**Command line (works for both SD card and NVMe):**
-```bash
-# For SD card
-sudo dd if=wendyos.img of=/dev/sdX bs=4M status=progress oflag=sync conv=fsync
-
-# For NVMe
-sudo dd if=wendyos-nvme.img of=/dev/nvme0n1 bs=4M status=progress oflag=sync conv=fsync
-
-sync
-```
-
-**GUI tools:**
-- balenaEtcher (recommended)
-- Raspberry Pi Imager
-- GNOME Disks
+A local build cannot be freshly installed on the AGX Orin's onboard eMMC: the
+bundle's `initrd-flash` installs to the NVMe only and discards the eMMC. Install
+eMMC from a published flashpack with
+`wendy install --device-type jetson-agx-orin --storage emmc` (`--pr <N>` for a
+PR build). A unit already running WendyOS on eMMC takes a local build as an
+update: `wendy os update ./build/tmp/deploy/images/<machine>/wendyos-image-<machine>.wendy`.
 
 ### Low-level alternative: Flashing with initrd-flash (USB Recovery Mode)
 
@@ -504,24 +410,24 @@ persistent writes, correlates every USB LUN to the selected physical port and
 session, and requires the device's final `SUCCESS` status. Use the manual method when:
 
 - **Your device is bricked or won't boot** (recovery/unbrick method)
-- You want to flash internal storage (NVMe/eMMC) over USB
+- You want to flash the NVMe over USB
 - You need to flash a device without removing the storage
 - You're setting up devices for the first time
-- Standard `doexternal.sh` doesn't work for your setup
 - You need NVIDIA's official recovery mode flashing
 
 **When NOT to use initrd-flash:**
-- You already have WendyOS installed (use Mender OTA updates instead)
-- You're flashing external SD cards (use `dosdcard.sh` instead)
-- You need to create portable .img files (use `doexternal.sh -s` or `dosdcard.sh` instead)
+- You already have WendyOS installed (OS updates arrive through wendyos-update)
+- You're writing an SD card or a drive attached to your computer (use `wendy install --rootfs-only` or [Writing a local build](#writing-a-local-build))
 
 #### Prerequisites
 
-- A supported Jetson Developer Kit:
-  - Jetson Orin Nano DevKit (NVMe or SD)
-  - Jetson AGX Orin DevKit (NVMe or onboard eMMC)
+- A supported Jetson Developer Kit with an NVMe drive. The bundle's `initrd-flash` writes the
+  NVMe and also discards `/dev/mmcblk0`: the onboard eMMC on an AGX Orin, or an inserted SD
+  card on an Orin Nano (remove the card first to keep it):
+  - Jetson Orin Nano DevKit
+  - Jetson AGX Orin DevKit
 - USB-C cable (for recovery mode connection)
-- Host PC running Linux (Ubuntu 20.04+ recommended), MacOS
+- Host PC running x86_64 Linux (Ubuntu 20.04+ recommended); on macOS or Windows use `wendy install`
 - Device in recovery mode (procedure differs per board — see step 2 below)
 
 #### Recovery from Bricked Device
@@ -545,20 +451,18 @@ Set `MACHINE` to match what you built (use the same value passed to `make build`
 
 ```bash
 # Pick one
-MACHINE=jetson-orin-nano-devkit-nvme-wendyos
-MACHINE=jetson-agx-orin-devkit-nvme-wendyos
-MACHINE=jetson-agx-orin-devkit-emmc-wendyos      # AGX Orin onboard eMMC
-MACHINE=jetson-orin-nano-devkit-wendyos          # SD-based Nano
+MACHINE=jetson-orin-nano-devkit-wendyos
+MACHINE=jetson-agx-orin-devkit-wendyos
 
 cd /path/to/project
 mkdir -p ./deploy
 cd ./deploy
 
 # Extract the tegraflash package
-tar -xzf ../build/tmp/deploy/images/${MACHINE}/wendyos-image-${MACHINE}.tegraflash.tar.gz
+tar -xf ../build/tmp/deploy/images/${MACHINE}/wendyos-image-${MACHINE}.tegraflash-tar
 
 # Verify the initrd-flash script exists
-ls -la initrd-flash.sh
+ls -la initrd-flash
 ```
 
 **2. Put Device in Recovery Mode**
@@ -649,18 +553,18 @@ gsettings set org.gnome.desktop.media-handling automount true
 cd /path/to/project/deploy
 
 # Run the flash script (no arguments needed - config is in .env.initrd-flash)
-sudo ./initrd-flash.sh
+sudo ./initrd-flash
 
 # Optional: Skip bootloader flashing (rootfs only)
-# sudo ./initrd-flash.sh --skip-bootloader
+# sudo ./initrd-flash --skip-bootloader
 
 # Optional: Erase NVMe before flashing
-# sudo ./initrd-flash.sh --erase-nvme
+# sudo ./initrd-flash --erase-nvme
 ```
 
 **Note:** The script reads configuration from `.env.initrd-flash` (created during build), which contains:
-- Machine type (e.g., `jetson-orin-nano-devkit-nvme-wendyos`, `jetson-agx-orin-devkit-nvme-wendyos`, `jetson-agx-orin-devkit-emmc-wendyos`, `jetson-orin-nano-devkit-wendyos`)
-- Target device (NVMe or eMMC)
+- Machine type, the UEFI TnSpec name (e.g., `jetson-orin-nano-wendyos`, `jetson-agx-orin-wendyos`)
+- Target device (NVMe)
 - Board IDs and other hardware parameters
 
 No command-line arguments are needed for machine/device - it's all pre-configured!
@@ -687,12 +591,12 @@ Firmware Components:
 Storage Components:
 - **ESP (EFI System Partition)** - Contains UEFI boot files (`esp.img`)
 - **Kernel** and **Device Tree Blobs**
-- **Rootfs Partitions** - APP_a and APP_b (A/B redundancy for Mender)
+- **Rootfs Partitions** - APP and APP_b (A/B slots for wendyos-update)
 - **Partition Table** - GPT layout defined in flash XML
 
 Bootloader Location:
-- SPI Flash (device 3:0) **OR** eMMC boot partitions (device 0:3) - device-dependent
-- Rootfs written to NVMe (device 9:0) or eMMC user partition (device 1:3)
+- Boot firmware: QSPI flash (device 3:0)
+- Rootfs: NVMe (device 9:0)
 
 Why This Matters:
 - **Fixes bootloader corruption** - Reflashes complete boot chain (MB1, MB2, PSC, UEFI)
@@ -712,15 +616,14 @@ Important Notes:
 
 The script will display progress:
 ```
-*** Flashing target device started. ***
-Waiting for device to expose ssh ...
-SSH ready
-Flashing to mmcblk0p1 ...
-Writing bootloader ...
-Writing kernel ...
-Writing rootfs ...
-*** The target device has been flashed successfully. ***
-*** Reboot the target device ***
+Machine:       jetson-orin-nano-wendyos
+Rootfs device: nvme0n1p1
+== Step 1: Preparing binaries at <time> ==
+== Step 2: Boot Jetson via RCM at <time> ==
+== Step 3: Sending flash sequence commands at <time> ==
+== Step 4: Writing partitions on external storage device at <time> ==
+== Step 5: Waiting for final status from device at <time> ==
+Successfully finished at <time>
 ```
 
 **6. Reboot the Device**
@@ -807,18 +710,15 @@ The system includes Mender for Over-The-Air updates with A/B partition redundanc
 
 ### Partition Layout
 
-**SD Card (mmcblk0):**
-- `/dev/mmcblk0p1` - Root filesystem A
-- `/dev/mmcblk0p2` - Root filesystem B
-- `/dev/mmcblk0p11` - Boot partition (shared)
-- `/dev/mmcblk0p15` - Data partition (persistent)
-
-**NVMe:**
-- `/dev/nvme0n1p1` - Root filesystem A
-- `/dev/nvme0n1p2` - Root filesystem B
-- `/dev/nvme0n1p11` - Boot partition (shared)
-- `/dev/nvme0n1p15` - UDA partition (NVIDIA reserved, not used by wendyos)
-- `/dev/nvme0n1p17` - Mender data partition (expandable, mounted at `/data`)
+Jetson Orin boards update with wendyos-update, not Mender. Every Orin disk has
+the same layout; `<disk>` is `mmcblk0` (Orin Nano SD card or AGX Orin eMMC) or
+`nvme0n1`:
+- `/dev/<disk>p1` - APP, root filesystem slot A
+- `/dev/<disk>p2` - APP_b, root filesystem slot B
+- `/dev/<disk>p11` - esp
+- `/dev/<disk>p15` - UDA (NVIDIA reserved, not used by WendyOS)
+- `/dev/<disk>p16` - config
+- `/dev/<disk>p17` - data (mounted at `/data`, grown to fill the disk on first boot)
 
 ### Manual Update
 
@@ -956,7 +856,6 @@ You can modify these variables in `bootstrap.sh` before running:
 ### Build Configuration Variables
 
 In `build/conf/local.conf`:
-- `WENDYOS_FLASH_IMAGE_SIZE` - Flash image size: "4GB", "8GB", "16GB", "32GB", "64GB" (default: "64GB" — set per-board in `conf/template/boards/<id>/local.conf`; Tegra only)
 - `WENDYOS_DEBUG` - Enable debug packages and `debug-tweaks` (empty root password, passwordless root SSH) (default: 0)
 - `WENDYOS_DEBUG_UART` - Enable UART debug output (default: 0)
 - `WENDYOS_SSHD` - Include OpenSSH server (`sshd`) in the image (default: 0; set to `1` to enable sshd)
@@ -964,23 +863,33 @@ In `build/conf/local.conf`:
 - `WENDYOS_PERSIST_JOURNAL_LOGS` - Persist logs to storage (default: 0)
 - `WENDYOS_GAME_CONTROLLER` - Guarantee the native game-controller kernel interfaces (default: 1; see [`docs/game-controller-support.md`](docs/game-controller-support.md))
 
-**Note**: Choose `WENDYOS_FLASH_IMAGE_SIZE` based on your target storage device capacity and expected rootfs size. Larger images provide more space for root filesystems and future updates.
-
 ### Runtime Identity
 
 Runtime consumers (e.g. the wendy agent) read two files from `/etc/wendyos/`:
 
 - **`/etc/wendyos/device-type`** — shell-sourceable, board + yocto machine.
-  Example for Jetson Orin Nano (NVMe):
+  Example for Jetson Orin Nano:
 
   ```
-  BOARD=jetson-orin-nano-nvme
-  MACHINE=jetson-orin-nano-devkit-nvme-wendyos
+  BOARD=jetson-orin-nano
+  MACHINE=jetson-orin-nano-devkit-wendyos
   ```
 
   `BOARD` is the WendyOS board id (the value you pass to `bootstrap.sh` as
   `BOARD=`), set by `WENDYOS_BOARD_ID` in `conf/machine/<machine>.conf`.
   `MACHINE` is bitbake's full yocto machine name.
+
+  On Tegra the file is seeded into `/data` once, so a unit keeps the lines of
+  the image whose install created its `/data` (a fresh recovery or raw-image
+  install seeds it again). A unit installed from a release that still built
+  one image per disk keeps that image's lines after it updates, including
+  `STORAGE=emmc`, `nvme` or `sd`: an AGX Orin installed on eMMC keeps
+  `BOARD=jetson-agx-orin-emmc` and `MACHINE=jetson-agx-orin-devkit-emmc-wendyos`
+  (its OTA artifact accepts both board ids), and a Nano installed on NVMe keeps
+  `MACHINE=jetson-orin-nano-devkit-nvme-wendyos`. A unit installed from current
+  images has `BOARD=jetson-agx-orin` or `jetson-orin-nano`, the new `MACHINE`
+  and no `STORAGE` line, whatever its disk. Branch on `BOARD`, and treat
+  `jetson-agx-orin-emmc` as `jetson-agx-orin`; never branch on `MACHINE`.
 
 - **`/etc/wendyos/version.txt`** — the installed OS version, e.g.
   `WendyOS-0.14.0`. Reflects the currently running rootfs (always fresh after
@@ -993,12 +902,12 @@ without maintaining their own board-to-machine lookup table.
 
 The `/etc/wendyos/` directory is bind-mounted from `/data/etc/wendyos/` on
 Tegra (via `setup-etc-binds.sh`), so runtime-generated identity (`device-uuid`,
-`device-name`) persists across Mender OTA updates. The two build-time files
+`device-name`) persists across OTA updates. The two build-time files
 above have different refresh semantics and are seeded differently:
 
 | File | Installed by recipe to | Runtime lifecycle |
 |---|---|---|
-| `device-type` | `/etc/wendyos/device-type` (rootfs) | `setup-etc-binds.sh` seeds to `/data` on first boot only — hardware identity, never changes |
+| `device-type` | `/etc/wendyos/device-type` (rootfs) | `setup-etc-binds.sh` seeds to `/data` on first boot only — kept across OTA updates; re-seeded only by a fresh install |
 | `version.txt` | `/usr/lib/wendyos/version.txt` (authoritative) + `/etc/wendyos/version.txt` symlink | `setup-etc-binds.sh` overwrites `/etc/wendyos/version.txt` from `/usr/lib/` on every boot — stays current across OTA |
 
 On RPi and QEMU (no `/data`), `setup-etc-binds.sh` doesn't run. `device-type`
@@ -1452,7 +1361,8 @@ Building WendyOS on macOS is fully supported through Docker Desktop. The build p
 
 ### Flashing
 
-Use the interactive flash tool (works on both macOS and Linux):
+For a Raspberry Pi or x86 build, use the interactive flash tool (works on both
+macOS and Linux). For a Jetson, see [Install on a Jetson](#install-on-a-jetson).
 
 ```bash
 make flash-to-external

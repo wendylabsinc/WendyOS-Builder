@@ -33,19 +33,19 @@ TARGETS = {
         "module_id": "3767", "module_sku": "0005",
         "carrier_id": "3768", "carrier_sku": "0000",
         "rootfs_device": "nvme0n1",
-        "machine": "jetson-orin-nano-devkit-nvme-wendyos",
+        "machine": "jetson-orin-nano-wendyos",
     },
     ("jetson-agx-orin", "nvme"): {
         "module_id": "3701", "module_sku": "0005",
         "carrier_id": "3737", "carrier_sku": "0000",
         "rootfs_device": "nvme0n1",
-        "machine": "jetson-agx-orin-devkit-nvme-wendyos",
+        "machine": "jetson-agx-orin-wendyos",
     },
     ("jetson-agx-orin", "emmc"): {
         "module_id": "3701", "module_sku": "0005",
         "carrier_id": "3737", "carrier_sku": "0000",
         "rootfs_device": "mmcblk0",
-        "machine": "jetson-agx-orin-devkit-emmc-wendyos",
+        "machine": "jetson-agx-orin-wendyos",
     },
 }
 
@@ -138,6 +138,10 @@ def generate(root: pathlib.Path, *, version: str, device: str, storage: str,
     if flash_package_path.stat().st_size != 128 << 20:
         raise ValueError("flash package must be exactly 128 MiB")
     config_image = validate_partition_images(root, partition_layout, rootfs_device)
+    # One bundle feeds every target disk; the device-side export must be this one.
+    commands = require_file(root, "stage2/flashpkg/conf/command_sequence").read_text().splitlines()
+    if f"export-devices {rootfs_device}" not in commands:
+        raise ValueError(f"flash package does not export {rootfs_device}")
     phases = parse_rcm_phases(root)
     if not (root / "stage2/flashpkg/status").is_file():
         raise ValueError("flash package status template is missing")

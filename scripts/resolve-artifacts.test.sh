@@ -46,16 +46,16 @@ newdir() { mktemp -d "${TMPDIR:-/tmp}/resolve-test.XXXXXX"; }
 # (a) Per-family resolution
 # ---------------------------------------------------------------------------
 
-# Jetson NVMe (generated-nvme-img): bundle present, nvme .img absent — the
+# Jetson NVMe (generated-raw-img): bundle present, raw .img absent — the
 # resolver must NOT fail (the image is generated later) and must resolve the
 # MACHINE-scoped target path plus the recovery bundle.
 test_jetson_nvme() {
-  local d M; d=$(newdir); M=jetson-agx-orin-devkit-nvme-wendyos
+  local d M; d=$(newdir); M=jetson-agx-orin-devkit-wendyos
   : >"$d/wendyos-image-$M.tegraflash-tar"
   local out; out=$(run_resolver jetson-agx-orin nvme "$M" "$d"); local rc=$?
   assert_eq "jetson nvme: exits 0" 0 "$rc"
-  assert_eq "jetson nvme: kind"        generated-nvme-img "$(field IMAGE_KIND        <<<"$out")"
-  assert_eq "jetson nvme: image"       "$d/wendyos-image-$M-nvme.img" "$(field IMAGE_FILE <<<"$out")"
+  assert_eq "jetson nvme: kind"        generated-raw-img "$(field IMAGE_KIND        <<<"$out")"
+  assert_eq "jetson nvme: image"       "$d/wendyos-image-$M-raw.img" "$(field IMAGE_FILE <<<"$out")"
   assert_eq "jetson nvme: bundle"      "$d/wendyos-image-$M.tegraflash-tar" "$(field TEGRAFLASH_BUNDLE <<<"$out")"
   assert_eq "jetson nvme: recovery"    true  "$(field RECOVERY_EXPECTED  <<<"$out")"
   assert_eq "jetson nvme: bmap"        true  "$(field BMAP_REQUIRED      <<<"$out")"
@@ -66,7 +66,7 @@ test_jetson_nvme() {
 
 # Jetson eMMC (tegraflash-bundle): the bundle is the image; no bmap.
 test_jetson_emmc() {
-  local d M; d=$(newdir); M=jetson-agx-orin-devkit-emmc-wendyos
+  local d M; d=$(newdir); M=jetson-agx-orin-devkit-wendyos
   : >"$d/wendyos-image-$M.tegraflash-tar"
   local out; out=$(run_resolver jetson-agx-orin emmc "$M" "$d"); local rc=$?
   assert_eq "jetson emmc: exits 0" 0 "$rc"
@@ -76,6 +76,17 @@ test_jetson_emmc() {
   assert_eq "jetson emmc: bmap"        false "$(field BMAP_REQUIRED <<<"$out")"
   assert_eq "jetson emmc: flashpack"   true  "$(field FLASHPACK_REQUIRED <<<"$out")"
   assert_eq "jetson emmc: pass_storage" true "$(field PASS_STORAGE  <<<"$out")"
+  rm -rf "$d"
+}
+
+# AGX Orin: both targets come from one MACHINE and its one bundle.
+test_jetson_agx_targets_share_bundle() {
+  local d M; d=$(newdir); M=jetson-agx-orin-devkit-wendyos
+  : >"$d/wendyos-image-$M.tegraflash-tar"
+  local nvme emmc
+  nvme=$(run_resolver jetson-agx-orin nvme "$M" "$d")
+  emmc=$(run_resolver jetson-agx-orin emmc "$M" "$d")
+  assert_eq "agx targets: same bundle" "$(field TEGRAFLASH_BUNDLE <<<"$nvme")" "$(field TEGRAFLASH_BUNDLE <<<"$emmc")"
   rm -rf "$d"
 }
 
@@ -141,25 +152,26 @@ test_missing_qcomflash_fatal() {
 
 # tegraflash .zst variant resolves too (JP7 / r38.4.x compressed bundle).
 test_tegraflash_zst() {
-  local d M; d=$(newdir); M=jetson-orin-nano-devkit-nvme-wendyos
+  local d M; d=$(newdir); M=jetson-orin-nano-devkit-wendyos
   : >"$d/wendyos-image-$M.tegraflash-tar.zst"
   local out; out=$(run_resolver jetson-orin-nano nvme "$M" "$d"); local rc=$?
   assert_eq "zst variant: exits 0" 0 "$rc"
-  assert_eq "zst variant: kind"   generated-nvme-img "$(field IMAGE_KIND <<<"$out")"
+  assert_eq "zst variant: kind"   generated-raw-img "$(field IMAGE_KIND <<<"$out")"
   assert_eq "zst variant: bundle" "$d/wendyos-image-$M.tegraflash-tar.zst" "$(field TEGRAFLASH_BUNDLE <<<"$out")"
   assert_eq "zst variant: flashpack" true "$(field FLASHPACK_REQUIRED <<<"$out")"
   rm -rf "$d"
 }
 
-# Orin Nano SD retains an explicit raw rootfs-only image, generated from the
-# sdcard device in flash.xml.in. It does not produce a recovery flashpack.
+# Orin Nano SD ships the same raw rootfs-only image as Nano NVMe, and no
+# recovery flashpack.
 test_jetson_nano_sd() {
   local d M; d=$(newdir); M=jetson-orin-nano-devkit-wendyos
   : >"$d/wendyos-image-$M.tegraflash-tar"
   local out; out=$(run_resolver jetson-orin-nano sd "$M" "$d"); local rc=$?
+  local nvme; nvme=$(run_resolver jetson-orin-nano nvme "$M" "$d")
   assert_eq "nano sd: exits 0" 0 "$rc"
-  assert_eq "nano sd: kind" generated-sd-img "$(field IMAGE_KIND <<<"$out")"
-  assert_eq "nano sd: image" "$d/wendyos-image-$M-sd.img" "$(field IMAGE_FILE <<<"$out")"
+  assert_eq "nano sd: kind" generated-raw-img "$(field IMAGE_KIND <<<"$out")"
+  assert_eq "nano sd: image shared with nvme" "$(field IMAGE_FILE <<<"$nvme")" "$(field IMAGE_FILE <<<"$out")"
   assert_eq "nano sd: bmap" true "$(field BMAP_REQUIRED <<<"$out")"
   assert_eq "nano sd: no flashpack" false "$(field FLASHPACK_REQUIRED <<<"$out")"
   assert_eq "nano sd: pass_storage" true "$(field PASS_STORAGE <<<"$out")"
@@ -229,7 +241,7 @@ test_vm_wic_disk() {
 # tegraflash-bundle kind with an empty deploy dir -> fatal, error names the
 # device, the pattern and lists the deploy dir.
 test_missing_bundle_fatal() {
-  local d M; d=$(newdir); M=jetson-agx-orin-devkit-emmc-wendyos
+  local d M; d=$(newdir); M=jetson-agx-orin-devkit-wendyos
   local out; out=$(run_resolver jetson-agx-orin emmc "$M" "$d" 2>&1); local rc=$?
   if [[ "$rc" -ne 0 ]]; then ok "missing bundle: non-zero exit"; else bad "missing bundle: expected non-zero"; fi
   if grep -q "jetson-agx-orin/emmc" <<<"$out"; then ok "missing bundle: names device/storage"; else bad "missing bundle: error lacks device/storage"; fi
@@ -257,19 +269,19 @@ test_unknown_combo_fatal() {
   rm -rf "$d"
 }
 
-# generated-nvme-img with a missing bundle is fatal at resolve time only via the
+# generated-raw-img with a missing bundle is fatal at resolve time only via the
 # workflow's own extraction guard, but the resolver still must NOT crash when
-# the nvme .img itself is absent (it is generated later). Covered by
+# the raw .img itself is absent (it is generated later). Covered by
 # test_jetson_nvme; here we assert the bundle-absent case yields an empty bundle
-# without the resolver inventing the nvme image existence.
-test_generated_nvme_bundle_absent() {
-  local d M; d=$(newdir); M=jetson-agx-orin-devkit-nvme-wendyos
+# without the resolver inventing the raw image existence.
+test_generated_raw_bundle_absent() {
+  local d M; d=$(newdir); M=jetson-agx-orin-devkit-wendyos
   # No files at all. recovery bundle glob finds nothing -> empty, but kind is
-  # generated-nvme-img so the resolver does not treat the missing nvme .img as
+  # generated-raw-img so the resolver does not treat the missing raw .img as
   # fatal; it exits 0 and leaves the bundle empty for the workflow to guard.
   local out; out=$(run_resolver jetson-agx-orin nvme "$M" "$d"); local rc=$?
-  assert_eq "generated-nvme bundle-absent: exits 0" 0 "$rc"
-  assert_eq "generated-nvme bundle-absent: empty bundle" "" "$(field TEGRAFLASH_BUNDLE <<<"$out")"
+  assert_eq "generated-raw bundle-absent: exits 0" 0 "$rc"
+  assert_eq "generated-raw bundle-absent: empty bundle" "" "$(field TEGRAFLASH_BUNDLE <<<"$out")"
   rm -rf "$d"
 }
 
@@ -315,6 +327,7 @@ test_matrix_coverage() {
 
 test_jetson_nvme
 test_jetson_emmc
+test_jetson_agx_targets_share_bundle
 test_thor
 test_tegraflash_zst
 test_dragonwing_qcomflash
@@ -327,7 +340,7 @@ test_vm_wic_disk
 test_missing_bundle_fatal
 test_missing_x86_fatal
 test_unknown_combo_fatal
-test_generated_nvme_bundle_absent
+test_generated_raw_bundle_absent
 test_matrix_coverage
 
 echo

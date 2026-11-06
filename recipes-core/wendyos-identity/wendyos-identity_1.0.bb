@@ -5,10 +5,11 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda
 
 inherit systemd
 
-# Storage medium ("nvme"/"emmc"/"sd") for /etc/wendyos/device-type; set per
-# board in the template local.conf. Weak default keeps ${STORAGE} well-defined
-# (empty) for boards that declare no medium (e.g. qemu), so the do_install
-# guard below reliably skips the STORAGE line instead of risking a literal.
+# Storage medium ("nvme"/"emmc"/"sd") for /etc/wendyos/device-type; set only by
+# boards whose image boots from a single medium. Weak default keeps ${STORAGE}
+# well-defined (empty) for images that boot from several media (e.g. the Orin
+# boards) or declare none (e.g. qemu), so the do_install guard below reliably
+# skips the STORAGE line instead of risking a literal.
 STORAGE ??= ""
 
 SRC_URI = " \
@@ -84,11 +85,9 @@ do_install:append() {
     install -d ${D}${sysconfdir}/wendyos
     printf 'BOARD=%s\n'   "${WENDYOS_BOARD_ID}" >  ${D}${sysconfdir}/wendyos/device-type
     printf 'MACHINE=%s\n' "${MACHINE}"          >> ${D}${sysconfdir}/wendyos/device-type
-    # STORAGE lets the OTA client pick the storage-specific artifact directly
-    # (e.g. jetson-agx-orin publishes both an NVMe and an eMMC image under one
-    # manifest key). Without it the agent must infer the medium from the MACHINE
-    # name, which fails for legacy/plain-string identities and can serve the
-    # wrong image. Only emitted when the board declares a medium.
+    # STORAGE lets the OTA client pick a storage-specific artifact directly. A
+    # board whose one image boots from several media declares none; its storage
+    # targets all publish that same OTA artifact. Only emitted when declared.
     if [ -n "${STORAGE}" ]; then
         printf 'STORAGE=%s\n' "${STORAGE}"      >> ${D}${sysconfdir}/wendyos/device-type
     fi

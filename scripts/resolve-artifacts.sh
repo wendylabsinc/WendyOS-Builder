@@ -17,15 +17,15 @@
 # Inputs (env vars, matching build.yml's existing style):
 #   DEVICE      e.g. jetson-agx-orin
 #   STORAGE     e.g. nvme | emmc | sd | ufs | disk
-#   MACHINE     Yocto MACHINE, e.g. jetson-agx-orin-devkit-nvme-wendyos
+#   MACHINE     Yocto MACHINE, e.g. jetson-agx-orin-devkit-wendyos
 #   DEPLOY_DIR  build/tmp/deploy/images/<MACHINE>
 #   MAP_FILE    (optional) override the map path — used by the tests
 #
 # Output: KEY=VALUE lines on stdout, safe to `eval` in a step or append to
 # $GITHUB_ENV. Diagnostics and errors go to stderr.
-#   IMAGE_KIND         generated-nvme-img | generated-sd-img | tegraflash-bundle |
+#   IMAGE_KIND         generated-raw-img | tegraflash-bundle |
 #                      qcomflash-bundle | wic-disk
-#   IMAGE_FILE         primary artifact path. For generated-*-img this is the
+#   IMAGE_FILE         primary artifact path. For generated-raw-img this is the
 #                      MACHINE-scoped target path the "Generate flashable image"
 #                      step writes (it does NOT exist at Yocto deploy time, so it
 #                      is intentionally not existence-checked here).
@@ -130,18 +130,14 @@ case "$IMAGE_KIND" in
     fi
     IMAGE_FILE="$QCOMFLASH_BUNDLE"
     ;;
-  generated-nvme-img)
-    # The offline NVMe image is produced by build.yml's "Generate flashable
+  generated-raw-img)
+    # The offline raw image is produced by build.yml's "Generate flashable
     # image" step from the extracted bundle; it does not exist at Yocto deploy
     # time, so its existence is NOT validated here (the workflow keeps the
     # stale-image guard for it). Resolve only its canonical MACHINE-scoped path,
-    # which the generate step writes to and the upload step reads.
-    IMAGE_FILE="$DEPLOY_DIR/wendyos-image-${MACHINE}-nvme.img"
-    ;;
-  generated-sd-img)
-    # Same offline layout writer as generated-nvme-img, selecting flash.xml.in's
-    # sdcard device instead of external-flash.xml.in's external device.
-    IMAGE_FILE="$DEPLOY_DIR/wendyos-image-${MACHINE}-sd.img"
+    # which the generate step writes to and the upload step reads. The Nano's
+    # SD and NVMe targets resolve to this same file.
+    IMAGE_FILE="$DEPLOY_DIR/wendyos-image-${MACHINE}-raw.img"
     ;;
   wic-disk)
     # One directly-bootable .wic disk image: the generic x86_64 PC, the VM
