@@ -1,0 +1,97 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ChristosNtokos <chrisdokos1@gmail.com>
+Date: Sun, 25 Oct 2026 21:05:00 +0200
+Subject: [PATCH] rtl8822ce: log a TX DMA error and dump the TX rings once per
+ error
+
+xmit_status_check() runs every 2 s. While REG_TXDMA_STATUS is
+non-zero, it printks the whole TX ring backup (core_get_tx_ring_ext(),
+about 700 lines) on every run. With the silent reset compiled out,
+the error never cleared: about 11 MB of journal a minute, which pushed
+every older log out of a 500 MB journal within an hour.
+
+Print one warning line with the register value and the ring dump only
+on the first check that sees the error. When a later check reads zero
+again, print one line saying it cleared, and log the next error in
+full. Both lines bypass the driver's log level (0 by default, which
+hides RTW_INFO), so a reset and its outcome stay visible.
+
+The flag is initialised only in sreset_init_value(), not in
+sreset_reset_value(): the silent reset itself calls
+sreset_reset_value() through rtw_reset_drv_sw(), and clearing the flag
+there would bring back a dump on every check while resets keep failing.
+
+Unchanged: the per-frame check in rtl8822ce_xmit.c still dumps once,
+at the first error after the module loads, and freezes the backup
+(DUMP_TXBD_HALT). So the first error can print two dumps, and a later
+error's dump repeats the frames of the first one.
+'echo "1 1" > /proc/net/rtl88x2ce/wlan0/tx_ring_ext' re-arms the backup.
+
+Upstream-Status: Pending
+Signed-off-by: ChristosNtokos <chrisdokos1@gmail.com>
+---
+ .../realtek/rtl8822ce/core/rtw_sreset.c        |  1 +
+ .../rtl8822ce/hal/rtl8822c/rtl8822c_ops.c      | 18 +++++++++++++++++-
+ .../realtek/rtl8822ce/include/rtw_sreset.h     |  1 +
+ 3 files changed, 19 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/net/wireless/realtek/rtl8822ce/core/rtw_sreset.c b/drivers/net/wireless/realtek/rtl8822ce/core/rtw_sreset.c
+index 21cc18b..d84b879 100644
+--- a/drivers/net/wireless/realtek/rtl8822ce/core/rtw_sreset.c
++++ b/drivers/net/wireless/realtek/rtl8822ce/core/rtw_sreset.c
+@@ -28,6 +28,7 @@ void sreset_init_value(_adapter *padapter)
+ 	psrtpriv->Wifi_Error_Status = WIFI_STATUS_SUCCESS;
+ 	psrtpriv->last_tx_time = 0;
+ 	psrtpriv->last_tx_complete_time = 0;
++	psrtpriv->txdma_err_logged = _FALSE;
+ #endif
+ }
+ void sreset_reset_value(_adapter *padapter)
+diff --git a/drivers/net/wireless/realtek/rtl8822ce/hal/rtl8822c/rtl8822c_ops.c b/drivers/net/wireless/realtek/rtl8822ce/hal/rtl8822c/rtl8822c_ops.c
+index bde359c..0c51386 100755
+--- a/drivers/net/wireless/realtek/rtl8822ce/hal/rtl8822c/rtl8822c_ops.c
++++ b/drivers/net/wireless/realtek/rtl8822ce/hal/rtl8822c/rtl8822c_ops.c
+@@ -1038,11 +1038,27 @@ static void xmit_status_check(PADAPTER p)
+ 	if (txdma_status != 0x00) {
+ 		RTW_INFO("%s REG_TXDMA_STATUS:0x%08x\n", __FUNCTION__, txdma_status);
+ 
+-		core_get_tx_ring_ext(p);
++		/*
++		 * Log the error and dump the TX rings (~700 lines) once per
++		 * error, not on every 2 s check for as long as it lasts.
++		 */
++		if (!psrtpriv->txdma_err_logged) {
++			psrtpriv->txdma_err_logged = _TRUE;
++			printk(KERN_WARNING DRIVER_PREFIX FUNC_ADPT_FMT
++			       ": TX DMA error, REG_TXDMA_STATUS=0x%08x, resetting\n",
++			       FUNC_ADPT_ARG(p), txdma_status);
++			core_get_tx_ring_ext(p);
++		}
+ 
+ 		psrtpriv->tx_dma_status_cnt++;
+ 		psrtpriv->self_dect_case = 4;
+ 		rtw_hal_sreset_reset(p);
++	} else if (psrtpriv->txdma_err_logged) {
++		psrtpriv->txdma_err_logged = _FALSE;
++		printk(KERN_INFO DRIVER_PREFIX FUNC_ADPT_FMT
++		       ": TX DMA error cleared, %llu TX DMA resets since load\n",
++		       FUNC_ADPT_ARG(p),
++		       (unsigned long long)psrtpriv->tx_dma_status_cnt);
+ 	}
+ #ifdef CONFIG_USB_HCI
+ 	current_time = rtw_get_current_time();
+diff --git a/drivers/net/wireless/realtek/rtl8822ce/include/rtw_sreset.h b/drivers/net/wireless/realtek/rtl8822ce/include/rtw_sreset.h
+index 1fd999a..0f46c89 100644
+--- a/drivers/net/wireless/realtek/rtl8822ce/include/rtw_sreset.h
++++ b/drivers/net/wireless/realtek/rtl8822ce/include/rtw_sreset.h
+@@ -42,6 +42,7 @@ struct sreset_priv {
+ 	u8 self_dect_case;
+ 	u16 last_mac_rxff_ptr;
+ 	u8 dbg_sreset_ctrl;
++	u8 txdma_err_logged;	/* this TX DMA error was already logged */
+ };
+ 
+ 
+-- 
+2.50.1 (Apple Git-155)
+
