@@ -4,7 +4,8 @@
 # Builds fixture deploy-dir trees under mktemp and asserts that:
 #   (a) each device family resolves the correct artifact set,
 #   (b) a missing expected artifact exits non-zero with an informative error,
-#   (c) every device+storage combo in build.yml's matrix has a map entry.
+#   (c) every device+storage combo in build.yml's matrix has a map entry,
+#   (d) every manifest alias passes its storage to the publisher.
 set -uo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -325,6 +326,18 @@ test_matrix_coverage() {
   fi
 }
 
+# The master manifest marks an alias with its entry's storage, which only a
+# pass_storage entry records.
+test_aliases_pass_storage() {
+  local missing
+  missing=$(jq -r 'to_entries[] | select(.value.manifest_alias and .value.pass_storage != true) | .key' "$MAP")
+  if [[ -z "$missing" ]]; then
+    ok "manifest aliases pass their storage"
+  else
+    bad "manifest alias without pass_storage: $missing"
+  fi
+}
+
 test_jetson_nvme
 test_jetson_emmc
 test_jetson_agx_targets_share_bundle
@@ -342,6 +355,7 @@ test_missing_x86_fatal
 test_unknown_combo_fatal
 test_generated_raw_bundle_absent
 test_matrix_coverage
+test_aliases_pass_storage
 
 echo
 echo "===================="

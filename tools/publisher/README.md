@@ -79,7 +79,11 @@ eligible device pointers to one invocation:
 The batch is validated before accessing storage. Identical rows from multiple
 storage variants are deduplicated; conflicting updates for one device are
 rejected. An empty array is a no-op. `stability` defaults to `stable` and can
-be specified per row; `nightly: false` updates the stable pointer.
+be specified per row; `nightly: false` updates the stable pointer. A row with
+`alias_of` marks the device as an alias of another one, and `alias_storage`
+names the storage it stands for. Units that carry the alias id still find their
+updates under it, while install pickers list only the device it names. A row
+without `alias_of` keeps the existing mark.
 
 The publisher reads and writes the master manifest once on success, preserving
 other devices, firmware entries and the opposite channel. Conflicts (412),
@@ -304,6 +308,13 @@ Located at `manifests/master.json`:
       "latest_nightly": "nightly-1.5.0",
       "manifest_path": "manifests/jetson-orin-nano.json",
       "stability": "experimental"
+    },
+    "jetson-agx-orin-emmc": {
+      "latest": "1.0.0",
+      "manifest_path": "manifests/jetson-agx-orin-emmc.json",
+      "stability": "stable",
+      "alias_of": "jetson-agx-orin",
+      "alias_storage": "emmc"
     }
   }
 }
