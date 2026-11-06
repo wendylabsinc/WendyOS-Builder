@@ -138,7 +138,7 @@ python do_modify_partition_layout() {
     #
     # The 'id' attribute sets the GPT partition number (NOT physical order).
     # This is how APP ends up as /dev/nvme0n1p1 despite not being first
-    # physically.  parted/sgdisk use these numbers, so the first-boot grower's
+    # physically.  parted/sfdisk use these numbers, so the first-boot grower's
     # "parted resizepart 17 100%" targets the right partition regardless
     # of where config (id=16) sits physically.
     def modify_device(device, layout_path):

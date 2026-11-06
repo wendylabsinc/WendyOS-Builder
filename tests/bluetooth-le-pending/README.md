@@ -2,11 +2,13 @@
 
 Run `python3 tests/bluetooth-le-pending/run.py` (Python 3, a C compiler and `patch`).
 The test downloads only `hci_sync.c` at the shipped Raspberry Pi, NVIDIA and
-Qualcomm revisions, applies the recipe-selected backport with zero fuzz, and
-compiles the actual callback with mocked kernel primitives. The Qualcomm
-callback is shared by Dragonwing and Arduino Uno Q; its reference release is
-asserted on every path. The unpatched callbacks must fail the two-pending-dial
-cases, and all seven patched paths must pass. `--sources DIR` accepts cached
+Qualcomm revisions, applies the backport with zero fuzz to the Pi and NVIDIA
+sources, and compiles the actual callback with mocked kernel primitives. The
+unpatched Pi and NVIDIA callbacks must fail the two-pending-dial cases, and all
+seven patched paths must pass. The Qualcomm kernel (Dragonwing and Arduino
+Uno Q) already carries the fix, so its shipped callback must pass unpatched;
+its reference release is asserted on every path, and the test checks that the
+Qualcomm append no longer applies the backport. `--sources DIR` accepts cached
 `pi.c`, `jetson.c` and `qcom.c` files for offline testing.
 
 Update the source URLs with the corresponding vendor recipe pins when kernels

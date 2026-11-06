@@ -5,13 +5,16 @@ firmware the open kernel modules load to bring up a Blackwell GPU. Must be the e
 same PV as nvidia-open-kmod — the kernel modules and this userspace are one ABI."
 HOMEPAGE = "https://www.nvidia.com"
 
-LICENSE = "NVIDIA-Proprietary"
+LICENSE = "LicenseRef-NVIDIA-Proprietary"
 # NVIDIA Driver License Agreement (v. February 25, 2025), as shipped in the
-# 580.105.08 .run.
+# 580.196.07 .run.
 LIC_FILES_CHKSUM = "file://LICENSE;md5=92aa2e2af6aa0bcba1c3fe49da021937"
 
-# NVIDIA-Proprietary is not an SPDX-catalogued license, so map the name to the
-# license text NVIDIA ships in the .run (otherwise do_create_spdx cannot find it).
+# NVIDIA's license is not in the SPDX license list, so LICENSE names it as an
+# SPDX license reference ("LicenseRef-" prefix). oe-core looks up the license
+# file under the name after that prefix, so this flag points it at the license
+# text NVIDIA ships in the .run. Without it the license check, do_populate_lic
+# and do_create_spdx cannot find the text.
 NO_GENERIC_LICENSE[NVIDIA-Proprietary] = "LICENSE"
 
 # genericx86-64 only — a machine-specific prebuilt binary.
@@ -22,9 +25,9 @@ NVIDIA_ARCH = "x86_64"
 NVIDIA_ARCHIVE = "NVIDIA-Linux-${NVIDIA_ARCH}-${PV}"
 
 SRC_URI = "https://download.nvidia.com/XFree86/Linux-${NVIDIA_ARCH}/${PV}/${NVIDIA_ARCHIVE}.run;name=run"
-# Checksums of the official download.nvidia.com .run for 580.105.08.
-SRC_URI[run.sha256sum] = "d9c6e8188672f3eb74dd04cfa69dd58479fa1d0162c8c28c8d17625763293475"
-SRC_URI[run.md5sum] = "c71560d2644e4ae386b83b168d444fb2"
+# Checksums of the official download.nvidia.com .run for 580.196.07.
+SRC_URI[run.sha256sum] = "0aab0518db53cf73c412dc7f32bbc850ca95e839d8923d0de4bff42c1c9169ce"
+SRC_URI[run.md5sum] = "6bef12d75a82393c160697a90f80d56b"
 
 S = "${UNPACKDIR}/${NVIDIA_ARCHIVE}"
 

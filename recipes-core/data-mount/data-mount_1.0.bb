@@ -27,5 +27,5 @@ SYSTEMD_AUTO_ENABLE:${PN} = "enable"
 
 # No RDEPENDS, on purpose. The bash, coreutils, util-linux, parted, e2fsprogs
 # and gptfdisk this recipe used to pull in belonged to the first-boot script it
-# no longer ships; data-device declares them for wendyos-data.service instead. A
+# no longer ships; data-device declares what wendyos-data.service needs. A
 # unit file needs nothing at runtime.

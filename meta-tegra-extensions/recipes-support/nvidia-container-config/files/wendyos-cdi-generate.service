@@ -2,8 +2,6 @@
 Description=WendyOS CDI Spec Generation for NVIDIA GPUs
 After=local-fs.target systemd-udev-settle.service
 Before=containerd.service docker.service
-# Only run if nvidia-cdi-refresh.service doesn't exist (fallback)
-ConditionPathExists=!/lib/systemd/system/nvidia-cdi-refresh.service
 # Ensure l4t.csv exists before running
 ConditionPathExists=/etc/nvidia-container-runtime/host-files-for-container.d/l4t.csv
 
@@ -15,20 +13,21 @@ ExecStartPre=/bin/sleep 2
 ExecStartPre=/bin/mkdir -p /etc/cdi
 # Generate CDI spec using CSV mode with explicit CSV file list
 # Includes: devices.csv (meta-tegra), drivers.csv (meta-tegra), l4t.csv (ours),
-#           devices-wendyos.csv (sysfs entries), and l4t-deepstream.csv (if present)
+#           devices-wendyos.csv (sysfs entries)
+# meta-tegra installs NVIDIA's Ubuntu-built GStreamer plugins and V4L2 video
+# and camera libraries in /usr/share/nvidia-container-passthrough, for containers.
+# meta-tegra's nvidia-ctk patch searches that folder only when cdi generate gets
+# --alt-roots (or NVIDIA_CTK_PASSTHROUGH_ROOT). meta-tegra sets alt-roots only in
+# the runtime's config.toml, which cdi generate does not read. Without the flag,
+# those files never reach a container.
 ExecStart=/bin/sh -c '\
     ARGS="--mode=csv --output=/etc/cdi/nvidia.yaml"; \
     ARGS="$ARGS --csv.file=/etc/nvidia-container-runtime/host-files-for-container.d/devices.csv"; \
     ARGS="$ARGS --csv.file=/etc/nvidia-container-runtime/host-files-for-container.d/drivers.csv"; \
     ARGS="$ARGS --csv.file=/etc/nvidia-container-runtime/host-files-for-container.d/l4t.csv"; \
     ARGS="$ARGS --csv.file=/etc/nvidia-container-runtime/host-files-for-container.d/devices-wendyos.csv"; \
-    if [ -f /etc/nvidia-container-runtime/host-files-for-container.d/l4t-deepstream.csv ]; then \
-        ARGS="$ARGS --csv.file=/etc/nvidia-container-runtime/host-files-for-container.d/l4t-deepstream.csv"; \
-    fi; \
+    ARGS="$ARGS --alt-roots=/usr/share/nvidia-container-passthrough"; \
     /usr/bin/nvidia-ctk cdi generate $ARGS'
-# Post-process CDI spec to fix GStreamer plugin paths for container compatibility
-# (Yocto uses /usr/lib/ but containers expect /usr/lib/aarch64-linux-gnu/)
-ExecStartPost=/usr/bin/fix-cdi-gstreamer-paths.sh
 StandardOutput=journal
 StandardError=journal
 

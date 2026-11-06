@@ -27,8 +27,9 @@ class VariantTests(unittest.TestCase):
                 "iwlwifi-gl-c0-fm-c0-c106.ucode", "iwlwifi-gl-c0-fm-c0.pnvm",
                 "LICENCE.iwlwifi_firmware",
             })
-            # Keep IQ below this kernel's c106 API ceiling, with the same
-            # NAN-capable firmware and notice already pinned for Jetson.
+            # Keep IQ on c106, the firmware tested on IQ8. The 7.3 kernel also
+            # accepts c107. Same NAN-capable firmware
+            # and notice already pinned for Jetson.
             for entry in resolved["firmware"]:
                 self.assertIn(entry, manifest["firmware"])
             self.assertTrue(resolved["source"]["devkit"])
