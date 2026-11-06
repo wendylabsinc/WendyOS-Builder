@@ -28,6 +28,8 @@ class LocalAgentTests(unittest.TestCase):
         self.source.mkdir()
         self.builder.mkdir()
         (self.source / 'main.go').write_text('package main\n')
+        (self.source / 'go/cmd/wendy-agent-supervisor').mkdir(parents=True)
+        (self.source / 'go/cmd/wendy-agent-supervisor/main.go').write_text('package main\n')
         (self.source / '.gitignore').write_text('ignored.go\n')
         for path in ['conf/layer.conf', 'tools/mesh/package-local-agent.py'] + [
             f'recipes-core/wendyos-agent/files/{name}' for name in PACKAGE.SERVICE_FILES
@@ -57,7 +59,8 @@ if args[0] == 'build':
     data = bytearray(64)
     data[:4] = b'\\x7fELF'
     data[18:20] = (183).to_bytes(2, 'little')
-    pathlib.Path(args[args.index('-o') + 1]).write_bytes(data)
+    # Each package gets its own bytes, so a swapped binary is caught.
+    pathlib.Path(args[args.index('-o') + 1]).write_bytes(bytes(data) + args[-1].encode())
     if os.environ.get('MUTATE_INPUT'):
         pathlib.Path(os.environ['MUTATE_INPUT']).write_text('uncommitted change')
 elif args[:2] == ['version', '-m']:
@@ -90,9 +93,17 @@ else:
         for path, digest in manifest['builder_files_sha256'].items():
             self.assertEqual(digest, hashlib.sha256((self.builder / path).read_bytes()).hexdigest())
         calls = [json.loads(line) for line in self.log.read_text().splitlines()]
-        self.assertEqual(calls[1]['args'][:2], ['version', '-m'])
+        builds = [call for call in calls if call['args'][0] == 'build']
+        self.assertEqual([call['args'][-1] for call in builds],
+                         ['./go/cmd/wendy-agent', './go/cmd/wendy-agent-supervisor'])
+        self.assertEqual(calls[2]['args'][:2], ['version', '-m'])
         self.assertNotEqual(calls[0]['cwd'], str(self.source.resolve()))
-        self.assertEqual(calls[0]['cwd'], calls[1]['cwd'])
+        # Both binaries come from the same private export of the recorded commit.
+        self.assertEqual({calls[0]['cwd'], calls[1]['cwd'], calls[2]['cwd']}, {calls[0]['cwd']})
+        self.assertEqual(manifest['binary_sha256'],
+                         hashlib.sha256((self.root / 'output/wendy-agent').read_bytes()).hexdigest())
+        self.assertEqual(manifest['supervisor_sha256'],
+                         hashlib.sha256((self.root / 'output/wendy-agent-supervisor').read_bytes()).hexdigest())
         self.assertEqual(calls[0]['sources'], {'main.go': 'package main\n'})
         self.assertFalse(Path(calls[0]['cwd']).exists())
         self.assertEqual(calls[0]['gowork'], 'off')
@@ -105,16 +116,42 @@ else:
         files = self.root / 'one/layer/recipes-core/wendyos-agent/files'
         archive = next(files.glob('*.tar.gz'))
         with tarfile.open(archive) as tar:
-            self.assertEqual(tar.getnames(), ['wendy-agent-linux-arm64/wendy-agent'])
-            entry = tar.getmembers()[0]
-            self.assertEqual((entry.mode, entry.uid, entry.gid, entry.mtime), (0o755, 0, 0, 0))
-            self.assertEqual(tar.extractfile(entry).read(), (self.root / 'one/wendy-agent').read_bytes())
+            # The image installs the supervisor from the same release as the agent.
+            self.assertEqual(tar.getnames(), ['wendy-agent-linux-arm64/wendy-agent',
+                                              'wendy-agent-linux-arm64/wendy-agent-supervisor'])
+            for entry in tar.getmembers():
+                self.assertEqual((entry.mode, entry.uid, entry.gid, entry.mtime), (0o755, 0, 0, 0))
+                name = entry.name.rsplit('/', 1)[1]
+                blob = tar.extractfile(entry).read()
+                self.assertEqual(blob, (self.root / 'one' / name).read_bytes())
+                self.assertTrue(blob.endswith(f'./go/cmd/{name}'.encode()), name)
         append = (files.parent / 'wendyos-agent_1.0.bbappend').read_text()
         self.assertIn(first['archive_sha256'], append)
+        # A local agent is under test: the daily update must not replace it.
         self.assertIn('ln -sf /dev/null', append)
         self.assertIn('SYSTEMD_SERVICE:${PN} = "wendyos-agent.service"', append)
+        # The bbappend replaces SRC_URI, so it must bring the supervisor's drop-ins.
+        for name in ('wendyos-agent-supervisor.conf', 'wendyos-agent-updater-supervisor.conf'):
+            self.assertIn(f'file://{name}', append)
+            self.assertTrue((files / name).is_file(), name)
         self.assertFalse(first['hardware_acceptance'])
         self.assertEqual(first['bitbake_validation'], 'PENDING')
+
+    def test_a_commit_without_the_supervisor_packs_the_agent_alone(self):
+        self.git(self.source, 'rm', '-rq', 'go/cmd/wendy-agent-supervisor')
+        self.git(self.source, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+                 'commit', '-qm', 'before the supervisor')
+        manifest = self.package()
+        builds = [json.loads(line)['args'][-1] for line in self.log.read_text().splitlines()
+                  if json.loads(line)['args'][0] == 'build']
+        self.assertEqual(builds, ['./go/cmd/wendy-agent'])
+        self.assertIsNone(manifest['supervisor_sha256'])
+        self.assertEqual(manifest['binary_sha256'],
+                         hashlib.sha256((self.root / 'output/wendy-agent').read_bytes()).hexdigest())
+        archive = next((self.root / 'output/layer/recipes-core/wendyos-agent/files').glob('*.tar.gz'))
+        with tarfile.open(archive) as tar:
+            # The recipe then builds the image without the supervisor, as for such a release.
+            self.assertEqual(tar.getnames(), ['wendy-agent-linux-arm64/wendy-agent'])
 
     def test_rejects_dirty_builder_before_building(self):
         (self.builder / 'recipes-core/wendyos-agent/files/wendyos-agent.service').write_text('local edit')

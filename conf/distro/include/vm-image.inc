@@ -94,14 +94,13 @@ ROOTFS_POSTPROCESS_COMMAND:append:vm-wendyos = " create_wendyos_vm_dirs;"
 # it on the NVIDIA stack, describing it as a fix for NVIDIA's prebuilt binaries.
 # That undersells it: the wendy AGENT needs it too, so this copy is ungated.
 #
-# The agent baked into the image is statically linked and runs fine. But
-# wendyos-agent-updater.timer fires a few minutes after boot and replaces
-# /opt/wendyos/bin/wendy-agent with the upstream release tarball's build, which is
-# DYNAMICALLY linked against the x86-64 ABI loader path /lib64/ld-linux-x86-64.so.2.
+# Agent releases are DYNAMICALLY linked against the x86-64 ABI loader path
+# /lib64/ld-linux-x86-64.so.2: the one baked into the image and every later
+# agent update.
 # OE is usrmerge: /lib is a symlink to usr/lib, the loader is at
-# /usr/lib/ld-linux-x86-64.so.2, and /lib64 does not exist. So the updated agent
-# dies with "cannot execute: required file not found" (systemd 203/EXEC) on a
-# restart loop, a few minutes into every boot. Verified on the first VM boot.
+# /usr/lib/ld-linux-x86-64.so.2, and /lib64 does not exist. So without this link
+# the agent dies with "cannot execute: required file not found" (systemd
+# 203/EXEC) in a restart loop. Verified on the first VM boot.
 #
 # The generic-x86-64 board never sees this because WENDYOS_NVIDIA_DGPU defaults to
 # "1" there, so its gated symlink is always created. Setting that knob to "0" on
