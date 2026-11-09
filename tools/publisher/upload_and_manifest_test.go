@@ -1008,6 +1008,7 @@ func TestHasPromotableImage(t *testing.T) {
 		"generic image":       {VersionMetadata{Path: "x.img"}, true},
 		"recovery flashpack":  {VersionMetadata{InstallMode: "recovery"}, true},
 		"edl bundle, no path": {VersionMetadata{InstallMode: "edl", QcomflashPath: "x.tar.gz"}, true},
+		"flashpack, no path":  {VersionMetadata{FlashpackPath: "x.flashpack.tar.zst"}, true},
 		"nothing at all":      {VersionMetadata{}, false},
 		"edl but no bundle":   {VersionMetadata{InstallMode: "edl"}, false},
 	} {
@@ -1094,6 +1095,33 @@ func TestValidateBundlePromotionFailsClosed(t *testing.T) {
 	}
 	if err := validateBundlePromotion("raspberry-pi-5", VersionMetadata{}, ""); err != nil {
 		t.Fatalf("non-EDL device rejected: %v", err)
+	}
+}
+
+// Thor publishes no bundle, so its flashpack is the only install artifact and a
+// promotion that fails to copy it must stop.
+func TestValidateFlashpackPromotionFailsClosed(t *testing.T) {
+	thor := VersionMetadata{FlashpackPath: "nightly/thor.flashpack.tar.zst", OTAUpdatePath: "nightly/thor.wendy"}
+
+	if err := validateFlashpackPromotion(thor, ""); err == nil {
+		t.Fatal("promotion accepted an uncopied flashpack; the stable version would have no install artifact")
+	}
+	if err := validateFlashpackPromotion(thor, "stable/thor.flashpack.tar.zst"); err != nil {
+		t.Fatalf("copied flashpack rejected: %v", err)
+	}
+	if err := validateFlashpackPromotion(VersionMetadata{Path: "rpi5.wic.zst"}, ""); err != nil {
+		t.Fatalf("device without a flashpack rejected: %v", err)
+	}
+	// A Thor nightly from before the bundle was dropped still carries it as its
+	// generic path, so its promotion behaves as it did before.
+	legacyThor := VersionMetadata{Path: "nightly/thor.tegraflash-tar", FlashpackPath: thor.FlashpackPath}
+	if err := validateFlashpackPromotion(legacyThor, ""); err != nil {
+		t.Fatalf("legacy Thor nightly rejected: %v", err)
+	}
+	// validateRecoveryPromotion owns the Orin flashpacks.
+	orin := VersionMetadata{InstallMode: "recovery", FlashpackPath: "nightly/orin-nvme.flashpack.tar.zst"}
+	if err := validateFlashpackPromotion(orin, ""); err != nil {
+		t.Fatalf("recovery-first version rejected: %v", err)
 	}
 }
 

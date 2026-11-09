@@ -1360,8 +1360,8 @@ func main() {
 		if !*updateOnly && !*masterManifestOnly {
 			// A driver add-on is publishable on its own: it attaches to a version
 			// an earlier build already created.
-			if *localFile == "" && *otaUpdateFile == "" && *recoveryFile == "" && *extensionFile == "" {
-				log.Fatal("At least one file must be provided: use --file for OS image, --ota-update for OTA update, --recovery-file for recovery file, or --extension-file for a driver add-on")
+			if *localFile == "" && *otaUpdateFile == "" && *recoveryFile == "" && *flashpackFile == "" && *extensionFile == "" {
+				log.Fatal("At least one file must be provided: use --file for OS image, --ota-update for OTA update, --recovery-file for recovery file, --flashpack-file for a flashpack, or --extension-file for a driver add-on")
 			}
 
 			// Validate main file if provided
@@ -1632,16 +1632,12 @@ func main() {
 	if !*updateOnly {
 		log.Info("Starting parallel file processing...")
 
-		// Recovery dedupe: on eMMC/Thor devices --file and --recovery-file point
-		// at the SAME local tegraflash bundle, which today uploads the identical
-		// 7 GB object twice in parallel (both resolve to the same destination
-		// path and neither exists yet, so the skip-if-exists check races). When
-		// the two paths resolve to the same file on disk, upload it once as the
-		// main image and reuse that result (path/size) plus the main file's
-		// checksum for the recovery manifest fields — which is exactly what a
-		// separate upload would have produced. When they differ (Orin NVMe:
-		// main is the .img.zst, recovery is a distinct bundle) both upload as
-		// before.
+		// Recovery dedupe: when --file and --recovery-file name the same file on
+		// disk, both would upload the identical object to the same destination in
+		// parallel (the skip-if-exists check races). Upload it once as the main
+		// image and reuse that result (path/size) plus the main file's checksum
+		// for the recovery manifest fields — exactly what a separate upload would
+		// have produced. When they differ, both upload as before.
 		recoveryDedup := false
 		if *localFile != "" && *recoveryFile != "" {
 			same, err := sameLocalFile(*localFile, *recoveryFile)
@@ -2490,9 +2486,9 @@ func applyEDLFlashBundle(meta *VersionMetadata, deviceType, filePath string, fil
 }
 
 // hasPromotableImage reports whether a version carries a primary artifact the
-// promotion can copy. An EDL bundle is one, and it publishes no generic path.
+// promotion can copy. An EDL bundle or a flashpack is one, with no generic path.
 func hasPromotableImage(meta VersionMetadata) bool {
-	return meta.Path != "" || meta.InstallMode == "recovery" || meta.QcomflashPath != ""
+	return meta.Path != "" || meta.InstallMode == "recovery" || meta.QcomflashPath != "" || meta.FlashpackPath != ""
 }
 
 // applyRecoveryRootfsOnly publishes raw media solely under explicit
@@ -2683,6 +2679,19 @@ func validateBundlePromotion(deviceType string, source VersionMetadata, copiedBu
 	}
 	if copiedBundlePath == "" {
 		return fmt.Errorf("failed to copy the EDL flash bundle")
+	}
+	return nil
+}
+
+// validateFlashpackPromotion stops a promotion that would leave a version whose
+// only install artifact is its flashpack (Thor) without one. Recovery-first and
+// EDL versions have their own validators.
+func validateFlashpackPromotion(source VersionMetadata, copiedFlashpack string) error {
+	if source.FlashpackPath == "" || source.Path != "" || source.InstallMode == "recovery" || source.QcomflashPath != "" {
+		return nil
+	}
+	if copiedFlashpack == "" {
+		return fmt.Errorf("failed to copy the flashpack, the only install artifact")
 	}
 	return nil
 }
@@ -3387,6 +3396,9 @@ func promoteNightlyToStable(ctx context.Context, bucket *storage.BucketHandle, p
 	}
 	if err := validateBundlePromotion(deviceType, sourceVersionMeta, qcomflashDest); err != nil {
 		logger.WithError(err).Fatal("Cannot promote an incomplete EDL flash bundle")
+	}
+	if err := validateFlashpackPromotion(sourceVersionMeta, topFlashpackDest); err != nil {
+		logger.WithError(err).Fatal("Cannot promote without the flashpack")
 	}
 
 	// Create new stable version entry with promotion metadata
