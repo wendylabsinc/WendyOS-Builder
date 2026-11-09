@@ -25,6 +25,7 @@ import (
 	"github.com/klauspost/compress/zstd"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/google"
 	"google.golang.org/api/googleapi"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
@@ -1052,30 +1053,44 @@ func sendDiscordNotification(webhookURL string, deviceType, version string, isNi
 	return nil
 }
 
-// createStorageClientWithAuth creates a storage client and triggers authentication if needed
-func createStorageClientWithAuth(ctx context.Context, accessToken string) (*storage.Client, error) {
+// createStorageClientWithAuth creates a storage client and triggers authentication if needed.
+// maxConns sizes the idle pool so parallel parts reuse their connections.
+func createStorageClientWithAuth(ctx context.Context, accessToken string, maxConns int) (*storage.Client, error) {
+	ts, err := storageTokenSource(ctx, accessToken)
+	if err != nil {
+		return nil, err
+	}
+	httpClient := &http.Client{
+		Transport: &oauth2.Transport{Source: ts, Base: newUploadTransport(maxConns)},
+		Timeout:   uploadRequestTimeout,
+	}
+	client, err := storage.NewClient(ctx, option.WithHTTPClient(httpClient))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create storage client: %w", err)
+	}
+	return client, nil
+}
+
+// storageTokenSource returns the credentials for createStorageClientWithAuth,
+// running an interactive gcloud login when no default credentials exist.
+func storageTokenSource(ctx context.Context, accessToken string) (oauth2.TokenSource, error) {
 	// If an access token is provided, seed the refreshing token source with it.
 	// GCP access tokens expire after 1 hour; gcloudTokenSource re-runs
 	// "gcloud auth print-access-token" when the token is near expiry so that
 	// long-running retry loops (412 backoff) don't hit 401 mid-flight.
 	if accessToken != "" {
 		log.Info("Using provided access token for authentication")
-		ts := &gcloudTokenSource{
+		return &gcloudTokenSource{
 			token: &oauth2.Token{
 				AccessToken: accessToken,
 				TokenType:   "Bearer",
 				Expiry:      time.Now().Add(55 * time.Minute),
 			},
-		}
-		client, err := storage.NewClient(ctx, option.WithTokenSource(ts))
-		if err != nil {
-			return nil, fmt.Errorf("failed to create storage client with access token: %w", err)
-		}
-		return client, nil
+		}, nil
 	}
 
-	// Try to create the client with default credentials
-	client, err := storage.NewClient(ctx)
+	// Try default credentials
+	creds, err := google.FindDefaultCredentials(ctx, storage.ScopeFullControl)
 	if err != nil {
 		// Check if this is an authentication error
 		errMsg := err.Error()
@@ -1094,19 +1109,18 @@ func createStorageClientWithAuth(ctx context.Context, accessToken string) (*stor
 				return nil, fmt.Errorf("authentication failed: %w", err)
 			}
 
-			log.Info("Authentication successful. Retrying storage client creation...")
+			log.Info("Authentication successful. Retrying credential lookup...")
 
-			// Retry creating the client
-			client, err = storage.NewClient(ctx)
+			creds, err = google.FindDefaultCredentials(ctx, storage.ScopeFullControl)
 			if err != nil {
-				return nil, fmt.Errorf("failed to create storage client after authentication: %w", err)
+				return nil, fmt.Errorf("failed to find credentials after authentication: %w", err)
 			}
 		} else {
 			return nil, err
 		}
 	}
 
-	return client, nil
+	return creds.TokenSource, nil
 }
 
 func main() {
@@ -1438,7 +1452,7 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
 
-	client, err := createStorageClientWithAuth(ctx, *accessToken)
+	client, err := createStorageClientWithAuth(ctx, *accessToken, *uploadConcurrency)
 	if err != nil {
 		log.WithError(err).Fatal("Failed to create storage client")
 	}
@@ -2216,6 +2230,7 @@ func uploadFile(ctx context.Context, bucket *storage.BucketHandle, prefix, local
 	// Create the destination object writer
 	w := obj.NewWriter(ctx)
 	w.ContentType = contentType
+	w.ChunkRetryDeadline = chunkRetryDeadline
 	// Have GCS reject a corrupted upload server-side. The composite path already
 	// verifies CRC32C after compose; this stream verified nothing.
 	if sum, crcErr := crc32cFile(localPath); crcErr == nil {
