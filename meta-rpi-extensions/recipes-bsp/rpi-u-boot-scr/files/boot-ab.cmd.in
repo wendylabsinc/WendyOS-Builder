@@ -113,6 +113,12 @@ else
     reset
 fi
 
+# Pi 4: stock U-Boot puts the DTB at the top of bootm_size, inside the window
+# the device tree's CMA pool must fit in, so that reservation fails. fdt_high
+# moves the DTB above the window; empty unsets it, the stock behaviour. Keep
+# this after the last `run wendyos_saveenv` so it never reaches uboot.env.
+setenv fdt_high @@WENDYOS_UBOOT_FDT_HIGH@@
+
 # Load the kernel from the SELECTED slot's rootfs /boot (A/B-safe: each slot
 # carries its own kernel). A failed load or a returning boot falls through to
 # reset, which during a trial advances bootcount toward the fall-back above.

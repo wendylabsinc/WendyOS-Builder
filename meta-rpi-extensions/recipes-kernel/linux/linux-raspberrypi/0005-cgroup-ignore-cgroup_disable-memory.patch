@@ -1,0 +1,31 @@
+From: Benjamin Kelenyi <benjamin@wendy.sh>
+Date: Tue, 10 Nov 2026 13:00:00 +0200
+Subject: [PATCH] cgroup: ignore cgroup_disable=memory
+
+The Raspberry Pi device trees put cgroup_disable=memory in /chosen/bootargs,
+so containerd's and every container's memory limit is silently ignored.
+Keep the memory controller on; an OTA updates the kernel but never the DTBs
+or cmdline.txt on the boot partition.
+
+Upstream-Status: Inappropriate [WendyOS policy: container memory limits]
+Signed-off-by: Benjamin Kelenyi <benjamin@wendy.sh>
+---
+ kernel/cgroup/cgroup.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/kernel/cgroup/cgroup.c b/kernel/cgroup/cgroup.c
+--- a/kernel/cgroup/cgroup.c
++++ b/kernel/cgroup/cgroup.c
+@@ -7059,6 +7059,12 @@ static int __init cgroup_disable(char *str)
+ 			    strcmp(token, ss->legacy_name))
+ 				continue;
+ 
++			/* Container memory limits need this controller. */
++			if (!strcmp(ss->name, "memory")) {
++				pr_info("Ignoring cgroup_disable=%s\n", ss->name);
++				continue;
++			}
++
+ 			static_branch_disable(cgroup_subsys_enabled_key[i]);
+ 			pr_info("Disabling %s control group subsystem\n",
+ 				ss->name);
