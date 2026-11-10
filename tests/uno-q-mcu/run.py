@@ -3,6 +3,7 @@
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -10,6 +11,7 @@ import unittest
 HERE = Path(__file__).resolve().parent
 LAYER = HERE.parent.parent / 'meta-arduino-extensions'
 FILES = LAYER / 'recipes-bsp' / 'wendyos-mcu' / 'files'
+ROUTER_UNIT = LAYER / 'recipes-connectivity' / 'arduino-router' / 'files' / 'wendyos-arduino-router.service'
 
 STUB = '''#!/bin/sh
 printf '%s' "$(basename "$0")" >> "$STUB_LOG"
@@ -29,6 +31,7 @@ GPIODETECT = (r'gpiochip0 [1c40000.spmi:pmic@0:gpio@c000] (10 lines)\n'
 class Helpers(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp)
         bindir = self.tmp / 'bin'
         bindir.mkdir()
         for tool in ('gpiodetect', 'gpioset', 'gpioinfo', 'openocd', 'systemctl'):
@@ -152,6 +155,38 @@ class Helpers(unittest.TestCase):
         self.assertFalse(status['ok'])
         self.assertIn('did not verify', status['error'])
 
+    def openocd_calls(self):
+        return [c for c in self.calls() if c.startswith('openocd')]
+
+    def test_failed_flash_restarts_the_mcu(self):
+        result = self.flash(STUB_OPENOCD_RC='1', STUB_OPENOCD_OUT='Error: write failed')
+        self.assertEqual(result.returncode, 4)
+        calls = self.openocd_calls()
+        self.assertEqual(len(calls), 2, calls)
+        self.assertIn('flash-zephyr-1.cfg', calls[0])
+        self.assertIn('resume-zephyr-1.cfg', calls[1])
+        self.assertNotIn('flash-zephyr-1.cfg', calls[1])
+
+    def test_good_flash_runs_openocd_once(self):
+        self.assertEqual(self.flash().returncode, 0)
+        self.assertEqual(len(self.openocd_calls()), 1)
+
+    def test_resume_mode_only_restarts(self):
+        result = self.run_tool('mcu-flash', '--resume', 'zephyr-1')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue(self.status(result)['ok'])
+        calls = self.openocd_calls()
+        self.assertEqual(len(calls), 1)
+        self.assertIn('resume-zephyr-1.cfg', calls[0])
+        self.assertIn('gpioset -c gpiochip1 -t0 37=0', self.calls())
+
+    def test_flash_recipe_ends_with_the_restart(self):
+        cfg = (FILES / 'flash-zephyr-1.cfg').read_text()
+        self.assertTrue(cfg.rstrip().endswith('source [find resume-zephyr-1.cfg]'))
+        resume = (FILES / 'resume-zephyr-1.cfg').read_text()
+        self.assertLess(resume.index('reset halt'), resume.index('resume\n'))
+        self.assertTrue(resume.rstrip().endswith('shutdown'))
+
     def test_flash_recipe_verifies_after_each_write(self):
         cfg = (FILES / 'flash-zephyr-1.cfg').read_text()
         for image in ('loader', 'sketch'):
@@ -160,6 +195,17 @@ class Helpers(unittest.TestCase):
             self.assertLess(written, failed)
         self.assertEqual(cfg.count('shutdown error'), 2)
 
+    def test_router_group_has_static_gid(self):
+        recipe = (LAYER / 'recipes-connectivity' / 'arduino-router' / 'arduino-router_0.11.0.bb').read_text()
+        self.assertIn('GROUPADD_PARAM:${PN} = "-r -g 880 arduino-router"', recipe)
+
+    def test_router_unit_has_no_tcp_listener(self):
+        unit = ROUTER_UNIT.read_text()
+        exec_start = next(l for l in unit.splitlines() if l.startswith('ExecStart=/'))
+        self.assertNotIn('--listen-port', exec_start)
+        self.assertIn('--unix-port /run/arduino-router/router.sock', exec_start)
+        self.assertIn('ExecStartPre=-/usr/libexec/wendyos/mcu-gpio 37=0', unit)
+        self.assertIn('--after-ready "/usr/libexec/wendyos/mcu-gpio 70=1"', exec_start)
 
 
 if __name__ == '__main__':
