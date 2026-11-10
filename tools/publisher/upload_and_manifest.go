@@ -25,6 +25,7 @@ import (
 	"github.com/klauspost/compress/zstd"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/google"
 	"google.golang.org/api/googleapi"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
@@ -1052,30 +1053,44 @@ func sendDiscordNotification(webhookURL string, deviceType, version string, isNi
 	return nil
 }
 
-// createStorageClientWithAuth creates a storage client and triggers authentication if needed
-func createStorageClientWithAuth(ctx context.Context, accessToken string) (*storage.Client, error) {
+// createStorageClientWithAuth creates a storage client and triggers authentication if needed.
+// maxConns sizes the idle pool so parallel parts reuse their connections.
+func createStorageClientWithAuth(ctx context.Context, accessToken string, maxConns int) (*storage.Client, error) {
+	ts, err := storageTokenSource(ctx, accessToken)
+	if err != nil {
+		return nil, err
+	}
+	httpClient := &http.Client{
+		Transport: &oauth2.Transport{Source: ts, Base: newUploadTransport(maxConns)},
+		Timeout:   uploadRequestTimeout,
+	}
+	client, err := storage.NewClient(ctx, option.WithHTTPClient(httpClient))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create storage client: %w", err)
+	}
+	return client, nil
+}
+
+// storageTokenSource returns the credentials for createStorageClientWithAuth,
+// running an interactive gcloud login when no default credentials exist.
+func storageTokenSource(ctx context.Context, accessToken string) (oauth2.TokenSource, error) {
 	// If an access token is provided, seed the refreshing token source with it.
 	// GCP access tokens expire after 1 hour; gcloudTokenSource re-runs
 	// "gcloud auth print-access-token" when the token is near expiry so that
 	// long-running retry loops (412 backoff) don't hit 401 mid-flight.
 	if accessToken != "" {
 		log.Info("Using provided access token for authentication")
-		ts := &gcloudTokenSource{
+		return &gcloudTokenSource{
 			token: &oauth2.Token{
 				AccessToken: accessToken,
 				TokenType:   "Bearer",
 				Expiry:      time.Now().Add(55 * time.Minute),
 			},
-		}
-		client, err := storage.NewClient(ctx, option.WithTokenSource(ts))
-		if err != nil {
-			return nil, fmt.Errorf("failed to create storage client with access token: %w", err)
-		}
-		return client, nil
+		}, nil
 	}
 
-	// Try to create the client with default credentials
-	client, err := storage.NewClient(ctx)
+	// Try default credentials
+	creds, err := google.FindDefaultCredentials(ctx, storage.ScopeFullControl)
 	if err != nil {
 		// Check if this is an authentication error
 		errMsg := err.Error()
@@ -1094,19 +1109,18 @@ func createStorageClientWithAuth(ctx context.Context, accessToken string) (*stor
 				return nil, fmt.Errorf("authentication failed: %w", err)
 			}
 
-			log.Info("Authentication successful. Retrying storage client creation...")
+			log.Info("Authentication successful. Retrying credential lookup...")
 
-			// Retry creating the client
-			client, err = storage.NewClient(ctx)
+			creds, err = google.FindDefaultCredentials(ctx, storage.ScopeFullControl)
 			if err != nil {
-				return nil, fmt.Errorf("failed to create storage client after authentication: %w", err)
+				return nil, fmt.Errorf("failed to find credentials after authentication: %w", err)
 			}
 		} else {
 			return nil, err
 		}
 	}
 
-	return client, nil
+	return creds.TokenSource, nil
 }
 
 func main() {
@@ -1346,8 +1360,8 @@ func main() {
 		if !*updateOnly && !*masterManifestOnly {
 			// A driver add-on is publishable on its own: it attaches to a version
 			// an earlier build already created.
-			if *localFile == "" && *otaUpdateFile == "" && *recoveryFile == "" && *extensionFile == "" {
-				log.Fatal("At least one file must be provided: use --file for OS image, --ota-update for OTA update, --recovery-file for recovery file, or --extension-file for a driver add-on")
+			if *localFile == "" && *otaUpdateFile == "" && *recoveryFile == "" && *flashpackFile == "" && *extensionFile == "" {
+				log.Fatal("At least one file must be provided: use --file for OS image, --ota-update for OTA update, --recovery-file for recovery file, --flashpack-file for a flashpack, or --extension-file for a driver add-on")
 			}
 
 			// Validate main file if provided
@@ -1438,7 +1452,7 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
 
-	client, err := createStorageClientWithAuth(ctx, *accessToken)
+	client, err := createStorageClientWithAuth(ctx, *accessToken, *uploadConcurrency)
 	if err != nil {
 		log.WithError(err).Fatal("Failed to create storage client")
 	}
@@ -1618,16 +1632,12 @@ func main() {
 	if !*updateOnly {
 		log.Info("Starting parallel file processing...")
 
-		// Recovery dedupe: on eMMC/Thor devices --file and --recovery-file point
-		// at the SAME local tegraflash bundle, which today uploads the identical
-		// 7 GB object twice in parallel (both resolve to the same destination
-		// path and neither exists yet, so the skip-if-exists check races). When
-		// the two paths resolve to the same file on disk, upload it once as the
-		// main image and reuse that result (path/size) plus the main file's
-		// checksum for the recovery manifest fields — which is exactly what a
-		// separate upload would have produced. When they differ (Orin NVMe:
-		// main is the .img.zst, recovery is a distinct bundle) both upload as
-		// before.
+		// Recovery dedupe: when --file and --recovery-file name the same file on
+		// disk, both would upload the identical object to the same destination in
+		// parallel (the skip-if-exists check races). Upload it once as the main
+		// image and reuse that result (path/size) plus the main file's checksum
+		// for the recovery manifest fields — exactly what a separate upload would
+		// have produced. When they differ, both upload as before.
 		recoveryDedup := false
 		if *localFile != "" && *recoveryFile != "" {
 			same, err := sameLocalFile(*localFile, *recoveryFile)
@@ -2216,6 +2226,7 @@ func uploadFile(ctx context.Context, bucket *storage.BucketHandle, prefix, local
 	// Create the destination object writer
 	w := obj.NewWriter(ctx)
 	w.ContentType = contentType
+	w.ChunkRetryDeadline = chunkRetryDeadline
 	// Have GCS reject a corrupted upload server-side. The composite path already
 	// verifies CRC32C after compose; this stream verified nothing.
 	if sum, crcErr := crc32cFile(localPath); crcErr == nil {
@@ -2475,9 +2486,9 @@ func applyEDLFlashBundle(meta *VersionMetadata, deviceType, filePath string, fil
 }
 
 // hasPromotableImage reports whether a version carries a primary artifact the
-// promotion can copy. An EDL bundle is one, and it publishes no generic path.
+// promotion can copy. An EDL bundle or a flashpack is one, with no generic path.
 func hasPromotableImage(meta VersionMetadata) bool {
-	return meta.Path != "" || meta.InstallMode == "recovery" || meta.QcomflashPath != ""
+	return meta.Path != "" || meta.InstallMode == "recovery" || meta.QcomflashPath != "" || meta.FlashpackPath != ""
 }
 
 // applyRecoveryRootfsOnly publishes raw media solely under explicit
@@ -2668,6 +2679,19 @@ func validateBundlePromotion(deviceType string, source VersionMetadata, copiedBu
 	}
 	if copiedBundlePath == "" {
 		return fmt.Errorf("failed to copy the EDL flash bundle")
+	}
+	return nil
+}
+
+// validateFlashpackPromotion stops a promotion that would leave a version whose
+// only install artifact is its flashpack (Thor) without one. Recovery-first and
+// EDL versions have their own validators.
+func validateFlashpackPromotion(source VersionMetadata, copiedFlashpack string) error {
+	if source.FlashpackPath == "" || source.Path != "" || source.InstallMode == "recovery" || source.QcomflashPath != "" {
+		return nil
+	}
+	if copiedFlashpack == "" {
+		return fmt.Errorf("failed to copy the flashpack, the only install artifact")
 	}
 	return nil
 }
@@ -3372,6 +3396,9 @@ func promoteNightlyToStable(ctx context.Context, bucket *storage.BucketHandle, p
 	}
 	if err := validateBundlePromotion(deviceType, sourceVersionMeta, qcomflashDest); err != nil {
 		logger.WithError(err).Fatal("Cannot promote an incomplete EDL flash bundle")
+	}
+	if err := validateFlashpackPromotion(sourceVersionMeta, topFlashpackDest); err != nil {
+		logger.WithError(err).Fatal("Cannot promote without the flashpack")
 	}
 
 	// Create new stable version entry with promotion metadata

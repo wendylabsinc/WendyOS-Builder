@@ -834,7 +834,7 @@ jobs:
 
             # Build the explicit rootfs-only raw artifact from the external
             # layout. Targets that resolve to the same image file share it.
-            # eMMC and Thor remain recovery-only and use the tegraflash bundle.
+            # eMMC and Thor remain recovery-only; their flashpack is built from the bundle.
             case "$IMAGE_KIND" in
               generated-raw-img)
                 if [[ -z "${generated[$IMAGE_FILE]:-}" ]]; then
@@ -846,7 +846,7 @@ jobs:
                 fi
                 ;;
               *)
-                echo "No offline raw image for $DEVICE (storage=$STORAGE); the tegraflash-tar is the flash artifact."
+                echo "No offline raw image for $DEVICE (storage=$STORAGE); the flashpack is the flash artifact."
                 ;;
             esac
 
@@ -941,9 +941,11 @@ jobs:
           set -euo pipefail
           TOKEN=$(gcloud auth print-access-token)
           # Build the publisher once, then invoke it per storage variant. Targets
-          # of one MACHINE share their recovery bundle, OTA, SBOM and devkit
-          # objects (the Orin Nano's nvme and sd targets also share one raw image
-          # and bmap); the publisher skips re-uploading identical bytes. Each
+          # of one MACHINE share their OTA, SBOM and devkit objects (the Orin
+          # Nano's nvme and sd targets also share one raw image and bmap); the
+          # publisher skips re-uploading identical bytes. The tegraflash bundle
+          # stays on the runner: every Jetson installs from its flashpack or
+          # raw image, so no install path reads a published bundle. Each
           # variant emits its own manifest-entry JSON. Upload-only: ALL manifest writes stay
           # deferred to the single serialised publish / publish-pr job — parallel
           # entries must never read-modify-write shared manifests (412 races,
@@ -969,6 +971,7 @@ jobs:
 
             # Do the non-resolution work (bmaptool / gzip) the map says applies.
             BMAP_FILE=""
+            MAIN_FILE="$IMAGE_FILE"
             case "$IMAGE_KIND" in
               generated-raw-img)
                 # MACHINE-scoped image written by the generate step (never a fixed
@@ -990,10 +993,14 @@ jobs:
                 BMAP_FILE="${IMAGE_FILE}.bmap"
                 ;;
               tegraflash-bundle)
-                # No offline disk image for eMMC / Thor NVMe; IMAGE_FILE is the
-                # tegraflash bundle itself, already resolved and existence-checked
-                # (with df/ls diagnostics) by the resolver. No bmap for this kind.
-                : ;;
+                # eMMC / Thor NVMe install from the flashpack built from this
+                # bundle, which is therefore not published.
+                if [[ "$FLASHPACK_REQUIRED" != "true" ]]; then
+                  echo "::error::${DEVICE}/${STORAGE} ships a tegraflash bundle without a flashpack; nothing would be installable" >&2
+                  exit 1
+                fi
+                MAIN_FILE=""
+                ;;
               qcomflash-bundle)
                 # IMAGE_FILE is the qcomflash tarball itself, already
                 # existence-checked by the resolver. No bmap, no gzip.
@@ -1015,11 +1022,13 @@ jobs:
             ARGS=(
               --device "$DEVICE"
               --version "$UPLOAD_VERSION"
-              --file "$IMAGE_FILE"
               --access-token "$TOKEN"
               --upload-only
               --metadata-out "$ENTRY_FILE"
             )
+            if [[ -n "$MAIN_FILE" ]]; then
+              ARGS+=(--file "$MAIN_FILE")
+            fi
 
             if [[ "$IS_RELEASE" != "true" ]]; then
               ARGS+=(--nightly)
@@ -1029,14 +1038,6 @@ jobs:
             # nightly/release tree (see wendy os install --pr).
             if [[ "${GITHUB_EVENT_NAME:-}" == "pull_request" ]]; then
               ARGS+=(--pr "${PR_NUMBER}")
-            fi
-
-            # For all Jetson targets, include the tegraflash bundle as the recovery file
-            # (used for USB recovery-mode flashing via tegraflash.py / initrd-flash).
-            # wendy/blacksail builds use .tegraflash-tar (JP7/r38.4.x renamed the
-            # type from the older .tegraflash.tar.gz) — resolved above.
-            if [[ -n "$TEGRAFLASH_BUNDLE" ]]; then
-              ARGS+=(--recovery-file "$TEGRAFLASH_BUNDLE")
             fi
 
             # Attach the flashpack built in the previous step. FLASHPACK_REQUIRED
