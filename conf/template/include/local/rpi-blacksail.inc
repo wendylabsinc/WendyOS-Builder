@@ -3,7 +3,8 @@
 # Volatile journal logs in tmpfs (no /data partition).
 WENDYOS_PERSIST_JOURNAL_LOGS = "0"
 
-# U-Boot: blacksail-native oe-core U-Boot 2026.07, no version pin needed.
+# U-Boot: blacksail-native oe-core U-Boot; only the Pi 5 pins its own SRCREV
+# (meta-rpi-extensions u-boot_%.bbappend).
 #
 # 2026.04 booted the Pi 5 fine (confirmed via the dedicated debug connector). The
 # earlier "2026.04 won't boot" was a console-routing red herring: on the newer
