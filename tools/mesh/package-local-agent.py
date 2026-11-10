@@ -18,6 +18,8 @@ import unicodedata
 
 SERVICE_FILES = (
     'wendyos-agent.service',
+    'wendyos-agent-supervisor.conf',
+    'wendyos-agent-updater-supervisor.conf',
     'wendyos-agent-updater.service',
     'wendyos-agent-updater.timer',
     'wendyos-agent-updater.sh',
@@ -149,6 +151,7 @@ def package_agent(source, out, go, version, builder):
 
     out.mkdir(parents=True)
     binary = out / 'wendy-agent'
+    supervisor = out / 'wendy-agent-supervisor'
     go_path = shutil.which(str(go))
     if go_path is None:
         raise ValueError(f'Go executable not found: {go}')
@@ -167,8 +170,14 @@ def package_agent(source, out, go, version, builder):
         snapshot = Path(temporary) / 'source'
         snapshot.mkdir()
         export_revision(source, commit, snapshot, Path(temporary) / 'objects')
-        subprocess.run([go, 'build', *build_flags, '-o', str(binary), './go/cmd/wendy-agent'],
-                       cwd=snapshot, env=env, check=True)
+        # The image installs the supervisor from the same archive as the agent;
+        # a commit from before it packs the agent alone, like a release then.
+        targets = [(binary, './go/cmd/wendy-agent')]
+        if (snapshot / 'go/cmd/wendy-agent-supervisor').is_dir():
+            targets.append((supervisor, './go/cmd/wendy-agent-supervisor'))
+        for target, package in targets:
+            subprocess.run([go, 'build', *build_flags, '-o', str(target), package],
+                           cwd=snapshot, env=env, check=True)
 
         # Resolve automatic toolchain selection against the same exported module.
         build_info = run(go, 'version', '-m', binary, cwd=snapshot, env=env).splitlines()
@@ -176,9 +185,11 @@ def package_agent(source, out, go, version, builder):
         raise ValueError('Go launcher changed during the build')
     if clean_revision(source) != (commit, tree):
         raise ValueError('source revision changed during the build')
-    data = binary.read_bytes()
-    if len(data) < 20 or data[:4] != b'\x7fELF' or int.from_bytes(data[18:20], 'little') != 183:
-        raise ValueError('expected ARM64 ELF')
+    blobs = {target.name: target.read_bytes() for target, _ in targets}
+    for blob in blobs.values():
+        if len(blob) < 20 or blob[:4] != b'\x7fELF' or int.from_bytes(blob[18:20], 'little') != 183:
+            raise ValueError('expected ARM64 ELF')
+    data, supervisor_data = blobs['wendy-agent'], blobs.get('wendy-agent-supervisor')
 
     # The binary reports the compiler that actually built it, including an
     # automatically selected Go toolchain. A bare `go version` may report the
@@ -192,10 +203,11 @@ def package_agent(source, out, go, version, builder):
     files.mkdir(parents=True)
     archive = files / f'wendy-agent-linux-arm64-{version}.tar.gz'
     with archive.open('wb') as raw, gzip.GzipFile(fileobj=raw, mode='wb', filename='', mtime=0) as compressed, tarfile.open(fileobj=compressed, mode='w') as tar:
-        info = tarfile.TarInfo('wendy-agent-linux-arm64/wendy-agent')
-        info.mode = 0o755
-        info.size = len(data)
-        tar.addfile(info, io.BytesIO(data))
+        for name, blob in blobs.items():
+            info = tarfile.TarInfo(f'wendy-agent-linux-arm64/{name}')
+            info.mode = 0o755
+            info.size = len(blob)
+            tar.addfile(info, io.BytesIO(blob))
     archive_sha = hashlib.sha256(archive.read_bytes()).hexdigest()
     for name in SERVICE_FILES:
         (files / name).write_bytes(inputs[f'recipes-core/wendyos-agent/files/{name}'])
@@ -243,6 +255,7 @@ FILES:${{PN}}:append = " ${{sysconfdir}}/systemd/system/wendyos-agent-updater.ti
         'go_build_info': '\n'.join(build_info[1:]),
         'version': version,
         'binary_sha256': hashlib.sha256(data).hexdigest(),
+        'supervisor_sha256': hashlib.sha256(supervisor_data).hexdigest() if supervisor_data else None,
         'archive_sha256': archive_sha,
         'build_flags': build_flags,
         'updater_masked': True,
