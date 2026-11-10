@@ -1,0 +1,98 @@
+#!/bin/sh
+# mcu-flash --layouts | --resume <layout> | <layout> <loader.elf> <sketch.bin>
+# Writes the UNO Q's STM32 the way Arduino's upload does: loader and sketch,
+# each verified first and written only when it differs. The last stdout line is
+# "wendy-mcu-status <json>". Exit: 0 ok, 2 bad input, 3 GPIO, 4 OpenOCD.
+# --resume restarts an MCU that a failed or killed flash left halted.
+set -u
+
+SHARE=${MCU_SHARE_DIR:-/usr/share/wendyos/mcu}
+GPIO=${MCU_GPIO:-/usr/libexec/wendyos/mcu-gpio}
+ROUTER_UNIT=wendyos-arduino-router.service
+
+# One line per layout. The agent reads the regions from here for its ELF check.
+layouts() {
+	echo "zephyr-1 loader=0x08000000-0x080d0000 sketch=0x08100000-0x081c0000"
+}
+
+status() {
+	st_ok=$1 st_err=$2 st_loader=${3:-false} st_sketch=${4:-false}
+	st_router=false
+	systemctl is-active --quiet "$ROUTER_UNIT" && st_router=true
+	st_err=$(printf '%s' "$st_err" | tr '"\\\n' "'' ")
+	printf 'wendy-mcu-status {"ok":%s,"loader_written":%s,"sketch_written":%s,"router_active":%s,"error":"%s"}\n' \
+		"$st_ok" "$st_loader" "$st_sketch" "$st_router" "$st_err"
+}
+
+fail() {
+	code=$1
+	shift
+	echo "mcu-flash: $*" >&2
+	status false "$*"
+	exit "$code"
+}
+
+if [ "${1:-}" = "--layouts" ]; then
+	layouts
+	exit 0
+fi
+
+resume_only=false
+if [ "${1:-}" = "--resume" ] && [ $# -eq 2 ]; then
+	resume_only=true
+	set -- "$2" /dev/null /dev/null
+fi
+[ $# -eq 3 ] || fail 2 "usage: mcu-flash --layouts | --resume <layout> | <layout> <loader.elf> <sketch.bin>"
+layout=$1 loader=$2 sketch=$3
+
+line=$(layouts | awk -v l="$layout" '$1 == l')
+[ -n "$line" ] || fail 2 "unknown layout $layout"
+sketch_addr=$(printf '%s\n' "$line" | sed -n 's/.* sketch=\(0x[0-9a-f]*\)-.*/\1/p')
+
+for f in "$loader" "$sketch"; do
+	[ -r "$f" ] || fail 2 "cannot read $f"
+done
+
+# BOOT0 floats high: a reset without it low starts ST's ROM bootloader.
+"$GPIO" 37=0 || fail 3 "cannot drive BOOT0 (GPIO 37) low"
+chip=$("$GPIO" --chip) || fail 3 "no TLMM gpiochip"
+
+# OpenOCD only says it cannot request a line; name who holds it instead.
+busy=$(gpioinfo -c "$chip" 25 26 38 2>/dev/null | grep 'consumer=' | tr '\t\n' '  ')
+[ -z "$busy" ] || fail 3 "the microcontroller's SWD lines (GPIO 25, 26, 38) are in use: $busy"
+
+# Without this, a flash that failed after halting the core leaves no sketch running.
+resume() {
+	openocd -s "$SHARE" -c "set mcu_chip ${chip#gpiochip}" -f openocd_gpiod.cfg \
+		-c "reset_config srst_only srst_nogate srst_push_pull connect_assert_srst" -c init \
+		-f "resume-$layout.cfg" >/dev/null 2>&1
+}
+
+if $resume_only; then
+	resume || fail 4 "could not restart the microcontroller"
+	status true ""
+	exit 0
+fi
+
+work=$(mktemp -d) || fail 4 "mktemp failed"
+trap 'rm -rf "$work"' EXIT
+
+{
+	openocd -s "$SHARE" -c "set mcu_chip ${chip#gpiochip}" -f openocd_gpiod.cfg \
+		-c "set filename0 {$loader}" -c "set filename1 {$sketch}" \
+		-c "set sketch_addr $sketch_addr" -f "flash-$layout.cfg" 2>&1
+	echo $? > "$work/rc"
+} | tee "$work/log"
+
+rc=$(cat "$work/rc")
+[ "$rc" -eq 0 ] || resume
+for image in loader sketch; do
+	grep -q "wendy-mcu: $image verify failed" "$work/log" &&
+		fail 4 "the $image did not verify after writing; run again"
+done
+[ "$rc" -eq 0 ] || fail 4 "OpenOCD failed (exit $rc): $(grep -m1 -i error "$work/log")"
+
+loader_written=false sketch_written=false
+grep -q 'wendy-mcu: loader written' "$work/log" && loader_written=true
+grep -q 'wendy-mcu: sketch written' "$work/log" && sketch_written=true
+status true "" "$loader_written" "$sketch_written"

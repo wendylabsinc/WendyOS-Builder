@@ -1,0 +1,32 @@
+#!/bin/sh
+# mcu-gpio --chip | <line>=<0|1>...
+# Sets UNO Q MCU control lines on the TLMM and releases them: the TLMM keeps an
+# output's level after release, so nothing has to hold the lines.
+set -u
+
+TLMM_LABEL=500000.pinctrl
+
+# The PMIC's gpiochip probes over SPMI, so chip numbers can move; labels don't.
+chip=$(gpiodetect 2>/dev/null | awk -v l="[$TLMM_LABEL]" '$2 == l { print $1; exit }')
+if [ -z "$chip" ]; then
+	echo "mcu-gpio: no gpiochip labelled $TLMM_LABEL" >&2
+	exit 1
+fi
+
+if [ "${1:-}" = "--chip" ]; then
+	echo "$chip"
+	exit 0
+fi
+
+if [ $# -eq 0 ]; then
+	echo "usage: mcu-gpio --chip | <line>=<0|1>..." >&2
+	exit 2
+fi
+
+if ! out=$(gpioset -c "$chip" -t0 "$@" 2>&1); then
+	echo "mcu-gpio: cannot set $*: $out" >&2
+	for assignment in "$@"; do
+		gpioinfo -c "$chip" "${assignment%%=*}" >&2
+	done
+	exit 3
+fi
