@@ -8,3 +8,11 @@ SRC_URI:append:arduino-uno-q-wendyos = " \
     file://0001-arm64-dts-qcom-imola-keep-the-ADSP-remote-heap-out-of-the-page-allocator.patch \
     file://0002-arm64-dts-qcom-imola-attach-MPM-to-the-cluster-power-domain.patch \
     "
+
+# Wendy Net uses LE credit-based L2CAP channels on the onboard controller.
+SRC_URI:append:arduino-uno-q-wendyos = " file://wendy-net-ble.cfg"
+
+do_configure:append:arduino-uno-q-wendyos() {
+    grep -q '^CONFIG_BT_LE=y$' "${B}/.config" || \
+        bbfatal "Wendy Net BLE requires CONFIG_BT_LE=y on ${MACHINE}"
+}
