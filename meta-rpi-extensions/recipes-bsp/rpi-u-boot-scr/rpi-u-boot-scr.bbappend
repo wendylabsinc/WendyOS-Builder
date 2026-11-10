@@ -19,12 +19,9 @@ WENDYOS_ROOTFS_PART_B ?= "4"
 # committed before U-Boot falls back. 1 = one attempt.
 WENDYOS_BOOTLIMIT ?= "1"
 
-# Upper bound for U-Boot's DTB placement (see boot-ab.cmd.in). Empty drops the
-# setenv line, leaving fdt_high unset. Pi 4: 0x3e000000 is above the 768 MB CMA
-# window on every RAM size, because the first bank is the low 1 GB minus the
-# firmware's GPU memory on all of them; U-Boot never places the DTB above free
-# RAM, so the bound only has to be high enough. Pi 3/5 keep their
-# bench-validated layout.
+# Upper bound for U-Boot's DTB placement (see boot-ab.cmd.in); empty unsets it.
+# Pi 4: above the top of free low RAM on every model, so U-Boot puts the DTB as
+# high as it can, clear of the CMA window.
 WENDYOS_UBOOT_FDT_HIGH ?= ""
 WENDYOS_UBOOT_FDT_HIGH:raspberrypi4-64 = "0x3e000000"
 
@@ -44,18 +41,13 @@ do_compile[vardeps] += "WENDYOS_OTA WENDYOS_ROOTFS_PART_A WENDYOS_ROOTFS_PART_B 
 
 do_compile() {
     if [ "${WENDYOS_OTA}" = "wendy" ]; then
-        if [ -n "${WENDYOS_UBOOT_FDT_HIGH}" ]; then
-            fdt_high='s/@@WENDYOS_UBOOT_FDT_HIGH@@/${WENDYOS_UBOOT_FDT_HIGH}/'
-        else
-            fdt_high='/@@WENDYOS_UBOOT_FDT_HIGH@@/d'
-        fi
         sed -e 's/@@KERNEL_IMAGETYPE@@/${KERNEL_IMAGETYPE}/' \
             -e 's/@@KERNEL_BOOTCMD@@/${KERNEL_BOOTCMD}/' \
             -e 's/@@WENDYOS_ROOTFS_PART_A@@/${WENDYOS_ROOTFS_PART_A}/' \
             -e 's/@@WENDYOS_ROOTFS_PART_B@@/${WENDYOS_ROOTFS_PART_B}/' \
             -e 's/@@WENDYOS_BOOTLIMIT@@/${WENDYOS_BOOTLIMIT}/' \
             -e 's/@@WENDYOS_UBOOT_ENV_SIZE@@/${WENDYOS_UBOOT_ENV_SIZE}/g' \
-            -e "$fdt_high" \
+            -e 's/@@WENDYOS_UBOOT_FDT_HIGH@@/${WENDYOS_UBOOT_FDT_HIGH}/' \
             "${UNPACKDIR}/boot-ab.cmd.in" > "${WORKDIR}/boot.cmd"
     else
         sed -e 's/@@KERNEL_IMAGETYPE@@/${KERNEL_IMAGETYPE}/' \
