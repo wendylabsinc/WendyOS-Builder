@@ -18,5 +18,5 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: python3 tests/access-notice/recipe_test.py
-      - run: docker build -f tests/access-notice/Dockerfile -t wendy-access-notice-test .
+      - run: docker build --network host -f tests/access-notice/Dockerfile -t wendy-access-notice-test .
       - run: docker run --rm wendy-access-notice-test
