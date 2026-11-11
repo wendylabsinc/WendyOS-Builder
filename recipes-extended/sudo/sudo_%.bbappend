@@ -1,6 +1,6 @@
 FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
 
-# Passwordless sudo for the wendy user, fleet-wide. Shipped here (in the sudo
+# Reauthenticated local administration for the wendy user. Shipped here (in the sudo
 # recipe) rather than in wendyos-user because sudo-lib owns /etc/sudoers.d — a
 # single package owning the dir + file avoids the rpm dir-ownership conflict
 # that co-owning it from wendyos-user triggers. Build-time file (was a

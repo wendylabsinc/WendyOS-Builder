@@ -1,2 +1,7 @@
-wendy ALL=(ALL) NOPASSWD: ALL
+# Local administration requires the invoking user's provisioned authenticator.
+# Never reuse an earlier sudo authentication, including one from sudo -v.
+Defaults:wendy authenticate, timestamp_timeout=0, !rootpw, !targetpw, !runaspw
 
+# The local administrator may administer the host as root after authentication.
+# Unattended device services run under their own systemd identity, not this rule.
+wendy ALL=(root) PASSWD: ALL
