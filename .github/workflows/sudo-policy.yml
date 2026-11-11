@@ -1,0 +1,28 @@
+name: Sudo policy
+
+on:
+  pull_request:
+    paths:
+      - 'recipes-extended/sudo/**'
+      - 'tests/sudo-policy/**'
+      - '.github/workflows/sudo-policy.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'recipes-extended/sudo/**'
+      - 'tests/sudo-policy/**'
+      - '.github/workflows/sudo-policy.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sudo-policy:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build isolated sudo policy test image
+        run: docker build -f tests/sudo-policy/Dockerfile -t wendy-sudo-policy-test .
+      - name: Verify authentication and authorization behavior
+        run: docker run --rm --hostname localhost --network none wendy-sudo-policy-test
