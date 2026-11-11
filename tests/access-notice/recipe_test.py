@@ -62,6 +62,13 @@ class RecipeTests(unittest.TestCase):
             (self.root / 'etc/pam.d' / service).unlink()
             self.assertEqual(install_function(recipe, self.root, 1).returncode, 42)
 
+    def test_incomplete_pam_rejected(self):
+        for recipe, service in [('recipes-extended/shadow/shadow-usg-notice.inc', 'login'),
+                                ('recipes-connectivity/openssh/openssh_%.bbappend', 'sshd')]:
+            for content in ['', 'auth include common-auth\n', 'account include common-account\n']:
+                (self.root / 'etc/pam.d' / service).write_text(content)
+                self.assertEqual(install_function(recipe, self.root, 1).returncode, 42)
+
     def guard(self):
         result = subprocess.run(['python3', str(ROOT / 'scripts/check_usg_access_notice.py'),
                                  '--rootfs', str(self.root), '--ssh'], capture_output=True, text=True)
@@ -87,6 +94,22 @@ class RecipeTests(unittest.TestCase):
         self.valid_image()
         (self.root / 'lib/security/pam_wendy_notice.so').unlink()
         with self.assertRaisesRegex(ValueError, 'PAM module'):
+            self.guard()
+
+    def test_image_guard_rejects_symlink_cycle(self):
+        self.valid_image()
+        path = self.root / 'etc/alternatives/login'
+        path.unlink()
+        path.symlink_to('/bin/login')
+        with self.assertRaisesRegex(ValueError, 'symlink cycle'):
+            self.guard()
+
+    def test_image_guard_rejects_symlink_escape(self):
+        self.valid_image()
+        path = self.root / 'etc/alternatives/login'
+        path.unlink()
+        path.symlink_to('../../../login.shadow')
+        with self.assertRaisesRegex(ValueError, 'escapes IMAGE_ROOTFS'):
             self.guard()
 
     def test_image_guard_rejects_auth_bypass(self):

@@ -5,6 +5,8 @@ RDEPENDS:${PN}-sshd:append:class-target = " ${@'wendyos-access-notice' if d.getV
 do_install:append:class-target() {
     if [ "${WENDYOS_USG_NOTICE}" = "1" ]; then
         test -f ${D}${sysconfdir}/pam.d/sshd || bbfatal "USG notice requires PAM OpenSSH"
+        grep -Eq '^[[:space:]]*account[[:space:]]+' ${D}${sysconfdir}/pam.d/sshd || bbfatal "USG notice requires upstream SSH account checks"
+        grep -Eq '^[[:space:]]*session[[:space:]]+' ${D}${sysconfdir}/pam.d/sshd || bbfatal "USG notice requires upstream SSH session checks"
         # The public key is mandatory before this consent-only PAM auth step.
         # Retain all upstream account, password-change and session checks.
         {

@@ -1,4 +1,4 @@
-FROM ubuntu:24.04
+FROM debian:bookworm-slim
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     build-essential libpam0g-dev openssh-server openssh-client python3 python3-pexpect \
     && rm -rf /var/lib/apt/lists/*
