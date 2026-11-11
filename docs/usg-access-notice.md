@@ -78,7 +78,7 @@ From the repository root:
 ```sh
 python3 tests/access-notice/recipe_test.py
 docker build -f tests/access-notice/Dockerfile -t wendy-access-notice-test .
-docker run --rm wendy-access-notice-test
+docker run --rm --network none wendy-access-notice-test
 ```
 
 The container exercises real Linux-PAM, local `login` and OpenSSH with disposable
