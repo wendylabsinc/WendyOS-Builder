@@ -1,0 +1,22 @@
+name: USG access notice
+on:
+  pull_request:
+    paths:
+      - 'conf/distro/include/usg-access-notice.inc'
+      - 'classes/usg-access-notice-check.bbclass'
+      - 'scripts/check_usg_access_notice.py'
+      - 'recipes-security/wendyos-access-notice/**'
+      - 'recipes-connectivity/openssh/**'
+      - 'recipes-extended/shadow/**'
+      - 'tests/access-notice/**'
+      - '.github/workflows/usg-access-notice.yml'
+permissions:
+  contents: read
+jobs:
+  consent:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 tests/access-notice/recipe_test.py
+      - run: docker build --network host -f tests/access-notice/Dockerfile -t wendy-access-notice-test .
+      - run: docker run --rm --network none wendy-access-notice-test
