@@ -1,6 +1,6 @@
 SUMMARY = "WendyOS Default User Configuration"
 DESCRIPTION = "Creates the default 'wendy' user for WendyOS. \
-The base package creates the user (passwordless sudo is shipped by the sudo \
+The base package creates the user (sudo policy is shipped by the sudo \
 recipe, which owns /etc/sudoers.d). The -data-setup package provides the \
 first-boot service that initializes the home directory on the persistent /data \
 partition (Tegra only)."
@@ -20,18 +20,19 @@ PACKAGES = "${PN}-data-setup ${PN}"
 # Create wendy user - simplified group list (non-existent groups cause failures).
 # The render group (GPU render-node access for amdgpu/ROCm) is added on x86
 # only; the ARM fleet reaches the GPU via the nvidia nodes + video group and
-# does not need it. The group list is a variable so the password hash stays in
-# one place across the override.
+# does not need it.
 USERADD_PACKAGES = "${PN}"
 
 WENDY_GROUPS = "dialout,video,audio,users"
 WENDY_GROUPS:x86-wendyos = "dialout,video,audio,users,render"
 GROUPADD_PARAM:${PN}:x86-wendyos = "-r render"
 
-# Password 'wendy' hash generated with: openssl passwd -6 -salt 5ixFr0sKRtsKKKhY wendy
+# Images must not contain a shared login credential, including debug images.
+# An authenticated administrator can provision a unique password with passwd;
+# the target shadow/PAM stack enforces the password quality policy.
 # useradd -m creates /home/wendy on the rootfs; on Tegra, the first-boot service
 # in wendyos-user-data-setup re-initializes it from persistent storage (/data/home)
-USERADD_PARAM:${PN} = "-m -d /home/wendy -s /bin/bash -G ${WENDY_GROUPS} -p '\$6\$5ixFr0sKRtsKKKhY\$5SyCVB9y95JEITWZ8AMcMCrMF4Rvq97ymUjEoUCBKfTl7vWHjTLEboowxWF6hIJgBUMOnJQfeIRPPwYCUaIwm.' wendy"
+USERADD_PARAM:${PN} = "-m -d /home/wendy -s /bin/bash -G ${WENDY_GROUPS} -p '!' wendy"
 
 SYSTEMD_SERVICE:${PN}-data-setup = "wendyos-user-setup.service"
 SYSTEMD_AUTO_ENABLE:${PN}-data-setup = "enable"
@@ -51,7 +52,7 @@ do_install() {
 # co-owning that dir here caused an rpm dir-ownership conflict).
 FILES:${PN} = ""
 ALLOW_EMPTY:${PN} = "1"
-RDEPENDS:${PN} = "sudo bash systemd"
+RDEPENDS:${PN} = "sudo bash systemd shadow"
 
 # Data setup package: first-boot /data/home initialization (Tegra only)
 SUMMARY:${PN}-data-setup = "WendyOS User Home Directory Setup for /data Partition"
