@@ -641,12 +641,17 @@ Connect via SSH (over USB or Ethernet):
 ```bash
 # Find device IP (check DHCP, use .local name, or USB network)
 ssh wendy@wendy-<adjective>-<noun>.local
-# Default password: wendy
+# No default password is shipped. Provision access first as described below.
 
 # Verify system info
 cat /etc/os-release
 uname -a
 ```
+
+The `wendy` password is locked on new images, including debug images. Before
+using password login, provision a unique password through an authenticated
+Agent host shell. See [local credentials](docs/security-local-credentials.md)
+for provisioning, password requirements, and the effect of an A/B update.
 
 ### Available Images
 
