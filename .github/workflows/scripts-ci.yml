@@ -107,6 +107,9 @@ on:
       - 'scripts/networkmanager_config_test.py'
       - 'tests/nm-transient-psk/**'
       - 'meta-arduino-extensions/recipes-connectivity/wendyos-radio-addr/files/*.sh'
+      - 'meta-arduino-extensions/recipes-bsp/wendyos-mcu/files/*'
+      - 'meta-arduino-extensions/recipes-connectivity/arduino-router/files/*'
+      - 'tests/uno-q-mcu/**'
       # No *.sh filter: data-recovery-key is a command and carries no extension.
       - 'recipes-support/data-device/files/*'
       - 'recipes-support/data-crypt/files/*'
@@ -228,6 +231,9 @@ on:
       - 'scripts/networkmanager_config_test.py'
       - 'tests/nm-transient-psk/**'
       - 'meta-arduino-extensions/recipes-connectivity/wendyos-radio-addr/files/*.sh'
+      - 'meta-arduino-extensions/recipes-bsp/wendyos-mcu/files/*'
+      - 'meta-arduino-extensions/recipes-connectivity/arduino-router/files/*'
+      - 'tests/uno-q-mcu/**'
       # No *.sh filter: data-recovery-key is a command and carries no extension.
       - 'recipes-support/data-device/files/*'
       - 'recipes-support/data-crypt/files/*'
@@ -295,6 +301,9 @@ jobs:
         run: |
           python3 tests/bluetooth-le-pending/run.py
           python3 tests/bluetooth-le-pending/run-scan-order.py
+      - name: Test the UNO Q MCU flash and GPIO helpers
+        run: python3 tests/uno-q-mcu/run.py
+
       - name: Test legacy advertising expiry on pinned Raspberry Pi kernel
         run: |
           python3 -m unittest discover -s tests/bluetooth-advertising -p '*_test.py'
@@ -328,7 +337,9 @@ jobs:
                      recipes-core/wendyos-identity/files/generate-device-name.sh \
                      recipes-core/wendyos-identity/files/generate-device-name.test.sh \
                      recipes-connectivity/avahi/files/generate-hostname.sh \
-                     meta-arduino-extensions/recipes-connectivity/wendyos-radio-addr/files/wendyos-radio-addr.sh
+                     meta-arduino-extensions/recipes-connectivity/wendyos-radio-addr/files/wendyos-radio-addr.sh \
+                     meta-arduino-extensions/recipes-bsp/wendyos-mcu/files/mcu-flash \
+                     meta-arduino-extensions/recipes-bsp/wendyos-mcu/files/mcu-gpio
           shellcheck recipes-connectivity/networkmanager/files/wendyos-dhcp-ntp.sh \
                      recipes-connectivity/networkmanager/files/wendyos-dhcp-ntp.test.sh
 
