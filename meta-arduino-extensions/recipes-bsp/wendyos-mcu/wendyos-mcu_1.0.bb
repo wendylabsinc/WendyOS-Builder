@@ -1,7 +1,8 @@
 SUMMARY = "Flash and GPIO helpers for the Arduino UNO Q microcontroller"
 DESCRIPTION = "Writes the STM32's firmware over its SWD link to the TLMM GPIOs \
 with OpenOCD, the way Arduino's upload does, and sets the MCU control lines."
-# MIT: mcu-flash and mcu-gpio. GPL-2.0-or-later: the OpenOCD configs. Apache-2.0: flash- and resume-zephyr-1.cfg.
+# MIT: mcu-flash, mcu-gpio, erase-zephyr-1.cfg. GPL-2.0-or-later: the OpenOCD configs.
+# Apache-2.0: flash- and resume-zephyr-1.cfg.
 LICENSE = "MIT & GPL-2.0-or-later & Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302 \
                     file://${COMMON_LICENSE_DIR}/GPL-2.0-or-later;md5=fed54355545ffd980b814dab4a3b312c \
@@ -24,6 +25,7 @@ SRC_URI = " \
     file://mcu-gpio \
     file://flash-zephyr-1.cfg \
     file://resume-zephyr-1.cfg \
+    file://erase-zephyr-1.cfg \
     file://openocd_gpiod.cfg \
     file://stm32u5x.cfg \
     file://stm32x5x_common.cfg \
@@ -39,7 +41,7 @@ RDEPENDS:${PN} = "openocd libgpiod-tools"
 do_install() {
     install -d ${D}${libexecdir}/wendyos ${D}${datadir}/wendyos/mcu/target
     install -m 0755 ${UNPACKDIR}/mcu-flash ${UNPACKDIR}/mcu-gpio ${D}${libexecdir}/wendyos/
-    for f in flash-zephyr-1.cfg resume-zephyr-1.cfg openocd_gpiod.cfg stm32u5x.cfg stm32x5x_common.cfg mem_helper.tcl; do
+    for f in flash-zephyr-1.cfg resume-zephyr-1.cfg erase-zephyr-1.cfg openocd_gpiod.cfg stm32u5x.cfg stm32x5x_common.cfg mem_helper.tcl; do
         install -m 0644 ${UNPACKDIR}/$f ${D}${datadir}/wendyos/mcu/
     done
     install -m 0644 ${UNPACKDIR}/target/swj-dp.tcl ${D}${datadir}/wendyos/mcu/target/

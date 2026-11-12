@@ -1,9 +1,10 @@
 #!/bin/sh
-# mcu-flash --layouts | --resume <layout> | <layout> <loader.elf> <sketch.bin>
+# mcu-flash --layouts | --resume <layout> | --erase <layout> | <layout> <loader.elf> <sketch.bin>
 # Writes the UNO Q's STM32 the way Arduino's upload does: loader and sketch,
 # each verified first and written only when it differs. The last stdout line is
 # "wendy-mcu-status <json>". Exit: 0 ok, 2 bad input, 3 GPIO, 4 OpenOCD.
 # --resume restarts an MCU that a failed or killed flash left halted.
+# --erase removes the sketch, so the loader has nothing to run.
 set -u
 
 SHARE=${MCU_SHARE_DIR:-/usr/share/wendyos/mcu}
@@ -37,17 +38,22 @@ if [ "${1:-}" = "--layouts" ]; then
 	exit 0
 fi
 
-resume_only=false
-if [ "${1:-}" = "--resume" ] && [ $# -eq 2 ]; then
-	resume_only=true
-	set -- "$2" /dev/null /dev/null
-fi
-[ $# -eq 3 ] || fail 2 "usage: mcu-flash --layouts | --resume <layout> | <layout> <loader.elf> <sketch.bin>"
+mode=flash
+case "${1:-}" in
+--resume | --erase)
+	if [ $# -eq 2 ]; then
+		mode=${1#--}
+		set -- "$2" /dev/null /dev/null
+	fi
+	;;
+esac
+[ $# -eq 3 ] || fail 2 "usage: mcu-flash --layouts | --resume <layout> | --erase <layout> | <layout> <loader.elf> <sketch.bin>"
 layout=$1 loader=$2 sketch=$3
 
 line=$(layouts | awk -v l="$layout" '$1 == l')
 [ -n "$line" ] || fail 2 "unknown layout $layout"
 sketch_addr=$(printf '%s\n' "$line" | sed -n 's/.* sketch=\(0x[0-9a-f]*\)-.*/\1/p')
+sketch_end=$(printf '%s\n' "$line" | sed -n 's/.* sketch=0x[0-9a-f]*-\(0x[0-9a-f]*\).*/\1/p')
 
 for f in "$loader" "$sketch"; do
 	[ -r "$f" ] || fail 2 "cannot read $f"
@@ -68,11 +74,20 @@ resume() {
 		-f "resume-$layout.cfg" >/dev/null 2>&1
 }
 
-if $resume_only; then
+case $mode in
+resume)
 	resume || fail 4 "could not restart the microcontroller"
 	status true ""
 	exit 0
-fi
+	;;
+erase)
+	openocd -s "$SHARE" -c "set mcu_chip ${chip#gpiochip}" -f openocd_gpiod.cfg \
+		-c "set sketch_addr $sketch_addr" -c "set sketch_size $((sketch_end - sketch_addr))" \
+		-f "erase-$layout.cfg" 2>&1 || fail 4 "could not erase the sketch"
+	status true ""
+	exit 0
+	;;
+esac
 
 work=$(mktemp -d) || fail 4 "mktemp failed"
 trap 'rm -rf "$work"' EXIT
@@ -85,7 +100,15 @@ trap 'rm -rf "$work"' EXIT
 } | tee "$work/log"
 
 rc=$(cat "$work/rc")
-[ "$rc" -eq 0 ] || resume
+if [ "$rc" -ne 0 ]; then
+	resumed=false
+	resume && resumed=true
+	# Both images are written and verified; only the restart failed, and a second one worked.
+	if grep -q 'wendy-mcu: not running' "$work/log"; then
+		$resumed || fail 4 "the microcontroller does not run after the flash; run again"
+		rc=0
+	fi
+fi
 for image in loader sketch; do
 	grep -q "wendy-mcu: $image verify failed" "$work/log" &&
 		fail 4 "the $image did not verify after writing; run again"

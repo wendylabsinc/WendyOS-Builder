@@ -180,6 +180,34 @@ class Helpers(unittest.TestCase):
         self.assertIn('resume-zephyr-1.cfg', calls[0])
         self.assertIn('gpioset -c gpiochip1 -t0 37=0', self.calls())
 
+    def test_chip_not_running_after_flash_fails(self):
+        result = self.flash(STUB_OPENOCD_RC='1',
+                            STUB_OPENOCD_OUT='wendy-mcu: sketch written\\nwendy-mcu: not running')
+        self.assertEqual(result.returncode, 4)
+        self.assertIn('does not run after the flash', self.status(result)['error'])
+        self.assertEqual(len(self.openocd_calls()), 2)
+
+    def test_erase_mode_erases_the_sketch_region(self):
+        result = self.run_tool('mcu-flash', '--erase', 'zephyr-1')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue(self.status(result)['ok'])
+        call = self.openocd_calls()[0]
+        for part in ('set sketch_addr 0x08100000', 'set sketch_size 786432', 'erase-zephyr-1.cfg'):
+            self.assertIn(part, call)
+        self.assertNotIn('flash-zephyr-1.cfg', call)
+
+    def test_erase_recipe_keeps_the_loader(self):
+        cfg = (FILES / 'erase-zephyr-1.cfg').read_text()
+        self.assertIn('flash erase_address ${sketch_addr} ${sketch_size}', cfg)
+        self.assertNotIn('write_image', cfg)
+        self.assertTrue(cfg.rstrip().endswith('source [find resume-zephyr-1.cfg]'))
+
+    def test_restart_checks_the_core_runs(self):
+        resume = (FILES / 'resume-zephyr-1.cfg').read_text()
+        self.assertLess(resume.index('resume\n'), resume.index('mrw 0xE000EDF0'))
+        self.assertIn('echo "wendy-mcu: not running"', resume)
+        self.assertEqual(resume.count('shutdown error'), 1)
+
     def test_flash_recipe_ends_with_the_restart(self):
         cfg = (FILES / 'flash-zephyr-1.cfg').read_text()
         self.assertTrue(cfg.rstrip().endswith('source [find resume-zephyr-1.cfg]'))
