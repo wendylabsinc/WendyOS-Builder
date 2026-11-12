@@ -19,8 +19,10 @@ jobs:
       pull-requests: write
     steps:
       - name: Verify origin repo
+        env:
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
         run: |
-          if [ "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ]; then
+          if [ "$HEAD_REPOSITORY" != "$GITHUB_REPOSITORY" ]; then
             echo "Fork PRs are not permitted to trigger this workflow."
             exit 1
           fi
@@ -40,7 +42,7 @@ jobs:
             --jq '{title, body, number}' > pr_meta.json
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
 

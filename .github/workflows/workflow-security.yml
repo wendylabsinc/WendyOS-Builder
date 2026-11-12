@@ -1,0 +1,28 @@
+name: Workflow security
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  workflow-security:
+    permissions:
+      contents: read
+    name: Workflow security
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Audit workflow trust boundaries
+        run: |
+          python3 .github/scripts/ci_security_test.py
+          python3 -m venv "$RUNNER_TEMP/workflow-audit"
+          "$RUNNER_TEMP/workflow-audit/bin/pip" install --disable-pip-version-check zizmor==1.32.0
+          "$RUNNER_TEMP/workflow-audit/bin/zizmor" --offline --no-config --no-ignores --min-severity high --min-confidence high .github
