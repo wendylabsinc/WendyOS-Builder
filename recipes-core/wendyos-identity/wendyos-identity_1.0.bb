@@ -79,7 +79,8 @@ do_install() {
 }
 
 do_install:append() {
-    # Stable board identity for the wendy agent. Sourced as shell.
+    # Stable board identity for the wendy agent and wendyos-update. KEY=value
+    # lines, read as data.
     # BOARD is set in conf/machine/<machine>.conf; MACHINE is the yocto machine
     # name; STORAGE ("nvme"/"emmc"/"sd") is set in the board template local.conf.
     install -d ${D}${sysconfdir}/wendyos
