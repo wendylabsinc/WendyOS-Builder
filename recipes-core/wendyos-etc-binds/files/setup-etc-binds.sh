@@ -278,6 +278,21 @@ else
     log_info "/etc/${NM_CONNECTIONS} already mounted, skipping"
 fi
 
+# An empty profile survives on /data but NetworkManager cannot load it. Report
+# this separately from mount success, without reading credentials or removing
+# the file needed to investigate the loss. Diagnostics must not fail boot.
+for profile in "/etc/${NM_CONNECTIONS}"/*.nmconnection
+do
+    if [ -f "${profile}" ] && [ ! -s "${profile}" ]
+    then
+        # Quote control characters in filenames so one file produces one line.
+        printf -v profile_name '%q' "${profile}"
+        warning="Empty persistent NetworkManager profile: ${profile_name}; no saved settings or credentials can be loaded from this file. File preserved; reconfigure the connection to restore access."
+        logger -t "${LOG_TAG}" -p user.warning "${warning}" || true
+        printf '[WARN] %s\n' "${warning}" >&2 || true
+    fi
+done
+
 # PHASE 3: agent identity/enrollment state persistence (/etc/wendy-agent)
 log_info "Phase 3: Setting up agent state persistence"
 

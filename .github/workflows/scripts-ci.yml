@@ -104,6 +104,7 @@ on:
       - 'recipes-core/systemd-conf/**'
       - 'scripts/network_manager_ownership_test.py'
       - 'scripts/networkmanager_config_test.py'
+      - 'scripts/wifi_profile_persistence_test.py'
       - 'tests/nm-transient-psk/**'
       - 'meta-arduino-extensions/recipes-connectivity/wendyos-radio-addr/files/*.sh'
       # No *.sh filter: data-recovery-key is a command and carries no extension.
@@ -228,6 +229,7 @@ on:
       - 'recipes-core/systemd-conf/**'
       - 'scripts/network_manager_ownership_test.py'
       - 'scripts/networkmanager_config_test.py'
+      - 'scripts/wifi_profile_persistence_test.py'
       - 'tests/nm-transient-psk/**'
       - 'meta-arduino-extensions/recipes-connectivity/wendyos-radio-addr/files/*.sh'
       # No *.sh filter: data-recovery-key is a command and carries no extension.
@@ -341,6 +343,9 @@ jobs:
 
       - name: Verify NetworkManager connection defaults and installation
         run: python3 -m unittest scripts/networkmanager_config_test.py -v
+
+      - name: Test persistent network profiles and empty-profile diagnostics
+        run: python3 -m unittest scripts/wifi_profile_persistence_test.py -v
 
       - name: Test persistent clock packaging and systemd units
         run: |
