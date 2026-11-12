@@ -1,5 +1,7 @@
 inherit partuuid-rpi
 
+CMDLINE:append:rpi = " cgroup_enable=memory"
+
 # `root=` is set at boot by the A/B boot script (boot-ab.cmd, rpi-u-boot-scr)
 # from the selected slot. We only contribute WendyOS console + USB-gadget
 # additions via :append:rpi.
