@@ -19,3 +19,7 @@ ALTERNATIVE_PRIORITY = "100"
 ALTERNATIVE:${PN} = "runc"
 ALTERNATIVE_LINK_NAME[runc] = "${bindir}/runc"
 ALTERNATIVE_TARGET[runc] = "${bindir}/crun"
+
+# Turn off the recipe's own crun->runc symlink so it does not clash with the
+# alternatives-managed ${bindir}/runc link above.
+CRUN_AS_RUNC = "false"

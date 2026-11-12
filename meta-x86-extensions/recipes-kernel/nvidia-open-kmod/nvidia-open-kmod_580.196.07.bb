@@ -5,19 +5,24 @@ the RTX 5050 (10de:2d98) require these open modules; the matching proprietary \
 userspace (libcuda/NVML, provided by nvidia-userspace) must be the same PV."
 HOMEPAGE = "https://github.com/NVIDIA/open-gpu-kernel-modules"
 
-LICENSE = "MIT | GPL-2.0-only"
+LICENSE = "GPL-2.0-only OR MIT"
 LIC_FILES_CHKSUM = "file://COPYING;md5=1d5fa2a493e937d5a4b96e5e03b90f7c"
 
 inherit module
 
-# 580.105.08 is the first production driver family that knows Blackwell / RTX 50.
+# 580.196.07 lists the RTX 5050 (10de:2d98) as supported by the open modules.
+# It is needed because linux-yocto 6.18.40 and later give
+# pci_resize_resource() a fourth argument, and only 580.126.09 and later check for
+# it at build time. From 580.119.02 on, NVIDIA's 580 tags are only on its "580"
+# branch, not on "main".
 # Keep this in lockstep with nvidia-userspace (same PV) — kernel modules and the
 # proprietary userspace must match exactly.
 SRC_URI = " \
-    git://github.com/NVIDIA/open-gpu-kernel-modules.git;branch=main;protocol=https \
+    git://github.com/NVIDIA/open-gpu-kernel-modules.git;branch=580;protocol=https \
     file://nvidia.conf \
     "
-SRCREV = "2af9f1f0f7de4988432d4ae875b5858ffdb09cc2"
+# Tag 580.196.07.
+SRCREV = "02e64bf229e77873c9df22ebcfed6a3e0b813206"
 
 COMPATIBLE_MACHINE = "genericx86-64-wendyos"
 

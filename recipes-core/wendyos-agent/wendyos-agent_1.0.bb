@@ -19,7 +19,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda
 # they pin a known-good version so local builds stay reproducible. Bump them
 # when you want local builds to track a newer agent; CI always overrides them
 # with the release scripts/resolve-agent-release.sh picks.
-WENDYOS_AGENT_VERSION ??= "2026.07.03-194041"
+WENDYOS_AGENT_VERSION ??= "2026.11.12-135023"
 
 # The release publishes one tarball per arch (see WENDYOS_AGENT_RELEASE_ARCH
 # below), each with its own checksum. WENDYOS_AGENT_SHA256 defaults to the hash
@@ -27,8 +27,8 @@ WENDYOS_AGENT_VERSION ??= "2026.07.03-194041"
 # still passes WENDYOS_AGENT_SHA256 directly via the environment for whichever
 # arch it builds; because this default is weak (??=), that env value wins. Bump
 # these together with WENDYOS_AGENT_VERSION.
-WENDYOS_AGENT_SHA256_arm64 ??= "c84d35aee93a25866b9da41a112463f887f6cbb4cebcf2093c9795e8f3fafaa9"
-WENDYOS_AGENT_SHA256_amd64 ??= "33e3ac7ad8bdb3e715d1465e74a0fcd58bf548d12faa799d17e9f65b3317f9e3"
+WENDYOS_AGENT_SHA256_arm64 ??= "eefd1847e00db3c6f5030fd89dc59ac7f79b0b41205ceaa2531ffe3d9a37eb2e"
+WENDYOS_AGENT_SHA256_amd64 ??= "a2825a263faa119d18afbe6a91db458fe821af14c997bbab3abe28724a8c52ed"
 WENDYOS_AGENT_SHA256  ??= "${@d.getVar('WENDYOS_AGENT_SHA256_' + (d.getVar('WENDYOS_AGENT_RELEASE_ARCH') or 'arm64'))}"
 
 # Surface the resolved agent version as the package version for traceability

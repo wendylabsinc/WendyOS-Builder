@@ -11,7 +11,7 @@
 
 # Tree pin: blacksail (kernel 6.18). x86 moved off scarthgap because the target
 # hardware's GPU + WiFi (Intel 8086:e340) + BT (8086:e376) are all newer than
-# scarthgap's 6.6 kernel + 20240909 firmware; blacksail's 6.18 + 20260519
+# scarthgap's 6.6 kernel + 20240909 firmware; blacksail's 6.18 kernel + newer
 # firmware support them natively, and it lets the mt76 MT7920 backport be
 # dropped (upstream since v6.10). No SRCREV override: this board takes the
 # shared blacksail pin set from scripts/upstream-repos.env.

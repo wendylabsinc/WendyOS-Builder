@@ -53,22 +53,4 @@ IMAGE_INSTALL:append = " \
     v4l-utils \
     "
 
-# Enable DeepStream SDK support (optional - adds ~1GB to image)
-# Tegra/NVIDIA hardware only - DeepStream requires NVIDIA GPUs
-# Also enables l4t-deepstream.csv which provides:
-# - GPU device nodes (/dev/nvhost-*) for tegrastats and GPU monitoring
-# - CUDA compilation toolchain (headers, binaries, nvvm) for Triton/JIT
-# - Additional libraries (libnuma) and monitoring paths
 WENDYOS_USB_GADGET ?= "1"
-WENDYOS_DEEPSTREAM ?= "1"
-# The DeepStream package is BSP-specific:
-#   blacksail (JP7.2/r39.2, CUDA 13) -> deepstream-8.0 (meta-tegra-extensions-jp7)
-#   wrynose (r38.4) / other          -> none (no DeepStream recipe exists there)
-DEEPSTREAM_PKG = "${@'deepstream-8.0' if d.getVar('WENDYOS_LAYER_TREE') == 'blacksail' else ''}"
-IMAGE_INSTALL:append = " \
-    ${@oe.utils.ifelse( \
-        d.getVar('WENDYOS_DEEPSTREAM') == '1', \
-            d.getVar('DEEPSTREAM_PKG'), \
-            '' \
-        )} \
-    "

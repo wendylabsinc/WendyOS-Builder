@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SOURCES = {
     "pi": "https://raw.githubusercontent.com/raspberrypi/linux/95b85bebbedcaedfa7ca79116ed38b7376fba412/net/bluetooth/hci_sync.c",
     "jetson": "https://gitlab.com/nvidia/nv-tegra/3rdparty/canonical/linux-noble/-/raw/78272943bba3a47e633b28963b0cda60de503500/net/bluetooth/hci_sync.c",
-    "qcom": "https://raw.githubusercontent.com/qualcomm-linux/kernel/d49c33864d06e9672dce57738be8851384578fcf/net/bluetooth/hci_sync.c",
+    "qcom": "https://raw.githubusercontent.com/qualcomm-linux/kernel/1a0586064ee1fbcefe49b6382ee17a236c590879/net/bluetooth/hci_sync.c",
 }
 
 def callback(source):
@@ -27,10 +27,11 @@ def main():
     args = parser.parse_args()
     patch = ROOT / "recipes-kernel/linux/bluetooth-le-pending/0001-bluetooth-clean-up-rejected-pending-le-connection.patch"
     harness = Path(__file__).with_name("harness.c").read_text()
-    # Arduino layers the Qualcomm append, so requiring it again would double-apply.
+    # qcom-next already carries the fix (upstream 7e1e4047200f), so the Qualcomm
+    # append, which Arduino layers too, must not apply the backport again.
     qcom = (ROOT / "meta-qcom-extensions/recipes-kernel/linux/linux-qcom-next_%.bbappend").read_text()
-    assert "require recipes-kernel/linux/bluetooth-le-pending.inc" in qcom
-    assert 'BLUETOOTH_LE_PENDING_PATCH = "0001-bluetooth-clean-up-rejected-pending-le-connection-qcom.patch"' in qcom
+    assert "bluetooth-le-pending" not in qcom
+    assert "BLUETOOTH_LE_PENDING_PATCH" not in qcom
     arduino = (ROOT / "conf/template/boards/arduino-uno-q/bblayers.conf").read_text()
     assert "include/bblayers/qcom.inc" in arduino
     with tempfile.TemporaryDirectory(prefix="ble-pending-") as temp:
@@ -40,9 +41,13 @@ def main():
         for name, url in SOURCES.items():
             source = (args.sources / (name + ".c")).read_text() if args.sources else urllib.request.urlopen(url, timeout=120).read().decode()
             target.write_text(source)
-            selected_patch = patch.with_name(patch.stem + "-qcom.patch") if name == "qcom" else patch
-            subprocess.run(["patch", "--batch", "--fuzz=0", "-p1", "-i", str(selected_patch)], cwd=work, check=True)
-            for label, code, expected in [("original", source, 86), ("patched", target.read_text(), 0)]:
+            if name == "qcom":
+                # Fixed upstream: the shipped callback itself must pass.
+                cases = [("upstream", source, 0)]
+            else:
+                subprocess.run(["patch", "--batch", "--fuzz=0", "-p1", "-i", str(patch)], cwd=work, check=True)
+                cases = [("original", source, 86), ("patched", target.read_text(), 0)]
+            for label, code, expected in cases:
                 body = callback(code)
                 test = harness.replace("/* CALLBACK */", body)
                 c = work / (name + "-" + label + ".c")

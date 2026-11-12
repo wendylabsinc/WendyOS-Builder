@@ -52,7 +52,6 @@ WIC_CREATE_EXTRA_ARGS ?= "--no-fstab-update"
 do_image_wic[depends] += " \
     wic-tools:do_populate_sysroot \
     e2fsprogs-native:do_populate_sysroot \
-    gptfdisk-native:do_populate_sysroot \
     "
 
 # --- wendyos-update (wendy OTA) image deltas ------------------------------
@@ -86,7 +85,7 @@ create_wendyos_vm_dirs() {
     install -d -m 0755 ${IMAGE_ROOTFS}/data
 }
 
-ROOTFS_POSTPROCESS_COMMAND:append:vm-wendyos = " create_wendyos_vm_dirs;"
+ROOTFS_POSTPROCESS_COMMAND:append:vm-wendyos = " create_wendyos_vm_dirs"
 
 # /lib64 -> lib compatibility symlink (x86_64 only in effect: the aarch64 ELF
 # interpreter is /lib/ld-linux-aarch64.so.1, which usrmerge already resolves, so
@@ -110,5 +109,5 @@ create_lib64_compat() {
     [ -e ${IMAGE_ROOTFS}/lib64 ] || ln -sf lib ${IMAGE_ROOTFS}/lib64
 }
 
-ROOTFS_POSTPROCESS_COMMAND:append:vm-wendyos = " create_lib64_compat;"
+ROOTFS_POSTPROCESS_COMMAND:append:vm-wendyos = " create_lib64_compat"
 

@@ -5,7 +5,6 @@
 WENDYOS_UPDATE_BOOTLOADER ?= "0"
 WENDYOS_EFI_DEBUG ?= "0"
 WENDYOS_USB_GADGET ?= "0"
-WENDYOS_DEEPSTREAM ?= "0"
 
 # Disable persistent journal logs for QEMU (no /data partition)
 # This prevents var-log.mount from being created

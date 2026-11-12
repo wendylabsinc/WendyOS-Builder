@@ -50,7 +50,7 @@ add_config_fstab() {
     echo "/dev/wendyos/config  /config  auto  defaults,nofail  0 0" >> ${IMAGE_ROOTFS}${sysconfdir}/fstab
     mkdir -p ${IMAGE_ROOTFS}/config
 }
-ROOTFS_POSTPROCESS_COMMAND:append:tegra = " add_config_fstab;"
+ROOTFS_POSTPROCESS_COMMAND:append:tegra = " add_config_fstab"
 
 # A minimal UEFI drives only the TNSPEC_BOOTDEV disk class, and the Orin images boot from SD, eMMC or NVMe.
 python () {

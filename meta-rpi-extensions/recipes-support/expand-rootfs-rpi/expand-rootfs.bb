@@ -30,7 +30,7 @@ FILES:${PN} += " \
 SYSTEMD_SERVICE:${PN} = "expand-rootfs.service"
 SYSTEMD_AUTO_ENABLE = "enable"
 
-RDEPENDS:${PN} = "bash coreutils util-linux parted e2fsprogs-resize2fs udev gptfdisk"
+RDEPENDS:${PN} = "bash coreutils util-linux parted e2fsprogs-resize2fs udev util-linux-sfdisk"
 
 COMPATIBLE_MACHINE = "rpi"
 

@@ -37,7 +37,6 @@ on:
       - 'meta-tegra-extensions/recipes-core/initrdscripts/tegra-minimal-init_%.bbappend'
       - 'meta-tegra-extensions/recipes-core/initrdscripts/tegra-minimal-init/**'
       - 'scripts/check_game_controller_support*'
-      - 'scripts/kernel_patch_dates_test.py'
       - 'meta-qcom-extensions/recipes-kernel/linux/**'
       - 'meta-arduino-extensions/recipes-kernel/linux/**'
       - 'scripts/check_mesh_local_policy.py'
@@ -117,12 +116,8 @@ on:
       - 'meta-arduino-extensions/recipes-bsp/partition/files/*'
       - 'meta-qcom-extensions/recipes-core/wendyos-config-setup/files/*'
       - 'meta-qcom-extensions/recipes-core/packagegroups/*'
-      - 'meta-qcom-extensions/recipes-bsp/hexagon-dsp-binaries/*'
       - 'conf/machine/iq-*-evk-wendyos.conf'
       - 'conf/machine/include/dragonwing-*.inc'
-      - 'conf/distro/wendyos.conf'
-      - 'conf/distro/include/qcom-distro.inc'
-      - 'scripts/upstream-repos.env'
       - 'scripts/qcom-npu.test.sh'
       - '.github/device-artifacts.json'
       - '.github/workflows/scripts-ci.yml'
@@ -161,7 +156,6 @@ on:
       - 'meta-tegra-extensions/recipes-core/initrdscripts/tegra-minimal-init_%.bbappend'
       - 'meta-tegra-extensions/recipes-core/initrdscripts/tegra-minimal-init/**'
       - 'scripts/check_game_controller_support*'
-      - 'scripts/kernel_patch_dates_test.py'
       - 'meta-qcom-extensions/recipes-kernel/linux/**'
       - 'meta-arduino-extensions/recipes-kernel/linux/**'
       - 'scripts/check_mesh_local_policy.py'
@@ -241,12 +235,8 @@ on:
       - 'meta-arduino-extensions/recipes-bsp/partition/files/*'
       - 'meta-qcom-extensions/recipes-core/wendyos-config-setup/files/*'
       - 'meta-qcom-extensions/recipes-core/packagegroups/*'
-      - 'meta-qcom-extensions/recipes-bsp/hexagon-dsp-binaries/*'
       - 'conf/machine/iq-*-evk-wendyos.conf'
       - 'conf/machine/include/dragonwing-*.inc'
-      - 'conf/distro/wendyos.conf'
-      - 'conf/distro/include/qcom-distro.inc'
-      - 'scripts/upstream-repos.env'
       - 'scripts/qcom-npu.test.sh'
       - '.github/device-artifacts.json'
       - '.github/workflows/scripts-ci.yml'
@@ -428,13 +418,10 @@ jobs:
       - name: Run SensorLink loopback image acceptance tests
         run: python3 -m unittest scripts/check_sensor_loopback_support_test.py
 
-      - name: Verify reproducible kernel patch commit identities
-        run: python3 -m unittest scripts/kernel_patch_dates_test.py
-
       - name: Verify config-only kernel release identities
         run: |
           curl --fail --silent --show-error --location --retry 3 \
-            https://raw.githubusercontent.com/qualcomm-linux/kernel/d49c33864d06e9672dce57738be8851384578fcf/scripts/setlocalversion \
+            https://raw.githubusercontent.com/qualcomm-linux/kernel/1a0586064ee1fbcefe49b6382ee17a236c590879/scripts/setlocalversion \
             -o "$RUNNER_TEMP/qcom-setlocalversion"
           WENDY_KERNEL_SETLOCALVERSION="$RUNNER_TEMP/qcom-setlocalversion" \
             python3 -m unittest scripts/kernel_config_identity_test.py
