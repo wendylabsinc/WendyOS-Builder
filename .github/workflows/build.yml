@@ -1528,3 +1528,25 @@ jobs:
           jq -s '.' "$RUNNER_TEMP/master-updates.jsonl" > "$RUNNER_TEMP/master-updates.json"
           "$RUNNER_TEMP/publisher" --master-manifest-batch "$RUNNER_TEMP/master-updates.json" --access-token "$TOKEN" </dev/null
           exit "$failed"
+
+  required-ci:
+    name: Required CI
+    if: ${{ always() }}
+    needs: [detect-changes, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Require every selected image build to pass
+        env:
+          DETECT_RESULT: ${{ needs.detect-changes.result }}
+          BUILD_RESULT: ${{ needs.build.result }}
+          DEVICES: ${{ needs.detect-changes.outputs.devices }}
+        run: |
+          test "$DETECT_RESULT" = success
+          if [ -z "$DEVICES" ]; then
+            test "$BUILD_RESULT" = skipped
+          else
+            test "$BUILD_RESULT" = success
+          fi
