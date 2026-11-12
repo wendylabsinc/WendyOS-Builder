@@ -28,43 +28,83 @@ log_error() {
     echo "[ERROR] $1" >&2
 }
 
-# BOARD is consumed by wendyos-update. Read it as data, never source a
-# persistent file as shell code. Reject empty, malformed or duplicate entries.
-valid_device_type() {
-    local line board="" count=0
-    [ -f "$1" ] || return 1
+# The BOARD a device-type file names, by the same rule wendyos-update uses:
+# lines are trimmed and the first non-empty BOARD= wins. The file is data on a
+# writable partition, so it is parsed, never sourced.
+device_type_board() {
+    local file="$1" line
+    [ -f "$file" ] || return 1
+    # bash drops NUL bytes when it reads; the updater keeps them.
+    [ "$(tr -d '\0' < "$file" | wc -c)" -eq "$(wc -c < "$file")" ] || return 1
     while IFS= read -r line || [ -n "$line" ]; do
+        line="${line#"${line%%[![:space:]]*}"}"
+        line="${line%"${line##*[![:space:]]}"}"
         case "$line" in
-            BOARD=*)
-                board="${line#BOARD=}"
-                count=$((count + 1))
+            BOARD=?*)
+                printf '%s\n' "${line#BOARD=}"
+                return 0
                 ;;
         esac
-    done < "$1"
-    [ "$count" -eq 1 ] && [[ "$board" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]
+    done < "$file"
+    return 1
 }
 
+same_content() {
+    [ -f "$1" ] && [ -f "$2" ] &&
+        [ "$(sha256sum < "$1")" = "$(sha256sum < "$2")" ]
+}
+
+# The device type describes the booted image, so the persisted copy follows the
+# image's own file: it is replaced whenever it differs (empty, cut short, from
+# another board, or from an older image).
 restore_device_type() {
-    local source="$1" target="$2" stage
-    valid_device_type "$target" && return 0
-    if ! valid_device_type "$source" || [ -d "$target" ]; then
-        log_error "Cannot restore device type from ${source} to ${target}"
+    local image="$1" target="$2" stage="${2}.tmp"
+
+    # Left behind when power was cut in the middle of an earlier restore.
+    rm -f "$stage" || true
+
+    if ! device_type_board "$image" > /dev/null; then
+        log_error "Image device type ${image} is missing or names no board"
+        # Nothing to copy from: the persisted file is usable if it names a board.
+        if device_type_board "$target" > /dev/null; then
+            return 0
+        fi
         return 1
     fi
 
-    # Stage beside the target so rename is atomic. A failed/interrupted copy
-    # must not leave a partial identity that the next boot treats as valid.
-    stage=$(mktemp "${target}.XXXXXX") || return 1
-    if cp "$source" "$stage" && valid_device_type "$stage" &&
-        chmod 0644 "$stage" && sync && mv -f "$stage" "$target"
-    then
-        log_info "Restored device type from ${source}"
+    if same_content "$image" "$target"; then
         return 0
     fi
-    rm -f "$stage"
+
+    if [ -d "$target" ]; then
+        log_error "Cannot restore device type: ${target} is a directory"
+        return 1
+    fi
+
+    # Staged beside the target and renamed, so a power cut leaves either the
+    # old file or the whole new one. Synced first: a rename can reach the disk
+    # before the data it names.
+    if cp "$image" "$stage" && chmod 0644 "$stage" &&
+        same_content "$image" "$stage" &&
+        sync "$stage" && mv -f "$stage" "$target"
+    then
+        sync "$(dirname "$target")" || true
+        log_info "Device type set to $(device_type_board "$target") from ${image}"
+        return 0
+    fi
+    rm -f "$stage" || true
     log_error "Failed to restore device type to ${target}"
     return 1
 }
+
+# Tests source this file for the functions above.
+if [ "${BASH_SOURCE[0]}" != "$0" ]; then
+    return 0
+fi
+
+# Set when a step failed that does not stop the bind mounts. The mounts are
+# still set up, then the unit fails so the fault is visible.
+DEGRADED=0
 
 # Verify /data is mounted
 if ! mountpoint -q /data
@@ -140,14 +180,21 @@ then
     chmod 755 "${DATA_ETC}/wendyos"
 fi
 
-# The rootfs copy remains accessible even when /etc/wendyos is already
-# bind-mounted. Repair invalid persisted metadata, including an empty file
-# left by an interrupted seed, without replacing a valid board identity.
-if ! restore_device_type /usr/lib/wendyos/device-type "${DATA_ETC}/wendyos/device-type"
+# Until the bind below, /etc/wendyos/device-type is the image's own file. Once
+# bound it is the /data copy, so a restart of this unit can only check it.
+if mountpoint -q /etc/wendyos
 then
-    # Keep networking and enrollment mounts available so the device can be
-    # diagnosed remotely even if its build-time metadata is missing or invalid.
-    log_error "Device type remains unavailable; continuing with configuration mounts"
+    if ! device_type_board "${DATA_ETC}/wendyos/device-type" > /dev/null
+    then
+        log_error "Device type is unusable and /etc/wendyos is already mounted; a reboot restores it"
+        DEGRADED=1
+    fi
+elif ! restore_device_type /etc/wendyos/device-type "${DATA_ETC}/wendyos/device-type"
+then
+    # Not fatal here: without the network and enrollment mounts below the
+    # device could not be reached to diagnose it.
+    log_error "Device type remains unusable; continuing with configuration mounts"
+    DEGRADED=1
 fi
 
 # Bind-mount entire /etc/wendyos/ directory
@@ -177,14 +224,22 @@ fi
 if mountpoint -q /etc/wendyos && [ -f /usr/lib/wendyos/version.txt ]
 then
     log_info "Refreshing /etc/wendyos/version.txt from /usr/lib/wendyos/"
-    cp -p /usr/lib/wendyos/version.txt /etc/wendyos/version.txt
+    if ! cp -p /usr/lib/wendyos/version.txt /etc/wendyos/version.txt
+    then
+        log_error "Failed to refresh /etc/wendyos/version.txt"
+        DEGRADED=1
+    fi
 fi
 
 # Same OTA-freshness refresh for the builder commit stamp (see version.txt above).
 if mountpoint -q /etc/wendyos && [ -f /usr/lib/wendyos/commit ]
 then
     log_info "Refreshing /etc/wendyos/commit from /usr/lib/wendyos/"
-    cp -p /usr/lib/wendyos/commit /etc/wendyos/commit
+    if ! cp -p /usr/lib/wendyos/commit /etc/wendyos/commit
+    then
+        log_error "Failed to refresh /etc/wendyos/commit"
+        DEGRADED=1
+    fi
 fi
 
 # [Note]
@@ -364,7 +419,12 @@ then
             log_info "Creating ${DATA_AGENT} for persistent agent state"
             mkdir -p "${DATA_AGENT}"
         fi
-        chmod 700 "${DATA_AGENT}"
+        # Not a reason to skip the bind: without it the device is unenrolled.
+        if ! chmod 700 "${DATA_AGENT}"
+        then
+            log_error "Failed to set the mode of ${DATA_AGENT}"
+            DEGRADED=1
+        fi
         mkdir -p "${AGENT_DIR}"
 
         log_info "Bind-mounting ${DATA_AGENT} → ${AGENT_DIR}"
@@ -402,10 +462,14 @@ do
     fi
 done
 
-if [ ${FAILED} -eq 0 ]
+if [ ${FAILED} -eq 0 ] && [ ${DEGRADED} -eq 0 ]
 then
     log_info "All bind mounts successfully configured"
     exit 0
+elif [ ${FAILED} -eq 0 ]
+then
+    log_error "Bind mounts are active, but an identity file could not be written, check logs"
+    exit 1
 else
     log_error "Some bind mounts failed, check logs"
     exit 1

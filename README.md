@@ -867,7 +867,7 @@ In `build/conf/local.conf`:
 
 Runtime consumers (e.g. the wendy agent) read two files from `/etc/wendyos/`:
 
-- **`/etc/wendyos/device-type`** — shell-sourceable, board + yocto machine.
+- **`/etc/wendyos/device-type`** — `KEY=value` lines, board + yocto machine.
   Example for Jetson Orin Nano:
 
   ```
@@ -879,40 +879,43 @@ Runtime consumers (e.g. the wendy agent) read two files from `/etc/wendyos/`:
   `BOARD=`), set by `WENDYOS_BOARD_ID` in `conf/machine/<machine>.conf`.
   `MACHINE` is bitbake's full yocto machine name.
 
-  On Tegra the file is seeded into `/data` once, so a unit keeps the lines of
-  the image whose install created its `/data` (a fresh recovery or raw-image
-  install seeds it again). A unit installed from a release that still built
-  one image per disk keeps that image's lines after it updates, including
-  `STORAGE=emmc`, `nvme` or `sd`: an AGX Orin installed on eMMC keeps
-  `BOARD=jetson-agx-orin-emmc` and `MACHINE=jetson-agx-orin-devkit-emmc-wendyos`
-  (its OTA artifact accepts both board ids), and a Nano installed on NVMe keeps
-  `MACHINE=jetson-orin-nano-devkit-nvme-wendyos`. A unit installed from current
-  images has `BOARD=jetson-agx-orin` or `jetson-orin-nano`, the new `MACHINE`
-  and no `STORAGE` line, whatever its disk. Branch on `BOARD`, and treat
-  `jetson-agx-orin-emmc` as `jetson-agx-orin`; never branch on `MACHINE`.
+  On boards with a `/data` partition the file lives in `/data`, and
+  `setup-etc-binds.sh` makes it a copy of the booted image's file on every
+  boot. A unit therefore always has the lines of the image it runs. A unit
+  installed from a release that still built one image per disk has that image's
+  lines (an AGX Orin installed on eMMC has `BOARD=jetson-agx-orin-emmc`,
+  `MACHINE=jetson-agx-orin-devkit-emmc-wendyos` and `STORAGE=emmc`) until it
+  first boots a current image; that is why the AGX Orin OTA artifact accepts
+  both board ids (`WENDYOS_EXTRA_BOARD_IDS`). From then on it has
+  `BOARD=jetson-agx-orin` or `jetson-orin-nano`, the new `MACHINE` and no
+  `STORAGE` line, whatever its disk: the agent reports the disk the unit booted
+  from. Branch on `BOARD`, and treat `jetson-agx-orin-emmc` as
+  `jetson-agx-orin`; never branch on `MACHINE`.
 
 - **`/etc/wendyos/version.txt`** — the installed OS version, e.g.
   `WendyOS-0.14.0`. Reflects the currently running rootfs (always fresh after
   an OTA update).
 
-Runtime consumers can `. /etc/wendyos/device-type` and branch on `$BOARD`
-without maintaining their own board-to-machine lookup table.
+Runtime consumers read the `BOARD=` line and branch on it without maintaining
+their own board-to-machine lookup table. Parse the file as data, do not source
+it: it lives on `/data` and is not validated as shell code.
 
 #### Where these files live on disk
 
 The `/etc/wendyos/` directory is bind-mounted from `/data/etc/wendyos/` on
-Tegra (via `setup-etc-binds.sh`), so runtime-generated identity (`device-uuid`,
+every board with a `/data` partition (via `setup-etc-binds.sh`), so runtime-generated identity (`device-uuid`,
 `device-name`) persists across OTA updates. The two build-time files
-above have different refresh semantics and are seeded differently:
+above are refreshed from the booted image on every boot:
 
 | File | Installed by recipe to | Runtime lifecycle |
 |---|---|---|
-| `device-type` | `/etc/wendyos/device-type` + authoritative `/usr/lib/wendyos/device-type` | `setup-etc-binds.sh` atomically restores missing or invalid persistent metadata from `/usr/lib/`; valid board identities are preserved |
+| `device-type` | `/etc/wendyos/device-type` (rootfs) | `setup-etc-binds.sh` copies the image's file to `/data` on every boot when the `/data` copy differs (missing, empty, damaged, or from another image) — stays current across OTA |
 | `version.txt` | `/usr/lib/wendyos/version.txt` (authoritative) + `/etc/wendyos/version.txt` symlink | `setup-etc-binds.sh` overwrites `/etc/wendyos/version.txt` from `/usr/lib/` on every boot — stays current across OTA |
 
-On RPi and QEMU (no `/data`), `setup-etc-binds.sh` doesn't run. `device-type`
-lives directly on rootfs and `version.txt` is a symlink to the `/usr/lib/`
-copy — both always current.
+On images built without the OTA stack (`WENDYOS_OTA = "none"`, e.g. QEMU)
+there is no `/data` and `setup-etc-binds.sh` doesn't run. `device-type` lives
+directly on rootfs and `version.txt` is a symlink to the `/usr/lib/` copy —
+both always current.
 
 ### Per-Board Repo Overrides
 
