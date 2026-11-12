@@ -23,6 +23,9 @@ on:
       - 'scripts/resolve-agent-release*'
       - 'scripts/make-t234-flashpack.sh'
       - 'scripts/t234_flashpack_manifest*'
+      - 'scripts/test-orin-seed-producer.py'
+      - 'scripts/orin_seed_producer_test.py'
+      - '.github/workflows/build.yml'
       - 'scripts/make-jetson-disk-img.py'
       - 'scripts/make_jetson_disk_img_test.py'
       - 'scripts/tegra_boot_efi_generator_test.py'
@@ -144,6 +147,9 @@ on:
       - 'scripts/resolve-agent-release*'
       - 'scripts/make-t234-flashpack.sh'
       - 'scripts/t234_flashpack_manifest*'
+      - 'scripts/test-orin-seed-producer.py'
+      - 'scripts/orin_seed_producer_test.py'
+      - '.github/workflows/build.yml'
       - 'scripts/make-jetson-disk-img.py'
       - 'scripts/make_jetson_disk_img_test.py'
       - 'scripts/tegra_boot_efi_generator_test.py'
@@ -382,7 +388,7 @@ jobs:
         run: bash scripts/qcom-npu.test.sh
 
       - name: Run T234 flashpack manifest tests
-        run: python3 -m unittest scripts/t234_flashpack_manifest_test.py
+        run: python3 -m unittest scripts/t234_flashpack_manifest_test.py scripts/orin_seed_producer_test.py
 
       - name: Run FAT image marker tests
         run: |

@@ -249,6 +249,8 @@ jobs:
       matrix: ${{ fromJson(needs.detect-changes.outputs.matrix) }}
     env:
       WENDYOS_HOST_BUILD: "1"
+      # Reviewed host-writer fixture, independent of the produced image commit.
+      ORIN_SEED_CLI_COMMIT: b3af32266cb6c889db7bb42b2a580b5905e2f0cf
 
     steps:
       - name: Checkout
@@ -928,6 +930,44 @@ jobs:
             echo "built flashpack: ${FLASHPACKS[0]}"
             echo "::endgroup::"
           done
+
+      - name: Checkout reviewed Orin seed rehearsal
+        if: matrix.device == 'jetson-orin-nano'
+        uses: actions/checkout@v4
+        with:
+          repository: wendylabsinc/WendyOS
+          ref: ${{ env.ORIN_SEED_CLI_COMMIT }}
+          path: orin-seed-cli
+          persist-credentials: false
+
+      - name: Rehearse full Nano NVMe seed writes
+        id: orin-seed-rehearsal
+        if: matrix.device == 'jetson-orin-nano'
+        timeout-minutes: 110
+        working-directory: ${{ github.workspace }}/wendyos
+        env:
+          UPLOAD_VERSION: ${{ needs.detect-changes.outputs.version }}
+          PRIV_TAG: ${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.device }}
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/orin-seed-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "evidence=$evidence" >> "$GITHUB_OUTPUT"
+          python3 scripts/test-orin-seed-producer.py \
+            --cli-root "$GITHUB_WORKSPACE/orin-seed-cli" \
+            --cli-commit "$ORIN_SEED_CLI_COMMIT" \
+            --archive-dir "$GITHUB_WORKSPACE/flashpack-out/jetson-orin-nano-devkit-wendyos-nvme" \
+            --work-parent "/wendy/build-tmp/$PRIV_TAG" \
+            --version "$UPLOAD_VERSION" --output "$evidence"
+
+      - name: Retain Orin host-writer evidence
+        if: always() && matrix.device == 'jetson-orin-nano' && steps.orin-seed-rehearsal.outputs.evidence != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: orin-seed-host-${{ matrix.device }}
+          path: ${{ steps.orin-seed-rehearsal.outputs.evidence }}
+          if-no-files-found: error
+          retention-days: 14
+          overwrite: true
 
       - name: Upload image and emit manifest entry
         env:
