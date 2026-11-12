@@ -7,10 +7,13 @@
 
 set -Eeuo pipefail
 
-DEVICE_NAME_FILE="/etc/wendyos/device-name"
+DEVICE_NAME_FILE="${DEVICE_NAME_FILE:-/etc/wendyos/device-name}"
 DEVICE_NAME_DIR=$(dirname "$DEVICE_NAME_FILE")
-ADJECTIVES_FILE="/usr/share/wendyos/adjectives.txt"
-NOUNS_FILE="/usr/share/wendyos/nouns.txt"
+ADJECTIVES_FILE="${ADJECTIVES_FILE:-/usr/share/wendyos/adjectives.txt}"
+NOUNS_FILE="${NOUNS_FILE:-/usr/share/wendyos/nouns.txt}"
+# Written by the CLI at flash time; the agent applies and deletes it later in
+# boot, too late for gadget-setup, which bakes the name into the USB descriptor.
+WENDY_CONF="${WENDY_CONF:-/config/wendy.conf}"
 
 # Logging
 log() {
@@ -23,6 +26,31 @@ log() {
 is_valid_device_name() {
     local name="$1"
     [[ "$name" =~ ^[a-z][a-z0-9-]{1,53}[a-z0-9]$ ]]
+}
+
+# [device] name from wendy.conf, parsed like the agent's parseINI (apply.go):
+# trimmed lines, '#'/';' comments, last duplicate wins. Prints nothing when the
+# file is absent, unreadable or has no valid name; never fails.
+flash_time_name() {
+    local name
+    [ -r "$WENDY_CONF" ] || return 0
+    name=$(awk '
+        { sub(/\r$/, ""); gsub(/^[ \t]+|[ \t]+$/, "") }
+        $0 == "" || /^[#;]/ { next }
+        /^\[.*\]$/ { section = substr($0, 2, length($0) - 2); next }
+        section == "device" && index($0, "=") > 1 {
+            key = substr($0, 1, index($0, "=") - 1); val = substr($0, index($0, "=") + 1)
+            gsub(/^[ \t]+|[ \t]+$/, "", key); gsub(/^[ \t]+|[ \t]+$/, "", val)
+            if (key == "name") name = val
+        }
+        END { print name }
+    ' "$WENDY_CONF" 2>/dev/null) || return 0
+    [ -n "$name" ] || return 0
+    if is_valid_device_name "$name"; then
+        echo "$name"
+    else
+        log "WARNING: Ignoring invalid device name in $WENDY_CONF: ${name:0:64}" >&2
+    fi
 }
 
 # Generate random device name from word lists
@@ -74,8 +102,13 @@ main() {
         fi
     fi
 
-    # Generate new device name
-    new_name=$(generate_random_name)
+    # Prefer the name given at flash time, else generate one
+    new_name=$(flash_time_name)
+    if [ -n "$new_name" ]; then
+        log "Using device name from $WENDY_CONF: $new_name"
+    else
+        new_name=$(generate_random_name)
+    fi
 
     # Validate generated name
     if ! is_valid_device_name "$new_name"; then

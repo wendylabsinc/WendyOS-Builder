@@ -7,6 +7,11 @@ Description=WendyOS Device Name Generation
 After=wendyos-etc-binds.service wendyos-uuid-generate.service
 Requires=wendyos-etc-binds.service
 Before=wendyos-identity.service
+# Reads the flash-time name from /config/wendy.conf. Wants, not Requires: no
+# /config just means a generated name. Before the FAT->ext4 conversion, which
+# unmounts /config while it runs.
+WantsMountsFor=/config
+Before=wendyos-config-convert.service
 
 [Service]
 Type=oneshot

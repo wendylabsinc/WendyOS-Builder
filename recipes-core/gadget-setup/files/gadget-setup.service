@@ -1,6 +1,9 @@
 [Unit]
 Description=USB Gadget setup (NCM+ACM composite)
 After=sysinit.target local-fs.target systemd-udevd.service
+# The product string carries /etc/wendyos/device-name; on first boot it only
+# exists once the generator has run.
+After=wendyos-device-name-generate.service
 Before=NetworkManager.service network.target
 Wants=NetworkManager.service
 
