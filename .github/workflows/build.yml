@@ -54,6 +54,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+permissions:
+  contents: read
+
 jobs:
   # ---------------------------------------------------------------------------
   # detect-changes: compute the build matrix.
@@ -64,15 +67,21 @@ jobs:
   # ---------------------------------------------------------------------------
   detect-changes:
     name: Detect affected devices
+    # Fork code must not reach the persistent image-builder or its caches.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
       matrix: ${{ steps.set.outputs.matrix }}
       devices: ${{ steps.set.outputs.devices }}
       version: ${{ steps.version.outputs.version }}
       is-release: ${{ steps.version.outputs.is-release }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          persist-credentials: false
           fetch-depth: 0
           ref: ${{ inputs.version }}
 
@@ -80,7 +89,7 @@ jobs:
       # 'os' is '**' minus the driver paths, so a PR touching both still builds.
       - id: filter
         if: github.event_name == 'pull_request'
-        uses: dorny/paths-filter@v4
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4
         with:
           filters: |
             drivers:
@@ -237,7 +246,7 @@ jobs:
   build:
     name: Build ${{ matrix.device }} (${{ matrix.storages }})
     needs: detect-changes
-    if: ${{ needs.detect-changes.outputs.devices != '' }}
+    if: ${{ needs.detect-changes.outputs.devices != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     permissions:
       contents: read
       # GitHub mints the OIDC token (not the runner), so GCP Workload Identity
@@ -252,8 +261,9 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          persist-credentials: false
           path: wendyos
           ref: ${{ inputs.version }}
 
@@ -735,7 +745,7 @@ jobs:
 
       - name: Upload SBOM artifact
         if: steps.sbom.outputs.found == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           # One artifact per device holding every storage variant's SBOM docs
           # (filenames embed the MACHINE, so they don't collide). The publish
@@ -749,16 +759,16 @@ jobs:
           overwrite: true
 
       - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
       - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: wendyos/tools/publisher/go.mod
           cache-dependency-path: wendyos/tools/publisher/go.sum
@@ -1121,7 +1131,7 @@ jobs:
       - name: Upload manifest entry artifact
         # Runs on PRs too: publish-pr (a separate job) consumes these
         # PR-stamped manifest-entry artifacts to write pr/<N>/ manifests.
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           # One artifact per device holding every storage variant's entry JSON.
           # publish / publish-pr glob the individual files (download pattern
@@ -1180,28 +1190,28 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
       - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           path: wendyos
           ref: ${{ inputs.version }}
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: wendyos/tools/publisher/go.mod
           cache-dependency-path: wendyos/tools/publisher/go.sum
 
       - name: Download manifest entries
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: manifest-entry-*
           path: manifest-entries
@@ -1212,7 +1222,7 @@ jobs:
       # share a machine (hence an identical SBOM), so merge-multiple's
       # last-writer-wins is harmless. Attached to the GitHub release below.
       - name: Download SBOM artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: sbom-*
           path: sbom-assets
@@ -1326,7 +1336,7 @@ jobs:
   publish-pr:
     name: Publish PR manifests
     needs: [detect-changes, build]
-    if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.detect-changes.result == 'success' }}
     concurrency:
       group: pr-publish-${{ github.event.pull_request.number }}
       cancel-in-progress: false
@@ -1336,27 +1346,28 @@ jobs:
     runs-on: [runs-on, family=c7i-flex.xlarge, spot=false, "run-id=${{ github.run_id }}-publish-pr"]
     steps:
       - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
       - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          persist-credentials: false
           path: wendyos
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: wendyos/tools/publisher/go.mod
           cache-dependency-path: wendyos/tools/publisher/go.sum
 
       - name: Download manifest entries
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: manifest-entry-*
           path: manifest-entries
@@ -1408,7 +1419,7 @@ jobs:
     needs: [detect-changes, publish, publish-pr]
     # No devices check: a driver-only PR skips the matrix and is exactly the
     # case this job has to cover.
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && needs.detect-changes.result == 'success' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     # A called workflow cannot widen these, and id-token is not granted by
     # default, so the add-on publish could not mint an OIDC token without it.
     permissions:
@@ -1421,7 +1432,9 @@ jobs:
       # Passed explicitly: an input the call omits resolves to this run's own
       # dispatch value, not to blank.
       device: ${{ inputs.device }}
-    secrets: inherit
+    secrets:
+      GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
   # Advancing "latest" is what actually offers a version to a device, so it runs
   # only once the add-ons for that version are published. Until then the build is
@@ -1445,28 +1458,29 @@ jobs:
       PUBLIC_BASE: https://storage.googleapis.com/wendyos-images-public
     steps:
       - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
       - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          persist-credentials: false
           path: wendyos
           ref: ${{ inputs.version }}
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: wendyos/tools/publisher/go.mod
           cache-dependency-path: wendyos/tools/publisher/go.sum
 
       - name: Download manifest entries
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: manifest-entry-*
           path: manifest-entries
