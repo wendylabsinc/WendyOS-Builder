@@ -214,6 +214,7 @@ if [ -n "$FIRMWARE" ]; then
         mkdir -p "$(dirname "$destination")"
         echo "fetching firmware $path"
         curl --fail --location --silent --show-error --retry 3 --retry-all-errors \
+            --connect-timeout 15 --max-time 120 --retry-max-time 180 \
             --output "$destination.tmp" "$url"
         actual=$(sha256sum "$destination.tmp" | cut -d' ' -f1)
         [ "$actual" = "$digest" ] \
