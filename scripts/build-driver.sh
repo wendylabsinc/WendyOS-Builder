@@ -185,6 +185,7 @@ mapfile -t KOS < <(find "$SRCDIR" -name '*.ko' -print)
 
 # --- firmware -----------------------------------------------------------------------
 # Large redistributable firmware blobs stay in their authoritative upstream repository.
+# WENDYOS_FIRMWARE_MIRROR overrides the mirror tried before upstream; empty disables it.
 # The manifest pins both immutable URLs and hashes; pack-sysext consumes this staged tree
 # beside modules/. A malicious path must not escape the image's firmware directory.
 FIRMWARE=$(python3 - "$MANIFEST" <<'PY'
@@ -205,6 +206,36 @@ for entry in json.load(open(sys.argv[1])).get("firmware", []):
 PY
 ) || err "invalid firmware entries in $MANIFEST"
 
+# Upstream hosts refuse connections from some CI runners, so a digest-addressed copy is
+# tried first. The pinned hash is the only trust anchor: a wrong mirror object is skipped.
+FIRMWARE_MIRROR=${WENDYOS_FIRMWARE_MIRROR-https://storage.googleapis.com/wendyos-images-public/driver-firmware}
+
+fetch_firmware() {
+    local url=$1 digest=$2 destination=$3 actual
+    if [ -n "$FIRMWARE_MIRROR" ]; then
+        # A miss is normal for firmware nobody has mirrored yet, so it stays quiet.
+        if curl --fail --location --silent --connect-timeout 15 --retry 2 \
+                --output "$destination.tmp" "$FIRMWARE_MIRROR/sha256/$digest"; then
+            actual=$(sha256sum "$destination.tmp" | cut -d' ' -f1)
+            if [ "$actual" = "$digest" ]; then
+                mv "$destination.tmp" "$destination"
+                echo "  from mirror"
+                return 0
+            fi
+            echo "build-driver: mirror object for $digest has sha256 $actual; using upstream" >&2
+        fi
+    fi
+    # Without a connect timeout an unreachable host costs minutes per attempt.
+    curl --fail --location --silent --show-error --connect-timeout 15 \
+        --retry 3 --retry-all-errors --output "$destination.tmp" "$url" \
+        || err "cannot fetch firmware from $url"
+    actual=$(sha256sum "$destination.tmp" | cut -d' ' -f1)
+    [ "$actual" = "$digest" ] \
+        || err "firmware sha256 mismatch for ${destination##*/}: expected $digest, got $actual"
+    mv "$destination.tmp" "$destination"
+    echo "  from upstream"
+}
+
 if [ -n "$FIRMWARE" ]; then
     command -v curl >/dev/null || err "curl is required to fetch firmware"
     command -v sha256sum >/dev/null || err "sha256sum is required to verify firmware"
@@ -213,12 +244,7 @@ if [ -n "$FIRMWARE" ]; then
         destination="$OUT/firmware/$path"
         mkdir -p "$(dirname "$destination")"
         echo "fetching firmware $path"
-        curl --fail --location --silent --show-error --retry 3 --retry-all-errors \
-            --output "$destination.tmp" "$url"
-        actual=$(sha256sum "$destination.tmp" | cut -d' ' -f1)
-        [ "$actual" = "$digest" ] \
-            || err "firmware sha256 mismatch for $path: expected $digest, got $actual"
-        mv "$destination.tmp" "$destination"
+        fetch_firmware "$url" "$digest" "$destination"
     done <<< "$FIRMWARE"
 fi
 
