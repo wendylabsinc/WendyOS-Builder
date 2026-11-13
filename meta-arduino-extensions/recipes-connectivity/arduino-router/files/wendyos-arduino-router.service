@@ -1,0 +1,17 @@
+[Unit]
+Description=Arduino router between the UNO Q microcontroller and Linux apps
+
+[Service]
+ExecStartPre=-/usr/libexec/wendyos/mcu-gpio 37=0
+ExecStart=/usr/bin/arduino-router --unix-port /run/arduino-router/router.sock --serial-port /dev/ttyHS1 --serial-baudrate 115200 --after-ready "/usr/libexec/wendyos/mcu-gpio 70=1"
+ExecStopPost=-/usr/libexec/wendyos/mcu-gpio 70=0
+ExecStopPost=-/usr/libexec/wendyos/mcu-gpio 38=0
+ExecStopPost=-/usr/libexec/wendyos/mcu-gpio 38=1
+Restart=always
+RestartSec=3
+# Every stop resets the MCU: a router that keeps failing backs off to once a minute.
+RestartSteps=5
+RestartMaxDelaySec=60
+
+[Install]
+WantedBy=multi-user.target

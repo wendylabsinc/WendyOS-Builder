@@ -50,4 +50,8 @@ RDEPENDS:${PN} += " wendyos-radio-addr"
 # switches slots; qbootctl's bless service marks each completed boot.
 RDEPENDS:${PN} += " qbootctl"
 
+# The STM32 flash path for `wendy run`, and the Linux side of Arduino's Bridge
+# that arduino-bridge apps talk to the sketch through.
+RDEPENDS:${PN} += " wendyos-mcu arduino-router"
+
 COMPATIBLE_MACHINE = "arduino-uno-q-wendyos"
