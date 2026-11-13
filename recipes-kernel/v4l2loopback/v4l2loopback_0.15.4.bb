@@ -23,6 +23,7 @@ inherit module
 # generated from this exact pinned rev's v4l2loopback.h, not an older one.
 SRC_URI = " \
     git://github.com/v4l2loopback/v4l2loopback.git;branch=main;protocol=https \
+    file://0001-output-completion-queue.patch \
     "
 SRCREV = "0f9ee86760b7f2bea174b7e3e7a1d38845da0ab4"
 
