@@ -61,8 +61,9 @@ gadget selection. See [IQ8/IQ9 validation and wiring](../../docs/dragonwing-inte
 
 ## Jetson/Pi firmware and activation
 
-The firmware payload is fetched from the official linux-firmware repository and
-verified by SHA-256. Wi-Fi firmware c107 is preferred, with c106 retained as a
+The firmware payload is fetched from the [canonical linux-firmware repository](https://gitlab.com/kernel-firmware/linux-firmware)
+at the manifest's immutable commit and verified by SHA-256. Downloads have bounded
+connection, transfer and retry times. Wi-Fi firmware c107 is preferred, with c106 retained as a
 fallback supported by the pinned driver. The PNVM is retained for compatibility.
 
 The Bluetooth payload is the `ibt-0291-0291` pair requested by the BE202's
