@@ -176,6 +176,9 @@ jobs:
     concurrency:
       group: driver-publish-${{ matrix.device }}
       cancel-in-progress: false
+      # Keep every driver waiting for this device's shared manifest. The default
+      # single pending slot discards older cells even with cancellation disabled.
+      queue: max
     steps:
       - uses: actions/checkout@v4
 
