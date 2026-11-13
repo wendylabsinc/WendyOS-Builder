@@ -1,6 +1,7 @@
 # Candidate OUTPUT queue correction
 
-This patch is a candidate, not validated hardware or kernel-runtime acceptance.
+This patch is an unreleased candidate. Disposable hosted Linux kernel and Wendy
+consumer checks pass; physical hardware and broader module acceptance remain pending.
 It must not be used only in CI while the image recipe remains unpatched. The
 recipe keeps upstream source revision
 `0f9ee86760b7f2bea174b7e3e7a1d38845da0ab4` and applies the checked-in patch to every
@@ -32,8 +33,8 @@ pending completions; write(2) polling and capture polling retain their behavior.
 Wendy's existing H.264 producer intentionally reuses mapped OUTPUT buffers
 without DQBUF. Repeated writes keep the latest completion of each index and move
 that index to the existing list tail. This candidate does not introduce a
-requirement that such writers dequeue. Capture-frame history, sustain-framerate
-and timeout-image behavior still require the actual consumer checks below.
+requirement that such writers dequeue. The existing Wendy consumer gates pass. Sustain-framerate, timeout-image and
+simultaneous writer/reader restart observations remain pending below.
 
 ## Required disposable Linux proof
 
@@ -72,3 +73,26 @@ A failed or interrupted drain retains the owned scratch/node for the job's
 existing final teardown. Any unproven module or consumer behavior remains pending.
 The patch affects a kernel module shared by all virtual cameras, so it needs
 review and runtime evidence before publication or release.
+
+## Observed hosted execution
+
+WendyOS head `2debcbb5aad06e78d332dee33a167cc632614931` ran the exact Builder
+recipe and patch at `4828717a29aa3e7d3b183c6683155337957af39f` in the
+[existing Linux media job](https://github.com/wendylabsinc/WendyOS/actions/runs/43378091991/job/131729254419).
+The complete job passed. With two OUTPUT buffers allocated and only buffer0
+queued, the original module returned buffer1 and failed `OUTPUT_QUEUE_CONTRACT`.
+The candidate returned buffer0 once, then EAGAIN, and passed the completion,
+poll, STREAMOFF and restart checks. Artifact14015471622 records exact source,
+patch, recipe, module and kernel provenance.
+
+The same loaded candidate passed authenticated Lite frames, H264 decoding,
+shared SensorLink and app-owned capture, Go2 camera-entitled OCI delivery,
+model sample-identity recording, and the authenticated IP-camera lifecycle.
+The IP-camera run observed two RTSP sessions, retained viewer and container
+demand through the idle grace period, reacquired capture, joined the writer
+and removed its node. Removing container demand failed its named assertion.
+Artifact14016307539 retains normal and control producer logs.
+
+These observations satisfy items1–4 for the audited disposable runner. Item5
+and broader target-kernel builds remain required before release. No physical
+camera, target board or released-image execution is claimed.
