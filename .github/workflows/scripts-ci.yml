@@ -325,6 +325,8 @@ jobs:
           shellcheck recipes-core/wendyos-identity/files/wendyos-identity-lib.sh \
                      recipes-core/wendyos-identity/files/update-mdns-uuid.sh \
                      recipes-core/wendyos-identity/files/update-mdns-uuid.test.sh \
+                     recipes-core/wendyos-identity/files/generate-device-name.sh \
+                     recipes-core/wendyos-identity/files/generate-device-name.test.sh \
                      recipes-connectivity/avahi/files/generate-hostname.sh \
                      meta-arduino-extensions/recipes-connectivity/wendyos-radio-addr/files/wendyos-radio-addr.sh
           shellcheck recipes-connectivity/networkmanager/files/wendyos-dhcp-ntp.sh \
@@ -368,6 +370,9 @@ jobs:
       # the next reboot with nothing in the logs.
       - name: Run mDNS identity publisher tests
         run: bash recipes-core/wendyos-identity/files/update-mdns-uuid.test.sh
+
+      - name: Run first-boot device name tests
+        run: bash recipes-core/wendyos-identity/files/generate-device-name.test.sh
 
       - name: Run DHCP NTP dispatcher tests
         run: bash recipes-connectivity/networkmanager/files/wendyos-dhcp-ntp.test.sh

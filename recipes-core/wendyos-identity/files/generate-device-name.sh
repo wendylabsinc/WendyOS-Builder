@@ -7,10 +7,12 @@
 
 set -Eeuo pipefail
 
-DEVICE_NAME_FILE="/etc/wendyos/device-name"
+DEVICE_NAME_FILE="${DEVICE_NAME_FILE:-/etc/wendyos/device-name}"
 DEVICE_NAME_DIR=$(dirname "$DEVICE_NAME_FILE")
-ADJECTIVES_FILE="/usr/share/wendyos/adjectives.txt"
-NOUNS_FILE="/usr/share/wendyos/nouns.txt"
+ADJECTIVES_FILE="${ADJECTIVES_FILE:-/usr/share/wendyos/adjectives.txt}"
+NOUNS_FILE="${NOUNS_FILE:-/usr/share/wendyos/nouns.txt}"
+# Written by `wendy install`; the agent applies and removes it later.
+WENDY_CONF="${WENDY_CONF:-/config/wendy.conf}"
 
 # Logging
 log() {
@@ -25,6 +27,26 @@ is_valid_device_name() {
     [[ "$name" =~ ^[a-z][a-z0-9-]{1,53}[a-z0-9]$ ]]
 }
 
+# Print the [device] name from wendy.conf, parsed like the agent's parseINI
+# (trimmed lines, # and ; comments, last value wins). Only this key is read:
+# the file also holds Wi-Fi passwords.
+name_from_config() {
+    [ -r "$WENDY_CONF" ] || return 0
+    awk '
+        { sub(/\r$/, ""); line = $0; gsub(/^[ \t]+|[ \t]+$/, "", line) }
+        line == "" || line ~ /^[#;]/ { next }
+        line ~ /^\[.*\]$/ { section = substr(line, 2, length(line) - 2); next }
+        section == "device" {
+            i = index(line, "=")
+            if (i > 1) {
+                key = substr(line, 1, i - 1); gsub(/^[ \t]+|[ \t]+$/, "", key)
+                if (key == "name") { val = substr(line, i + 1); gsub(/^[ \t]+|[ \t]+$/, "", val); name = val }
+            }
+        }
+        END { print name }
+    ' "$WENDY_CONF" 2>/dev/null || true
+}
+
 # Generate random device name from word lists
 generate_random_name() {
     local adjective noun
@@ -36,7 +58,8 @@ generate_random_name() {
         # Fallback to UUID-based name
         local uuid_file="/etc/wendyos/device-uuid"
         if [ -f "$uuid_file" ]; then
-            local uuid=$(cat "$uuid_file" | tr -d '[:space:]-' | tr '[:upper:]' '[:lower:]')
+            local uuid
+            uuid=$(tr -d '[:space:]-' < "$uuid_file" | tr '[:upper:]' '[:lower:]')
             echo "device-${uuid: -8}"
         else
             echo "device-$(tr -dc 'a-f0-9' < /dev/urandom | head -c 8)"
@@ -62,7 +85,7 @@ main() {
 
     # Check if device name already exists
     if [ -f "$DEVICE_NAME_FILE" ]; then
-        existing_name=$(cat "$DEVICE_NAME_FILE" | tr -d '[:space:]')
+        existing_name=$(tr -d '[:space:]' < "$DEVICE_NAME_FILE")
 
         # Validate existing name
         if is_valid_device_name "$existing_name"; then
@@ -74,24 +97,38 @@ main() {
         fi
     fi
 
-    # Generate new device name
-    new_name=$(generate_random_name)
+    # The name chosen at install time, so the board is never seen under a
+    # random name before the agent applies wendy.conf.
+    new_name=""
+    config_name=$(name_from_config)
+    if [ -n "$config_name" ]; then
+        if is_valid_device_name "$config_name"; then
+            new_name="$config_name"
+            log "Using the device name chosen at install: $new_name"
+        else
+            log "WARNING: Ignoring invalid device name in $WENDY_CONF: $config_name"
+        fi
+    fi
 
-    # Validate generated name
-    if ! is_valid_device_name "$new_name"; then
-        log "ERROR: Generated name is invalid: $new_name"
-        log "Using fallback name"
-        new_name="device-$(tr -dc 'a-f0-9' < /dev/urandom | head -c 8)"
+    if [ -z "$new_name" ]; then
+        new_name=$(generate_random_name)
+
+        # Validate generated name
+        if ! is_valid_device_name "$new_name"; then
+            log "ERROR: Generated name is invalid: $new_name"
+            log "Using fallback name"
+            new_name="device-$(tr -dc 'a-f0-9' < /dev/urandom | head -c 8)"
+        fi
     fi
 
     # Write device name to file
     echo "$new_name" > "$DEVICE_NAME_FILE"
     chmod 644 "$DEVICE_NAME_FILE"
 
-    log "Generated new device name: $new_name"
+    log "Set device name: $new_name"
 
     # Also write to kernel log for debugging
-    logger -t wendyos-device-name "Generated device name: $new_name"
+    logger -t wendyos-device-name "Set device name: $new_name"
 }
 
 main "$@"
