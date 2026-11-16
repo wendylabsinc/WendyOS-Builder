@@ -2,6 +2,10 @@
 FILESEXTRAPATHS:prepend := "${THISDIR}/mesh-local:"
 SRC_URI += "file://mesh-local.cfg"
 
+# Bluetooth-capable machines must support the BLE mesh carrier regardless of
+# vendor defaults. LAN-only machines do not need Bluetooth kernel support.
+SRC_URI += "${@bb.utils.contains('MACHINE_FEATURES', 'bluetooth', 'file://mesh-ble.cfg', '', d)}"
+
 python __anonymous() {
     checks = (d.getVarFlag('do_configure', 'postfuncs') or '').split()
     if 'wendyos_check_mesh_local' not in checks:
@@ -11,6 +15,12 @@ python __anonymous() {
 wendyos_check_mesh_local() {
     config="${B}/.config"
     [ -f "$config" ] || bbfatal "local mesh: missing resolved kernel config at $config"
+    if [ "${@bb.utils.contains('MACHINE_FEATURES', 'bluetooth', '1', '0', d)}" = "1" ]; then
+        grep -Eq '^CONFIG_BT=(y|m)$' "$config" || \
+            bbfatal "mesh BLE: CONFIG_BT missing for ${MACHINE}"
+        grep -q '^CONFIG_BT_LE=y$' "$config" || \
+            bbfatal "mesh BLE: CONFIG_BT_LE must be enabled for ${MACHINE}"
+    fi
     for list in "${WENDYOS_MESH_LOCAL_BUILTIN}" "${WENDYOS_MESH_LOCAL_MODULES}"; do
         set -- $list
         [ $# -gt 0 ] || bbfatal "local mesh: empty kernel contract"
