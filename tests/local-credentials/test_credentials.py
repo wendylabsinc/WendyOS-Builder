@@ -16,14 +16,14 @@ class CredentialsTest(unittest.TestCase):
         if (os.environ.get('WENDY_PAM_TEST_CONTAINER') != '1'
                 or not pathlib.Path('/.dockerenv').is_file()
                 or os.geteuid() != 0):
-            raise unittest.SkipTest('requires the disposable root Docker fixture')
+            raise RuntimeError('Run through tests/local-credentials/Dockerfile only')
 
     def setUp(self):
         # Read the lock value from the actual user recipe, not a test fixture.
         recipe = pathlib.Path('/test/wendyos-user.bb').read_text()
         useradd = re.search(r'^USERADD_PARAM:\$\{PN\} = "(.*)"$', recipe, re.M)[1]
         password = re.search(r"-p '([^']*)'", useradd)[1]
-        self.assertEqual(password, '!')
+        self.assertEqual(password, '*')
         subprocess.run(['useradd', '-m', '-p', password, 'wendy'], check=True)
         self.addCleanup(subprocess.run, ['userdel', '-r', 'wendy'],
                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -42,7 +42,7 @@ class CredentialsTest(unittest.TestCase):
                               timeout=10)
 
     def test_initial_account_is_locked(self):
-        self.assertEqual(self.shadow_password(), '!')
+        self.assertEqual(self.shadow_password(), '*')
         status = subprocess.check_output(['passwd', '-S', 'wendy'], text=True)
         self.assertEqual(status.split()[1], 'L')
 
@@ -59,7 +59,7 @@ class CredentialsTest(unittest.TestCase):
             with self.subTest(reason=reason):
                 result = self.change_password(candidate)
                 self.assertNotEqual(result.returncode, 0, reason)
-                self.assertEqual(self.shadow_password(), '!')
+                self.assertEqual(self.shadow_password(), '*')
 
     def test_provision_change_and_relock(self):
         result = self.change_password('Yq7!mZ2#vK9@xL6$p')

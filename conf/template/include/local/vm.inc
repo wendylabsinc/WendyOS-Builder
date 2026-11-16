@@ -10,8 +10,8 @@ WENDYOS_MDNS_INTERFACES = ""
 # Console login on the serial port. The VM is normally run headless
 # (qemu -nographic), so the serial console is the only way in before sshd is up,
 # and there is no physical console to protect. Root stays locked either way — log
-# in as the wendy user (sudo asks for its password). Set to "0" to match the hardware
-# fleet's default of no interactive login at all.
+# in as the wendy user once its password is provisioned (sudo asks for it). Set to
+# "0" to match the hardware fleet's default of no interactive login at all.
 WENDYOS_ENABLE_UART_LOGIN ?= "1"
 
 # Two knobs worth knowing about are deliberately NOT defaulted here — the machine

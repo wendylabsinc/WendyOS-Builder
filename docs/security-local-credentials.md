@@ -33,8 +33,12 @@ must be assessed separately.
 
 To disable local password authentication again, use the authenticated host
 shell to run `passwd -l wendy`. Check the account with `passwd -S wendy`.
-Account locking does not replace authorization of other credentials such as
-SSH keys or Agent certificates.
+Account locking does not replace authorization of Agent certificates.
+
+SSH keys depend on how the account is locked. The image ships the password
+field as `*`, which refuses password login only. `passwd -l` writes a `!`
+prefix, and sshd, which is built without PAM here, then refuses public-key
+login for `wendy` as well until a password is set again.
 
 ## Updates and recovery
 
