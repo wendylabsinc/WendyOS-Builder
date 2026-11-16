@@ -477,9 +477,9 @@ jobs:
       - name: Enable developer profile (PR builds)
         # PR images are open-book debug builds: full debug tooling, SSH, serial
         # boot output, and a serial (UART) and screen (VT) login as the wendy
-        # user (sudo asks for its password) so the PR is debuggable on real hardware —
-        # root stays locked. Login is opt-in (both default off), so enable both
-        # here.
+        # user (password provisioned through the agent; sudo asks for it) so the PR
+        # is debuggable on real hardware — root stays locked. Login is opt-in (both
+        # default off), so enable both here.
         # Never applied to nightly or release (fortress) builds.
         if: github.event_name == 'pull_request'
         run: |

@@ -30,9 +30,10 @@ GROUPADD_PARAM:${PN}:x86-wendyos = "-r render"
 # Images must not contain a shared login credential, including debug images.
 # An authenticated administrator can provision a unique password with passwd;
 # the target shadow/PAM stack enforces the password quality policy.
+# '*', not '!': sshd is built without PAM and refuses even key login for '!'.
 # useradd -m creates /home/wendy on the rootfs; on Tegra, the first-boot service
 # in wendyos-user-data-setup re-initializes it from persistent storage (/data/home)
-USERADD_PARAM:${PN} = "-m -d /home/wendy -s /bin/bash -G ${WENDY_GROUPS} -p '!' wendy"
+USERADD_PARAM:${PN} = "-m -d /home/wendy -s /bin/bash -G ${WENDY_GROUPS} -p '*' wendy"
 
 SYSTEMD_SERVICE:${PN}-data-setup = "wendyos-user-setup.service"
 SYSTEMD_AUTO_ENABLE:${PN}-data-setup = "enable"

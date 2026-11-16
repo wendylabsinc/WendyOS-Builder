@@ -1144,7 +1144,9 @@ firmware, and selects a CPU model the image can actually run on.
 ./scripts/run-vm.sh --help                 # all options
 ```
 
-Log in on the serial console, or over SSH on the forwarded port the script
+The `wendy` password is locked on a fresh image, so enroll the VM and set a
+password first; see [local credentials](docs/security-local-credentials.md).
+Then log in on the serial console, or over SSH on the forwarded port the script
 prints (2222 by default):
 
 ```bash
