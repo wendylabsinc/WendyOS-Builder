@@ -529,6 +529,7 @@ main() {
     fi
 
     info "SSH:       ssh -p ${SSH_PORT} wendy@localhost"
+    info "           (no default password: see docs/security-local-credentials.md)"
     info ""
     success "Starting ${NAME} (${CPUS} vCPU, ${MEMORY} MB, ${accel})."
     info "Exit cleanly with 'poweroff' in the guest, or Ctrl-A C then 'system_powerdown'."
