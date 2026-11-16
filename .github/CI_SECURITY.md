@@ -39,11 +39,12 @@ above to every workflow and job instead of to named ones: a job with its own
 runner, a write token, secrets or a called workflow must sit behind the gate.
 It checks the patterns it knows, and is not a proof. zizmor then reports
 findings of medium severity and confidence or higher, in its default persona;
-its stricter personas report more, and need review by hand. It uses the CLI because the vendor action does not expose
-`--no-config` and `--no-ignores`. These flags prevent inline exclusions from
-suppressing the audit. Both tools are installed from
-`.github/scripts/requirements.txt`, pinned by hash. Add this check to the
-default-branch ruleset after its first successful run.
+its stricter personas report more, and need review by hand. It uses the CLI
+because the vendor action does not expose `--no-config` and `--no-ignores`.
+These flags prevent inline exclusions from suppressing the audit. Both tools are
+installed from `.github/scripts/requirements.txt`, pinned by hash. The AI
+security review installs its SDK the same way, from `.github/security-review/`.
+Add this check to the default-branch ruleset after its first successful run.
 
 Two findings stay below the threshold on purpose: the release and promotion
 checkouts keep their credentials because those jobs push tags. Cache poisoning

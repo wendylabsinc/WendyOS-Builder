@@ -46,8 +46,16 @@ jobs:
         with:
           python-version: "3.12"
 
+      # Only the pinned package list: the review reads the diff, never the tree.
+      - name: Fetch the pinned SDK requirements
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/security-review
+          path: review-tools
+
       - name: Install Anthropic SDK
-        run: pip install --quiet anthropic==0.97.0
+        run: pip install --quiet --require-hashes -r review-tools/.github/security-review/requirements.txt
 
       - name: Run security review
         env:

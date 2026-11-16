@@ -185,6 +185,13 @@ class TrustBoundaryTests(unittest.TestCase):
                     default = action == 'actions/setup-go'
                     self.assertFalse(step.get('with', {}).get('cache', default))
 
+    def test_python_packages_are_installed_by_hash(self):
+        for name, job, body in JOBS:
+            for step in body.get('steps', []):
+                if re.search(r'\bpip3? install\b', str(step.get('run', ''))):
+                    with self.subTest(workflow=name, job=job):
+                        self.assertIn('--require-hashes', step['run'])
+
     def test_actions_are_pinned_to_a_commit_named_by_its_release(self):
         for name in WORKFLOW_FILES:
             for line in (WORKFLOWS / name).read_text().splitlines():
