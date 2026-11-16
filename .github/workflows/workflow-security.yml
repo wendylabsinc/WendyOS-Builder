@@ -17,12 +17,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
       - name: Audit workflow trust boundaries
         run: |
-          python3 .github/scripts/ci_security_test.py
           python3 -m venv "$RUNNER_TEMP/workflow-audit"
-          "$RUNNER_TEMP/workflow-audit/bin/pip" install --disable-pip-version-check zizmor==1.32.0
-          "$RUNNER_TEMP/workflow-audit/bin/zizmor" --offline --no-config --no-ignores --min-severity high --min-confidence high .github
+          "$RUNNER_TEMP/workflow-audit/bin/pip" install --disable-pip-version-check --require-hashes -r .github/scripts/requirements.txt
+          "$RUNNER_TEMP/workflow-audit/bin/python" .github/scripts/ci_security_test.py
+          "$RUNNER_TEMP/workflow-audit/bin/zizmor" --offline --no-config --no-ignores --min-severity medium --min-confidence medium .github
