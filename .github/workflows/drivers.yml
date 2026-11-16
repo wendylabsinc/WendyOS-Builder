@@ -272,6 +272,24 @@ jobs:
 
       - uses: google-github-actions/setup-gcloud@v2
 
+      - name: Mirror the firmware
+        env:
+          DRIVER: ${{ matrix.driver }}
+        run: |
+          set -euo pipefail
+          # build-driver.sh reads this mirror before upstream. Only what the manifest
+          # pins is mirrored: firmware copied from the devkit is never looked up here.
+          entries=$(jq -r '.firmware[]? | [.sha256, .path] | @tsv' "drivers/$DRIVER/build/driver.json")
+          while IFS=$'\t' read -r digest path; do
+            [[ -n "$path" ]] || continue
+            object="driver-firmware/sha256/${digest}"
+            if curl -sSfI --retry 3 -o /dev/null "${PUBLIC_BASE}/${object}" 2>/dev/null; then
+              continue
+            fi
+            gcloud storage cp "drivers/$DRIVER/build/firmware/$path" "gs://${PUBLIC_BASE##*/}/${object}"
+            echo "mirrored ${path} as ${digest}"
+          done <<< "$entries"
+
       - uses: actions/setup-go@v5
         with:
           go-version-file: tools/publisher/go.mod
