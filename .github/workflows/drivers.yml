@@ -169,9 +169,49 @@ jobs:
             exit 1
           fi
 
+  # Compile the publisher once: every job that uploads or writes manifests in
+  # this run uses this one binary.
+  publisher:
+    name: Build publisher
+    needs: discover
+    if: needs.discover.outputs.any == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: tools/publisher/go.mod
+          # A cache another run wrote must not reach a job that can publish.
+          cache: false
+
+      # Static, so the runners that use it need not share a C library.
+      - name: Build
+        working-directory: tools/publisher
+        env:
+          CGO_ENABLED: "0"
+        run: go build -o "$RUNNER_TEMP/publisher" .
+
+      - name: Upload the publisher
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: publisher-drivers
+          path: ${{ runner.temp }}/publisher
+          if-no-files-found: error
+          retention-days: 7
+          # A re-run of this job uploads the same name again.
+          overwrite: true
+
   build:
     name: ${{ matrix.driver }} on ${{ matrix.device }}
-    needs: discover
+    needs: [discover, publisher]
     if: needs.discover.outputs.any == 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -301,10 +341,15 @@ jobs:
             echo "mirrored ${path} as ${digest}"
           done <<< "$entries"
 
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+      - name: Download the publisher
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          go-version-file: tools/publisher/go.mod
-          cache: false
+          name: publisher-drivers
+          path: ${{ runner.temp }}/publisher-artifact
+
+      # An artifact does not keep the executable bit.
+      - name: Install the publisher
+        run: install -m 0755 "$RUNNER_TEMP/publisher-artifact/publisher" "$RUNNER_TEMP/publisher"
 
       - name: Publish the add-on
         env:
@@ -316,7 +361,6 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
-          cd tools/publisher && go build -o "$RUNNER_TEMP/publisher" . && cd -
 
           # modules_load is baked into the image, but the manifest carries it too
           # so the CLI can describe a driver without downloading it.
@@ -398,7 +442,7 @@ jobs:
 
   index-pr:
     name: Index PR drivers
-    needs: [discover, build]
+    needs: [discover, publisher, build]
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:
@@ -417,18 +461,21 @@ jobs:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
       - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2.2.1
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+      - name: Download the publisher
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          go-version-file: tools/publisher/go.mod
-          cache: false
+          name: publisher-drivers
+          path: ${{ runner.temp }}/publisher-artifact
+
+      # An artifact does not keep the executable bit.
+      - name: Install the publisher
+        run: install -m 0755 "$RUNNER_TEMP/publisher-artifact/publisher" "$RUNNER_TEMP/publisher"
       - name: Update PR master index
         env:
           MATRIX: ${{ needs.discover.outputs.matrix }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
-          cd tools/publisher
-          go build -o "$RUNNER_TEMP/publisher" .
           jq -c --arg version "pr-${PR_NUMBER}" \
             '[.include[].device] | unique | map({device: ., version: $version, nightly: true, stability: "stable"})' \
             <<< "$MATRIX" > "$RUNNER_TEMP/master-updates.json"

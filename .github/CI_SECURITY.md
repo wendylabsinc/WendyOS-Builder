@@ -27,8 +27,9 @@ enough). The gate can not tell that push from any other maintainer action:
 neither before reading the diff. After a maintainer's commit Dependabot stops
 rebasing the pull request, and it must be kept up to date by hand.
 
-Jobs that can publish restore no shared cache, so each one downloads the Go
-modules and compiles the publisher itself. Jobs declare their token
+Jobs that can publish restore no shared cache and compile nothing. One
+unprivileged job per workflow run builds the publisher, without a cache, and the
+publishing jobs download that binary as a run artifact. Jobs declare their token
 permissions. Read-only checkouts do not persist Git credentials. The
 release/promotion jobs retain authentication for intentional Git pushes. The
 driver workflow receives only its two named OIDC configuration secrets, rather

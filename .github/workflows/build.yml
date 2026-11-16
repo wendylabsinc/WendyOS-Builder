@@ -249,9 +249,50 @@ jobs:
           echo "Trigger=pull_request: force-building all devices for --pr installs."
           emit_all
           exit 0
+  # Compile the publisher once: every job that uploads or writes manifests in
+  # this run uses this one binary.
+  publisher:
+    name: Build publisher
+    needs: detect-changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          path: wendyos
+          ref: ${{ inputs.version }}
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: wendyos/tools/publisher/go.mod
+          # A cache another run wrote must not reach a job that can publish.
+          cache: false
+
+      # Static, so the runners that use it need not share a C library.
+      - name: Build
+        working-directory: wendyos/tools/publisher
+        env:
+          CGO_ENABLED: "0"
+        run: go build -o "$RUNNER_TEMP/publisher" .
+
+      - name: Upload the publisher
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: publisher
+          path: ${{ runner.temp }}/publisher
+          if-no-files-found: error
+          retention-days: 7
+          # A re-run of this job uploads the same name again.
+          overwrite: true
+
   build:
     name: Build ${{ matrix.device }} (${{ matrix.storages }})
-    needs: detect-changes
+    needs: [detect-changes, publisher]
     if: ${{ needs.detect-changes.outputs.devices != '' }}
     permissions:
       contents: read
@@ -773,12 +814,15 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2.2.1
 
-      - name: Set up Go
-        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+      - name: Download the publisher
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          go-version-file: wendyos/tools/publisher/go.mod
-          # A cache another run wrote must not reach a job that can publish.
-          cache: false
+          name: publisher
+          path: ${{ runner.temp }}/publisher-artifact
+
+      # An artifact does not keep the executable bit.
+      - name: Install the publisher
+        run: install -m 0755 "$RUNNER_TEMP/publisher-artifact/publisher" "$RUNNER_TEMP/publisher"
 
       # Jetson flash-packaging deps are baked into the self-hosted runner image
       # — see wendylabsinc/ci. The runner has no passwordless sudo, so there is
@@ -957,7 +1001,7 @@ jobs:
         run: |
           set -euo pipefail
           TOKEN=$(gcloud auth print-access-token)
-          # Build the publisher once, then invoke it per storage variant. Targets
+          # Invoke the publisher once per storage variant. Targets
           # of one MACHINE share their OTA, SBOM and devkit objects (the Orin
           # Nano's nvme and sd targets also share one raw image and bmap); the
           # publisher skips re-uploading identical bytes. The tegraflash bundle
@@ -967,9 +1011,6 @@ jobs:
           # deferred to the single serialised publish / publish-pr job — parallel
           # entries must never read-modify-write shared manifests (412 races,
           # lost updates).
-          cd "$GITHUB_WORKSPACE/wendyos/tools/publisher"
-          go build -o "$RUNNER_TEMP/publisher" .
-
           declare -A bmapped=()
           for token in $MAP; do
             IFS='|' read -r STORAGE board MACHINE <<< "$token"
@@ -1181,8 +1222,8 @@ jobs:
   # ---------------------------------------------------------------------------
   publish:
     name: Publish manifests
-    needs: [detect-changes, build]
-    if: ${{ !cancelled() && needs.detect-changes.result == 'success' && github.event_name != 'pull_request' }}
+    needs: [detect-changes, publisher, build]
+    if: ${{ !cancelled() && needs.detect-changes.result == 'success' && needs.publisher.result == 'success' && github.event_name != 'pull_request' }}
     concurrency:
       group: update-master-manifest
       cancel-in-progress: false
@@ -1211,11 +1252,15 @@ jobs:
           path: wendyos
           ref: ${{ inputs.version }}
 
-      - name: Set up Go
-        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+      - name: Download the publisher
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          go-version-file: wendyos/tools/publisher/go.mod
-          cache: false
+          name: publisher
+          path: ${{ runner.temp }}/publisher-artifact
+
+      # An artifact does not keep the executable bit.
+      - name: Install the publisher
+        run: install -m 0755 "$RUNNER_TEMP/publisher-artifact/publisher" "$RUNNER_TEMP/publisher"
 
       - name: Download manifest entries
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -1248,10 +1293,6 @@ jobs:
           fi
           echo "published=true" >> "$GITHUB_OUTPUT"
           TOKEN=$(gcloud auth print-access-token)
-          cd "$GITHUB_WORKSPACE/wendyos/tools/publisher"
-          # Build once; up to 15 invocations follow across this step and the
-          # master manifest step ($RUNNER_TEMP persists between steps).
-          go build -o "$RUNNER_TEMP/publisher" .
           # Applied strictly one at a time: this job is the only manifest
           # writer, so there is nothing to race against and no retry loop.
           for entry in "${entries[@]}"; do
@@ -1342,8 +1383,8 @@ jobs:
   # ---------------------------------------------------------------------------
   publish-pr:
     name: Publish PR manifests
-    needs: [detect-changes, build]
-    if: ${{ !cancelled() && needs.detect-changes.result == 'success' && github.event_name == 'pull_request' }}
+    needs: [detect-changes, publisher, build]
+    if: ${{ !cancelled() && needs.detect-changes.result == 'success' && needs.publisher.result == 'success' && github.event_name == 'pull_request' }}
     concurrency:
       group: pr-publish-${{ github.event.pull_request.number }}
       cancel-in-progress: false
@@ -1367,11 +1408,15 @@ jobs:
           persist-credentials: false
           path: wendyos
 
-      - name: Set up Go
-        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+      - name: Download the publisher
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          go-version-file: wendyos/tools/publisher/go.mod
-          cache: false
+          name: publisher
+          path: ${{ runner.temp }}/publisher-artifact
+
+      # An artifact does not keep the executable bit.
+      - name: Install the publisher
+        run: install -m 0755 "$RUNNER_TEMP/publisher-artifact/publisher" "$RUNNER_TEMP/publisher"
 
       - name: Download manifest entries
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -1390,8 +1435,6 @@ jobs:
             exit 0
           fi
           TOKEN=$(gcloud auth print-access-token)
-          cd "$GITHUB_WORKSPACE/wendyos/tools/publisher"
-          go build -o "$RUNNER_TEMP/publisher" .
           for entry in "${entries[@]}"; do
             echo "::group::apply $(basename "$entry")"
             cat "$entry"
@@ -1411,8 +1454,6 @@ jobs:
             exit 0
           fi
           TOKEN=$(gcloud auth print-access-token)
-          cd "$GITHUB_WORKSPACE/wendyos/tools/publisher"
-          [[ -x "$RUNNER_TEMP/publisher" ]] || go build -o "$RUNNER_TEMP/publisher" .
           jq -s '[.[] | . as $entry | (.device, .aliases[]?) as $device | $entry | {device: $device, version, nightly: true, stability} + (if $device == $entry.device then {} else {alias_of: $entry.device, alias_storage: $entry.storage} end)]' "${entries[@]}" > "$RUNNER_TEMP/master-updates.json"
           "$RUNNER_TEMP/publisher" --master-manifest-batch "$RUNNER_TEMP/master-updates.json" --pr "$PR_NUMBER" --access-token "$TOKEN" </dev/null
 
@@ -1449,7 +1490,7 @@ jobs:
   # devkit — but no device resolves it through auto-detect.
   promote:
     name: Promote to latest
-    needs: [detect-changes, publish, drivers]
+    needs: [detect-changes, publisher, publish, drivers]
     # publish must have succeeded: a version whose device manifest was never
     # written would become a latest pointer devices cannot resolve. A failed
     # drivers job still runs through, where the per-device guard below catches it.
@@ -1480,11 +1521,15 @@ jobs:
           path: wendyos
           ref: ${{ inputs.version }}
 
-      - name: Set up Go
-        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+      - name: Download the publisher
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          go-version-file: wendyos/tools/publisher/go.mod
-          cache: false
+          name: publisher
+          path: ${{ runner.temp }}/publisher-artifact
+
+      # An artifact does not keep the executable bit.
+      - name: Install the publisher
+        run: install -m 0755 "$RUNNER_TEMP/publisher-artifact/publisher" "$RUNNER_TEMP/publisher"
 
       - name: Download manifest entries
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -1508,8 +1553,6 @@ jobs:
             MASTER='{}'
           fi
           failed=0
-          cd "$GITHUB_WORKSPACE/wendyos/tools/publisher"
-          go build -o "$RUNNER_TEMP/publisher" .
           # Collect only devices that published and pass the add-on check.
           # Failed/held-back devices keep their previous pointers. Identical
           # storage variants are deduplicated; conflicting rows reach the
@@ -1553,7 +1596,7 @@ jobs:
   required-ci:
     name: Required CI
     if: ${{ always() }}
-    needs: [detect-changes, build]
+    needs: [detect-changes, publisher, build]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -1562,6 +1605,7 @@ jobs:
       - name: Require every selected image build to pass
         env:
           DETECT_RESULT: ${{ needs.detect-changes.result }}
+          PUBLISHER_RESULT: ${{ needs.publisher.result }}
           BUILD_RESULT: ${{ needs.build.result }}
           DEVICES: ${{ needs.detect-changes.outputs.devices }}
         run: |
@@ -1570,6 +1614,7 @@ jobs:
             exit 1
           fi
           test "$DETECT_RESULT" = success
+          test "$PUBLISHER_RESULT" = success
           if [ -z "$DEVICES" ]; then
             test "$BUILD_RESULT" = skipped
           else
