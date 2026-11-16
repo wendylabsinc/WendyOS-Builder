@@ -38,7 +38,7 @@ Account locking does not replace authorization of Agent certificates.
 SSH keys depend on how the account is locked. The image ships the password
 field as `*`, which refuses password login only. `passwd -l` writes a `!`
 prefix, and sshd, which is built without PAM here, then refuses public-key
-login for `wendy` as well until a password is set again.
+login for `wendy` as well. `passwd -u wendy` or a new password restores it.
 
 ## Updates and recovery
 
