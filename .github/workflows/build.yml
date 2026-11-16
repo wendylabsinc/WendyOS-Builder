@@ -67,8 +67,12 @@ jobs:
   # ---------------------------------------------------------------------------
   detect-changes:
     name: Detect affected devices
-    # Fork code must not reach the persistent image-builder or its caches.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    # The one gate: every image, publish and driver job needs this job. An event
+    # not listed here, and fork code, never reaches the image builder.
+    if: >-
+      github.event_name == 'push' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -246,7 +250,7 @@ jobs:
   build:
     name: Build ${{ matrix.device }} (${{ matrix.storages }})
     needs: detect-changes
-    if: ${{ needs.detect-changes.outputs.devices != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ needs.detect-changes.outputs.devices != '' }}
     permissions:
       contents: read
       # GitHub mints the OIDC token (not the runner), so GCP Workload Identity
@@ -1175,7 +1179,7 @@ jobs:
   publish:
     name: Publish manifests
     needs: [detect-changes, build]
-    if: ${{ !cancelled() && github.event_name != 'pull_request' }}
+    if: ${{ !cancelled() && needs.detect-changes.result == 'success' && github.event_name != 'pull_request' }}
     concurrency:
       group: update-master-manifest
       cancel-in-progress: false
@@ -1336,7 +1340,7 @@ jobs:
   publish-pr:
     name: Publish PR manifests
     needs: [detect-changes, build]
-    if: ${{ !cancelled() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.detect-changes.result == 'success' }}
+    if: ${{ !cancelled() && needs.detect-changes.result == 'success' && github.event_name == 'pull_request' }}
     concurrency:
       group: pr-publish-${{ github.event.pull_request.number }}
       cancel-in-progress: false
@@ -1419,7 +1423,7 @@ jobs:
     needs: [detect-changes, publish, publish-pr]
     # No devices check: a driver-only PR skips the matrix and is exactly the
     # case this job has to cover.
-    if: ${{ !cancelled() && needs.detect-changes.result == 'success' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ !cancelled() && needs.detect-changes.result == 'success' }}
     # A called workflow cannot widen these, and id-token is not granted by
     # default, so the add-on publish could not mint an OIDC token without it.
     permissions:
@@ -1558,6 +1562,10 @@ jobs:
           BUILD_RESULT: ${{ needs.build.result }}
           DEVICES: ${{ needs.detect-changes.outputs.devices }}
         run: |
+          if [ "$DETECT_RESULT" = skipped ]; then
+            echo "::error::No image build ran: fork pull requests and untrusted events never reach the image builder. A maintainer must review the change and push it to a branch in this repository."
+            exit 1
+          fi
           test "$DETECT_RESULT" = success
           if [ -z "$DEVICES" ]; then
             test "$BUILD_RESULT" = skipped

@@ -1,12 +1,19 @@
 # Image-builder CI security
 
-The image-builder workflow skips fork pull requests before allocating the
-persistent runner, authenticating to cloud storage, or publishing driver images.
-Forks still receive the GitHub-hosted publisher, script and workflow-security
-checks. Maintainers must review external changes before placing them on an
-organization branch for a full image build.
+The image-builder workflow runs only for pushes, manual dispatches and
+same-repository pull requests. Every other event, and every fork pull request,
+stops at `detect-changes`, before a job allocates the persistent runner,
+authenticates to cloud storage, or publishes driver images. The image, publish
+and driver jobs all need `detect-changes`, so that one condition gates them all,
+and a trigger added later stays out until it is listed there.
 
-Actions are pinned to full upstream commit SHAs and Dependabot checks for updates.
+Forks still receive the GitHub-hosted publisher, script and workflow-security
+checks. `Required CI` fails on a fork pull request and says why, so a fork can
+not merge without an image build. Maintainers must review external changes
+before placing them on an organization branch for a full image build.
+
+Actions are pinned to full upstream commit SHAs. Nothing updates the pins yet:
+an update pull request must not build on the image builder before review.
 Jobs declare their token permissions. Read-only checkouts do not persist Git
 credentials. The release/promotion jobs retain authentication for intentional
 Git pushes. The driver workflow receives only its two named OIDC configuration
