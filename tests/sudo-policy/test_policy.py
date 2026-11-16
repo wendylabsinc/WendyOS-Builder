@@ -72,9 +72,14 @@ class SudoPolicyTests(unittest.TestCase):
         self.assertIn('password is required', result.stderr)
 
     def test_unrelated_user_has_no_administrator_grant(self):
-        result = self.as_user('sudo', '-n', '/usr/bin/id', '-u', user='unrelated')
+        # Authenticate first: sudo -n would also refuse a password-gated grant.
+        subprocess.run(['chpasswd'], input=f'unrelated:{self.password}\n',
+                       text=True, check=True)
+        result = self.as_user('sudo', '-S', '-p', '', '/usr/bin/id', '-u',
+                              user='unrelated', password=self.password + '\n')
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(result.stdout, '')
+        self.assertIn('not in the sudoers file', result.stderr)
 
     def test_direct_runas_other_user_is_not_granted(self):
         result = self.as_user('sudo', '-S', '-p', '', '-u', 'unrelated',
