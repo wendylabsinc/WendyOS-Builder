@@ -1,0 +1,24 @@
+version: 2
+updates:
+  # Every update is third-party code that will run in CI: take only releases
+  # that have had time to be found bad, and a major version one at a time.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 14
+    groups:
+      actions:
+        patterns: ["*"]
+        update-types: [minor, patch]
+  - package-ecosystem: pip
+    directory: /.github/scripts
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 14
+    groups:
+      workflow-security:
+        patterns: ["*"]
+        update-types: [minor, patch]
