@@ -36,7 +36,7 @@ IMAGE_FEATURES += "${@oe.utils.ifelse(d.getVar('WENDYOS_DEBUG') == '1', d.getVar
 # getty is disabled by default and each console type is separately opt-in. No
 # login implies opening root: credentials are a separate concern — root stays
 # locked (root:*: on every image via zap_empty_root_password); log in as the
-# wendy user, which has passwordless sudo. bootstrap.sh --debug and the CI PR
+# wendy user; sudo asks for that user's password. bootstrap.sh --debug and the CI PR
 # profile turn both logins on; nightly and release builds keep both off.
 #
 #   getty@ + autovt@ (+ logind auto-VTs)       -> monitor/keyboard VT login
