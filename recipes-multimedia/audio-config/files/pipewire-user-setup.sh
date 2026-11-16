@@ -78,7 +78,7 @@ wait_for_socket() {
 # `systemctl --user` command against it. `loginctl enable-linger` starts
 # user@$USER_UID.service asynchronously: the runtime directory above appears
 # almost immediately, but the user manager's control socket ($RUNTIME_DIR/bus)
-# takes a bit longer to bind. Without this wait, the `su` block below races
+# takes a bit longer to bind. Without this wait, the `setpriv` block below races
 # it and fails with "Failed to connect to user scope bus via local
 # transport: No such file or directory".
 if ! wait_for_socket "$RUNTIME_DIR/bus"; then
@@ -86,8 +86,9 @@ if ! wait_for_socket "$RUNTIME_DIR/bus"; then
     exit 1
 fi
 
-# Enable and start user services as the wendy user
-su - "$USER" -c "
+# Enable and start user services as the wendy user. setpriv, not su: a PAM su
+# opens a logind session, which takes this block out of the unit's cgroup and journal.
+setpriv --reuid "$USER" --regid "$(id -g "$USER")" --init-groups --reset-env /bin/bash -c "
     set -e
     export XDG_RUNTIME_DIR=$RUNTIME_DIR
     export DBUS_SESSION_BUS_ADDRESS=unix:path=\$XDG_RUNTIME_DIR/bus

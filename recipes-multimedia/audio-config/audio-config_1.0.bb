@@ -77,6 +77,7 @@ FILES:${PN} += " \
 # Runtime dependencies
 RDEPENDS:${PN} = " \
     bash \
+    util-linux-setpriv \
     pipewire \
     pipewire-v4l2 \
     wireplumber \
