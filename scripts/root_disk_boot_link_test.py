@@ -1,4 +1,4 @@
-"""Check the /dev/wendyos/boot link: the rule and the root-disk answer behind it."""
+"""Check the /dev/wendyos/boot link: the rule, the root-disk answer behind it, the fstabs."""
 
 import os
 from pathlib import Path
@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 FILES = ROOT / "recipes-support/data-device/files"
 HELPER = FILES / "root-disk-part"
 RULE = FILES / "99-wendyos-boot.rules"
+FSTABS = ROOT / "recipes-core/base-files/files"
 PI_PARTITIONS = ("boot", "config", "rootfsA", "rootfsB", "data")
 
 
@@ -51,6 +52,11 @@ class BootLinkTests(unittest.TestCase):
         return subprocess.run(["sh", str(HELPER), *args], env=env, text=True,
                               capture_output=True, check=False)
 
+    def boot_lines(self, fstab):
+        fields = [line.split() for line in (FSTABS / fstab).read_text().splitlines()
+                  if line.strip() and not line.lstrip().startswith("#")]
+        return [entry for entry in fields if entry[1] == "/boot"]
+
     def test_sd_root_ignores_the_nvme_boot_partition(self):
         self.disk("mmcblk0", "p", 179)
         self.disk("nvme0n1", "p", 259)
@@ -88,6 +94,14 @@ class BootLinkTests(unittest.TestCase):
         result = subprocess.run(["udevadm", "verify", "--resolve-names=never", "--no-summary",
                                  str(RULE)], text=True, capture_output=True, check=False)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_gpt_pi_fstab_mounts_boot_through_the_link(self):
+        self.assertEqual(self.boot_lines("rpi-wendy-fstab"),
+                         [["/dev/wendyos/boot", "/boot", "vfat", "defaults,nofail", "0", "2"]])
+
+    def test_mbr_pi_fstab_keeps_the_label(self):
+        self.assertEqual(self.boot_lines("rpi-wendy-mbr-fstab"),
+                         [["LABEL=boot", "/boot", "vfat", "defaults", "0", "2"]])
 
 
 if __name__ == "__main__":
