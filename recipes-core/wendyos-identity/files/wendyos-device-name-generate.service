@@ -5,8 +5,13 @@ Description=WendyOS Device Name Generation
 # consumes it. Was DefaultDependencies=no + WantedBy=sysinit.target, which
 # front-ran the bind (see wendyos-uuid-generate.service).
 After=wendyos-etc-binds.service wendyos-uuid-generate.service
+# /config holds the name chosen at install. etc-binds already waits for it;
+# state the dependency here too (ordering only).
+After=config.mount
 Requires=wendyos-etc-binds.service
 Before=wendyos-identity.service
+# gadget-setup names the USB device from device-name, once per boot.
+Before=gadget-setup.service
 
 [Service]
 Type=oneshot

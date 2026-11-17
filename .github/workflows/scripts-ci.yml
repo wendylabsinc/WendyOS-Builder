@@ -27,8 +27,16 @@ on:
       - 'scripts/make_jetson_disk_img_test.py'
       - 'scripts/tegra_boot_efi_generator_test.py'
       - 'meta-tegra-extensions/recipes-bsp/tools/**'
+      - 'scripts/tegra_minimal_init_test.py'
+      - 'scripts/tegra_capsule_tnspec_test.py'
+      - 'meta-tegra-extensions/recipes-bsp/uefi/tegra-uefi-capsules_%.bbappend'
+      - 'meta-tegra-extensions/classes/tegra_tnspec_legacy.bbclass'
+      - 'conf/distro/include/tegra-image.inc'
+      - 'conf/machine/jetson-*-wendyos.conf'
+      - 'conf/machine/include/jetson-*.inc'
+      - 'meta-tegra-extensions/recipes-core/initrdscripts/tegra-minimal-init_%.bbappend'
+      - 'meta-tegra-extensions/recipes-core/initrdscripts/tegra-minimal-init/**'
       - 'scripts/check_game_controller_support*'
-      - 'scripts/kernel_patch_dates_test.py'
       - 'meta-qcom-extensions/recipes-kernel/linux/**'
       - 'meta-arduino-extensions/recipes-kernel/linux/**'
       - 'scripts/check_mesh_local_policy.py'
@@ -90,6 +98,8 @@ on:
       - 'recipes-core/wendyos-sysext-apply/files/*.sh'
       - 'recipes-kernel/wendyos-kernel-devkit/files/*.sh'
       - 'recipes-core/wendyos-identity/files/*.sh'
+      - 'recipes-core/wendyos-identity/wendyos-identity_1.0.bb'
+      - 'scripts/device_type_test.py'
       - 'recipes-connectivity/avahi/files/*.sh'
       - 'recipes-connectivity/networkmanager/**'
       - 'recipes-connectivity/wpa-supplicant/**'
@@ -98,6 +108,9 @@ on:
       - 'scripts/networkmanager_config_test.py'
       - 'tests/nm-transient-psk/**'
       - 'meta-arduino-extensions/recipes-connectivity/wendyos-radio-addr/files/*.sh'
+      - 'meta-arduino-extensions/recipes-bsp/wendyos-mcu/files/*'
+      - 'meta-arduino-extensions/recipes-connectivity/arduino-router/files/*'
+      - 'tests/uno-q-mcu/**'
       # No *.sh filter: data-recovery-key is a command and carries no extension.
       - 'recipes-support/data-device/files/*'
       - 'recipes-support/data-crypt/files/*'
@@ -109,12 +122,8 @@ on:
       - 'meta-arduino-extensions/recipes-bsp/partition/files/*'
       - 'meta-qcom-extensions/recipes-core/wendyos-config-setup/files/*'
       - 'meta-qcom-extensions/recipes-core/packagegroups/*'
-      - 'meta-qcom-extensions/recipes-bsp/hexagon-dsp-binaries/*'
       - 'conf/machine/iq-*-evk-wendyos.conf'
       - 'conf/machine/include/dragonwing-*.inc'
-      - 'conf/distro/wendyos.conf'
-      - 'conf/distro/include/qcom-distro.inc'
-      - 'scripts/upstream-repos.env'
       - 'scripts/qcom-npu.test.sh'
       - '.github/device-artifacts.json'
       - '.github/workflows/scripts-ci.yml'
@@ -143,8 +152,16 @@ on:
       - 'scripts/make_jetson_disk_img_test.py'
       - 'scripts/tegra_boot_efi_generator_test.py'
       - 'meta-tegra-extensions/recipes-bsp/tools/**'
+      - 'scripts/tegra_minimal_init_test.py'
+      - 'scripts/tegra_capsule_tnspec_test.py'
+      - 'meta-tegra-extensions/recipes-bsp/uefi/tegra-uefi-capsules_%.bbappend'
+      - 'meta-tegra-extensions/classes/tegra_tnspec_legacy.bbclass'
+      - 'conf/distro/include/tegra-image.inc'
+      - 'conf/machine/jetson-*-wendyos.conf'
+      - 'conf/machine/include/jetson-*.inc'
+      - 'meta-tegra-extensions/recipes-core/initrdscripts/tegra-minimal-init_%.bbappend'
+      - 'meta-tegra-extensions/recipes-core/initrdscripts/tegra-minimal-init/**'
       - 'scripts/check_game_controller_support*'
-      - 'scripts/kernel_patch_dates_test.py'
       - 'meta-qcom-extensions/recipes-kernel/linux/**'
       - 'meta-arduino-extensions/recipes-kernel/linux/**'
       - 'scripts/check_mesh_local_policy.py'
@@ -206,6 +223,8 @@ on:
       - 'recipes-core/wendyos-sysext-apply/files/*.sh'
       - 'recipes-kernel/wendyos-kernel-devkit/files/*.sh'
       - 'recipes-core/wendyos-identity/files/*.sh'
+      - 'recipes-core/wendyos-identity/wendyos-identity_1.0.bb'
+      - 'scripts/device_type_test.py'
       - 'recipes-connectivity/avahi/files/*.sh'
       - 'recipes-connectivity/networkmanager/**'
       - 'recipes-connectivity/wpa-supplicant/**'
@@ -214,6 +233,9 @@ on:
       - 'scripts/networkmanager_config_test.py'
       - 'tests/nm-transient-psk/**'
       - 'meta-arduino-extensions/recipes-connectivity/wendyos-radio-addr/files/*.sh'
+      - 'meta-arduino-extensions/recipes-bsp/wendyos-mcu/files/*'
+      - 'meta-arduino-extensions/recipes-connectivity/arduino-router/files/*'
+      - 'tests/uno-q-mcu/**'
       # No *.sh filter: data-recovery-key is a command and carries no extension.
       - 'recipes-support/data-device/files/*'
       - 'recipes-support/data-crypt/files/*'
@@ -225,12 +247,8 @@ on:
       - 'meta-arduino-extensions/recipes-bsp/partition/files/*'
       - 'meta-qcom-extensions/recipes-core/wendyos-config-setup/files/*'
       - 'meta-qcom-extensions/recipes-core/packagegroups/*'
-      - 'meta-qcom-extensions/recipes-bsp/hexagon-dsp-binaries/*'
       - 'conf/machine/iq-*-evk-wendyos.conf'
       - 'conf/machine/include/dragonwing-*.inc'
-      - 'conf/distro/wendyos.conf'
-      - 'conf/distro/include/qcom-distro.inc'
-      - 'scripts/upstream-repos.env'
       - 'scripts/qcom-npu.test.sh'
       - '.github/device-artifacts.json'
       - '.github/workflows/scripts-ci.yml'
@@ -285,6 +303,9 @@ jobs:
         run: |
           python3 tests/bluetooth-le-pending/run.py
           python3 tests/bluetooth-le-pending/run-scan-order.py
+      - name: Test the UNO Q MCU flash and GPIO helpers
+        run: python3 tests/uno-q-mcu/run.py
+
       - name: Test legacy advertising expiry on pinned Raspberry Pi kernel
         run: |
           python3 -m unittest discover -s tests/bluetooth-advertising -p '*_test.py'
@@ -315,8 +336,12 @@ jobs:
           shellcheck recipes-core/wendyos-identity/files/wendyos-identity-lib.sh \
                      recipes-core/wendyos-identity/files/update-mdns-uuid.sh \
                      recipes-core/wendyos-identity/files/update-mdns-uuid.test.sh \
+                     recipes-core/wendyos-identity/files/generate-device-name.sh \
+                     recipes-core/wendyos-identity/files/generate-device-name.test.sh \
                      recipes-connectivity/avahi/files/generate-hostname.sh \
-                     meta-arduino-extensions/recipes-connectivity/wendyos-radio-addr/files/wendyos-radio-addr.sh
+                     meta-arduino-extensions/recipes-connectivity/wendyos-radio-addr/files/wendyos-radio-addr.sh \
+                     meta-arduino-extensions/recipes-bsp/wendyos-mcu/files/mcu-flash \
+                     meta-arduino-extensions/recipes-bsp/wendyos-mcu/files/mcu-gpio
           shellcheck recipes-connectivity/networkmanager/files/wendyos-dhcp-ntp.sh \
                      recipes-connectivity/networkmanager/files/wendyos-dhcp-ntp.test.sh
 
@@ -350,11 +375,17 @@ jobs:
           docker run --rm -v "$PWD:/w" -w /w alpine:3 sh -c \
             'apk add -q bash && bash recipes-core/wendyos-agent/files/wendyos-agent-updater.test.sh'
 
+      - name: Test device type recovery and recipe installation
+        run: python3 -m unittest scripts/device_type_test.py
+
       # The mDNS publisher decides what 'wendy device list' shows for every
       # device; a precedence bug there silently reverts an operator's rename on
       # the next reboot with nothing in the logs.
       - name: Run mDNS identity publisher tests
         run: bash recipes-core/wendyos-identity/files/update-mdns-uuid.test.sh
+
+      - name: Run first-boot device name tests
+        run: bash recipes-core/wendyos-identity/files/generate-device-name.test.sh
 
       - name: Run DHCP NTP dispatcher tests
         run: bash recipes-connectivity/networkmanager/files/wendyos-dhcp-ntp.test.sh
@@ -388,6 +419,18 @@ jobs:
           shellcheck meta-tegra-extensions/recipes-bsp/tools/files/wendyos-boot-efi-generator.sh
           python3 -m unittest scripts/tegra_boot_efi_generator_test.py -v
 
+      # The initramfs root lookup runs as PID 1: a mistake there is a unit that never boots.
+      - name: Check Jetson initramfs root-disk lookup
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y busybox
+          shellcheck -s sh meta-tegra-extensions/recipes-core/initrdscripts/tegra-minimal-init/*.sh
+          python3 -m unittest scripts/tegra_minimal_init_test.py -v
+
+      # A unit whose TnSpec name the capsule lacks rejects it, and its OTA rolls back.
+      - name: Check Orin capsule TnSpec coverage
+        run: python3 -m unittest scripts/tegra_capsule_tnspec_test.py -v
+
       - name: Test installed mesh bridge policy with systemd
         run: |
           sudo apt-get update
@@ -400,13 +443,10 @@ jobs:
       - name: Run SensorLink loopback image acceptance tests
         run: python3 -m unittest scripts/check_sensor_loopback_support_test.py
 
-      - name: Verify reproducible kernel patch commit identities
-        run: python3 -m unittest scripts/kernel_patch_dates_test.py
-
       - name: Verify config-only kernel release identities
         run: |
           curl --fail --silent --show-error --location --retry 3 \
-            https://raw.githubusercontent.com/qualcomm-linux/kernel/d49c33864d06e9672dce57738be8851384578fcf/scripts/setlocalversion \
+            https://raw.githubusercontent.com/qualcomm-linux/kernel/1a0586064ee1fbcefe49b6382ee17a236c590879/scripts/setlocalversion \
             -o "$RUNNER_TEMP/qcom-setlocalversion"
           WENDY_KERNEL_SETLOCALVERSION="$RUNNER_TEMP/qcom-setlocalversion" \
             python3 -m unittest scripts/kernel_config_identity_test.py

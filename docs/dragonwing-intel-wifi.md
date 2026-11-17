@@ -29,15 +29,22 @@ their existing Intel backport instead. The original Qualcomm radio packages
 remain in the base image.
 
 IQ kernel releases include a deterministic fingerprint of the resolved kernel
-configuration as well as the existing source/patch Git identity. Config-only
-changes therefore select a new matching devkit and add-on automatically. The
-same release travels through the kernel, devkit, published metadata and module
-vermagic; no hand-maintained ABI suffix is required.
+configuration, followed by meta-qcom's source suffix: the first 12 characters of
+the kernel commit and the number of patches applied on top of it, for example
+`7.3.0-rc4-wendyos-cfg<fingerprint>-g1a0586064ee1-p<patches>`. Config-only
+changes, a new kernel commit and an added or removed patch therefore select a
+new matching devkit and add-on automatically. Editing a patch without changing
+the number of patches does not change the release. The same release travels
+through the kernel, devkit, published metadata and module vermagic; no
+hand-maintained ABI suffix is required.
 
-The pinned qcom-next 7.2 kernel needs `CONFIG_IWLMLD` for these cards
-(`8086:272b`) and accepts firmware c102–c106. The IQ package fetches c106 and
-PNVM from the manifest's pinned linux-firmware commit and verifies their
-SHA-256 hashes. Bluetooth firmware comes from the image's pinned recipe:
+The pinned qcom-next 7.3-rc4 kernel (tag `qcom-next-7.3-rc4-20261014`) needs
+`CONFIG_IWLMLD` for these cards (`8086:272b`) and accepts firmware c102–c107.
+The driver asks for c107 first. The IQ package ships only c106, so the kernel
+log shows one `Direct firmware load for iwlwifi-gl-c0-fm-c0-c107.ucode failed
+with error -2` line and the driver then loads c106. The IQ package fetches
+c106 and PNVM from the manifest's pinned linux-firmware commit and verifies
+their SHA-256 hashes. Bluetooth firmware comes from the image's pinned recipe:
 the shared BE200/BE202 `intel/ibt-0291-0291.sfi` and `.ddc` pair. The mapping is
 documented by Intel's [BE200 firmware update](https://git.ti.com/cgit/processor-firmware/ti-linux-firmware/commit/WHENCE?id=ba1aa06f37477a702ebabf14b5753378460c9343)
 and Ubuntu's [BE202 support record](https://bugs.launchpad.net/bugs/2033455/comments/8).
@@ -46,8 +53,9 @@ and `ibt-0040-0041` firmware pairs are omitted. Both redistribution notices are 
 The package is stored on `/data` for each installed kernel version. Retaining a rollback
 kernel can retain another package; it does not consume either rootfs slot.
 The general Intel firmware bundles stay out of the base image. The Jetson/Pi
-package's c107 firmware must not be substituted for the IQ payload. Recheck
-compatibility when updating either pin.
+package's c107 firmware is within the 7.3 kernel's range but has not been tested
+on IQ, so do not substitute it for the IQ payload without hardware testing.
+Recheck compatibility when updating either pin.
 
 For NAN, c103 lacks the firmware command versions required by IWLMLD. The
 IQ kernel backports two fixes from the pinned Intel backport: advertise the
@@ -105,8 +113,8 @@ validates that the module is installed.
 IQ8 with BE202 has passed package installation/removal, warm reboot, Wi-Fi on
 2.4/5/6 GHz, WPA3-SAE, Bluetooth A2DP with concurrent Wi-Fi, and bidirectional
 Wendy Net NAN routing with a compatible development agent. IQ8/IQ9 image and
-package builds passed. Detailed qualification evidence is in
-[PR #321](https://github.com/wendylabsinc/WendyOS-Builder/pull/321).
+package builds passed. These results are from the qcom-next 7.2 kernel.
+Detailed qualification evidence is in [PR #321](https://github.com/wendylabsinc/WendyOS-Builder/pull/321).
 
 USB1 host support was qualified with a directly attached Logitech C922
 (`046d:085c`) on top of the published PR #321 image, using the candidate device

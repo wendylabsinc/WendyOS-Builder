@@ -5,18 +5,13 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda
 
 inherit systemd
 
-# DeepStream support flag (default off)
-WENDYOS_DEEPSTREAM ?= "0"
-
 SRC_URI = " \
     file://l4t-blacksail.csv \
-    file://l4t-deepstream-blacksail.csv \
     file://devices-wendyos.csv \
     file://wendyos-cdi-generate.service \
     file://wendyos-cuda-detect.service \
     file://generate-cuda-env.sh \
     file://99-z-nvidia-tegra.rules \
-    file://fix-cdi-gstreamer-paths.sh \
     "
 
 S = "${UNPACKDIR}"
@@ -34,31 +29,12 @@ do_install() {
     # name the container runtime reads.
     install -m 0644 ${UNPACKDIR}/l4t-blacksail.csv ${D}${sysconfdir}/nvidia-container-runtime/host-files-for-container.d/l4t.csv
 
-    # Install DeepStream CSV if enabled
-    if [ "${WENDYOS_DEEPSTREAM}" = "1" ]; then
-        # Same story: blacksail/JP7.2 host paths (CUDA 13.2 + DeepStream 8.0),
-        # installed under the target name the runtime reads.
-        install -m 0644 ${UNPACKDIR}/l4t-deepstream-blacksail.csv ${D}${sysconfdir}/nvidia-container-runtime/host-files-for-container.d/l4t-deepstream.csv
-
-        # Create multiarch compatibility symlinks for GStreamer DeepStream plugins
-        # This allows the CDI GST_PLUGIN_PATH to work with both Yocto and Debian/Ubuntu conventions
-        install -d ${D}${libdir}/aarch64-linux-gnu/gstreamer-1.0
-        ln -sf ../../gstreamer-1.0/deepstream ${D}${libdir}/aarch64-linux-gnu/gstreamer-1.0/deepstream
-
-        # Create multiarch symlink for nvidia libraries (libgstnvcustomhelper.so, etc.)
-        install -d ${D}${libdir}/aarch64-linux-gnu
-        ln -sf ../nvidia ${D}${libdir}/aarch64-linux-gnu/nvidia
-    fi
-
     # Install WendyOS device/sysfs mappings (supplements meta-tegra's devices.csv)
     install -m 0644 ${UNPACKDIR}/devices-wendyos.csv ${D}${sysconfdir}/nvidia-container-runtime/host-files-for-container.d/
 
     # Install CUDA environment detection script
     install -d ${D}${bindir}
     install -m 0755 ${UNPACKDIR}/generate-cuda-env.sh ${D}${bindir}/
-
-    # Install CDI post-processing script for DeepStream path fixes
-    install -m 0755 ${UNPACKDIR}/fix-cdi-gstreamer-paths.sh ${D}${bindir}/
 
     # Install systemd services
     install -d ${D}${systemd_system_unitdir}
@@ -74,17 +50,11 @@ do_install() {
 }
 
 FILES:${PN} += "${sysconfdir}/nvidia-container-runtime/host-files-for-container.d/l4t.csv"
-FILES:${PN} += "${sysconfdir}/nvidia-container-runtime/host-files-for-container.d/l4t-deepstream.csv"
 FILES:${PN} += "${sysconfdir}/nvidia-container-runtime/host-files-for-container.d/devices-wendyos.csv"
 FILES:${PN} += "${bindir}/generate-cuda-env.sh"
-FILES:${PN} += "${bindir}/fix-cdi-gstreamer-paths.sh"
 FILES:${PN} += "${systemd_system_unitdir}/wendyos-cdi-generate.service"
 FILES:${PN} += "${systemd_system_unitdir}/wendyos-cuda-detect.service"
 FILES:${PN} += "${sysconfdir}/udev/rules.d/99-z-nvidia-tegra.rules"
-
-# Multiarch compatibility symlinks (only when DeepStream is enabled)
-FILES:${PN} += "${@bb.utils.contains('WENDYOS_DEEPSTREAM', '1', '${libdir}/aarch64-linux-gnu/gstreamer-1.0/deepstream', '', d)}"
-FILES:${PN} += "${@bb.utils.contains('WENDYOS_DEEPSTREAM', '1', '${libdir}/aarch64-linux-gnu/nvidia', '', d)}"
 
 # nvidia-container-toolkit is now available via meta-tegra virtualization layer
 RDEPENDS:${PN} = "nvidia-container-toolkit libnvidia-container bash"

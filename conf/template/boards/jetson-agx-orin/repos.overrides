@@ -3,7 +3,7 @@
 # Sourced by bootstrap.sh after the default URL_*/SRCREV_* values are set, but
 # before the repos[] array is built.
 #
-# JetPack 7.2 / L4T R39.2.0. R39.2 is the first JP7 line to cover the Orin
+# JetPack 7.2.1 / L4T R39.2.1. R39.2 is the first JP7 line to cover the Orin
 # family as well as Thor, so every Jetson board shares one Yocto series and no
 # pin here differs from the shared blacksail set. Every pin and the reasoning
 # behind it lives in scripts/upstream-repos.env. The JP6 Orin fallback only

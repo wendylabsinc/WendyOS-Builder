@@ -19,6 +19,12 @@ WENDYOS_ROOTFS_PART_B ?= "4"
 # committed before U-Boot falls back. 1 = one attempt.
 WENDYOS_BOOTLIMIT ?= "1"
 
+# Upper bound for U-Boot's DTB placement (see boot-ab.cmd.in); empty unsets it.
+# Pi 4: above the top of free low RAM on every model, so U-Boot puts the DTB as
+# high as it can, clear of the CMA window.
+WENDYOS_UBOOT_FDT_HIGH ?= ""
+WENDYOS_UBOOT_FDT_HIGH:raspberrypi4-64 = "0x3e000000"
+
 # Must equal U-Boot's CONFIG_ENV_SIZE and the size in fw_env.config.
 WENDYOS_UBOOT_ENV_SIZE ?= "0x4000"
 
@@ -30,7 +36,8 @@ WENDYOS_ROOTFS_PART_B:raspberrypi3-64 = "3"
 
 # Re-run if any of the templated knobs change.
 do_compile[vardeps] += "WENDYOS_OTA WENDYOS_ROOTFS_PART_A WENDYOS_ROOTFS_PART_B \
-                        WENDYOS_BOOTLIMIT WENDYOS_UBOOT_ENV_SIZE"
+                        WENDYOS_BOOTLIMIT WENDYOS_UBOOT_ENV_SIZE \
+                        WENDYOS_UBOOT_FDT_HIGH"
 
 do_compile() {
     if [ "${WENDYOS_OTA}" = "wendy" ]; then
@@ -40,6 +47,7 @@ do_compile() {
             -e 's/@@WENDYOS_ROOTFS_PART_B@@/${WENDYOS_ROOTFS_PART_B}/' \
             -e 's/@@WENDYOS_BOOTLIMIT@@/${WENDYOS_BOOTLIMIT}/' \
             -e 's/@@WENDYOS_UBOOT_ENV_SIZE@@/${WENDYOS_UBOOT_ENV_SIZE}/g' \
+            -e 's/@@WENDYOS_UBOOT_FDT_HIGH@@/${WENDYOS_UBOOT_FDT_HIGH}/' \
             "${UNPACKDIR}/boot-ab.cmd.in" > "${WORKDIR}/boot.cmd"
     else
         sed -e 's/@@KERNEL_IMAGETYPE@@/${KERNEL_IMAGETYPE}/' \

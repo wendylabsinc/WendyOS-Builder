@@ -131,6 +131,21 @@ with (Path(os.environ["TEST_ROOT"]) / "calls.jsonl").open("a") as f:
         self.assertTrue(rows["nightly"]["nightly"])
         self.assertEqual(len(calls[0]["batch"]), 2)
 
+    def test_aliases_are_marked_in_both_channels(self):
+        self.entry("agx-emmc", "jetson-agx-orin", nightly=True, storage="emmc",
+                   aliases=["jetson-agx-orin-emmc"])
+        self.entry("agx-nvme", "jetson-agx-orin", nightly=True, storage="nvme")
+        for step in ("Update PR master manifest", "Update master manifest"):
+            with self.subTest(step=step):
+                (self.root / "calls.jsonl").unlink(missing_ok=True)
+                result, calls = self.run_step(step)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                rows = {row["device"]: row for row in calls[0]["batch"]}
+                self.assertEqual(set(rows), {"jetson-agx-orin", "jetson-agx-orin-emmc"})
+                self.assertEqual(rows["jetson-agx-orin-emmc"]["alias_of"], "jetson-agx-orin")
+                self.assertEqual(rows["jetson-agx-orin-emmc"]["alias_storage"], "emmc")
+                self.assertNotIn("alias_of", rows["jetson-agx-orin"])
+
     def test_all_devices_held_back_yields_empty_batch(self):
         self.entry("held", "held")
         self.write_json("cloud/master.json", {"devices": {"held": {"latest": "old"}}})

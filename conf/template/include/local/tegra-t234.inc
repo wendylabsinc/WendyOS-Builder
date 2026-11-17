@@ -1,7 +1,7 @@
-# Tegra T234 (Orin / Orin Nano): wendyos-update OTA on JetPack 7.2 /
-# L4T R39.2.0 (blacksail). Symmetric with tegra-t264.inc (Thor).
+# Tegra T234 (Orin / Orin Nano): wendyos-update OTA on JetPack 7.2.1 /
+# L4T R39.2.1 (blacksail). Symmetric with tegra-t264.inc (Thor).
 #
-# This is the JP7.2 fleet-unification path: r39.2.0 is the first JetPack 7
+# This is the JP7.2 fleet-unification path: r39.2 is the first JetPack 7
 # line to support the Orin family alongside Thor, so all three Jetson boards
 # can share one Yocto series (blacksail) and one OTA stack (wendyos-update).
 
@@ -40,16 +40,12 @@ TEGRA_BLBLOCKSIZE:pn-wendyos-image = "4096"
 # Orin -- the default was simply never flipped, and testing ran with a
 # local.conf override.
 #
-# t234 keeps the prebuilt UEFI firmware (both AGX Orin machine confs pin
+# The AGX Orin keeps the prebuilt UEFI firmware (its machine conf pins
 # tegra-uefi-prebuilt; source-built edk2-firmware-tegra is recorded as
-# boot-looping there), so capsule generation depends on the FMP GUID file
-# supplied by
+# boot-looping there), so its capsule takes the FMP GUID file from
 # meta-tegra-extensions/recipes-bsp/tegra-binaries/tegra-uefi-prebuilt_%.bbappend.
-#
-# UNVERIFIED ON DEVICE: the tegra234 GUID in that bbappend
-# (bf0d4599-20d4-414e-b2c5-3595b1cda402) comes from upstream's documentation,
-# not from an Orin. Only the tegra264 value has been confirmed against a live
-# ESRT. Before trusting a capsule update on Orin, check on the device:
+# The Orin Nano builds edk2-firmware-tegra. Both Orin devkits report the same
+# GUID, bf0d4599-20d4-414e-b2c5-3595b1cda402, in
 #   cat /sys/firmware/efi/esrt/entries/entry0/fw_class
 # A mismatch does not fail the build -- the firmware rejects the capsule at
 # update time.
@@ -62,14 +58,6 @@ WENDYOS_UPDATE_BOOTLOADER = "1"
 #   "0" - RELEASE (minimal UART output, production default)
 #   "1" - DEBUG (verbose boot/capsule debug output)
 WENDYOS_EFI_DEBUG = "0"
-
-# DeepStream 8.0 (JetPack 7.2 / CUDA 13) — ENABLED. tegra-image.inc resolves
-# WENDYOS_DEEPSTREAM=1 to the deepstream-8.0 package on blacksail, provided by
-# our vendored recipe in meta-tegra-extensions-jp7 (DS8 is not yet on the
-# meta-tegra-community wip-l4t-r39.2.0 branch — see scripts/check-jp7.2-upstream.sh
-# for when to drop the vendored recipe). COMPATIBLE_MACHINE=(tegra), so the same
-# recipe serves Orin (t234) and Thor (t264).
-WENDYOS_DEEPSTREAM = "1"
 
 # The ability to encrypt /data: LUKS2, with the key sealed to the fTPM (OP-TEE).
 # Default ON. It adds the crypt tools to the image (tegra-image.inc), systemd's

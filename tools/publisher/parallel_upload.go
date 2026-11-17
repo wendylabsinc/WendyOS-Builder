@@ -5,10 +5,13 @@ import (
 	"fmt"
 	"hash/crc32"
 	"io"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"cloud.google.com/go/storage"
 	"github.com/sirupsen/logrus"
@@ -16,13 +19,12 @@ import (
 
 // Parallel composite upload.
 //
-// The GCS Go SDK's default single-stream writer tops out around 10 MB/s to a
-// US bucket, so a 7 GB image takes ~11 minutes. Splitting the object into a
-// handful of parts, uploading them concurrently and asking GCS to Compose them
-// server-side saturates the NIC (~113 MB/s on the CI box's 1 Gbit link) and
-// brings the same upload down to ~1 minute. Composite uploads are used only for
-// files larger than parallelUploadThreshold; everything smaller keeps the
-// original single-stream path.
+// One TCP stream to GCS runs far below the CI box's line rate. Splitting the
+// object into a handful of parts, uploading them concurrently, each on its own
+// connection (newUploadTransport), and asking GCS to Compose them server-side
+// fills the link instead. Composite uploads are used only for files larger
+// than parallelUploadThreshold; everything smaller keeps the original
+// single-stream path.
 
 const (
 	// composeMaxParts is the maximum number of source objects a single GCS
@@ -40,7 +42,31 @@ const (
 	// flushes; 32 MiB keeps the socket busier. This is a per-part in-flight
 	// buffer, not the whole part, so memory stays bounded.
 	partChunkSize = 32 << 20 // 32 MiB
+	// uploadRequestTimeout bounds one HTTP request; an upload request carries at
+	// most one chunk. HTTP/1.1 has no ping, so this ends a silently dead connection.
+	uploadRequestTimeout = 5 * time.Minute
+	// chunkRetryDeadline outlives one timed-out request, so the SDK resends that
+	// chunk on a fresh connection instead of failing the whole upload.
+	chunkRetryDeadline = uploadRequestTimeout + time.Minute
 )
+
+// newUploadTransport gives every concurrent upload stream its own TCP
+// connection. The SDK's default transport speaks HTTP/2, which multiplexes all
+// parts onto one connection and caps a publish at single-flow throughput.
+func newUploadTransport(maxConns int) *http.Transport {
+	http1Only := new(http.Protocols)
+	http1Only.SetHTTP1(true)
+	return &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		DialContext:           (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+		TLSHandshakeTimeout:   10 * time.Second,
+		IdleConnTimeout:       90 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		MaxIdleConnsPerHost:   maxConns,
+		// Overrides ForceAttemptHTTP2 and keeps h2 out of the TLS handshake.
+		Protocols: http1Only,
+	}
+}
 
 // crc32cTable is the Castagnoli table GCS uses for its CRC32C object checksums.
 var crc32cTable = crc32.MakeTable(crc32.Castagnoli)
@@ -185,6 +211,7 @@ func (b bucketComposer) uploadPart(ctx context.Context, partName, contentType st
 	w := obj.NewWriter(ctx)
 	w.ContentType = contentType
 	w.ChunkSize = chunkSize
+	w.ChunkRetryDeadline = chunkRetryDeadline
 	if _, err := io.Copy(w, r); err != nil {
 		w.Close() // best-effort; the write already failed
 		return fmt.Errorf("failed to write part to GCS: %w", err)

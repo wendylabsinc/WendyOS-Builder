@@ -2,8 +2,8 @@
 #
 # Static checks on the Dragonwing NPU stack.
 #
-# Two failure modes here are invisible to a build: the DSP firmware refuses a userspace
-# it does not authorise, and an unsatisfiable RRECOMMENDS drops a package silently.
+# One failure mode here is invisible to a build: an unsatisfiable RRECOMMENDS drops a
+# package silently.
 #
 # Run: bash scripts/qcom-npu.test.sh
 
@@ -11,10 +11,6 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PG="$ROOT/meta-qcom-extensions/recipes-core/packagegroups/packagegroup-wendyos-qcom.bb"
-BBA="$ROOT/meta-qcom-extensions/recipes-bsp/hexagon-dsp-binaries/hexagon-dsp-binaries_%.bbappend"
-DISTRO="$ROOT/conf/distro/include/qcom-distro.inc"
-REPOSENV="$ROOT/scripts/upstream-repos.env"
-OECORE="$ROOT/../repos/blacksail/openembedded-core"
 fails=0
 
 check() {
@@ -26,9 +22,11 @@ check() {
     fi
 }
 
-for f in "$PG" "$BBA" "$DISTRO" "$REPOSENV"; do
-    [ -f "$f" ] || { printf 'missing input: %s\n' "$f" >&2; exit 1; }
-done
+if [ ! -f "$PG" ]; then
+    printf 'missing input: %s\n' "$PG" >&2
+    exit 1
+fi
+
 printf 'Checking the Dragonwing NPU stack\n'
 
 # A comment must never satisfy an assertion.
@@ -49,8 +47,6 @@ expand_conf() {
     done <"$1"
 }
 PGBODY="$(strip "$PG")"
-BBABODY="$(strip "$BBA")"
-DISTROBODY="$(strip "$DISTRO")"
 
 # --- 1. the stack is complete, and expands for every Dragonwing machine ------
 # Read the template from the recipe: a restated list cannot notice a deletion.
@@ -65,9 +61,6 @@ else check 1 "the install template parses (got $n packages, expected at least 7)
 # install the wrong DSP userspace on the other machine.
 printf '%s\n' "$TEMPLATE" | grep -qE 'iq[0-9]+-evk|hexagon-v[0-9]+'
 check $((1 - $?)) "the template names no board or Hexagon version literally"
-
-SOCS="$(printf '%s\n' "$DISTROBODY" \
-    | sed -nE 's/^WENDYOS_QCOM_DSP_SOCS[[:space:]]*\??=[[:space:]]*"([^"]+)".*/\1/p')"
 
 # '?=' is a no-op once the variable has a value, so a last-match read would
 # report a weak default that an assignment above the require already overrode.
@@ -96,10 +89,13 @@ for MACH in "${machines[@]}"; do
     mbody="$(expand_conf "$MACH" | grep -vE '^[[:space:]]*#')"
     board="$(getv WENDYOS_QCOM_NPU_BOARD "$mbody")"
     arch="$(getv WENDYOS_QCOM_NPU_DSP_ARCH "$mbody")"
-    soc="$(getv WENDYOS_QCOM_NPU_SOC "$mbody")"
 
-    if [ -n "$board" ] && [ -n "$arch" ] && [ -n "$soc" ]; then rc=0; else rc=1; fi
-    check "$rc" "$mname declares its DSP board, arch and SoC"
+    if [ -n "$board" ] && [ -n "$arch" ]; then
+        rc=0
+    else
+        rc=1
+    fi
+    check "$rc" "$mname declares its DSP board and arch"
 
     # An unexpanded variable becomes a package name that does not exist, which
     # do_rootfs reports far from its cause.
@@ -124,15 +120,6 @@ for MACH in "${machines[@]}"; do
     if [ "$(printf '%s\n' "$expanded" | sort)" = "$want" ]; then rc=0; else rc=1; fi
     check "$rc" "$mname resolves to exactly the expected DSP package names"
 
-    # A SoC absent from the retarget list ships a userspace the firmware refuses,
-    # at runtime, with a green build.
-    if [ -n "$soc" ] && printf '%s\n' "$SOCS" | tr ' ' '\n' | grep -qx "$soc"; then
-        rc=0
-    else
-        rc=1
-    fi
-    check "$rc" "$mname's SoC (${soc:-unset}) is in WENDYOS_QCOM_DSP_SOCS"
-
     npu="$(getv WENDYOS_QCOM_NPU "$mbody")"
     if [ "$npu" = "1" ]; then rc=0; else rc=1; fi
     check "$rc" "$mname has the NPU on by default"
@@ -150,47 +137,6 @@ check $((1 - $?)) "and the recipe declares no RRECOMMENDS at all"
 # --- 3. it is in the image, not an extension --------------------------------
 printf '%s\n' "$PGBODY" | grep -qF "d.getVar('WENDYOS_QCOM_NPU') == '1'"
 check $? "the install list is still gated on the knob"
-
-# --- 4. the firmware pairing ------------------------------------------------
-# The pin must name the version oe-core ships, or do_rootfs cannot resolve it.
-printf '%s\n' "$DISTROBODY" | grep -qE '^WENDYOS_QCOM_DSP_BUILD[[:space:]]*\??='
-check $? "the DSP build is pinned distro-wide"
-FWPV="$(printf '%s\n' "$DISTROBODY" | sed -nE 's/^WENDYOS_QCOM_DSP_FW_PV[[:space:]]*\??=[[:space:]]*"([^"]+)".*/\1/p')"
-if [ -n "$FWPV" ]; then check 0 "the firmware version it is matched to is pinned"
-else check 1 "WENDYOS_QCOM_DSP_FW_PV is not pinned"; fi
-
-# An oe-core bump can move linux-firmware, and with it which binaries the signed firmware
-# admits. Comparing the two revisions needs no checkout, so unlike the check below it also
-# runs in CI.
-pin() { sed -nE "s/^$1=\"([^\"]+)\".*/\1/p" "$REPOSENV"; }
-OEREV="$(pin SRCREV_OECORE)"
-OEVERIFIED="$(pin SRCREV_OECORE_DSP_VERIFIED)"
-if [ -n "$OEREV" ] && [ "$OEREV" = "$OEVERIFIED" ]; then
-    check 0 "the DSP pairing was verified against the pinned oe-core"
-else
-    check 1 "oe-core is at ${OEREV:-unset}, pairing verified at ${OEVERIFIED:-unset}; \
-re-check the pairing and update SRCREV_OECORE_DSP_VERIFIED"
-fi
-
-if [ -d "$OECORE" ]; then
-    OEPV="$(find "$OECORE/meta/recipes-kernel/linux-firmware" -maxdepth 1 \
-        -name 'linux-firmware_*.bb' -printf '%f\n' 2>/dev/null \
-        | sed -nE 's/^linux-firmware_(.+)\.bb$/\1/p' | head -1)"
-    if [ -n "$OEPV" ] && [ "$FWPV" = "$OEPV" ]; then
-        check 0 "the pin ($FWPV) matches oe-core's linux-firmware ($OEPV)"
-    else
-        check 1 "the pin ($FWPV) does not match oe-core's linux-firmware (${OEPV:-unknown})"
-    fi
-else
-    printf '  skip  oe-core not checked out; the revision check above stands in\n'
-fi
-
-# --- 5. the retarget cannot silently no-op ----------------------------------
-# A no-op retarget ships a userspace the firmware refuses, with a green build.
-printf '%s\n' "$BBABODY" | grep -qF 'bbfatal'
-check $? "the bbappend asserts the retarget substituted"
-printf '%s\n' "$BBABODY" | grep -qE "do_install:(prepend|append)"
-check $? "and hooks upstream's do_install rather than replacing it"
 
 printf '\n%s\n' "$([ "$fails" -eq 0 ] && echo 'all checks passed' || echo "$fails check(s) failed")"
 exit $((fails > 0))

@@ -4,7 +4,7 @@
 #
 # .github/device-artifacts.json is the SINGLE SOURCE OF TRUTH for how each
 # device+storage combo's flashable artifacts are named and which extras
-# (recovery tegraflash bundle, bmap, flashpack, publisher --storage) apply.
+# (tegraflash bundle, bmap, flashpack, publisher --storage) apply.
 # This script is its only consumer: it turns that map plus a live deploy dir
 # into paths, and fails loudly — naming the device, the map entry, the expected
 # pattern and the actual deploy-dir contents — when an expected artifact is
@@ -17,19 +17,19 @@
 # Inputs (env vars, matching build.yml's existing style):
 #   DEVICE      e.g. jetson-agx-orin
 #   STORAGE     e.g. nvme | emmc | sd | ufs | disk
-#   MACHINE     Yocto MACHINE, e.g. jetson-agx-orin-devkit-nvme-wendyos
+#   MACHINE     Yocto MACHINE, e.g. jetson-agx-orin-devkit-wendyos
 #   DEPLOY_DIR  build/tmp/deploy/images/<MACHINE>
 #   MAP_FILE    (optional) override the map path — used by the tests
 #
 # Output: KEY=VALUE lines on stdout, safe to `eval` in a step or append to
 # $GITHUB_ENV. Diagnostics and errors go to stderr.
-#   IMAGE_KIND         generated-nvme-img | generated-sd-img | tegraflash-bundle |
+#   IMAGE_KIND         generated-raw-img | tegraflash-bundle |
 #                      qcomflash-bundle | wic-disk
-#   IMAGE_FILE         primary artifact path. For generated-*-img this is the
+#   IMAGE_FILE         primary artifact path. For generated-raw-img this is the
 #                      MACHINE-scoped target path the "Generate flashable image"
 #                      step writes (it does NOT exist at Yocto deploy time, so it
 #                      is intentionally not existence-checked here).
-#   TEGRAFLASH_BUNDLE  resolved tegraflash bundle (recovery/flash artifact), or
+#   TEGRAFLASH_BUNDLE  resolved tegraflash bundle (input to the flashpack), or
 #                      empty when the device has none (Raspberry Pi).
 #   RECOVERY_EXPECTED  true when a tegraflash bundle is expected (all Jetsons).
 #   BMAP_REQUIRED      true when the workflow should `bmaptool create` the image.
@@ -115,8 +115,8 @@ fi
 
 case "$IMAGE_KIND" in
   tegraflash-bundle)
-    # eMMC and Thor NVMe ship no offline disk image; the tegraflash bundle IS
-    # the flash artifact. A missing bundle here is fatal.
+    # eMMC and Thor NVMe ship no offline disk image; their flashpack is built
+    # from the tegraflash bundle. A missing bundle here is fatal.
     if [[ -z "$TEGRAFLASH_BUNDLE" || ! -f "$TEGRAFLASH_BUNDLE" ]]; then
       fail "no tegraflash bundle for $KEY ($MACHINE): expected wendyos-image-${MACHINE}.tegraflash-tar or .tegraflash-tar.zst in $DEPLOY_DIR (map entry image_kind=tegraflash-bundle)"
     fi
@@ -130,18 +130,14 @@ case "$IMAGE_KIND" in
     fi
     IMAGE_FILE="$QCOMFLASH_BUNDLE"
     ;;
-  generated-nvme-img)
-    # The offline NVMe image is produced by build.yml's "Generate flashable
+  generated-raw-img)
+    # The offline raw image is produced by build.yml's "Generate flashable
     # image" step from the extracted bundle; it does not exist at Yocto deploy
     # time, so its existence is NOT validated here (the workflow keeps the
     # stale-image guard for it). Resolve only its canonical MACHINE-scoped path,
-    # which the generate step writes to and the upload step reads.
-    IMAGE_FILE="$DEPLOY_DIR/wendyos-image-${MACHINE}-nvme.img"
-    ;;
-  generated-sd-img)
-    # Same offline layout writer as generated-nvme-img, selecting flash.xml.in's
-    # sdcard device instead of external-flash.xml.in's external device.
-    IMAGE_FILE="$DEPLOY_DIR/wendyos-image-${MACHINE}-sd.img"
+    # which the generate step writes to and the upload step reads. The Nano's
+    # SD and NVMe targets resolve to this same file.
+    IMAGE_FILE="$DEPLOY_DIR/wendyos-image-${MACHINE}-raw.img"
     ;;
   wic-disk)
     # One directly-bootable .wic disk image: the generic x86_64 PC, the VM

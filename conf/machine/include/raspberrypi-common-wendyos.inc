@@ -24,7 +24,6 @@ RPI_USE_U_BOOT = "${@'1' if d.getVar('WENDYOS_RPI_UBOOT') == '1' else '0'}"
 # ride in the boot FAT).
 WENDYOS_UPDATE_BOOTLOADER ?= "0"
 WENDYOS_EFI_DEBUG ?= "0"
-WENDYOS_DEEPSTREAM ?= "0"
 # Persistent journal can be turned on once /data is verified to be mounted
 # correctly; default off for now to preserve existing behavior.
 WENDYOS_PERSIST_JOURNAL_LOGS ?= "0"

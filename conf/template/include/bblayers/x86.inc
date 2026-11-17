@@ -20,11 +20,3 @@ BBLAYERS += " \
 # BBLAYERS add because it is set at local.conf time, after this bblayers include
 # is parsed.
 BBLAYERS += " ${TOPDIR}/../repos/${WENDYOS_LAYER_TREE}/meta-security/meta-tpm "
-
-# blacksail gate bridge. meta-tpm declares LAYERSERIES_COMPAT_tpm-layer="wrynose".
-# On the blacksail tree the core still intersects "wrynose" (same as meta-oe), so it
-# parses; this append makes blacksail explicit and covers a core that later drops
-# wrynose. It MUST live in a bblayers include: LAYERSERIES_COMPAT is snapshotted and
-# checked during the layer.conf loop, before local.conf postfiles like
-# blacksail-compat.inc (see the NOTE there). Inert off the blacksail tree.
-LAYERSERIES_COMPAT_tpm-layer:append = "${@' blacksail' if d.getVar('WENDYOS_LAYER_TREE') == 'blacksail' else ''}"

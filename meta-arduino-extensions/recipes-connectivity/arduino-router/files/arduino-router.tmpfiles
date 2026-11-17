@@ -1,0 +1,3 @@
+# Containers mount this directory, not the socket: the router recreates the
+# socket on every start, and a mounted file would keep the dead one.
+d /run/arduino-router 0750 root arduino-router -

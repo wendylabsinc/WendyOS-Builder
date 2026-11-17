@@ -13,11 +13,12 @@ inherit packagegroup
 SUMMARY:${PN} = "Tegra hardware support packages"
 RDEPENDS:${PN} = " \
     tegra-tools-tegrastats \
-    tegra-bootcontrol-overlay \
     tegra-rootfs-redundancy \
     setup-nv-boot-control \
     packagegroup-nvidia-container \
     "
+# Only Thor's boot chain carries the boot-priority overlay (tegra-overlays.inc).
+RDEPENDS:${PN}:append:tegra264 = " tegra-bootcontrol-overlay"
 
 # Conditional UEFI capsule package installation
 # Controlled by WENDYOS_UPDATE_BOOTLOADER

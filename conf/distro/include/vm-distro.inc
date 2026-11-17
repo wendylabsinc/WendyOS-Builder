@@ -9,7 +9,6 @@
 # Tegra-only and is not even in BUILDCFG_VARS, so a value here would be dead text.
 WENDYOS_UPDATE_BOOTLOADER ?= "0"
 WENDYOS_USB_GADGET ?= "0"
-WENDYOS_DEEPSTREAM ?= "0"
 WENDYOS_NVIDIA_DGPU ?= "0"
 
 # The VM is discovered over the host network, not a direct USB gadget link, so

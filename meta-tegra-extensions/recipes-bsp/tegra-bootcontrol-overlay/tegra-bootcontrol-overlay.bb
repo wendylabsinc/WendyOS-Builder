@@ -5,14 +5,11 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda
 
 FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
 
-# NVMe machines boot from NVMe; all others (eMMC/SD) keep sd first.
-DTSO_FILE = "boot-priority.dtso"
-DTSO_FILE:jetson-agx-orin-devkit-nvme-wendyos = "boot-priority-nvme.dtso"
-DTSO_FILE:jetson-orin-nano-devkit-nvme-wendyos = "boot-priority-nvme.dtso"
-DTSO_FILE:jetson-agx-thor-devkit-nvme-wendyos = "boot-priority-nvme.dtso"
+# Only Thor's boot chain carries this overlay (tegra-overlays.inc). UEFI reads DefaultBootPriority
+# under another GUID, so this overlay sets no boot order.
+DTSO_FILE = "boot-priority-nvme.dtso"
 
 SRC_URI = " \
-    file://boot-priority.dtso \
     file://boot-priority-nvme.dtso \
     "
 S = "${UNPACKDIR}"

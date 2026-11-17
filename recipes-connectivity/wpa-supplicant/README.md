@@ -1,8 +1,8 @@
 # Host Wi-Fi Aware support
 
 Wi-Fi Aware (NAN) lets nearby devices discover each other and establish direct
-Wi-Fi connections without an access point. This layer upgrades wpa_supplicant
-to hostap 2.12, enables its NAN/PASN support, and installs `wendyos-nan` to
+Wi-Fi connections without an access point. oe-core ships hostap 2.12. This layer
+patches it, enables its NAN/PASN support, and installs `wendyos-nan` to
 manage the host interfaces. It requires a capable driver, such as the BE202
 bundle already on `main`; installing the supplicant alone does not add radio
 support. NetworkManager continues to use the same supplicant for ordinary Wi-Fi.

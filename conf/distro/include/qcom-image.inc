@@ -63,7 +63,7 @@ create_wendyos_qcom_dirs() {
     install -d -m 0755 ${IMAGE_ROOTFS}/var/lib/wendy
     install -d -m 0755 ${IMAGE_ROOTFS}/var/lib/containerd
 }
-ROOTFS_POSTPROCESS_COMMAND:append = " create_wendyos_qcom_dirs;"
+ROOTFS_POSTPROCESS_COMMAND:append = " create_wendyos_qcom_dirs"
 
 # MACHINE_FEATURES has "efi", so packagegroup-core-boot RDEPENDS ${EFI_PROVIDER}
 # (unremovable) and grub-efi drops bootaa64.efi, grub.cfg and a writable grubenv
@@ -73,4 +73,4 @@ ROOTFS_POSTPROCESS_COMMAND:append = " create_wendyos_qcom_dirs;"
 prune_wendyos_qcom_shadow_esp() {
     rm -rf ${IMAGE_ROOTFS}/boot/EFI
 }
-ROOTFS_POSTPROCESS_COMMAND:append = " prune_wendyos_qcom_shadow_esp;"
+ROOTFS_POSTPROCESS_COMMAND:append = " prune_wendyos_qcom_shadow_esp"

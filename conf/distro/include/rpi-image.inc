@@ -33,7 +33,6 @@ do_image_wic[depends] += " \
     rpi-cmdline:do_deploy \
     wic-tools:do_populate_sysroot \
     e2fsprogs-native:do_populate_sysroot \
-    gptfdisk-native:do_populate_sysroot \
     "
 
 do_image_wic[depends] += "${PN}:do_generate_partuuids"
@@ -60,7 +59,7 @@ create_rpi_mountpoints() {
     mkdir -p ${IMAGE_ROOTFS}/var/lib/containerd
 }
 
-ROOTFS_POSTPROCESS_COMMAND:append = " create_rpi_mountpoints;"
+ROOTFS_POSTPROCESS_COMMAND:append = " create_rpi_mountpoints"
 
 # --- wendyos-update (wendy) image deltas for RPi --------------------------
 # 1) Drop data-mount (pulled by wendyos-update.inc): it ships its own data.mount

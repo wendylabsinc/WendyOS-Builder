@@ -11,15 +11,20 @@ import tarfile
 import tempfile
 import urllib.request
 
+# The source release oe-core's wpa-supplicant_2.12.bb builds. Our append only
+# adds patches, so keep these in step with that recipe's PV and sha256sum.
+VERSION = '2.12'
+CHECKSUM = '08e23937e16d0155e55cab2b51f51fbe10d80a1aa91c4e15442645059b737ef6'
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--archive', type=Path, help='use a cached source archive (checksum still verified)')
     args = parser.parse_args()
     root = Path(__file__).resolve().parent
-    recipe = (root / 'wpa-supplicant_2.11.bbappend').read_text()
-    version = re.search(r'^PV = "([^"]+)"', recipe, re.M)[1]
-    checksum = re.search(r'SRC_URI\[sha256sum\] = "([^"]+)"', recipe)[1]
+    recipe = (root / 'wpa-supplicant_%.bbappend').read_text()
+    version = VERSION
+    checksum = CHECKSUM
     files = root / 'wpa-supplicant'
     with tempfile.TemporaryDirectory(prefix='wendyos-nan-') as tmp:
         tmp = Path(tmp)

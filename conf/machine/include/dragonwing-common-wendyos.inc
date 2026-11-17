@@ -48,9 +48,6 @@ QCOM_BOOTIMG_ROOTFS = "PARTLABEL=rootfsA"
 WENDYOS_UPDATE_BOOTLOADER = "0"
 WENDYOS_EFI_DEBUG = "0"
 
-# NVIDIA-only stacks.
-WENDYOS_DEEPSTREAM = "0"
-
 # Name the gadget controller explicitly on boards with multiple USB controllers.
 # IQ8 overrides this for USB2 while its primary controller hosts the M.2 hub.
 # The Tegra-only gadget helper recipes that wendyos-image.bb pairs with this

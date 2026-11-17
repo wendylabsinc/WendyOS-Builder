@@ -5,7 +5,7 @@
 # config-parse time; this file is required from wendyos-image.bb (recipe
 # parse), which is too late.
 
-# Boot-control DT overlays (boot-priority + the gated fTPM overlay). The list
+# Boot-control DT overlays (Thor: boot-priority + the gated fTPM overlay; Orin adds none). The list
 # lives in tegra-overlays.inc, shared verbatim with the tegra-uefi-capsules
 # bbappend so capsule updates carry the same DTB content as the flash. 
 # This file only adds the image-build dependency on the overlay artifact.
@@ -13,6 +13,9 @@
 # with compliance before shipping a TPM-enabled unit.
 require conf/distro/include/tegra-overlays.inc
 EXTRA_IMAGEDEPENDS:append = "${@' tegra-ftpm-overlay' if d.getVar('WENDYOS_ENABLE_TPM') == '1' and d.getVar('WENDYOS_FTPM_DTBO') else ''}"
+
+# The bundle's generate_bup_payload.sh signs the same TnSpec names as the capsule recipe.
+inherit tegra_tnspec_legacy
 
 # TPM2 + LUKS2 userspace for /data encryption (gated on WENDYOS_DATA_ENCRYPTED).
 # Mirrors x86-image.inc: cryptsetup (luksFormat/open), systemd-crypt
@@ -39,7 +42,7 @@ IMAGE_INSTALL:append = "${@' ' + d.getVar('WENDYOS_TEGRA_TPM_INSTALL') if d.getV
 TEGRA_BPMP_SERIAL_LOGGING ?= "0"
 
 # Tegra-specific packages (Jetson hardware only)
-# packagegroup-wendyos-tegra pulls in tegra-bootcontrol-overlay,
+# packagegroup-wendyos-tegra pulls in tegra-bootcontrol-overlay (Thor),
 # setup-nv-boot-control, packagegroup-nvidia-container, and
 # conditionally tegra-uefi-capsules/bootloader-update.
 IMAGE_INSTALL:append = " \
@@ -50,22 +53,4 @@ IMAGE_INSTALL:append = " \
     v4l-utils \
     "
 
-# Enable DeepStream SDK support (optional - adds ~1GB to image)
-# Tegra/NVIDIA hardware only - DeepStream requires NVIDIA GPUs
-# Also enables l4t-deepstream.csv which provides:
-# - GPU device nodes (/dev/nvhost-*) for tegrastats and GPU monitoring
-# - CUDA compilation toolchain (headers, binaries, nvvm) for Triton/JIT
-# - Additional libraries (libnuma) and monitoring paths
 WENDYOS_USB_GADGET ?= "1"
-WENDYOS_DEEPSTREAM ?= "1"
-# The DeepStream package is BSP-specific:
-#   blacksail (JP7.2/r39.2, CUDA 13) -> deepstream-8.0 (meta-tegra-extensions-jp7)
-#   wrynose (r38.4) / other          -> none (no DeepStream recipe exists there)
-DEEPSTREAM_PKG = "${@'deepstream-8.0' if d.getVar('WENDYOS_LAYER_TREE') == 'blacksail' else ''}"
-IMAGE_INSTALL:append = " \
-    ${@oe.utils.ifelse( \
-        d.getVar('WENDYOS_DEEPSTREAM') == '1', \
-            d.getVar('DEEPSTREAM_PKG'), \
-            '' \
-        )} \
-    "

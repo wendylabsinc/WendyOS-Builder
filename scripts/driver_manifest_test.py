@@ -1,10 +1,13 @@
 """Exercise the build/pack scripts' Python validators before shell serialization."""
 
+import hashlib
 import json
 from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+
+from scripts.driver_supports_device import supports
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -44,6 +47,48 @@ class DriverManifestTests(unittest.TestCase):
         result = self.firmware("intel/ibt-0291-0291.sfi")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.split("\t")[2], "intel/ibt-0291-0291.sfi\n")
+
+    def fetch(self, mirror_files, digest, upstream="https://fixture.invalid/firmware"):
+        """Run build-driver.sh's fetch_firmware against a local mirror directory."""
+        source = (ROOT / "scripts" / "build-driver.sh").read_text()
+        function = "fetch_firmware() {" + source.split("fetch_firmware() {", 1)[1].split("\n}\n", 1)[0] + "\n}\n"
+        with tempfile.TemporaryDirectory() as directory:
+            mirror = Path(directory) / "mirror" / "sha256"
+            mirror.mkdir(parents=True)
+            for name, content in mirror_files.items():
+                (mirror / name).write_bytes(content)
+            destination = Path(directory) / "out" / "fw.bin"
+            destination.parent.mkdir()
+            script = ('set -euo pipefail\nerr() { echo "build-driver: $*" >&2; exit 1; }\n'
+                      'FIRMWARE_MIRROR=$1\n' + function + 'fetch_firmware "$2" "$3" "$4"\n')
+            result = subprocess.run(
+                ["bash", "-c", script, "bash", "file://%s/mirror" % directory, upstream, digest, str(destination)],
+                text=True, capture_output=True, check=False)
+            return result, (destination.read_bytes() if destination.exists() else None)
+
+    def test_mirrored_firmware_never_contacts_upstream(self):
+        content = b"firmware"
+        digest = hashlib.sha256(content).hexdigest()
+        result, fetched = self.fetch({digest: content}, digest)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(fetched, content)
+        self.assertIn("from mirror", result.stdout)
+
+    def test_wrong_mirror_object_is_not_installed(self):
+        digest = hashlib.sha256(b"firmware").hexdigest()
+        result, fetched = self.fetch({digest: b"tampered"}, digest)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIsNone(fetched)
+        self.assertIn("using upstream", result.stderr)
+        self.assertIn("cannot fetch firmware", result.stderr)
+
+    def test_mirror_miss_falls_back_to_upstream(self):
+        digest = hashlib.sha256(b"firmware").hexdigest()
+        result, fetched = self.fetch({}, digest)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIsNone(fetched)
+        self.assertNotIn("using upstream", result.stderr)
+        self.assertIn("cannot fetch firmware from https://fixture.invalid/firmware", result.stderr)
 
     def test_service_options_are_rejected_at_pack_time(self):
         for unit in ["--help", "-H", "-host.service"]:
@@ -109,6 +154,21 @@ class DriverManifestTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("activation_by_device must map", result.stderr)
                 self.assertEqual(result.stdout, "")
+
+    def test_an_alias_is_built_as_its_canonical_device(self):
+        # Alias legs build with the canonical device's id, so per-device keys on an alias never apply.
+        # Discover gates each leg on its own id, so listing only one of the two silently drops the other.
+        artifacts = json.loads((ROOT / ".github/device-artifacts.json").read_text())
+        aliases = {entry["manifest_alias"]: key.split("/")[0]
+                   for key, entry in artifacts.items() if entry.get("manifest_alias")}
+        for path in sorted((ROOT / "drivers").glob("*/driver.json")):
+            manifest = json.loads(path.read_text())
+            for alias, device in aliases.items():
+                with self.subTest(driver=path.parent.name, alias=alias):
+                    self.assertEqual(supports(manifest, alias), supports(manifest, device),
+                                     f"list both {device} and {alias} in devices, or neither")
+                    for key in ("variants_by_device", "activation_by_device"):
+                        self.assertNotIn(alias, manifest.get(key, {}))
 
     def test_invalid_wifi_restore_pci_id_is_rejected(self):
         result = self.validate("pack-sysext.sh",

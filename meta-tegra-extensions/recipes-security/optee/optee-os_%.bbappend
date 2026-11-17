@@ -10,8 +10,8 @@
 # runtime package (see recipes-core/packagegroups/tegra-packagegroup-base.inc);
 # tee-supplicant loads the TA from REE-FS on demand at runtime.
 #
-# Version-agnostic _%.bbappend so it survives the future r38/wrynose meta-tegra
-# bump (optee-os recipe version changes).
+# Version-agnostic _%.bbappend so it survives meta-tegra version bumps
+# (optee-os recipe version changes).
 EXTRA_OEMAKE += "CFG_PKCS11_TA=y"
 
 # Make OP-TEE check the single-instance TA lock again at a fixed interval

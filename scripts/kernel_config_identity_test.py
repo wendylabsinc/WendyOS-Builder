@@ -17,10 +17,10 @@ spec = importlib.util.spec_from_file_location('kernel_config_identity', HELPER)
 identity = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(identity)
 
-CONFIG = '''# Linux/arm64 7.2 Kernel Configuration
+CONFIG = '''# Linux/arm64 7.3.0-rc4 Kernel Configuration
 CONFIG_64BIT=y
 CONFIG_LOCALVERSION="-wendyos"
-CONFIG_LOCALVERSION_AUTO=y
+# CONFIG_LOCALVERSION_AUTO is not set
 CONFIG_MODULE_SIG=y
 CONFIG_MODULE_SIG_KEY="certs/signing_key.pem"
 CONFIG_MODVERSIONS=y
@@ -105,35 +105,36 @@ class ConfigIdentityTests(unittest.TestCase):
         self.assertIn('No such file', result.stderr)
     @unittest.skipUnless(os.environ.get('WENDY_KERNEL_SETLOCALVERSION'), 'optional pinned Linux script integration')
     def test_pinned_linux_release_changes_only_when_config_changes(self):
-        # Invoke the real pinned kernel script, with auto.conf in the form that
-        # kbuild syncconfig produces. Source identity remains the kernel's job.
+        # Invoke the real pinned kernel script the way the Qualcomm qcom-next
+        # 7.3 build does: meta-qcom turns CONFIG_LOCALVERSION_AUTO off (so it
+        # is absent from auto.conf) and passes its source suffix, the kernel
+        # commit and the number of patches, as LOCALVERSION (KERNEL_LOCALVERSION,
+        # exported by kernel.bbclass). Source identity remains the kernel's job.
         source = self.root / 'source'
         source.mkdir()
-        (source / 'Makefile').write_text('VERSION = 7\nPATCHLEVEL = 2\nSUBLEVEL = 0\n')
-        subprocess.run(['git', 'init', '-q', str(source)], check=True)
-        subprocess.run(['git', '-C', str(source), '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid',
-                        'add', 'Makefile'], check=True)
-        subprocess.run(['git', '-C', str(source), '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid',
-                        'commit', '-qm', 'Pinned source fixture'], check=True)
+        (source / 'Makefile').write_text('VERSION = 7\nPATCHLEVEL = 3\nSUBLEVEL = 0\nEXTRAVERSION = -rc4\n')
         auto = self.root / 'include/config/auto.conf'
         auto.parent.mkdir(parents=True)
+        source_suffix = '-g1a0586064ee1-p7'
 
         def release(config):
             self.config.write_text(config)
             suffix = identity.update(self.config)
             # auto.conf omits quotes around string-valued settings.
-            auto.write_text('CONFIG_LOCALVERSION=' + suffix + '\nCONFIG_LOCALVERSION_AUTO=y\n')
+            auto.write_text('CONFIG_LOCALVERSION=' + suffix + '\n')
             result = subprocess.run(['sh', os.environ['WENDY_KERNEL_SETLOCALVERSION'], str(source)],
-                                    cwd=self.root, env=os.environ | {'KERNELVERSION': '7.2.0', 'LOCALVERSION': ''},
+                                    cwd=self.root,
+                                    env=os.environ | {'KERNELVERSION': '7.3.0-rc4', 'LOCALVERSION': source_suffix},
                                     text=True, capture_output=True, check=True)
             return result.stdout.strip()
 
         first = release(CONFIG)
-        self.assertRegex(first, r'^7\.2\.0-wendyos-cfg[0-9a-f]{16}-g[0-9a-f]+$')
+        self.assertRegex(first, r'^7\.3\.0-rc4-wendyos-cfg[0-9a-f]{16}-g[0-9a-f]{12}-p[0-9]+$')
         self.assertEqual(first, release(CONFIG))
         changed = release(CONFIG.replace('CONFIG_DUMMY=m', 'CONFIG_DUMMY=y'))
         self.assertNotEqual(first, changed)
-        self.assertEqual(first.rsplit('-g', 1)[1], changed.rsplit('-g', 1)[1])
+        self.assertTrue(first.endswith(source_suffix))
+        self.assertTrue(changed.endswith(source_suffix))
         print('Pinned Linux releases:', first, changed)
 
 
