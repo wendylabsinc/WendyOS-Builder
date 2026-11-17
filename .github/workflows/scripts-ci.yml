@@ -113,6 +113,7 @@ on:
       - 'tests/uno-q-mcu/**'
       - 'scripts/root_disk_boot_link_test.py'
       - 'recipes-core/base-files/files/rpi-wendy*-fstab'
+      - 'meta-rpi-extensions/recipes-core/images/wendyos-image.bbappend'
       # No *.sh filter: data-recovery-key is a command and carries no extension.
       - 'recipes-support/data-device/files/*'
       - 'recipes-support/data-crypt/files/*'
@@ -240,6 +241,7 @@ on:
       - 'tests/uno-q-mcu/**'
       - 'scripts/root_disk_boot_link_test.py'
       - 'recipes-core/base-files/files/rpi-wendy*-fstab'
+      - 'meta-rpi-extensions/recipes-core/images/wendyos-image.bbappend'
       # No *.sh filter: data-recovery-key is a command and carries no extension.
       - 'recipes-support/data-device/files/*'
       - 'recipes-support/data-crypt/files/*'

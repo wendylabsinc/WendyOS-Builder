@@ -1,7 +1,9 @@
-"""Check the /dev/wendyos/boot link: the rule, the root-disk answer behind it, the fstabs."""
+"""Check the /dev/wendyos/boot link: the rule, the root-disk answer behind it, the fstabs,
+and the image check that no fstab link ships without its rule."""
 
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import tempfile
@@ -13,6 +15,8 @@ FILES = ROOT / "recipes-support/data-device/files"
 HELPER = FILES / "root-disk-part"
 RULE = FILES / "99-wendyos-boot.rules"
 FSTABS = ROOT / "recipes-core/base-files/files"
+IMAGE_APPEND = ROOT / "meta-rpi-extensions/recipes-core/images/wendyos-image.bbappend"
+PI_RULES = ("99-wendyos-boot.rules", "99-wendyos-config.rules", "99-wendyos-data.rules")
 PI_PARTITIONS = ("boot", "config", "rootfsA", "rootfsB", "data")
 
 
@@ -102,6 +106,75 @@ class BootLinkTests(unittest.TestCase):
     def test_mbr_pi_fstab_keeps_the_label(self):
         self.assertEqual(self.boot_lines("rpi-wendy-mbr-fstab"),
                          [["LABEL=boot", "/boot", "vfat", "defaults", "0", "2"]])
+
+
+class FstabLinkCheckTests(unittest.TestCase):
+    """Run the Pi image's check_wendyos_links against fake rootfs trees."""
+
+    def run_check(self, fstab, rules, rules_dir="etc/udev/rules.d"):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        rootfs = Path(tmp.name)
+        (rootfs / "etc").mkdir()
+        (rootfs / "etc/fstab").write_text(fstab)
+        if rules is not None:
+            (rootfs / rules_dir).mkdir(parents=True)
+            for name, text in rules.items():
+                (rootfs / rules_dir / name).write_text(text)
+        body = re.search(r"^check_wendyos_links\(\) \{\n(.*?)^\}", IMAGE_APPEND.read_text(),
+                         re.S | re.M).group(1)
+        values = {"IMAGE_ROOTFS": rootfs, "sysconfdir": "/etc", "nonarch_base_libdir": "/usr/lib"}
+        script = re.sub(r"\$\{(\w+)\}", lambda m: str(values[m.group(1)]), body)
+        # bitbake runs shell tasks with -e and provides bbfatal.
+        return subprocess.run(["sh", "-ec", 'bbfatal() { echo "$*" >&2; exit 1; }\n' + script],
+                              text=True, capture_output=True, check=False)
+
+    def shipped(self, *names):
+        return {name: (FILES / name).read_text() for name in names}
+
+    def test_shipped_pi_fstab_and_rules_pass(self):
+        result = self.run_check((FSTABS / "rpi-wendy-fstab").read_text(), self.shipped(*PI_RULES))
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_missing_boot_rule_fails_the_build(self):
+        result = self.run_check((FSTABS / "rpi-wendy-fstab").read_text(),
+                                self.shipped("99-wendyos-config.rules", "99-wendyos-data.rules"))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("/dev/wendyos/boot", result.stderr)
+        # The message names what was searched for, so a rule written another way is found fast.
+        self.assertIn('SYMLINK+="wendyos/boot"', result.stderr)
+
+    def test_image_build_runs_the_check(self):
+        lines = [line.strip() for line in IMAGE_APPEND.read_text().splitlines()
+                 if not line.lstrip().startswith("#")]
+        self.assertIn('ROOTFS_POSTPROCESS_COMMAND += "check_wendyos_links"', lines)
+
+    def test_pi3_fstab_needs_only_the_data_rule(self):
+        result = self.run_check((FSTABS / "rpi-wendy-mbr-fstab").read_text(),
+                                self.shipped("99-wendyos-data.rules"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_rule_under_usr_lib_counts(self):
+        result = self.run_check("/dev/wendyos/boot /boot vfat defaults,nofail 0 2\n",
+                                self.shipped("99-wendyos-boot.rules"), "usr/lib/udev/rules.d")
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_commented_out_rule_does_not_count(self):
+        rule = "".join("# " + line for line in (FILES / "99-wendyos-boot.rules").read_text()
+                       .splitlines(keepends=True))
+        result = self.run_check("/dev/wendyos/boot /boot vfat defaults,nofail 0 2\n",
+                                {"99-wendyos-boot.rules": rule})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("/dev/wendyos/boot", result.stderr)
+
+    def test_commented_out_fstab_line_needs_no_rule(self):
+        result = self.run_check("# /dev/wendyos/boot /boot vfat defaults,nofail 0 2\n", None)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_no_rules_directory_fails_with_a_message(self):
+        result = self.run_check("/dev/wendyos/boot /boot vfat defaults,nofail 0 2\n", None)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("/dev/wendyos/boot", result.stderr)
 
 
 if __name__ == "__main__":
