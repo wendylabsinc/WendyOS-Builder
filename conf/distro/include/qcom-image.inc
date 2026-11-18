@@ -9,6 +9,10 @@ inherit native-driver-check
 # such as Uno Q which select a different hardware packagegroup below.
 IMAGE_INSTALL:append = " v4l2loopback kernel-module-snd-aloop"
 
+# Host-side USB peripheral drivers, required the same way. qcom-distro.inc owns
+# the list.
+IMAGE_INSTALL:append = " ${@' '.join(entry.split(':', 1)[1] for entry in d.getVar('WENDYOS_QCOM_USB_PERIPHERAL_MODULES').split())}"
+
 # wendyos-image.bb pairs these with WENDYOS_USB_GADGET for every board, but both
 # live in meta-tegra-extensions. IMAGE_INSTALL resolves at task-scheduling time, so
 # an absent package must be removed explicitly or the build fails on it. Neither is

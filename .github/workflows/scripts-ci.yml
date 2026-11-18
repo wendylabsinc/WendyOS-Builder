@@ -52,6 +52,8 @@ on:
       - 'recipes-kernel/v4l2loopback/**'
       - 'meta-tegra-extensions-jp7/recipes-kernel/v4l2loopback/**'
       - 'conf/distro/include/qcom-image.inc'
+      - 'conf/distro/include/qcom-distro.inc'
+      - 'scripts/qcom_usb_peripherals_test.py'
       - 'conf/distro/include/rpi-image.inc'
       - 'scripts/mesh_local_contract_test.py'
       - 'classes/mesh-kernel-check.bbclass'
@@ -177,6 +179,8 @@ on:
       - 'recipes-kernel/v4l2loopback/**'
       - 'meta-tegra-extensions-jp7/recipes-kernel/v4l2loopback/**'
       - 'conf/distro/include/qcom-image.inc'
+      - 'conf/distro/include/qcom-distro.inc'
+      - 'scripts/qcom_usb_peripherals_test.py'
       - 'conf/distro/include/rpi-image.inc'
       - 'scripts/mesh_local_contract_test.py'
       - 'classes/mesh-kernel-check.bbclass'
@@ -442,6 +446,9 @@ jobs:
 
       - name: Run SensorLink loopback image acceptance tests
         run: python3 -m unittest scripts/check_sensor_loopback_support_test.py
+
+      - name: Run Qualcomm USB peripheral driver tests
+        run: python3 -m unittest scripts/qcom_usb_peripherals_test.py
 
       - name: Verify config-only kernel release identities
         run: |
