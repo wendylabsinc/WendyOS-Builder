@@ -77,6 +77,12 @@ EXTRA_OEMAKE:append:pn-linux-qcom-next = " INSTALL_MOD_STRIP=1"
 EXTRA_OEMAKE:append:pn-qps615-dlkm = " INSTALL_MOD_STRIP=1"
 EXTRA_OEMAKE:append:pn-v4l2loopback = " INSTALL_MOD_STRIP=1"
 
+# The on-board sound card registers after USB has enumerated. USB audio is kept
+# off card 0, so that card keeps the number ALSA's default device uses. index is
+# per USB audio device: -2 (any slot but 0) for each of CONFIG_SND_MAX_CARDS.
+KERNEL_MODULE_PROBECONF += "snd-usb-audio"
+module_conf_snd-usb-audio = "options snd-usb-audio index=${@','.join(['-2'] * 32)}"
+
 # /data encryption stays off: turning it on is a separate decision with its own
 # rollback hazard, and not every board here has usable TPM firmware to enroll to.
 WENDYOS_DATA_ENCRYPTED = "0"

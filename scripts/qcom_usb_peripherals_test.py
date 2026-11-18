@@ -14,6 +14,8 @@ KERNEL = ROOT / 'meta-qcom-extensions/recipes-kernel/linux/linux-qcom-next_%.bba
 FRAGMENT = KERNEL.parent / 'linux-qcom-next/usb-peripherals.cfg'
 IMAGE = ROOT / 'conf/distro/include/qcom-image.inc'
 NAME = 'WENDYOS_QCOM_USB_PERIPHERAL_MODULES'
+EVK = ROOT / 'conf/machine/include/dragonwing-common-wendyos.inc'
+UNO_Q = ROOT / 'conf/machine/arduino-uno-q-wendyos.conf'
 BOARD_PACKAGEGROUPS = sorted(path for layer in ('meta-qcom-extensions', 'meta-arduino-extensions')
                              for path in (ROOT / layer / 'recipes-core/packagegroups').glob('*.bb'))
 
@@ -97,6 +99,18 @@ class QcomUsbPeripheralsTest(unittest.TestCase):
             for package in contract().values():
                 with self.subTest(packagegroup=path.name, package=package):
                     self.assertNotRegex(code, r'(?<![\w-])' + re.escape(package) + r'(?![\w-])')
+
+    def test_only_the_evks_keep_usb_audio_off_card_0(self):
+        text = EVK.read_text()
+        # The option file is generated only for a module named in both variables.
+        self.assertRegex(text, r'(?m)^KERNEL_MODULE_PROBECONF \+= "snd-usb-audio"$')
+        # index is per USB audio device; -2 (any slot but 0) for all 32 slots
+        # (CONFIG_SND_MAX_CARDS), not only the first device.
+        self.assertRegex(text, r'(?m)^module_conf_snd-usb-audio = "options snd-usb-audio index='
+                         + re.escape("${@','.join(['-2'] * 32)}") + r'"$')
+        self.assertIn('kernel-module-snd-usb-audio', contract().values())
+        # Uno Q has no on-board card, so USB audio stays free to be card 0 there.
+        self.assertNotIn(EVK.name, UNO_Q.read_text())
 
 
 if __name__ == '__main__':
