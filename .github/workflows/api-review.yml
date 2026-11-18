@@ -1,0 +1,32 @@
+name: AI Compatibility Review
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Same-repository PR to validate without publishing
+        required: true
+        type: string
+      expected_head_sha:
+        description: Exact PR head SHA approved for validation
+        required: true
+        type: string
+permissions: {}
+concurrency:
+  group: "${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || inputs.pr_number }}-${{ github.event.action == 'labeled' && github.event.label.name != 'review: api' && github.run_id || 'review' }}"
+  cancel-in-progress: true
+jobs:
+  review:
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    uses: wendylabsinc/WendyOS/.github/workflows/api-review-shared.yml@c39e2a71e2b8e98ddc560e1a364a4102820184c4
+    with:
+      automation_sha: c39e2a71e2b8e98ddc560e1a364a4102820184c4
+      pr_number: ${{ inputs.pr_number || '' }}
+      expected_head_sha: ${{ inputs.expected_head_sha || '' }}
+      dry_run: ${{ github.event_name == 'workflow_dispatch' }}
+    secrets:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
