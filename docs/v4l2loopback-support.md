@@ -1,8 +1,8 @@
 # V4L2 and ALSA loopback support
 
-WendyOS includes `v4l2loopback` on Tegra, Qualcomm and Raspberry Pi images.
+WendyOS includes `v4l2loopback` on Tegra, Qualcomm, Raspberry Pi, VM and QEMU images.
 The agent uses its control device to create virtual cameras for IP cameras and
-SensorLink sources. Qualcomm and Raspberry Pi images also include `snd-aloop`,
+SensorLink sources. Qualcomm, Raspberry Pi, VM and QEMU images also include `snd-aloop`,
 which exposes SensorLink microphones through ALSA PCM devices.
 
 ## Packages and loading
@@ -18,6 +18,11 @@ Tegra images require the package through `packagegroup-wendyos-tegra`.
 `qcom-image.inc` explicitly installs `v4l2loopback` and
 `kernel-module-snd-aloop` on every `qcom-wendyos` target, including Uno Q.
 `rpi-image.inc` does the same on every `rpi` target (Pi 3, Pi 4 and Pi 5).
+`vm-image.inc` and `qemu-image.inc` explicitly install both loopback drivers for
+both VM architectures and the QEMU ARM64 image. Their linux-yocto appends
+include the shared `virtual-loopback.cfg` fragment: it enables the media core
+and UVC, which selects the videobuf2 allocator required by v4l2loopback, plus
+modular ALSA and `CONFIG_SND_ALOOP=m`. The agent loads ALSA loopback on demand.
 These are required image packages. Missing drivers fail the image build.
 
 The v4l2loopback recipe generates module loading and modprobe configuration
@@ -41,10 +46,14 @@ Raspberry Pi kernels need no fragment: the RPi defconfigs set
 The module recipe checks the effective kernel configuration for
 `CONFIG_VIDEO_DEV` and `CONFIG_VIDEOBUF2_VMALLOC`. The Qualcomm kernel
 append also checks those settings and requires `CONFIG_SND_ALOOP=m`
-after Kconfig resolves its fragments.
+after Kconfig resolves its fragments. VM and QEMU kernels separately check
+`CONFIG_VIDEO_DEV`, `CONFIG_VIDEOBUF2_VMALLOC` and modular `CONFIG_SND_ALOOP`
+after configuration.
+Existing simulator disks need a rebuilt matching image or OTA update; changing
+the image recipe does not install a module into a running simulator.
 
 After `do_rootfs` generates `modules.dep`, `sensor-loopback-check.bbclass`
-validates each Qualcomm and Raspberry Pi image. It checks both loopback
+validates each Qualcomm, Raspberry Pi, VM and QEMU image. It checks both loopback
 driver files and every module dependency against the compiled kernel
 release. A module tree
 for a different kernel, a missing dependency, or an absent driver fails
