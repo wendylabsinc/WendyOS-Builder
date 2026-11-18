@@ -13,8 +13,10 @@ python3 tools/mesh/package-local-agent.py \
 
 Add `/tmp/wendy-local-agent/layer` to `BBLAYERS` in the image build's
 `conf/bblayers.conf` (use the path as seen inside Docker when building there).
-The layer supplies the local archive and masks the agent's automatic updater
-timer. Remove the layer to return to the normal release selection.
+The layer supplies the local archive, which holds the agent and, for commits
+that have it, `wendy-agent-supervisor` built from the same commit. It also masks
+the agent's automatic updater timer. Remove the layer to return to the normal
+release selection.
 
 `BUILD-PROVENANCE.json` records the source and Builder commits, hashes of the
 committed Builder inputs, the selected Go launcher path and SHA-256, the compiler
