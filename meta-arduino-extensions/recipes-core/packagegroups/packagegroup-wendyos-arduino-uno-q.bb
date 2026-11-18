@@ -12,13 +12,11 @@ inherit packagegroup
 #  phy-qcom-*          that controller's USB2 and USB3 PHYs. Without them dwc3 never
 #                      probes, so there is no gadget -- the board's host link.
 #  spidev              the SPI link to the STM32 MCU.
-#  uvcvideo            USB webcams on the USB-C port in host role.
 RDEPENDS:${PN} = " \
     kernel-module-anx7625 \
     kernel-module-phy-qcom-qusb2 \
     kernel-module-phy-qcom-qmp-usbc \
     kernel-module-spidev \
-    kernel-module-uvcvideo \
     "
 
 # Wi-Fi firmware runs on the modem DSP: rmtfs and tqftpserv serve its storage and
