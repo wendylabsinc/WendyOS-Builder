@@ -42,19 +42,45 @@ login for `wendy` as well. `passwd -u wendy` or a new password restores it.
 
 ## Updates and recovery
 
-The shipped image owns `/etc/shadow`. The standard persistent `/etc` bind
-mounts do not preserve it across installation of a new A/B root filesystem.
-A password set on one slot survives a reboot into that slot but must be
-provisioned again after booting a newly installed image. Agent enrollment is
-stored under `/var/lib/wendy`, which is mounted from `/data/wendy` for A/B
-updates. Verify authenticated Agent access before and after the update.
+The shipped image owns `/etc/shadow`, so a newly installed A/B root filesystem
+starts with the locked entry. What the device owns in the `wendy` entry is
+therefore also kept on `/data`, in `/data/etc/wendyos-credential/wendy`,
+readable by root only: the password, the day it was last changed, and the
+account expiry. It is saved whenever `/etc/shadow` changes, and again at boot
+and at shutdown, and it is restored at boot before any login path is open. A
+provisioned password, a lock set with `passwd -l`, and an account disabled
+with `usermod --expiredate 1 wendy` therefore survive an update. The password
+aging limits are not kept: they stay those of the installed image.
 
-This change does not rewrite credentials on a running device. Booting an old
-rollback slot can restore its old credential state. Before deployment, update
-or retire slots containing the legacy shared password and validate the
-recovery process. Systems with a downstream persistent `/etc/shadow` must
-remove the legacy shared credential separately while preserving unique
-provisioned credentials.
+To disable the account, use the expiry: every login path honours it. `passwd
+-l` locks the password only; sshd on ordinary images also refuses keys for
+such an account, as described above.
+
+Each slot records the entry it last had in common with `/data`. At boot the
+saved entry is applied to a new slot and to a slot that was rolled back to,
+and a change that this slot never managed to save, for example because `/data`
+was read-only or power was cut, is kept and saved instead. The old shared
+password, an empty password and a hash the account tools would reject are
+never saved or restored; setting one removes the saved entry, so the next
+installed slot starts locked. If `/data` itself cannot be written, the saved
+entry cannot be corrected, and a slot installed in that state receives the
+older entry.
+
+The saved entry is lost with `/data`. After a wipe of `/data`, including the
+one-time conversion to an encrypted `/data`, the running slot saves its entry
+again at the next boot, and only a slot installed before that boot needs to be
+provisioned again. A reinstall that keeps `/data` keeps the password. Agent
+enrollment is stored under `/var/lib/wendy`, which is mounted from
+`/data/wendy` for A/B updates. Verify authenticated Agent access before and
+after the update.
+
+This change does not rewrite credentials on a running device, and an image
+from before it does not restore the saved entry. The slot that holds the
+previous image keeps the legacy shared password until it is overwritten, and a
+rollback boots it again. After the first update to a locked image, apply one
+more update to overwrite that slot, and validate the recovery process. Systems
+with a downstream persistent `/etc/shadow` must remove the legacy shared
+credential separately while preserving unique provisioned credentials.
 
 If an unenrolled device has no approved administrative access path, use the
 deployment's authorized enrollment or recovery procedure. Do not restore a
@@ -78,7 +104,8 @@ release (`WENDYOS_BUILD_KIND`). Never deploy an image built with it.
 This addresses the shared source credential associated with GPOS
 V-203625, V-203627, V-203634, and V-203676. Password quality is enforced on
 PAM password changes; privileged raw hash writes such as `usermod -p` or
-`chpasswd -e` bypass PAM and are not approved provisioning paths.
+`chpasswd -e` bypass PAM and are not approved provisioning paths. The boot-time
+restore writes back an entry the device already held; it sets no new password.
 
 Record the exact image and Agent release, resolved packages and PAM files,
 locked initial account state, rejected weak passwords, accepted unique
