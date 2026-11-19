@@ -59,25 +59,40 @@ provisioned password, a lock set with `passwd -l`, and an account expiry
 therefore survive an update. The password aging limits are not kept: they stay
 those of the installed image.
 
-Each slot records the entry it last had in common with `/data`. At boot the
-saved entry is applied to a new slot and to a slot that was rolled back to,
-and a change that this slot never managed to save, for example because `/data`
-was read-only or power was cut, is kept and saved instead. The account is
-disabled while the saved entry is applied; if applying it fails, it stays
-disabled for that boot and the next boot tries again. The old shared password,
-an empty password and a hash the account tools would reject are never saved
-or restored: the saved entry then has no password, so other slots, including
-one rolled back to, start without one. If `/data` itself cannot be written,
-the saved entry cannot be corrected, and a slot installed in that state
-receives the older entry.
+Every write of the saved entry carries a new random token, and each slot
+records its own entry and the token from its last save or restore. At boot:
 
-The saved entry is lost with `/data`. After a wipe of `/data`, including the
-one-time conversion to an encrypted `/data`, the running slot saves its entry
-again at the next boot, and only a slot installed before that boot needs to be
-provisioned again. A reinstall that keeps `/data` keeps the password. Agent
-enrollment is stored under `/var/lib/wendy`, which is mounted from
-`/data/wendy` for A/B updates. Verify authenticated Agent access before and
-after the update.
+- A new slot, or a slot whose recorded token differs from the saved one,
+  takes the saved entry. Another slot saved since, and that slot was booted
+  later, so its entry is the newer one.
+- A slot whose recorded token still matches keeps its own entry. A change it
+  never managed to save, for example because power was cut, is saved then.
+- A slot that saved before but finds the saved entry missing, unreadable or
+  unusable removes its own password. That happens when another slot could not
+  save a change, so this slot's entry may be the older one. Its account expiry
+  stays as it is: an expiry that could not be saved is lost. If even removing
+  the password fails, the slot keeps it for that boot.
+
+The account is disabled while the saved entry is applied; if a later step
+fails, it stays disabled for that boot. If even disabling it fails, the slot
+keeps its own entry for that boot. Either way the next boot tries again.
+
+The old shared password, an empty password and a hash the account tools would
+reject are never saved or restored: the saved entry then has no password. A
+save that fails, for example for lack of space, replaces the saved entry with
+an empty marker only that slot records. Until another slot saves or fails to
+save, that slot keeps its own entry and saves it at its next attempt (the next
+account change, boot or shutdown); every other slot that saved before starts
+without a password. If `/data` cannot be written at all, not even to replace
+the entry, other slots receive the older entry.
+
+Any wipe of `/data` removes the saved entry, including the one-time conversion
+to an encrypted `/data`: its snapshot of `/data` may miss the latest save, so
+the entry is not carried across. Slots that saved before then start without a
+password and must be provisioned again. A reinstall that keeps `/data` keeps
+the password. Agent enrollment is stored under `/var/lib/wendy`, which is
+mounted from `/data/wendy` for A/B updates. Verify authenticated Agent access
+before and after the update.
 
 This change does not rewrite credentials on a running device, and an image
 from before it does not restore the saved entry. The slot that holds the

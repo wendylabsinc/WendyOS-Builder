@@ -12,11 +12,13 @@ USER_NAME="wendy"
 SHADOW="/etc/shadow"
 DATA_MOUNT="${WENDYOS_DATA_MOUNT:-/data}"
 STORE_DIR="${DATA_MOUNT}/etc/wendyos-credential"
+# Two lines: the entry, then a token that every write replaces.
 STORE="${STORE_DIR}/${USER_NAME}"
 
-# Fingerprints of this slot's entry and of the stored entry at the last sync.
-# They tell a change that was never saved (the slot wins) from a store that
-# another slot changed since (the store wins).
+# "<fingerprint of this slot's entry> <store token>" from this slot's last sync.
+# A token that has changed means another slot, booted later, saved since: its
+# entry is newer. "removed.<token>" names the marker this slot left in place
+# of a store it had to remove.
 SYNCED="/etc/.wendyos-credential-synced"
 
 # Fingerprint of the entry every image shipped before the account was locked.
@@ -70,8 +72,18 @@ is_legacy() {
 
 # True for a saved entry that may be put back; sets E_PASS, E_LAST, E_EXPIRE.
 usable_entry() {
-    parse_entry "$1" && valid_field "$E_PASS" &&
+    parse_entry "$1" && valid_field "$E_PASS" && ! is_legacy "$E_PASS" &&
         [ "$1" = "${USER_NAME}:${E_PASS}:${E_LAST}:::::${E_EXPIRE}:" ]
+}
+
+# The stored form of a slot entry: the password is replaced by "*" when it may
+# not be kept, so no other slot goes back to an older password.
+kept_entry() {
+    parse_entry "$1" || return 1
+    if ! valid_field "$E_PASS" || is_legacy "$E_PASS"; then
+        E_PASS="*"
+    fi
+    printf '%s:%s:%s:::::%s:' "$USER_NAME" "$E_PASS" "$E_LAST" "$E_EXPIRE"
 }
 
 data_mounted() {
@@ -90,29 +102,46 @@ write_file() {
         sync "$(dirname "$1")"
 }
 
-# Without the record the next boot only loses the "slot wins" case, so a
-# failure here is reported and not fatal.
+# Sets S_ENTRY and S_TOKEN from the store. Fails only when it cannot be opened.
+read_store() {
+    S_ENTRY=""
+    S_TOKEN=""
+    { IFS= read -r S_ENTRY || true; IFS= read -r S_TOKEN || true; } < "$STORE"
+}
+
+# Sets REC_SLOT and REC_TOKEN from this slot's record, empty without one.
+read_record() {
+    REC_SLOT=""
+    REC_TOKEN=""
+    if [ -f "$SYNCED" ]; then
+        read -r REC_SLOT REC_TOKEN < "$SYNCED" 2>/dev/null || true
+    fi
+}
+
+# A record that cannot be written makes the next boot apply the store, which
+# by then holds this slot's own entry, so a failure here is not fatal.
 mark_synced() {
     local mark
-    mark="$(fingerprint "$1") $(fingerprint "$2")"
+    mark="$(fingerprint "$1") $2"
     if [ "$(cat "$SYNCED" 2>/dev/null)" != "$mark" ] && ! write_file "$SYNCED" "$mark"; then
         log "could not record the saved state in ${SYNCED}"
     fi
     return 0
 }
 
-# The stored form of a slot entry: the password is replaced by "*" when it may
-# not be kept, so no other slot goes back to an older password.
-kept_entry() {
-    parse_entry "$1" || return 1
-    if ! valid_field "$E_PASS" || is_legacy "$E_PASS"; then
-        E_PASS="*"
+# This slot has saved before, so a store that is gone or unreadable was removed
+# by a failed save on another slot or by hand: keep no password from this slot.
+fail_closed() {
+    log "$1; removing this slot's ${USER_NAME} password"
+    if ! printf '%s:*\n' "$USER_NAME" | chpasswd -e; then
+        log "could not remove the ${USER_NAME} password"
+        return 1
     fi
-    printf '%s:%s:%s:::::%s:' "$USER_NAME" "$E_PASS" "$E_LAST" "$E_EXPIRE"
+    rm -f "$SYNCED"
 }
 
 restore() {
-    local saved current
+    local current
 
     data_mounted || return 1
 
@@ -122,36 +151,48 @@ restore() {
         1) log "no ${USER_NAME} account in ${SHADOW}"; return 0 ;;
         *) log "the ${USER_NAME} entry in ${SHADOW} cannot be read; leaving it"; return 0 ;;
     esac
-
-    local rec_slot="" rec_store=""
-    if [ -f "$SYNCED" ]; then
-        read -r rec_slot rec_store < "$SYNCED" 2>/dev/null || true
-        if [ "$rec_slot" != "$(fingerprint "$current")" ]; then
-            log "this slot has a change that was not saved; keeping it"
-            return 0
-        fi
-    fi
+    read_record
 
     if [ ! -f "$STORE" ]; then
+        if [[ "$REC_TOKEN" == removed.* ]] && [ -e "${STORE}.${REC_TOKEN}" ]; then
+            log "this slot removed the saved ${USER_NAME} entry; keeping its own until it saves"
+            return 0
+        fi
+        if [ -n "$REC_SLOT" ]; then
+            fail_closed "the saved ${USER_NAME} entry is gone"
+            return
+        fi
         log "no saved ${USER_NAME} entry"
         return 0
     fi
-    if ! IFS= read -r saved < "$STORE" && [ -z "${saved:-}" ] && [ -s "$STORE" ]; then
+    if ! read_store; then
+        if [ -n "$REC_SLOT" ]; then
+            fail_closed "the saved ${USER_NAME} entry cannot be read"
+            return
+        fi
         log "could not read ${STORE}"
         return 1
     fi
-
-    if ! usable_entry "$saved"; then
+    if ! usable_entry "$S_ENTRY"; then
+        if [ -n "$REC_SLOT" ]; then
+            fail_closed "the saved ${USER_NAME} entry cannot be used"
+            return
+        fi
         log "ignoring ${STORE}: not a saved ${USER_NAME} entry"
         return 0
     fi
-    if is_legacy "$E_PASS"; then
-        log "ignoring ${STORE}: it holds the old shared password"
+
+    # Nobody saved since this slot's last sync: anything new on this slot is
+    # its own change, which the save after this keeps.
+    if [ -n "$REC_TOKEN" ] && [ "$REC_TOKEN" = "$S_TOKEN" ]; then
+        if [ "$REC_SLOT" != "$(fingerprint "$current")" ]; then
+            log "this slot has a change that was not saved; keeping it"
+        fi
         return 0
     fi
-    if [ "$rec_store" = "$(fingerprint "$saved")" ] || [ "$saved" = "$current" ]; then
-        mark_synced "$current" "$saved"
-        return
+    if [ "$S_ENTRY" = "$current" ]; then
+        mark_synced "$current" "$S_TOKEN"
+        return 0
     fi
 
     # Forget the record first, so a restore that stops halfway is retried at
@@ -160,35 +201,57 @@ restore() {
         log "could not clear ${SYNCED}"
         return 1
     fi
-    # Disabled until every field is in place, so a failure fails closed.
+    # Disabled until every field is in place, so a later failure fails closed.
+    if ! chage -E 1 "$USER_NAME"; then
+        log "could not disable the ${USER_NAME} account to restore it; leaving it as it is for this boot"
+        return 1
+    fi
     # The password goes on stdin: an argument shows in /proc/<pid>/cmdline.
-    if ! chage -E 1 "$USER_NAME" ||
-       ! printf '%s:%s\n' "$USER_NAME" "$E_PASS" | chpasswd -e ||
+    if ! printf '%s:%s\n' "$USER_NAME" "$E_PASS" | chpasswd -e ||
        ! chage -d "${E_LAST:--1}" -E "${E_EXPIRE:--1}" "$USER_NAME" ||
-       [ "$(device_entry)" != "$saved" ]; then
+       [ "$(device_entry)" != "$S_ENTRY" ]; then
         log "could not restore the ${USER_NAME} entry; the account stays disabled for this boot"
         return 1
     fi
     log "restored the ${USER_NAME} entry"
-    mark_synced "$saved" "$saved"
+    mark_synced "$S_ENTRY" "$S_TOKEN"
 }
 
-# An entry that may not be kept must not leave an older one behind: it would
-# come back on the next slot.
+# Every slot that saved before treats a missing store as removed and keeps no
+# password. The store becomes a marker named after a new token, which only this
+# slot records, so this slot alone keeps its own entry. A rename needs no free
+# space, and emptying the marker only frees it.
 drop_store() {
+    local mark
+    mark="removed.$(cat /proc/sys/kernel/random/uuid)"
     rm -f "${STORE}.tmp"
     if [ -e "$STORE" ]; then
-        if rm -f "$STORE" && sync "$STORE_DIR"; then
-            log "removed the saved ${USER_NAME} entry: $1"
-        else
-            log "could not remove the saved ${USER_NAME} entry: $1"
-            return 1
-        fi
+        mv -f "$STORE" "${STORE}.${mark}" && : > "${STORE}.${mark}"
+    else
+        : > "${STORE}.${mark}"
     fi
+    if [ ! -e "${STORE}.${mark}" ] || [ -e "$STORE" ]; then
+        log "could not remove the saved ${USER_NAME} entry: $1"
+        return 1
+    fi
+    # Only the latest removal counts: an older marker, from any slot, would let
+    # that slot keep an entry older than this one.
+    remove_marks "${STORE}.${mark}"
+    log "removed the saved ${USER_NAME} entry: $1"
+    mark_synced "$2" "$mark"
+}
+
+# Removes every removal marker except $1, and makes that stick.
+remove_marks() {
+    local m
+    for m in "${STORE}".removed.*; do
+        [ "$m" = "${1:-}" ] || rm -f "$m"
+    done
+    sync "$STORE_DIR"
 }
 
 save() {
-    local current kept saved
+    local current kept token
 
     data_mounted || return 1
 
@@ -206,25 +269,26 @@ save() {
         case $? in
             0) ;;
             1) log "no ${USER_NAME} account in ${SHADOW}"; return 0 ;;
-            *) drop_store "the current entry cannot be read"; return ;;
+            *) drop_store "the current entry cannot be read" ""; return ;;
         esac
         kept=$(kept_entry "$current")
-        parse_entry "$current"
         if [ "$kept" != "$current" ]; then
             log "not keeping the ${USER_NAME} password: it is empty, the old shared one, or not a supported hash"
         fi
-        saved=""
         if [ -f "$STORE" ]; then
-            IFS= read -r saved < "$STORE" || true
+            read_store || { log "could not read ${STORE}"; return 1; }
+            if [ "$kept" = "$S_ENTRY" ] && [ -n "$S_TOKEN" ]; then
+                mark_synced "$current" "$S_TOKEN"
+                return 0
+            fi
         fi
-        if [ "$kept" = "$saved" ]; then
-            mark_synced "$current" "$kept"
-            return
-        fi
-        if ! write_file "$STORE" "$kept"; then
-            drop_store "it could not be updated"
+        token=$(cat /proc/sys/kernel/random/uuid)
+        if ! write_file "$STORE" "$kept"$'\n'"$token"; then
+            drop_store "it could not be updated" "$current"
             return 1
         fi
+        # A saved entry replaces every removal any slot recorded.
+        remove_marks
         log "saved the ${USER_NAME} entry"
     done
 }
