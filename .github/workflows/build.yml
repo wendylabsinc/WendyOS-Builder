@@ -234,9 +234,11 @@ jobs:
             exit 0
           fi
 
-          # Any other PR builds every device, so --pr installs resolve.
-          echo "Trigger=pull_request: force-building all devices for --pr installs."
-          emit_all
+          # TEST ONLY (do not merge): the Pi 5 and the x86 VM.
+          echo "Trigger=pull_request: profile test, Pi 5 and VM only."
+          entries=$(echo "${ALL_MATRIX}" | jq -c '[.[] | select(.device == "raspberry-pi-5" or .device == "vm-x86-64")]')
+          echo "matrix={\"include\":${entries}}" >> "$GITHUB_OUTPUT"
+          echo "devices=raspberry-pi-5 vm-x86-64" >> "$GITHUB_OUTPUT"
           exit 0
   build:
     name: Build ${{ matrix.device }} (${{ matrix.storages }})
@@ -486,24 +488,20 @@ jobs:
           } >> "$GITHUB_WORKSPACE/build/conf/auto.conf"
 
       - name: Enable developer profile (PR builds)
-        # PR images are open-book debug builds: full debug tooling, SSH, serial
-        # boot output, and a serial (UART) and screen (VT) login as the wendy
-        # user (sudo asks for its password) so the PR is debuggable on real hardware —
-        # root stays locked. Login is opt-in (both default off), so enable both
-        # here.
-        # Never applied to nightly or release (fortress) builds.
+        # TEST ONLY (do not merge): instead of the developer profile, the Pi 5
+        # gets the release profile and the VM the nightly profile.
         if: github.event_name == 'pull_request'
+        env:
+          DEVICE: ${{ matrix.device }}
         run: |
           {
             echo ''
-            echo '# PR CI: open-book developer profile'
-            echo 'WENDYOS_DEBUG = "1"'
-            echo 'WENDYOS_SSHD = "1"'
-            echo 'WENDYOS_DEBUG_UART = "1"'
-            echo 'WENDYOS_ENABLE_UART_LOGIN = "1"'
-            echo 'WENDYOS_ENABLE_VT_LOGIN = "1"'
-            # The wendy password is locked, so both consoles open a root shell.
-            echo 'WENDYOS_CONSOLE_AUTOLOGIN = "1"'
+            if [ "$DEVICE" = vm-x86-64 ]; then
+              echo '# TEST ONLY: nightly profile'
+              echo 'WENDYOS_DEBUG = "1"'
+            else
+              echo '# TEST ONLY: release profile'
+            fi
           } >> "$GITHUB_WORKSPACE/build/conf/auto.conf"
 
       - name: Enable SBOM generation for release builds
