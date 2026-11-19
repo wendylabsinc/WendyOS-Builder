@@ -4,6 +4,7 @@ import argparse
 from collections import deque
 import os
 from pathlib import Path
+import re
 import sys
 
 
@@ -36,6 +37,72 @@ def image_path(root, path):
     return current
 
 
+# A Match block overrides the header for the connections it selects.
+MATCH_PROTECTED = {'authenticationmethods', 'pubkeyauthentication', 'passwordauthentication',
+                   'kbdinteractiveauthentication', 'challengeresponseauthentication'}
+AUTOLOGIN_CREDENTIALS = ('agetty.autologin', 'login.noauth')
+CREDENTIAL_STORES = ('usr/lib/credstore', 'usr/lib/credstore.encrypted',
+                     'etc/credstore', 'etc/credstore.encrypted')
+UNIT_DIRS = ('usr/lib/systemd/system', 'lib/systemd/system', 'etc/systemd/system')
+
+
+def check_no_autologin(root):
+    """The account check refuses a login without consent, so an autologin
+    console would only loop on a denied login."""
+    for store in CREDENTIAL_STORES:
+        directory = root / store
+        if not directory.is_dir() or directory.is_symlink():
+            continue
+        for entry in directory.iterdir():
+            if any(entry.name == name or entry.name.endswith('.' + name)
+                   for name in AUTOLOGIN_CREDENTIALS):
+                raise ValueError('USG notice profile cannot be combined with a console '
+                                 'autologin: ' + str(entry))
+    for units in UNIT_DIRS:
+        directory = root / units
+        if not directory.is_dir() or directory.is_symlink():
+            continue
+        for unit in directory.rglob('*'):
+            if 'getty' not in str(unit.relative_to(directory)) or unit.is_symlink() \
+                    or not unit.is_file():
+                continue
+            if '--autologin' in unit.read_text(errors='replace'):
+                raise ValueError('USG notice profile cannot be combined with a console '
+                                 'autologin: ' + str(unit))
+
+
+def check_ssh_overrides(root, sysconf):
+    """The header wins over later global values, but not over these."""
+    files = [image_path(root, sysconf / 'ssh' / name)
+             for name in ('sshd_config', 'sshd_config_readonly')]
+    dropins = sysconf / 'ssh' / 'sshd_config.d'
+    if dropins.is_dir() and not dropins.is_symlink():
+        files += sorted(path for path in dropins.iterdir() if path.name.endswith('.conf'))
+    for path in files:
+        if not path.is_file():
+            continue
+        in_match = False
+        for line in path.read_text(errors='replace').splitlines():
+            words = line.strip().replace('=', ' ', 1).split()
+            if not words or words[0].startswith('#'):
+                continue
+            keyword = words[0].lower()
+            if keyword == 'match':
+                in_match = True
+            elif in_match and keyword in MATCH_PROTECTED:
+                raise ValueError('A Match block must not change USG SSH authentication in '
+                                 + str(path))
+            elif keyword == 'pamservicename' and [w.lower() for w in words[1:]] != ['sshd']:
+                raise ValueError('PAMServiceName must stay sshd in ' + str(path))
+    defaults = sysconf / 'default' / 'ssh'
+    if defaults.is_file() and not defaults.is_symlink():
+        for line in defaults.read_text(errors='replace').splitlines():
+            name, _, value = line.strip().partition('=')
+            if name.strip() == 'SSHD_OPTS' and re.search(r'(^|[\s"\'])-[of]', value):
+                raise ValueError('SSHD_OPTS must not override the USG OpenSSH config in '
+                                 + str(defaults))
+
+
 def check(args):
     root = Path(args.rootfs).resolve(strict=True)
     sysconf = image_path(root, root / args.sysconfdir.lstrip('/'))
@@ -43,6 +110,7 @@ def check(args):
     module = image_path(root, root / args.base_libdir.lstrip('/') / 'security/pam_wendy_notice.so')
     if not banner.is_file() or not module.is_file():
         raise ValueError('USG notice profile requires its banner and PAM module in the image')
+    check_no_autologin(root)
     login = image_path(root, root / args.base_bindir.lstrip('/') / 'login')
     if login.name != 'login.shadow' or not login.is_file():
         raise ValueError('USG notice profile requires the PAM-enabled Shadow login alternative')
@@ -64,6 +132,7 @@ def check(args):
                      if s.strip() and not s.lstrip().startswith('#')]
             if lines[:len(required)] != required:
                 raise ValueError('USG OpenSSH consent settings must be first in ' + str(path))
+        check_ssh_overrides(root, sysconf)
     if args.dropbear:
         raise ValueError('USG notice profile supports OpenSSH only, not Dropbear')
 
