@@ -10,11 +10,14 @@ It addresses the notice and explicit acknowledgement mechanisms in GPOS SRG
 V3R4 V-203595 and V-203596. It is not a complete STIG baseline or evidence of
 deployed compliance. Ordinary WendyOS images retain their existing login behavior.
 
-The profile adds PAM support, the Shadow login implementation, and a PAM module
-that displays the full USG notice and requires the exact response `ACCEPT`.
+Every WendyOS image already uses PAM for login, sshd and sudo. The profile adds
+the Shadow login implementation and a PAM module that displays the full USG
+notice and requires the exact response `ACCEPT`.
 Anything else, including an empty response, cancelled conversation or missing
 notice, denies access. The account check also denies paths that skipped the
-consent step, such as a preauthenticated `login -f` invocation.
+consent step, such as a preauthenticated `login -f` invocation. The profile
+therefore cannot be combined with `WENDYOS_CONSOLE_AUTOLOGIN`: the build and
+the image check both refuse it.
 
 The notice is a separate root-owned file under `/usr/share/wendyos-access-notice`.
 Console branding and build provenance in `/etc/issue` do not replace or alter it.
@@ -35,6 +38,17 @@ require `publickey,keyboard-interactive:pam`. The public key authenticates the
 caller, then PAM collects consent before granting access. Existing PAM account,
 password-change and session checks remain active. Consent is not an additional
 authentication factor and must not be represented as MFA.
+
+The SSH PAM stack has no other authenticator, so the module accepts consent
+only after sshd reports a verified public key. A later `Match` block that drops
+the key requirement cannot leave consent as the only step.
+
+`passwd -l` locks only the password. With PAM, sshd does not treat it as a
+disabled account, so a key login with consent still works; remove the user's
+`authorized_keys` to refuse SSH as well. An expiry (`usermod --expiredate 1`)
+refuses every login path, but do not set one on `wendy` on a device that runs
+apps: it also stops `wendy`'s user session, which provides audio to apps. See
+[local credentials](security-local-credentials.md).
 
 **This opt-in profile blocks unattended SSH clients.** Provision authorized keys
 before rollout and use a client supporting keyboard-interactive authentication.
@@ -62,7 +76,9 @@ Before release, boot each selected board/profile and record:
 - Expired/disabled account denial and normal PAM password/session behavior.
 
 The image check rejects missing notice files, a different login implementation,
-and missing initial PAM/OpenSSH settings. It does not prove runtime configuration
+missing initial PAM/OpenSSH settings, a console autologin, a `Match` block that
+changes SSH authentication, a changed `PAMServiceName`, and `SSHD_OPTS` that
+pass `-o` or `-f`. It does not prove runtime configuration
 after provisioning or protect against a privileged administrator changing files.
 
 Wendy Agent RPCs, Cloud/CLI application sessions, web interfaces, recovery shells,

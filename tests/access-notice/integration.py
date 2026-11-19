@@ -74,6 +74,10 @@ class NoticeTests(unittest.TestCase):
             with self.subTest(action=action):
                 self.assertFalse(self.probe(action=action))
 
+    def test_pam_sshd_service_needs_a_verified_key(self):
+        # No sshd set SSH_AUTH_INFO_0 here, so consent alone must fail.
+        self.assertFalse(self.probe(service='sshd'))
+
     def test_pam_login_still_requires_password(self):
         self.assertFalse(self.probe(service='notice-login', password='wrong'))
         self.assertTrue(self.probe(service='notice-login', password='Test-only-Local-Password42!'))
@@ -180,12 +184,59 @@ class NoticeTests(unittest.TestCase):
         finally:
             run('chage', '-E', '-1', 'noticeuser')
 
+    def test_ssh_without_password_with_key_and_consent(self):
+        # The shipped state: no usable password, account not locked.
+        run('usermod', '-p', '*', 'noticeuser')
+        try:
+            self.test_ssh_accept_without_pty()
+        finally:
+            run('chpasswd', input='noticeuser:Test-only-Local-Password42!\n')
+
     def test_ssh_locked_password_with_key_and_consent(self):
+        # passwd -l locks the password only; disable an account by expiry.
         run('usermod', '-L', 'noticeuser')
         try:
             self.test_ssh_accept_without_pty()
         finally:
             run('usermod', '-U', 'noticeuser')
+
+    def test_ssh_consent_alone_is_never_enough(self):
+        # A Match block that drops the key requirement must not open the door.
+        Path('/tmp/notice-match.conf').write_text(Path('/tmp/notice-sshd.conf').read_text()
+            .replace('Port 22222', 'Port 22223').replace('notice-sshd.pid', 'notice-match.pid')
+            + 'Match User noticeuser\n    AuthenticationMethods keyboard-interactive\n')
+        with open('/tmp/notice-match.log', 'w') as log:
+            server = subprocess.Popen(['/usr/sbin/sshd', '-D', '-e', '-f', '/tmp/notice-match.conf'],
+                                      stdout=log, stderr=log)
+            try:
+                import socket, time
+                for _ in range(100):
+                    try:
+                        with socket.create_connection(('127.0.0.1', 22223), timeout=.1):
+                            break
+                    except OSError:
+                        time.sleep(.05)
+                else:
+                    self.fail('test sshd with the Match block did not start')
+                child = pexpect.spawn('ssh', ['-F', '/dev/null', '-p', '22223',
+                    '-o', 'StrictHostKeyChecking=no', '-o', 'UserKnownHostsFile=/dev/null',
+                    '-o', 'PubkeyAuthentication=no',
+                    '-o', 'PreferredAuthentications=keyboard-interactive',
+                    'noticeuser@127.0.0.1', 'echo ACCESS_GRANTED'], encoding='utf-8', timeout=15)
+                seen = ''
+                for _ in range(4):
+                    index = child.expect(['Type ACCEPT to acknowledge these conditions:',
+                                          pexpect.EOF, pexpect.TIMEOUT], timeout=5)
+                    seen += child.before or ''
+                    if index != 0:
+                        break
+                    child.sendline('ACCEPT')
+                child.close(force=True)
+                self.assertNotIn('ACCESS_GRANTED', seen)
+                self.assertNotEqual(child.exitstatus, 0)
+            finally:
+                server.terminate()
+                server.wait(timeout=10)
 
 
 if __name__ == '__main__':

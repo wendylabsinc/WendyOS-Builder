@@ -126,6 +126,63 @@ class RecipeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'must be first'):
             self.guard()
 
+    def test_image_guard_rejects_console_autologin(self):
+        for name in ['usr/lib/credstore/agetty.autologin',
+                     'etc/credstore/tty.serial.ttyS0.agetty.autologin',
+                     'usr/lib/credstore/login.noauth']:
+            with self.subTest(name=name):
+                self.setUp()
+                self.valid_image()
+                path = self.root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text('root')
+                with self.assertRaisesRegex(ValueError, 'console autologin'):
+                    self.guard()
+        self.setUp()
+        self.valid_image()
+        dropin = self.root / 'etc/systemd/system/serial-getty@.service.d/auto.conf'
+        dropin.parent.mkdir(parents=True)
+        dropin.write_text('[Service]\nExecStart=\nExecStart=-/sbin/agetty --autologin root - $TERM\n')
+        with self.assertRaisesRegex(ValueError, 'console autologin'):
+            self.guard()
+
+    def test_image_guard_accepts_unrelated_credentials_and_units(self):
+        self.valid_image()
+        for name, text in [('usr/lib/credstore/agetty.noclear', '1'),
+                           ('usr/lib/systemd/system/serial-getty@.service',
+                            '[Service]\nExecStart=-/sbin/agetty --noclear - $TERM\n'),
+                           ('etc/ssh/sshd_config.d/10-sftp.conf',
+                            'Match Group sftp\n    ForceCommand internal-sftp\n'),
+                           ('etc/default/ssh', 'SSHD_OPTS=""\n')]:
+            path = self.root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text)
+        self.guard()
+
+    def test_image_guard_rejects_ssh_overrides(self):
+        cases = [('etc/ssh/sshd_config.d/10-x.conf',
+                  'Match User wendy\n    AuthenticationMethods keyboard-interactive\n', 'Match block'),
+                 ('etc/ssh/sshd_config.d/10-x.conf',
+                  'match all\nPubkeyAuthentication=no\n', 'Match block'),
+                 ('etc/ssh/sshd_config.d/10-x.conf', 'PAMServiceName sudo\n', 'PAMServiceName'),
+                 ('etc/default/ssh', 'SSHD_OPTS="-o AuthenticationMethods=any"\n', 'SSHD_OPTS'),
+                 ('etc/default/ssh', 'SSHD_OPTS=-f/etc/ssh/other\n', 'SSHD_OPTS')]
+        for name, text, message in cases:
+            with self.subTest(text=text):
+                self.setUp()
+                self.valid_image()
+                path = self.root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(text)
+                with self.assertRaisesRegex(ValueError, message):
+                    self.guard()
+        self.setUp()
+        self.valid_image()
+        path = self.root / 'etc/ssh/sshd_config'
+        path.write_text(path.read_text() + 'Match Address 10.0.0.0/8\n    PasswordAuthentication yes\n')
+        with self.assertRaisesRegex(ValueError, 'Match block'):
+            self.guard()
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

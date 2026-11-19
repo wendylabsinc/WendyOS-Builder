@@ -20,11 +20,27 @@ static void cleanup(pam_handle_t *pamh, void *data, int status)
     free(data);
 }
 
+/* sshd lists every completed method, one per line, in the PAM environment. */
+static int ssh_key_verified(pam_handle_t *pamh)
+{
+    const char *info = pam_getenv(pamh, "SSH_AUTH_INFO_0");
+
+    while (info != NULL && *info != '\0') {
+        if (strncmp(info, "publickey ", 10) == 0)
+            return 1;
+        info = strchr(info, '\n');
+        if (info != NULL)
+            info++;
+    }
+    return 0;
+}
+
 PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh, int flags,
                                   int argc, const char **argv)
 {
     char notice[8192], *answer = NULL, *accepted_user = NULL;
     const char *user = NULL;
+    const void *service = NULL;
     struct stat st;
     size_t size;
     int result;
@@ -37,6 +53,14 @@ PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh, int flags,
         return result;
     if (argc != 0 || (flags & PAM_SILENT))
         return PAM_AUTH_ERR;
+    /* The SSH stack has no other authenticator: consent alone must never
+     * log a user in, whatever AuthenticationMethods a Match block leaves. */
+    if (pam_get_item(pamh, PAM_SERVICE, &service) != PAM_SUCCESS || service == NULL)
+        return PAM_AUTH_ERR;
+    if (strcmp(service, "sshd") == 0 && !ssh_key_verified(pamh)) {
+        pam_syslog(pamh, LOG_NOTICE, "USG access notice refused: no verified SSH key");
+        return PAM_AUTH_ERR;
+    }
     file = fopen(NOTICE_FILE, "r");
     if (file == NULL)
         return PAM_AUTH_ERR;
