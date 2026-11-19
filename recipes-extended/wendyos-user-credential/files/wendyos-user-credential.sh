@@ -14,9 +14,9 @@ DATA_MOUNT="${WENDYOS_DATA_MOUNT:-/data}"
 STORE_DIR="${DATA_MOUNT}/etc/wendyos-credential"
 STORE="${STORE_DIR}/${USER_NAME}"
 
-# Fingerprint of the entry this slot last had in common with the store. It
-# tells a change that was never saved (the slot wins) from a new or rolled-back
-# slot (the store wins).
+# Fingerprints of this slot's entry and of the stored entry at the last sync.
+# They tell a change that was never saved (the slot wins) from a store that
+# another slot changed since (the store wins).
 SYNCED="/etc/.wendyos-credential-synced"
 
 # Fingerprint of the entry every image shipped before the account was locked.
@@ -94,11 +94,21 @@ write_file() {
 # failure here is reported and not fatal.
 mark_synced() {
     local mark
-    mark=$(fingerprint "$1")
+    mark="$(fingerprint "$1") $(fingerprint "$2")"
     if [ "$(cat "$SYNCED" 2>/dev/null)" != "$mark" ] && ! write_file "$SYNCED" "$mark"; then
         log "could not record the saved state in ${SYNCED}"
     fi
     return 0
+}
+
+# The stored form of a slot entry: the password is replaced by "*" when it may
+# not be kept, so no other slot goes back to an older password.
+kept_entry() {
+    parse_entry "$1" || return 1
+    if ! valid_field "$E_PASS" || is_legacy "$E_PASS"; then
+        E_PASS="*"
+    fi
+    printf '%s:%s:%s:::::%s:' "$USER_NAME" "$E_PASS" "$E_LAST" "$E_EXPIRE"
 }
 
 restore() {
@@ -113,9 +123,13 @@ restore() {
         *) log "the ${USER_NAME} entry in ${SHADOW} cannot be read; leaving it"; return 0 ;;
     esac
 
-    if [ -f "$SYNCED" ] && [ "$(cat "$SYNCED" 2>/dev/null)" != "$(fingerprint "$current")" ]; then
-        log "this slot has a change that was not saved; keeping it"
-        return 0
+    local rec_slot="" rec_store=""
+    if [ -f "$SYNCED" ]; then
+        read -r rec_slot rec_store < "$SYNCED" 2>/dev/null || true
+        if [ "$rec_slot" != "$(fingerprint "$current")" ]; then
+            log "this slot has a change that was not saved; keeping it"
+            return 0
+        fi
     fi
 
     if [ ! -f "$STORE" ]; then
@@ -135,20 +149,28 @@ restore() {
         log "ignoring ${STORE}: it holds the old shared password"
         return 0
     fi
-    if [ "$saved" = "$current" ]; then
-        mark_synced "$saved"
+    if [ "$rec_store" = "$(fingerprint "$saved")" ] || [ "$saved" = "$current" ]; then
+        mark_synced "$current" "$saved"
         return
     fi
 
-    # On stdin: an argument would show in /proc/<pid>/cmdline to every user.
-    if ! printf '%s:%s\n' "$USER_NAME" "$E_PASS" | chpasswd -e ||
+    # Forget the record first, so a restore that stops halfway is retried at
+    # the next boot instead of being kept as an unsaved change.
+    if [ -e "$SYNCED" ] && ! { rm -f "$SYNCED" && sync "$(dirname "$SYNCED")"; }; then
+        log "could not clear ${SYNCED}"
+        return 1
+    fi
+    # Disabled until every field is in place, so a failure fails closed.
+    # The password goes on stdin: an argument shows in /proc/<pid>/cmdline.
+    if ! chage -E 1 "$USER_NAME" ||
+       ! printf '%s:%s\n' "$USER_NAME" "$E_PASS" | chpasswd -e ||
        ! chage -d "${E_LAST:--1}" -E "${E_EXPIRE:--1}" "$USER_NAME" ||
        [ "$(device_entry)" != "$saved" ]; then
-        log "could not restore the ${USER_NAME} entry"
+        log "could not restore the ${USER_NAME} entry; the account stays disabled for this boot"
         return 1
     fi
     log "restored the ${USER_NAME} entry"
-    mark_synced "$saved"
+    mark_synced "$saved" "$saved"
 }
 
 # An entry that may not be kept must not leave an older one behind: it would
@@ -166,7 +188,7 @@ drop_store() {
 }
 
 save() {
-    local current saved
+    local current kept saved
 
     data_mounted || return 1
 
@@ -186,24 +208,20 @@ save() {
             1) log "no ${USER_NAME} account in ${SHADOW}"; return 0 ;;
             *) drop_store "the current entry cannot be read"; return ;;
         esac
+        kept=$(kept_entry "$current")
         parse_entry "$current"
-        if ! valid_field "$E_PASS"; then
-            drop_store "the current password is empty or not a known hash" && mark_synced "$current"
-            return
-        fi
-        if is_legacy "$E_PASS"; then
-            drop_store "the account has the old shared password" && mark_synced "$current"
-            return
+        if [ "$kept" != "$current" ]; then
+            log "not keeping the ${USER_NAME} password: it is empty, the old shared one, or not a supported hash"
         fi
         saved=""
         if [ -f "$STORE" ]; then
             IFS= read -r saved < "$STORE" || true
         fi
-        if [ "$current" = "$saved" ]; then
-            mark_synced "$current"
+        if [ "$kept" = "$saved" ]; then
+            mark_synced "$current" "$kept"
             return
         fi
-        if ! write_file "$STORE" "$current"; then
+        if ! write_file "$STORE" "$kept"; then
             drop_store "it could not be updated"
             return 1
         fi
