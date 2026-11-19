@@ -83,6 +83,11 @@ WENDYOS_SSHD ??= "0"
 WENDYOS_ENABLE_UART_LOGIN ??= "0"
 WENDYOS_ENABLE_VT_LOGIN ??= "0"
 
+# Debug builds only: the consoles enabled above open a root shell with no login.
+# The build fails without WENDYOS_DEBUG = "1" and one login above, and on CI
+# nightly and release builds.
+WENDYOS_CONSOLE_AUTOLOGIN ??= "0"
+
 # Build provenance stamped into the image (boot screen /etc/issue + /etc/wendyos/commit).
 # CI overrides these in auto.conf per build: VERSION is the release/nightly/PR tag
 # (pr-<N> | nightly-<ts> | X.Y.Z), COMMIT is the full builder git SHA. Local builds

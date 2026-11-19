@@ -491,6 +491,8 @@ jobs:
             echo 'WENDYOS_DEBUG_UART = "1"'
             echo 'WENDYOS_ENABLE_UART_LOGIN = "1"'
             echo 'WENDYOS_ENABLE_VT_LOGIN = "1"'
+            # The wendy password is locked, so both consoles open a root shell.
+            echo 'WENDYOS_CONSOLE_AUTOLOGIN = "1"'
           } >> "$GITHUB_WORKSPACE/build/conf/auto.conf"
 
       - name: Enable SBOM generation for release builds

@@ -62,6 +62,17 @@ shared password to make an image accessible. Operators using an older Agent
 without host-shell support must establish a supported provisioning path
 before installing this image.
 
+## Debug builds
+
+Images built with `bootstrap.sh --debug` and CI pull-request images set
+`WENDYOS_CONSOLE_AUTOLOGIN = "1"`. On these images the serial console and the
+screen open a root shell without a login, so a board can still be debugged
+when the Agent or the network is down. This adds no credential: the `wendy` and
+root passwords stay locked, and SSH still needs a key or a provisioned
+password. The build fails if the setting is used without `WENDYOS_DEBUG = "1"`
+and an enabled console login, or on a CI nightly or release build. Never deploy
+an image built with it.
+
 ## Assessment evidence
 
 This addresses the shared source credential associated with GPOS
