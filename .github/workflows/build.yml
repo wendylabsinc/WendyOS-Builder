@@ -70,6 +70,7 @@ jobs:
       devices: ${{ steps.set.outputs.devices }}
       version: ${{ steps.version.outputs.version }}
       is-release: ${{ steps.version.outputs.is-release }}
+      kind: ${{ steps.version.outputs.kind }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -121,12 +122,15 @@ jobs:
               exit 1
             fi
             echo "is-release=true" >> "$GITHUB_OUTPUT"
+            echo "kind=release" >> "$GITHUB_OUTPUT"
           elif [[ "${GITHUB_EVENT_NAME:-}" == "pull_request" ]]; then
             VERSION="pr-${PR_NUMBER}"
             echo "is-release=false" >> "$GITHUB_OUTPUT"
+            echo "kind=pr" >> "$GITHUB_OUTPUT"
           else
             VERSION="nightly-$(date -u +%Y%m%dT%H%M%S)"
             echo "is-release=false" >> "$GITHUB_OUTPUT"
+            echo "kind=nightly" >> "$GITHUB_OUTPUT"
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Build version: $VERSION"
@@ -440,10 +444,12 @@ jobs:
         # VERSION is the same string the publish step uploads under
         # (pr-<N> | nightly-<ts> | X.Y.Z); COMMIT is the full builder SHA — the PR
         # head on pull_request (the reviewed commit, not the ephemeral merge SHA),
-        # otherwise github.sha. Runs on every build. See WENDYOS_BUILD_* in
-        # conf/template/include/local/common.inc.
+        # otherwise github.sha. KIND (pr | nightly | release) is what the image
+        # recipe checks before it allows debug-only features. Runs on every build.
+        # See WENDYOS_BUILD_* in conf/template/include/local/common.inc.
         env:
           BUILD_VERSION: ${{ needs.detect-changes.outputs.version }}
+          BUILD_KIND: ${{ needs.detect-changes.outputs.kind }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PUSH_SHA: ${{ github.sha }}
         run: |
@@ -453,13 +459,18 @@ jobs:
           else
             BUILD_COMMIT="$PUSH_SHA"
           fi
+          case "$BUILD_KIND" in
+            pr|nightly|release) ;;
+            *) echo "ERROR: unknown build kind '${BUILD_KIND}'" >&2; exit 1 ;;
+          esac
           {
             echo ''
             echo '# CI: build provenance stamped into the image'
             echo "WENDYOS_BUILD_VERSION = \"${BUILD_VERSION}\""
             echo "WENDYOS_BUILD_COMMIT = \"${BUILD_COMMIT}\""
+            echo "WENDYOS_BUILD_KIND = \"${BUILD_KIND}\""
           } >> "$GITHUB_WORKSPACE/build/conf/auto.conf"
-          echo "Stamped version=${BUILD_VERSION} commit=${BUILD_COMMIT}"
+          echo "Stamped version=${BUILD_VERSION} commit=${BUILD_COMMIT} kind=${BUILD_KIND}"
 
       - name: Enable debug for nightly builds
         # Release images are production builds — no debug tools by default.

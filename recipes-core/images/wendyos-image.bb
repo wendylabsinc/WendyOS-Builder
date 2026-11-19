@@ -126,10 +126,9 @@ enable_console_autologin() {
 python () {
     if d.getVar('WENDYOS_CONSOLE_AUTOLOGIN') != '1':
         return
-    nightly = (d.getVar('WENDYOS_BUILD_VERSION') or '').startswith('nightly-')
-    release = d.getVar('WENDYOS_SBOM') == '1'
-    if d.getVar('WENDYOS_DEBUG') != '1' or nightly or release:
-        bb.fatal('WENDYOS_CONSOLE_AUTOLOGIN = "1" is for debug builds only: it needs WENDYOS_DEBUG = "1" and is refused on nightly and release builds')
+    kind = d.getVar('WENDYOS_BUILD_KIND')
+    if d.getVar('WENDYOS_DEBUG') != '1' or kind not in ('pr', 'local'):
+        bb.fatal('WENDYOS_CONSOLE_AUTOLOGIN = "1" is for debug builds only: it needs WENDYOS_DEBUG = "1" and WENDYOS_BUILD_KIND "pr" or "local" (got %r)' % kind)
     if d.getVar('WENDYOS_ENABLE_UART_LOGIN') != '1' and d.getVar('WENDYOS_ENABLE_VT_LOGIN') != '1':
         bb.fatal('WENDYOS_CONSOLE_AUTOLOGIN = "1" needs WENDYOS_ENABLE_UART_LOGIN or WENDYOS_ENABLE_VT_LOGIN = "1"')
 }
@@ -403,6 +402,7 @@ BUILDCFG_VARS += " \
     WENDYOS_UPDATE_BOOTLOADER \
     WENDYOS_NVIDIA_DGPU \
     WENDYOS_BUILD_VERSION \
+    WENDYOS_BUILD_KIND \
     WENDYOS_BUILD_COMMIT \
     "
 
