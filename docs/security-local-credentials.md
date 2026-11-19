@@ -33,12 +33,15 @@ must be assessed separately.
 
 To disable local password authentication again, use the authenticated host
 shell to run `passwd -l wendy`. Check the account with `passwd -S wendy`.
-Account locking does not replace authorization of Agent certificates.
+This locks the password only: an SSH key for `wendy` keeps working, as it does
+with the shipped `*` field. To disable the account itself, set its expiry with
+`usermod --expiredate 1 wendy`; console, SSH and sudo all refuse an expired
+account, and `usermod --expiredate '' wendy` enables it again. Neither replaces
+authorization of Agent certificates.
 
-SSH keys depend on how the account is locked. The image ships the password
-field as `*`, which refuses password login only. `passwd -l` writes a `!`
-prefix, and sshd, which is built without PAM here, then refuses public-key
-login for `wendy` as well. `passwd -u wendy` or a new password restores it.
+Every login program uses the same PAM stack: `login`, `su`, `sshd` and `sudo`
+check the account through `common-auth` and `common-account`, and `passwd`
+through `common-password`.
 
 ## Updates and recovery
 
@@ -53,8 +56,7 @@ with `usermod --expiredate 1 wendy` therefore survive an update. The password
 aging limits are not kept: they stay those of the installed image.
 
 To disable the account, use the expiry: every login path honours it. `passwd
--l` locks the password only; sshd on ordinary images also refuses keys for
-such an account, as described above.
+-l` locks the password only, as described above.
 
 Each slot records the entry it last had in common with `/data`. At boot the
 saved entry is applied to a new slot and to a slot that was rolled back to,
