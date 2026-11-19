@@ -6,18 +6,22 @@ Subject: [PATCH] rtl8822ce: turn on the driver's silent reset
 Every 2 s, xmit_status_check() reads REG_TXDMA_STATUS. When it is
 non-zero, it calls rtw_hal_sreset_reset() to recover. NVIDIA's
 autoconf.h leaves DBG_CONFIG_ERROR_RESET inside a comment, so
-sreset_reset() compiles to an empty function. A TX DMA error then
-stays set until the module is reloaded or the board is power-cycled.
-The radio still receives but cannot send, and every association
-attempt fails.
+sreset_reset() compiles to an empty function. The error bits are
+write-1-to-clear and nothing clears them, so a TX DMA error stays set
+until the MAC is powered off: a module reload, idle power save after a
+disconnect, or a reboot.
 
 Seen on a Jetson Orin Nano devkit: REG_TXDMA_STATUS=0x00000c00
-(UNKNOWN_QSEL | EP_QSEL_DIFF), 161 failed associations in an hour,
-fixed only by a power cycle.
+(UNKNOWN_QSEL | EP_QSEL_DIFF), then 161 failed associations in an hour,
+fixed only by a power cycle. The latched error alone does not stop TX:
+one frame with an unknown QSEL latches 0x00000c01 on an AGX Orin and
+traffic keeps flowing, so what stopped TX on that board is not known.
 
 Define DBG_CONFIG_ERROR_RESET. sreset_reset() then stops the
 interface, power-cycles the MAC through IPS (the same path the driver
 uses for idle power save), and restores the association and keys.
+On an AGX Orin with the same card a reset takes about 270 ms and keeps
+the WPA3 association and the IP address.
 
 What else the define turns on in this build (PCI, no concurrent mode):
 - sreset_inprogress() reports the real flag, so the TX queue is not
@@ -51,6 +55,3 @@ index 9d0858e..d46371f 100644
  
  #define DBG_IO
  #define DBG_DELAY_OS
--- 
-2.50.1 (Apple Git-155)
-

@@ -13,8 +13,10 @@ every older log out of a 500 MB journal within an hour.
 Print one warning line with the register value and the ring dump only
 on the first check that sees the error. When a later check reads zero
 again, print one line saying it cleared, and log the next error in
-full. Both lines bypass the driver's log level (0 by default, which
-hides RTW_INFO), so a reset and its outcome stay visible.
+full. While resets keep failing to clear it, print one more line every
+30 resets (about once a minute), so a reset loop is visible. These
+lines bypass the driver's log level (0 by default, which hides
+RTW_INFO), so a reset and its outcome stay visible.
 
 The flag is initialised only in sreset_init_value(), not in
 sreset_reset_value(): the silent reset itself calls
@@ -29,11 +31,12 @@ error's dump repeats the frames of the first one.
 
 Upstream-Status: Pending
 Signed-off-by: ChristosNtokos <chrisdokos1@gmail.com>
+Signed-off-by: Benjamin Kelenyi <benjamin@wendy.sh>
 ---
- .../realtek/rtl8822ce/core/rtw_sreset.c        |  1 +
- .../rtl8822ce/hal/rtl8822c/rtl8822c_ops.c      | 18 +++++++++++++++++-
- .../realtek/rtl8822ce/include/rtw_sreset.h     |  1 +
- 3 files changed, 19 insertions(+), 1 deletion(-)
+ .../realtek/rtl8822ce/core/rtw_sreset.c       |  1 +
+ .../rtl8822ce/hal/rtl8822c/rtl8822c_ops.c     | 25 ++++++++++++++++++-
+ .../realtek/rtl8822ce/include/rtw_sreset.h    |  2 ++
+ 3 files changed, 27 insertions(+), 1 deletion(-)
 
 diff --git a/drivers/net/wireless/realtek/rtl8822ce/core/rtw_sreset.c b/drivers/net/wireless/realtek/rtl8822ce/core/rtw_sreset.c
 index 21cc18b..d84b879 100644
@@ -48,10 +51,10 @@ index 21cc18b..d84b879 100644
  }
  void sreset_reset_value(_adapter *padapter)
 diff --git a/drivers/net/wireless/realtek/rtl8822ce/hal/rtl8822c/rtl8822c_ops.c b/drivers/net/wireless/realtek/rtl8822ce/hal/rtl8822c/rtl8822c_ops.c
-index bde359c..0c51386 100755
+index bde359c..a927214 100755
 --- a/drivers/net/wireless/realtek/rtl8822ce/hal/rtl8822c/rtl8822c_ops.c
 +++ b/drivers/net/wireless/realtek/rtl8822ce/hal/rtl8822c/rtl8822c_ops.c
-@@ -1038,11 +1038,27 @@ static void xmit_status_check(PADAPTER p)
+@@ -1038,11 +1038,34 @@ static void xmit_status_check(PADAPTER p)
  	if (txdma_status != 0x00) {
  		RTW_INFO("%s REG_TXDMA_STATUS:0x%08x\n", __FUNCTION__, txdma_status);
  
@@ -62,10 +65,17 @@ index bde359c..0c51386 100755
 +		 */
 +		if (!psrtpriv->txdma_err_logged) {
 +			psrtpriv->txdma_err_logged = _TRUE;
++			psrtpriv->txdma_err_resets = 0;
 +			printk(KERN_WARNING DRIVER_PREFIX FUNC_ADPT_FMT
 +			       ": TX DMA error, REG_TXDMA_STATUS=0x%08x, resetting\n",
 +			       FUNC_ADPT_ARG(p), txdma_status);
 +			core_get_tx_ring_ext(p);
++		} else if (++psrtpriv->txdma_err_resets % 30 == 0) {
++			/* About once a minute while resets keep failing. */
++			printk(KERN_WARNING DRIVER_PREFIX FUNC_ADPT_FMT
++			       ": TX DMA error still set after %u resets, REG_TXDMA_STATUS=0x%08x\n",
++			       FUNC_ADPT_ARG(p), psrtpriv->txdma_err_resets,
++			       txdma_status);
 +		}
  
  		psrtpriv->tx_dma_status_cnt++;
@@ -81,17 +91,15 @@ index bde359c..0c51386 100755
  #ifdef CONFIG_USB_HCI
  	current_time = rtw_get_current_time();
 diff --git a/drivers/net/wireless/realtek/rtl8822ce/include/rtw_sreset.h b/drivers/net/wireless/realtek/rtl8822ce/include/rtw_sreset.h
-index 1fd999a..0f46c89 100644
+index 1fd999a..7c47208 100644
 --- a/drivers/net/wireless/realtek/rtl8822ce/include/rtw_sreset.h
 +++ b/drivers/net/wireless/realtek/rtl8822ce/include/rtw_sreset.h
-@@ -42,6 +42,7 @@ struct sreset_priv {
+@@ -42,6 +42,8 @@ struct sreset_priv {
  	u8 self_dect_case;
  	u16 last_mac_rxff_ptr;
  	u8 dbg_sreset_ctrl;
 +	u8 txdma_err_logged;	/* this TX DMA error was already logged */
++	u32 txdma_err_resets;	/* resets that did not clear it */
  };
  
  
--- 
-2.50.1 (Apple Git-155)
-
