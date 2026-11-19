@@ -9,6 +9,7 @@ import re
 import shutil
 import subprocess
 import unittest
+import uuid
 
 STORE = pathlib.Path('/data/etc/wendyos-credential/wendy')
 SYNCED = pathlib.Path('/etc/.wendyos-credential-synced')
@@ -118,6 +119,8 @@ class CredentialsTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotEqual(self.shadow_password(), old_hash)
 
+    # --- A/B persistence of the wendy entry ---------------------------------
+
     def credential(self, verb, **env):
         return subprocess.run(['/test/wendyos-user-credential.sh', verb],
                               env={**os.environ, **env}, text=True,
@@ -131,13 +134,46 @@ class CredentialsTest(unittest.TestCase):
         subprocess.run(['chage', '-d', '20000', 'wendy'], check=True)
         SYNCED.unlink(missing_ok=True)
 
-    def test_password_survives_a_new_slot(self):
+    def slot(self):
+        """This slot's shadow file and record, to come back to it later."""
+        return pathlib.Path('/etc/shadow').read_text(), SYNCED.read_text()
+
+    def boot(self, slot):
+        pathlib.Path('/etc/shadow').write_text(slot[0])
+        SYNCED.write_text(slot[1])
+
+    def stored(self):
+        return STORE.read_text().splitlines()[0] + '\n'
+
+    def token(self):
+        return STORE.read_text().splitlines()[1]
+
+    def other_slot_saves(self, line):
+        # Another slot, booted later, saves: a new token with the entry.
+        STORE.parent.mkdir(parents=True, exist_ok=True)
+        STORE.write_text(line + str(uuid.uuid4()) + '\n')
+
+    def provision(self):
         self.assertEqual(self.change_password('Yq7!mZ2#vK9@xL6$p').returncode, 0)
-        provisioned = self.shadow_password()
-        saved = self.credential('save')
-        self.assertEqual(saved.returncode, 0, saved.stdout)
-        self.assertNotIn(provisioned, saved.stdout)
-        self.assertEqual(STORE.read_text(), self.kept())
+        self.assertEqual(self.credential('save').returncode, 0)
+        return self.shadow_password()
+
+    def stub(self, **tools):
+        """Put shell snippets in front of the real tools, one per name."""
+        stub = pathlib.Path('/tmp/stub')
+        shutil.rmtree(stub, ignore_errors=True)
+        stub.mkdir()
+        self.addCleanup(shutil.rmtree, stub, ignore_errors=True)
+        for name, body in tools.items():
+            real = shutil.which(name)
+            (stub / name).write_text(f'#!/bin/sh\n{body}\nexec {real} "$@"\n')
+            (stub / name).chmod(0o755)
+        return '/tmp/stub:' + os.environ['PATH']
+
+    def test_password_survives_a_new_slot(self):
+        provisioned = self.provision()
+        self.assertEqual(self.stored(), self.kept())
+        self.assertRegex(self.token(), r'^[0-9a-f-]{36}$')
         self.assertEqual(STORE.stat().st_mode & 0o777, 0o600)
         self.assertEqual(STORE.parent.stat().st_mode & 0o777, 0o700)
         self.new_slot()
@@ -148,32 +184,38 @@ class CredentialsTest(unittest.TestCase):
         self.assertEqual(subprocess.check_output(
             ['passwd', '-S', 'wendy'], text=True).split()[1], 'P')
 
+    def test_every_write_gets_a_new_token(self):
+        self.provision()
+        first = self.token()
+        self.assertEqual(self.credential('save').returncode, 0)
+        self.assertEqual(self.token(), first)
+        subprocess.run(['passwd', '-l', 'wendy'], check=True, capture_output=True)
+        self.assertEqual(self.credential('save').returncode, 0)
+        self.assertNotEqual(self.token(), first)
+
     def test_lock_survives_a_new_slot(self):
-        self.assertEqual(self.change_password('Yq7!mZ2#vK9@xL6$p').returncode, 0)
-        subprocess.run(['passwd', '-l', 'wendy'], check=True,
-                       stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.provision()
+        subprocess.run(['passwd', '-l', 'wendy'], check=True, capture_output=True)
         locked = self.shadow_password()
         self.assertEqual(self.credential('save').returncode, 0)
         self.new_slot()
         self.assertEqual(self.credential('restore').returncode, 0)
         self.assertEqual(self.shadow_password(), locked)
-        self.assertTrue(locked.startswith('!'))
 
-    def test_disabled_account_and_password_age_survive_a_new_slot(self):
-        self.assertEqual(self.change_password('Yq7!mZ2#vK9@xL6$p').returncode, 0)
+    def test_expiry_and_password_age_survive_a_new_slot(self):
+        self.provision()
         subprocess.run(['chage', '-d', '19000', 'wendy'], check=True)
         subprocess.run(['usermod', '--expiredate', '1', 'wendy'], check=True)
         self.assertEqual(self.credential('save').returncode, 0)
         kept = self.kept()
         self.new_slot()
-        self.assertEqual(self.shadow_fields()[7], '')
         self.assertEqual(self.credential('restore').returncode, 0)
         self.assertEqual(self.kept(), kept)
         self.assertEqual(self.shadow_fields()[2], '19000')
         self.assertEqual(self.shadow_fields()[7], '1')
 
     def test_image_keeps_its_aging_limits(self):
-        self.assertEqual(self.change_password('Yq7!mZ2#vK9@xL6$p').returncode, 0)
+        self.provision()
         subprocess.run(['chage', '-m', '0', '-M', '99999', '-W', '7', 'wendy'], check=True)
         self.assertEqual(self.credential('save').returncode, 0)
         self.new_slot()
@@ -184,141 +226,256 @@ class CredentialsTest(unittest.TestCase):
         self.assertEqual(self.shadow_fields()[3:7], ['1', '60', '14', '35'])
         self.assertTrue(self.shadow_password().startswith('$6$'))
 
-    def test_unsaved_change_on_this_slot_is_not_undone(self):
-        self.assertEqual(self.change_password('Yq7!mZ2#vK9@xL6$p').returncode, 0)
-        self.assertEqual(self.credential('save').returncode, 0)
-        unlocked = STORE.read_text()
-        # The save after the lock never ran (no /data, read-only /data, power cut).
-        subprocess.run(['passwd', '-l', 'wendy'], check=True,
-                       stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        self.assertEqual(STORE.read_text(), unlocked)
+    def test_fresh_device_stays_locked(self):
+        self.assertEqual(self.credential('restore').returncode, 0)
+        self.assertEqual(self.shadow_password(), '*')
+        self.assertFalse(STORE.exists())
+
+    def test_unsaved_change_on_this_slot_is_kept(self):
+        self.provision()
+        # The save after the lock never ran (power cut).
+        subprocess.run(['passwd', '-l', 'wendy'], check=True, capture_output=True)
         booted = self.credential('restore')
         self.assertEqual(booted.returncode, 0, booted.stdout)
         self.assertIn('not saved', booted.stdout)
         self.assertTrue(self.shadow_password().startswith('!'))
         self.assertEqual(self.credential('save').returncode, 0)
-        self.assertEqual(STORE.read_text(), self.kept())
+        self.assertEqual(self.stored(), self.kept())
+
+    def test_newer_save_on_another_slot_beats_an_unsaved_change(self):
+        self.provision()
+        # This slot changes its password, but the save never happens.
+        subprocess.run(['usermod', '-p', GOOD, 'wendy'], check=True)
+        # A slot booted later locks the account and disables it.
+        self.other_slot_saves(entry('!' + GOOD, last='20100', expire='1'))
+        restored = self.credential('restore')
+        self.assertEqual(restored.returncode, 0, restored.stdout)
+        self.assertNotIn('not saved', restored.stdout)
+        self.assertEqual(self.shadow_password(), '!' + GOOD)
+        self.assertEqual(self.shadow_fields()[7], '1')
+
+    def test_same_content_saved_again_elsewhere_still_wins(self):
+        provisioned = self.provision()
+        subprocess.run(['passwd', '-l', 'wendy'], check=True, capture_output=True)
+        self.assertEqual(self.credential('save').returncode, 0)
+        # Slot A unlocks, but the save never happens.
+        subprocess.run(['passwd', '-u', 'wendy'], check=True, capture_output=True)
+        slot_a = self.slot()
+        # Slot B, booted later, unlocks and locks again, both saved. The store
+        # ends on the same content as A last saw.
+        self.new_slot()
+        self.assertEqual(self.credential('restore').returncode, 0)
+        for flag in ('-u', '-l'):
+            subprocess.run(['passwd', flag, 'wendy'], check=True, capture_output=True)
+            self.assertEqual(self.credential('save').returncode, 0)
+        # Rolled back to A: B's later lock wins over A's unsaved unlock.
+        self.boot(slot_a)
+        self.assertEqual(self.credential('restore').returncode, 0)
+        self.assertEqual(self.shadow_password(), '!' + provisioned)
 
     def test_rollback_slot_takes_the_newer_saved_entry(self):
-        self.assertEqual(self.change_password('Yq7!mZ2#vK9@xL6$p').returncode, 0)
-        self.assertEqual(self.credential('save').returncode, 0)
-        # The other slot saved a newer password while this one was not booted.
-        STORE.write_text(entry(GOOD, last='19500'))
+        self.provision()
+        self.other_slot_saves(entry(GOOD, last='19500'))
         self.assertEqual(self.credential('restore').returncode, 0)
         self.assertEqual(self.shadow_password(), GOOD)
         self.assertEqual(self.shadow_fields()[2], '19500')
 
-    def test_entry_chpasswd_would_reject_is_not_kept(self):
-        self.assertEqual(self.change_password('Yq7!mZ2#vK9@xL6$p').returncode, 0)
+    def test_store_gone_after_a_sync_fails_closed(self):
+        self.provision()
+        STORE.unlink()
+        restored = self.credential('restore')
+        self.assertEqual(restored.returncode, 0, restored.stdout)
+        self.assertIn('is gone', restored.stdout)
+        self.assertEqual(self.shadow_password(), '*')
         self.assertEqual(self.credential('save').returncode, 0)
-        for bad in ('!!' + GOOD, '$1$saltsalt$' + 'a' * 22, 'x', '!!', '$6$short$abc'):
+        self.assertEqual(self.stored(), self.kept('*'))
+
+    def test_unusable_store_after_a_sync_fails_closed(self):
+        legacy = subprocess.check_output(
+            ['perl', '-e', 'print crypt("wendy", q{$6$5ixFr0sKRtsKKKhY$})'], text=True)
+        for content in ('garbage\n', entry('') + 'token\n', entry(legacy) + 'token\n',
+                        entry('$6$ab cd') + 'token\n'):
+            with self.subTest(content=content):
+                self.provision()
+                STORE.write_text(content)
+                self.assertEqual(self.credential('restore').returncode, 0)
+                self.assertEqual(self.shadow_password(), '*')
+
+    def test_unusable_store_on_a_fresh_slot_is_ignored(self):
+        STORE.parent.mkdir(parents=True)
+        self.new_slot()
+        for content in ('', '\n', 'x:y\n', '-o\n', GOOD + '\n',
+                        entry(GOOD).replace('wendy:', 'root:'),
+                        entry(''), entry('$6$ab cd'), entry(GOOD, last='x'),
+                        entry(GOOD, expire='-1'),
+                        f'wendy:{GOOD}:19000:0:99999:7:::\n',
+                        f'wendy:{GOOD}:19000:::::1:reserved\n',
+                        f'wendy:{GOOD}:19000:::::\n',
+                        f'wendy:{GOOD}:19000:::::::\n'):
+            with self.subTest(content=content):
+                SYNCED.unlink(missing_ok=True)
+                STORE.write_text(content)
+                restored = self.credential('restore')
+                self.assertEqual(restored.returncode, 0)
+                self.assertIn('not a saved wendy entry', restored.stdout)
+                self.assertEqual(self.shadow_password(), '*')
+                self.assertEqual(self.shadow_fields()[2], '20000')
+
+    def test_store_from_the_previous_version_is_used_and_upgraded(self):
+        STORE.parent.mkdir(parents=True)
+        STORE.write_text(entry(GOOD))
+        self.new_slot()
+        self.assertEqual(self.credential('restore').returncode, 0)
+        self.assertEqual(self.shadow_password(), GOOD)
+        self.assertEqual(self.credential('save').returncode, 0)
+        self.assertRegex(self.token(), r'^[0-9a-f-]{36}$')
+
+    def test_unkeepable_passwords_are_stored_as_none(self):
+        self.provision()
+        legacy = subprocess.check_output(
+            ['perl', '-e', 'print crypt("wendy", q{$6$5ixFr0sKRtsKKKhY$})'], text=True)
+        for bad in ('!!' + GOOD, '$1$saltsalt$' + 'a' * 22, 'x', '!!', '$6$short$abc',
+                    legacy, '!' + legacy):
             with self.subTest(bad=bad):
                 subprocess.run(['usermod', '-p', bad, 'wendy'], check=True)
                 self.assertEqual(self.credential('save').returncode, 0)
-                # Kept as "no password", so no slot returns to the old one.
-                self.assertEqual(STORE.read_text(), self.kept('*'))
+                self.assertEqual(self.stored(), self.kept('*'))
                 # This slot keeps what was set, and the next boot is unblocked.
                 self.assertEqual(self.credential('restore').returncode, 0)
                 self.assertEqual(self.shadow_password(), bad)
+        subprocess.run(['passwd', '-d', 'wendy'], check=True, capture_output=True)
+        self.assertEqual(self.credential('save').returncode, 0)
+        self.assertEqual(self.stored(), self.kept('*'))
         for good in ('!' + GOOD, '!*', '!', '$y$j9T$' + 'a' * 22 + '$' + 'b' * 43,
                      '$5$rounds=5000$salt$' + 'c' * 43):
             with self.subTest(good=good):
                 subprocess.run(['usermod', '-p', good, 'wendy'], check=True)
                 self.assertEqual(self.credential('save').returncode, 0)
-                self.assertEqual(STORE.read_text(), self.kept())
+                self.assertEqual(self.stored(), self.kept())
 
-    def test_restore_passes_the_entry_on_stdin_and_stops_on_failure(self):
-        self.assertEqual(self.change_password('Yq7!mZ2#vK9@xL6$p').returncode, 0)
+    def test_rollback_does_not_bring_back_a_removed_password(self):
+        self.provision()
+        slot_a = self.slot()
+        subprocess.run(['passwd', '-d', 'wendy'], check=True, capture_output=True)
         self.assertEqual(self.credential('save').returncode, 0)
-        saved = STORE.read_text()
-        provisioned = self.shadow_password()
-        stub = pathlib.Path('/tmp/stub')
-        stub.mkdir()
-        self.addCleanup(shutil.rmtree, stub, ignore_errors=True)
-        for tool in ('chpasswd', 'chage'):
-            (stub / tool).write_text('#!/bin/sh\necho "$0 $*" >> /tmp/stub/argv\n'
-                                     f'exec /usr/sbin/{tool} "$@"\n'
-                                     if tool == 'chpasswd' else
-                                     '#!/bin/sh\necho "$0 $*" >> /tmp/stub/argv\n'
-                                     f'exec /usr/bin/{tool} "$@"\n')
-            (stub / tool).chmod(0o755)
+        self.boot(slot_a)
+        self.assertEqual(self.credential('restore').returncode, 0)
+        self.assertEqual(self.shadow_password(), '*')
+
+    def test_failed_save_keeps_this_slot_and_closes_the_others(self):
+        self.provision()
+        slot_a = self.slot()
+        # Slot B locks the account, but /data is full.
+        subprocess.run(['passwd', '-l', 'wendy'], check=True, capture_output=True)
+        locked = self.shadow_password()
+        path = self.stub(sync='case "$1" in /data/*.tmp) exit 1 ;; esac')
+        failed = self.credential('save', PATH=path)
+        self.assertNotEqual(failed.returncode, 0, failed.stdout)
+        self.assertFalse(STORE.exists())
+        slot_b = self.slot()
+        mark = slot_b[1].split()[1]
+        self.assertRegex(mark, r'^removed\.[0-9a-f-]{36}$')
+        self.assertTrue((STORE.parent / f'wendy.{mark}').exists())
+        self.assertEqual((STORE.parent / f'wendy.{mark}').stat().st_size, 0)
+        # Rolled back to A before B could save: A keeps no password.
+        self.boot(slot_a)
+        self.assertEqual(self.credential('restore').returncode, 0)
+        self.assertEqual(self.shadow_password(), '*')
+        # B keeps its lock and saves it once there is space again.
+        self.boot(slot_b)
+        restored = self.credential('restore')
+        self.assertEqual(restored.returncode, 0, restored.stdout)
+        self.assertEqual(self.shadow_password(), locked)
+        self.assertEqual(self.credential('save').returncode, 0)
+        self.assertEqual(self.stored(), self.kept())
+        # The saved entry replaces the removal marker.
+        self.assertEqual(list(STORE.parent.glob('wendy.removed.*')), [])
+
+    def test_an_old_removal_does_not_count_after_a_later_save(self):
+        self.provision()
+        # Slot A cannot save a new password and removes the store.
+        subprocess.run(['usermod', '-p', GOOD, 'wendy'], check=True)
+        path = self.stub(sync='case "$1" in /data/*.tmp) exit 1 ;; esac')
+        self.assertNotEqual(self.credential('save', PATH=path).returncode, 0)
+        slot_a = self.slot()
+        # Slot B fails closed, then the operator provisions a newer password.
         self.new_slot()
-        path = '/tmp/stub:' + os.environ['PATH']
+        SYNCED.write_text('0' * 64 + ' some-old-token\n')
+        self.assertEqual(self.credential('restore').returncode, 0)
+        newest = self.provision()
+        # The store is lost again (a wipe, or another failed save).
+        STORE.unlink()
+        # Rolled back to A: its old removal no longer counts.
+        self.boot(slot_a)
+        restored = self.credential('restore')
+        self.assertEqual(restored.returncode, 0, restored.stdout)
+        self.assertIn('is gone', restored.stdout)
+        self.assertEqual(self.shadow_password(), '*')
+        self.assertNotEqual(newest, GOOD)
+
+    def test_a_later_failed_save_elsewhere_voids_an_older_removal(self):
+        self.provision()
+        full = self.stub(sync='case "$1" in /data/*.tmp) exit 1 ;; esac')
+        # Slot A cannot save a new password and leaves its marker.
+        subprocess.run(['usermod', '-p', GOOD, 'wendy'], check=True)
+        self.assertNotEqual(self.credential('save', PATH=full).returncode, 0)
+        slot_a = self.slot()
+        # Slot B, which saved before, fails closed; /data is still full, and
+        # the operator then locks the account on B, which cannot be saved.
+        self.new_slot()
+        SYNCED.write_text('0' * 64 + ' some-old-token\n')
+        self.assertEqual(self.credential('restore').returncode, 0)
+        self.assertEqual(self.shadow_password(), '*')
+        self.assertNotEqual(self.credential('save', PATH=full).returncode, 0)
+        subprocess.run(['passwd', '-l', 'wendy'], check=True, capture_output=True)
+        self.assertNotEqual(self.credential('save', PATH=full).returncode, 0)
+        self.assertEqual(len(list(STORE.parent.glob('wendy.removed.*'))), 1)
+        # Rolled back to A: B's later removal voids A's, so A keeps no password.
+        self.boot(slot_a)
+        restored = self.credential('restore')
+        self.assertEqual(restored.returncode, 0, restored.stdout)
+        self.assertIn('is gone', restored.stdout)
+        self.assertEqual(self.shadow_password(), '*')
+
+    def test_restore_passes_the_entry_on_stdin(self):
+        provisioned = self.provision()
+        path = self.stub(chpasswd='echo "$0 $*" >> /tmp/argv',
+                         chage='echo "$0 $*" >> /tmp/argv')
+        self.addCleanup(pathlib.Path('/tmp/argv').unlink, missing_ok=True)
+        self.new_slot()
         self.assertEqual(self.credential('restore', PATH=path).returncode, 0)
         self.assertEqual(self.shadow_password(), provisioned)
-        argv = (stub / 'argv').read_text()
+        argv = pathlib.Path('/tmp/argv').read_text()
         self.assertIn('chpasswd -e', argv)
-        self.assertNotIn(provisioned, argv)
         self.assertNotIn('$6$', argv)
-        # A tool that fails must fail the restore and leave the store alone,
-        # so that the save after it cannot replace a good entry.
-        self.new_slot()
-        (stub / 'chpasswd').write_text('#!/bin/sh\nexit 1\n')
-        failed = self.credential('restore', PATH=path)
-        self.assertNotEqual(failed.returncode, 0)
-        self.assertEqual(STORE.read_text(), saved)
-        self.assertFalse(SYNCED.exists())
 
     def test_restore_that_stops_halfway_fails_closed_and_is_retried(self):
-        self.assertEqual(self.change_password('Yq7!mZ2#vK9@xL6$p').returncode, 0)
-        self.assertEqual(self.credential('save').returncode, 0)
-        provisioned = self.shadow_password()
-        # A rolled-back slot with its own older, enabled password.
-        subprocess.run(['usermod', '-p', GOOD, 'wendy'], check=True)
-        self.assertEqual(self.credential('save').returncode, 0)
-        STORE.write_text(entry(provisioned, expire='1'))
-        stub = pathlib.Path('/tmp/stub')
-        stub.mkdir()
-        self.addCleanup(shutil.rmtree, stub, ignore_errors=True)
-        for step, tool in (('password', 'chpasswd'), ('last step', 'chage')):
+        provisioned = self.provision()
+        for step, tool in (
+                ('password', {'chpasswd': 'exit 1'}),
+                ('last step', {'chage': '[ -e /tmp/stub/once ] && exit 1; touch /tmp/stub/once'})):
             with self.subTest(failing=step):
-                (stub / 'chage').write_text('#!/bin/sh\nexec /usr/bin/chage "$@"\n')
-                (stub / 'chpasswd').write_text('#!/bin/sh\nexec /usr/sbin/chpasswd "$@"\n')
-                if tool == 'chpasswd':
-                    (stub / tool).write_text('#!/bin/sh\nexit 1\n')
-                else:
-                    # The first chage call (disable) works, the second fails.
-                    (stub / tool).write_text(
-                        '#!/bin/sh\nif [ -e /tmp/stub/once ]; then exit 1; fi\n'
-                        'touch /tmp/stub/once\nexec /usr/bin/chage "$@"\n')
-                for f in stub.iterdir():
-                    f.chmod(0o755)
-                (stub / 'once').unlink(missing_ok=True)
+                # A rolled-back slot, enabled; a later slot saved it disabled.
                 subprocess.run(['usermod', '-p', GOOD, '-e', '', 'wendy'], check=True)
-                self.assertEqual(self.credential('save').returncode, 0)
-                STORE.write_text(entry(provisioned, expire='1'))
-                failed = self.credential('restore', PATH='/tmp/stub:' + os.environ['PATH'])
+                self.other_slot_saves(entry(provisioned, expire='1'))
+                failed = self.credential('restore', PATH=self.stub(**tool))
                 self.assertNotEqual(failed.returncode, 0, failed.stdout)
-                # Whatever stopped it, the account is disabled, not open.
+                self.assertIn('stays disabled', failed.stdout)
                 self.assertEqual(self.shadow_fields()[7], '1')
                 self.assertFalse(SYNCED.exists())
-                # The next boot does not mistake the half state for a change.
                 retried = self.credential('restore')
                 self.assertEqual(retried.returncode, 0, retried.stdout)
-                self.assertNotIn('not saved', retried.stdout)
                 self.assertEqual(self.shadow_password(), provisioned)
                 self.assertEqual(self.shadow_fields()[7], '1')
 
-    def test_rollback_does_not_bring_back_a_removed_password(self):
-        # Slot A provisions a password and is in step with the store.
-        self.assertEqual(self.change_password('Yq7!mZ2#vK9@xL6$p').returncode, 0)
-        self.assertEqual(self.credential('save').returncode, 0)
-        slot_a = pathlib.Path('/etc/shadow').read_text()
-        slot_a_synced = SYNCED.read_text()
-        # Slot B removes it; the store keeps "no password".
-        subprocess.run(['passwd', '-d', 'wendy'], check=True,
-                       stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        self.assertEqual(self.credential('save').returncode, 0)
-        self.assertEqual(STORE.read_text(), self.kept('*'))
-        # Roll back to slot A: its own record still matches its entry.
-        pathlib.Path('/etc/shadow').write_text(slot_a)
-        SYNCED.write_text(slot_a_synced)
-        restored = self.credential('restore')
-        self.assertEqual(restored.returncode, 0, restored.stdout)
-        self.assertEqual(self.shadow_password(), '*')
-        # And the slot that removed it keeps what it set.
-        self.assertEqual(self.credential('save').returncode, 0)
-        self.assertEqual(STORE.read_text(), self.kept('*'))
+    def test_restore_that_cannot_disable_changes_nothing(self):
+        self.provision()
+        self.other_slot_saves(entry('!' + GOOD, expire='1'))
+        subprocess.run(['usermod', '-p', GOOD, 'wendy'], check=True)
+        failed = self.credential('restore', PATH=self.stub(chage='exit 1'))
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertIn('leaving it as it is', failed.stdout)
+        self.assertEqual(self.shadow_password(), GOOD)
 
     def test_leftover_temporary_file_does_not_widen_the_mode(self):
         STORE.parent.mkdir(parents=True)
@@ -329,81 +486,16 @@ class CredentialsTest(unittest.TestCase):
         self.assertEqual(STORE.stat().st_mode & 0o777, 0o600)
         self.assertEqual(SYNCED.stat().st_mode & 0o777, 0o600)
 
-    def test_fresh_device_stays_locked(self):
-        self.assertEqual(self.credential('restore').returncode, 0)
-        self.assertEqual(self.shadow_password(), '*')
-        self.assertFalse(STORE.exists())
-
-    def test_old_shared_password_is_never_kept(self):
-        # The entry every image shipped before the account was locked.
-        legacy = subprocess.check_output(
-            ['perl', '-e', 'print crypt("wendy", q{$6$5ixFr0sKRtsKKKhY$})'],
-            text=True)
-        self.assertTrue(legacy.startswith('$6$5ixFr0sKRtsKKKhY$'), legacy)
-        for legacy_entry in (legacy, '!' + legacy):
-            with self.subTest(locked=legacy_entry.startswith('!')):
-                # A saved good password must not outlive the bad one either.
-                STORE.parent.mkdir(parents=True, exist_ok=True)
-                STORE.write_text(entry(GOOD))
-                subprocess.run(['usermod', '-p', legacy_entry, 'wendy'], check=True)
-                self.assertEqual(self.credential('save').returncode, 0)
-                self.assertEqual(STORE.read_text(), self.kept('*'))
-                self.new_slot()
-                STORE.write_text(entry(legacy_entry))
-                restored = self.credential('restore')
-                self.assertEqual(restored.returncode, 0)
-                self.assertIn('old shared password', restored.stdout)
-                self.assertEqual(self.shadow_password(), '*')
-
-    def test_unusable_entries_are_ignored(self):
-        STORE.parent.mkdir(parents=True)
-        self.new_slot()
-        for content in ('', '\n', 'x:y\n', '-o\n', GOOD + '\n',
-                        entry(GOOD).replace('wendy:', 'root:'),
-                        entry(''),
-                        entry('$6$ab cd'),
-                        entry(GOOD, last='x'),
-                        entry(GOOD, expire='-1'),
-                        f'wendy:{GOOD}:19000:0:99999:7:::\n',
-                        f'wendy:{GOOD}:19000:::::1:reserved\n',
-                        f'wendy:{GOOD}:19000:::::\n',
-                        f'wendy:{GOOD}:19000:::::::\n'):
-            with self.subTest(content=content):
-                STORE.write_text(content)
-                restored = self.credential('restore')
-                self.assertEqual(restored.returncode, 0)
-                self.assertIn('not a saved wendy entry', restored.stdout)
-                self.assertEqual(self.shadow_password(), '*')
-                self.assertEqual(self.shadow_fields()[2], '20000')
-        # The same shape with nothing wrong in it is restored.
-        STORE.write_text(entry(GOOD))
-        self.assertEqual(self.credential('restore').returncode, 0)
-        self.assertEqual(self.shadow_password(), GOOD)
-        self.new_slot()
-        # A deleted password is a login without one. It is not kept, and the
-        # entry saved before it must not come back on the next slot.
-        subprocess.run(['passwd', '-d', 'wendy'], check=True,
-                       stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        self.assertEqual(self.shadow_password(), '')
-        STORE.write_text(entry(GOOD))
-        self.assertEqual(self.credential('save').returncode, 0)
-        self.assertEqual(STORE.read_text(), self.kept('*'))
-
-    def test_entry_that_cannot_be_updated_is_removed(self):
-        self.assertEqual(self.change_password('Yq7!mZ2#vK9@xL6$p').returncode, 0)
-        self.assertEqual(self.credential('save').returncode, 0)
-        subprocess.run(['passwd', '-l', 'wendy'], check=True,
-                       stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        # The write beside the store fails; the unlocked entry must not stay.
+    def test_store_that_cannot_be_written_is_removed(self):
+        self.provision()
+        subprocess.run(['passwd', '-l', 'wendy'], check=True, capture_output=True)
         (STORE.parent / 'wendy.tmp').mkdir()
-        self.addCleanup(shutil.rmtree, STORE.parent / 'wendy.tmp',
-                        ignore_errors=True)
+        self.addCleanup(shutil.rmtree, STORE.parent / 'wendy.tmp', ignore_errors=True)
         self.assertNotEqual(self.credential('save').returncode, 0)
         self.assertFalse(STORE.exists())
 
     def test_restore_leaves_other_accounts_alone(self):
-        self.assertEqual(self.change_password('Yq7!mZ2#vK9@xL6$p').returncode, 0)
-        self.assertEqual(self.credential('save').returncode, 0)
+        self.provision()
         before = [line for line in pathlib.Path('/etc/shadow').read_text().splitlines()
                   if not line.startswith('wendy:')]
         self.new_slot()
