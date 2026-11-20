@@ -153,7 +153,7 @@ class SensorLoopbackBuildContractTests(unittest.TestCase):
 
     def test_shared_recipe_and_visible_kconfig_selectors(self):
         recipe = ROOT / 'recipes-kernel/v4l2loopback/v4l2loopback_0.15.4.bb'
-        self.assertIn('COMPATIBLE_MACHINE = "(tegra|qcom-wendyos|rpi)"', recipe.read_text())
+        self.assertIn('COMPATIBLE_MACHINE = "(tegra|qcom-wendyos|rpi|vm-wendyos)"', recipe.read_text())
         self.assertFalse((ROOT / 'meta-tegra-extensions-jp7/recipes-kernel/v4l2loopback' / recipe.name).exists())
         fragment = ROOT / 'meta-qcom-extensions/recipes-kernel/linux/linux-qcom-next/sensor-loopback.cfg'
         config = check.read_config(fragment)

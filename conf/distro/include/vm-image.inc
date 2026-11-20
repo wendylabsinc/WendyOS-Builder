@@ -17,6 +17,12 @@
 #                               meta-tpm is not layered. See vm-distro.inc.
 # create_lib64_compat is KEPT (below) — it is not NVIDIA-only in effect.
 
+# Network and ROS 2 cameras use the same agent-managed V4L2 devices as on
+# physical targets. Fail image creation if the driver or its dependency tree is
+# absent; updating the agent alone cannot supply a missing kernel module.
+inherit camera-loopback-check
+IMAGE_INSTALL:append = " v4l2loopback"
+
 # A/B rootfs sizing: image == slot == .wendy payload, pinned to one constant via
 # floor==ceiling, so an OTA image can never outgrow its fixed on-device slot. The
 # VM machine overrides WENDYOS_ROOTFS_SIZE_KB:vm-wendyos from its own

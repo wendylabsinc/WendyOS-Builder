@@ -1,8 +1,8 @@
 # V4L2 and ALSA loopback support
 
-WendyOS includes `v4l2loopback` on Tegra, Qualcomm and Raspberry Pi images.
+WendyOS includes `v4l2loopback` on Tegra, Qualcomm, Raspberry Pi and VM images.
 The agent uses its control device to create virtual cameras for IP cameras and
-SensorLink sources. Qualcomm and Raspberry Pi images also include `snd-aloop`,
+SensorLink sources, and for ROS 2 camera topics. Qualcomm and Raspberry Pi images also include `snd-aloop`,
 which exposes SensorLink microphones through ALSA PCM devices.
 
 ## Packages and loading
@@ -18,6 +18,9 @@ Tegra images require the package through `packagegroup-wendyos-tegra`.
 `qcom-image.inc` explicitly installs `v4l2loopback` and
 `kernel-module-snd-aloop` on every `qcom-wendyos` target, including Uno Q.
 `rpi-image.inc` does the same on every `rpi` target (Pi 3, Pi 4 and Pi 5).
+`vm-image.inc` requires `v4l2loopback` on both ARM64 and x86-64 VMs.
+The VM kernel fragment enables the media and UVC options that select the
+hidden V4L2/videobuf2-vmalloc prerequisites. It does not add ALSA loopback.
 These are required image packages. Missing drivers fail the image build.
 
 The v4l2loopback recipe generates module loading and modprobe configuration
@@ -52,10 +55,19 @@ before image and OTA artifacts are produced. This catches the IQ9 failure
 where the kernel enabled ALSA loopback but the image omitted its package,
 and v4l2loopback was available only to the Tegra layer.
 
+VM images use `camera-loopback-check.bbclass` for the corresponding video-only
+check, including transitive dependencies and kernel-release matching. This is
+part of the image build, not a manual module installation. Deploy the resulting
+VM image through the normal WendyOS OTA flow so the kernel and modules update
+together and the existing data partition is retained. Agent-only updates do not
+supply this driver. Camera rendering still comes from the simulated peripheral;
+the module enables Wendy's normal camera discovery, viewing and entitled app
+access. Booted camera tests are required in addition to these build gates.
+
 Run the fixture tests without a Yocto build:
 
 ```sh
-python3 -m unittest scripts/check_sensor_loopback_support_test.py scripts/check_mesh_kernel_support_test.py
+python3 -m unittest scripts/check_sensor_loopback_support_test.py scripts/check_mesh_kernel_support_test.py scripts/vm_camera_support_test.py
 ```
 
 For the IQ9 image, build with `BOARD=dragonwing-iq9075` using the normal

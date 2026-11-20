@@ -49,6 +49,10 @@ on:
       - 'scripts/check_mesh_kernel_support*'
       - 'scripts/check_sensor_loopback_support*'
       - 'classes/sensor-loopback-check.bbclass'
+      - 'classes/camera-loopback-check.bbclass'
+      - 'scripts/vm_camera_support_test.py'
+      - 'conf/distro/include/vm-image.inc'
+      - 'meta-vm-extensions/recipes-kernel/linux/**'
       - 'recipes-kernel/v4l2loopback/**'
       - 'meta-tegra-extensions-jp7/recipes-kernel/v4l2loopback/**'
       - 'conf/distro/include/qcom-image.inc'
@@ -177,6 +181,10 @@ on:
       - 'scripts/check_mesh_kernel_support*'
       - 'scripts/check_sensor_loopback_support*'
       - 'classes/sensor-loopback-check.bbclass'
+      - 'classes/camera-loopback-check.bbclass'
+      - 'scripts/vm_camera_support_test.py'
+      - 'conf/distro/include/vm-image.inc'
+      - 'meta-vm-extensions/recipes-kernel/linux/**'
       - 'recipes-kernel/v4l2loopback/**'
       - 'meta-tegra-extensions-jp7/recipes-kernel/v4l2loopback/**'
       - 'conf/distro/include/qcom-image.inc'
@@ -450,7 +458,7 @@ jobs:
         run: python3 -m unittest scripts/check_mesh_kernel_support_test.py scripts/mesh_local_contract_test.py
 
       - name: Run SensorLink loopback image acceptance tests
-        run: python3 -m unittest scripts/check_sensor_loopback_support_test.py
+        run: python3 -m unittest scripts/check_sensor_loopback_support_test.py scripts/vm_camera_support_test.py
 
       - name: Verify config-only kernel release identities
         run: |

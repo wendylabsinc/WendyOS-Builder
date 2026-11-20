@@ -30,3 +30,8 @@ require ${@'recipes-kernel/linux/game-controller.inc' if d.getVar('WENDYOS_GAME_
 require recipes-kernel/linux/mesh-local.inc
 require recipes-kernel/linux/mesh-internet.inc
 require recipes-kernel/linux/cve-2026-98432.inc
+
+# Virtual cameras still need the kernel media stack, even without physical
+# camera passthrough. UVC selects the hidden videobuf2-vmalloc dependencies.
+FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
+SRC_URI:append:vm-wendyos = " file://camera-loopback.cfg"
