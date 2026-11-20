@@ -53,11 +53,15 @@ The shipped image owns `/etc/shadow`, so a newly installed A/B root filesystem
 starts with the locked entry. What the device owns in the `wendy` entry is
 therefore also kept on `/data`, in `/data/etc/wendyos-credential/wendy`,
 readable by root only: the password, the day it was last changed, and the
-account expiry. It is saved whenever `/etc/shadow` changes, and again at boot
-and at shutdown, and it is restored at boot before any login path is open. A
+account expiry. A watcher checks `/etc/shadow` every two seconds and saves any
+change, retrying a save that fails; the entry is also saved at boot and at a
+clean shutdown, and it is restored at boot before any login path is open. A
 provisioned password, a lock set with `passwd -l`, and an account expiry
-therefore survive an update. The password aging limits are not kept: they stay
-those of the installed image.
+therefore survive an update. After an OS update the Agent restarts the device
+without a clean shutdown, so a change made in the last few seconds before that
+restart, or one that could not be saved yet, does not reach the new slot: it is
+saved only if the slot it was made on boots again before another slot saves.
+The password aging limits are not kept: they stay those of the installed image.
 
 Every write of the saved entry carries a new random token, and each slot
 records its own entry and the token from its last save or restore. At boot:

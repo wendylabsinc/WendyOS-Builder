@@ -8,6 +8,7 @@ import pathlib
 import re
 import shutil
 import subprocess
+import time
 import unittest
 import uuid
 
@@ -436,6 +437,62 @@ class CredentialsTest(unittest.TestCase):
         self.assertEqual(restored.returncode, 0, restored.stdout)
         self.assertIn('is gone', restored.stdout)
         self.assertEqual(self.shadow_password(), '*')
+
+    def watch(self, path=None):
+        env = {**os.environ, 'WENDYOS_CREDENTIAL_INTERVAL': '0.2'}
+        if path:
+            env['PATH'] = path
+        watcher = subprocess.Popen(['/test/wendyos-user-credential.sh', 'watch'], env=env,
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.addCleanup(watcher.wait, 10)
+        self.addCleanup(watcher.kill)
+
+    def wait_stored(self, want, seconds=15):
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            if STORE.exists() and self.stored() == want:
+                return True
+            time.sleep(0.2)
+        return False
+
+    def test_watcher_never_misses_a_change(self):
+        self.provision()
+        # Every save takes over a second, so changes land in the middle of one.
+        self.watch(self.stub(sync='case "$1" in /data/*) sleep 0.6 ;; esac'))
+        for n, gap in enumerate((0, 0.1, 0.5, 0.9)):
+            with self.subTest(gap=gap):
+                subprocess.run(['usermod', '--expiredate', '1', 'wendy'], check=True)
+                time.sleep(0.5 + gap)
+                # Each pair ends on a value the store has not held yet.
+                subprocess.run(['usermod', '--expiredate', str(30000 + n), 'wendy'], check=True)
+                self.assertTrue(self.wait_stored(self.kept()), STORE.read_text())
+        # The watcher does not hold the lock between saves.
+        started = time.monotonic()
+        self.assertEqual(self.credential('save').returncode, 0)
+        self.assertLess(time.monotonic() - started, 5)
+
+    def test_watcher_retries_a_failed_save(self):
+        self.provision()
+        # /data is full until the flag goes away.
+        flag = pathlib.Path('/tmp/full')
+        flag.touch()
+        self.addCleanup(flag.unlink, missing_ok=True)
+        self.watch(self.stub(sync='[ -e /tmp/full ] && case "$1" in /data/*.tmp) exit 1 ;; esac'))
+        # Let the watcher's start-up save run first, so it cannot pass for a retry.
+        time.sleep(1)
+        subprocess.run(['passwd', '-l', 'wendy'], check=True, capture_output=True)
+        deadline = time.monotonic() + 10
+        while STORE.exists() and time.monotonic() < deadline:
+            time.sleep(0.2)
+        self.assertFalse(STORE.exists())
+        time.sleep(1)
+        # Space comes back with no further account change: the save is retried.
+        flag.unlink()
+        self.assertTrue(self.wait_stored(self.kept(), 20))
+        deadline = time.monotonic() + 5
+        while list(STORE.parent.glob('wendy.removed.*')) and time.monotonic() < deadline:
+            time.sleep(0.2)
+        self.assertEqual(list(STORE.parent.glob('wendy.removed.*')), [])
 
     def test_restore_passes_the_entry_on_stdin(self):
         provisioned = self.provision()

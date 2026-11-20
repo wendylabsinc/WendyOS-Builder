@@ -1,5 +1,5 @@
 #!/bin/bash
-# wendyos-user-credential.sh save|restore
+# wendyos-user-credential.sh save|restore|watch
 #
 # /etc/shadow belongs to the A/B slot, so a newly installed image starts with a
 # locked wendy account. This keeps what the device owns in the wendy entry on
@@ -263,7 +263,7 @@ save() {
         return 1
     fi
 
-    # Read again after each write: the watcher is not armed while this runs.
+    # Read again after each write: the entry can change while this runs.
     for _ in 1 2 3 4 5; do
         current=$(device_entry)
         case $? in
@@ -293,11 +293,35 @@ save() {
     done
 }
 
+# Saves whenever /etc/shadow's metadata differs from the last saved look. It
+# compares state, not change events, so a change made during a save is not
+# missed, and a failed save is retried until it works.
+watch() {
+    local seen="" now retry=0
+    while :; do
+        now=$(stat -c '%d %i %y %z %s' "$SHADOW" 2>/dev/null)
+        if [ "$now" != "$seen" ]; then
+            # Its own process, so the store lock is released between saves.
+            if timeout 120 "$0" save; then
+                seen=$now
+                retry=0
+            else
+                # Back off up to a minute, so a full /data is not hammered.
+                retry=$(( retry ? (retry * 2 > 60 ? 60 : retry * 2) : 2 ))
+                sleep "$retry"
+                continue
+            fi
+        fi
+        sleep "${WENDYOS_CREDENTIAL_INTERVAL:-2}"
+    done
+}
+
 case "${1:-}" in
     save)    save ;;
     restore) restore ;;
+    watch)   watch ;;
     *)
-        echo "usage: $0 save|restore" >&2
+        echo "usage: $0 save|restore|watch" >&2
         exit 2
         ;;
 esac
