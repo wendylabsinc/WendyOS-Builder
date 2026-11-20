@@ -29,9 +29,10 @@
 #   - boot/config/rootfsA carry partuuid-rpi UUIDs; rootfsB/data get
 #     wic-generated ones. NOTE these UUIDs are NOT stable across builds
 #     (partuuid-rpi caches them per build dir), so nothing the rootfs carries
-#     across an OTA may reference them: /boot is mounted by LABEL, not PARTUUID
-#     (WDY-1768), and the slots are selected by partlabel/number. The --uuid
-#     here only stamps the GPT entry; it is no longer load-bearing for mounting.
+#     across an OTA may reference them: /boot is mounted by its partition name
+#     on the root disk (/dev/wendyos/boot), and the slots are selected by
+#     partlabel/number. The --uuid here only stamps the GPT entry; it is no
+#     longer load-bearing for mounting.
 bootloader --ptable gpt
 part /boot   --source bootimg-partition --ondisk mmcblk0 --fstype=vfat --label boot    --active --align 4096 --size 128M --uuid "${WENDYOS_BOOT_PARTUUID}"
 part         --ondisk mmcblk0 --fstype=vfat --label config  --align 4096 --size ${WENDYOS_CONFIG_PART_SIZE_MB}M --uuid "${WENDYOS_CONFIG_PARTUUID}"

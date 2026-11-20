@@ -30,7 +30,8 @@
 # Everything is referenced by LABEL, never PARTUUID/--uuid: under MBR the kernel
 # exposes PARTUUIDs as <disk-signature>-<partno> (not the UUIDv4 partuuid-rpi
 # generates), and wic rejects --uuid on msdos. The matching fstab is
-# rpi-wendy-mbr-fstab (LABEL=boot for /boot, vs PARTUUID in the GPT fstab).
+# rpi-wendy-mbr-fstab (LABEL=boot for /boot, vs the /dev/wendyos/boot link in
+# the GPT fstab).
 #
 # Notes (see docs/plans/wendyos-update-rpi.md):
 #   - The kernel is loaded by boot.scr from the SELECTED slot's rootfs /boot

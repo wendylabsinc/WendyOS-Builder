@@ -111,6 +111,9 @@ on:
       - 'meta-arduino-extensions/recipes-bsp/wendyos-mcu/files/*'
       - 'meta-arduino-extensions/recipes-connectivity/arduino-router/files/*'
       - 'tests/uno-q-mcu/**'
+      - 'scripts/root_disk_boot_link_test.py'
+      - 'recipes-core/base-files/files/rpi-wendy*-fstab'
+      - 'meta-rpi-extensions/recipes-core/images/wendyos-image.bbappend'
       # No *.sh filter: data-recovery-key is a command and carries no extension.
       - 'recipes-support/data-device/files/*'
       - 'recipes-support/data-crypt/files/*'
@@ -236,6 +239,9 @@ on:
       - 'meta-arduino-extensions/recipes-bsp/wendyos-mcu/files/*'
       - 'meta-arduino-extensions/recipes-connectivity/arduino-router/files/*'
       - 'tests/uno-q-mcu/**'
+      - 'scripts/root_disk_boot_link_test.py'
+      - 'recipes-core/base-files/files/rpi-wendy*-fstab'
+      - 'meta-rpi-extensions/recipes-core/images/wendyos-image.bbappend'
       # No *.sh filter: data-recovery-key is a command and carries no extension.
       - 'recipes-support/data-device/files/*'
       - 'recipes-support/data-crypt/files/*'
@@ -418,6 +424,9 @@ jobs:
         run: |
           shellcheck meta-tegra-extensions/recipes-bsp/tools/files/wendyos-boot-efi-generator.sh
           python3 -m unittest scripts/tegra_boot_efi_generator_test.py -v
+
+      - name: Check the Pi boot link stays on the root disk
+        run: python3 -m unittest scripts/root_disk_boot_link_test.py -v
 
       # The initramfs root lookup runs as PID 1: a mistake there is a unit that never boots.
       - name: Check Jetson initramfs root-disk lookup
