@@ -44,6 +44,10 @@ SRC_URI:append:raspberrypi3-64 = " \
     file://10-device-mbr.conf \
     "
 
+# Only the GPT Pi fstab mounts /boot through the /dev/wendyos/boot link, so no
+# other board ships its rule. On the Pi 3 (MBR, no names) it never matches.
+SRC_URI:append:rpi = " file://99-wendyos-boot.rules"
+
 # The package contents differ per machine. Without this the package is shared
 # across every board of the same tune, and sstate could hand an rpi4/rpi5 build
 # the rpi3 variant, or the other way round.
@@ -79,6 +83,10 @@ do_install() {
     install -m 0644 ${UNPACKDIR}/10-device.conf ${D}${systemd_system_unitdir}/wendyos-data.service.d/10-device.conf
 }
 
+do_install:append:rpi() {
+    install -m 0644 ${UNPACKDIR}/99-wendyos-boot.rules ${D}${sysconfdir}/udev/rules.d/
+}
+
 do_install:append:raspberrypi3-64() {
     install -m 0644 ${UNPACKDIR}/99-wendyos-data-mbr.rules ${D}${sysconfdir}/udev/rules.d/
 
@@ -102,6 +110,7 @@ FILES:${PN} = " \
     ${systemd_system_unitdir}/data.mount.d/10-conversion.conf \
     ${systemd_system_unitdir}/wendyos-data.service.d/10-device.conf \
     "
+FILES:${PN}:append:rpi = " ${sysconfdir}/udev/rules.d/99-wendyos-boot.rules"
 FILES:${PN}:append:raspberrypi3-64 = " \
     ${sysconfdir}/udev/rules.d/99-wendyos-data-mbr.rules \
     ${systemd_system_unitdir}/wendyos-data.service.d/10-device-mbr.conf \
@@ -154,8 +163,9 @@ FILES:${PN}:append:raspberrypi3-64 = " \
 # too. findmnt is how it learns which device / is mounted from. busybox has no
 # findmnt, so nothing else can stand in for it. It usually arrives anyway, as
 # an RRECOMMENDS of the util-linux metapackage (see blkdiscard below), but
-# without it the GPT boards lose both links and neither /data nor /config
-# mounts, so it is declared rather than left to a recommendation.
+# without it the GPT boards lose their links: neither /data nor /config
+# mounts, nor /boot on the Pi 4 and Pi 5, which then cannot take an update.
+# So it is declared rather than left to a recommendation.
 #
 # The crypt stack is deliberately NOT here. cryptsetup and systemd-crypt are
 # installed only where WENDYOS_DATA_ENCRYPTED is 1, through the per-board image

@@ -1,0 +1,6 @@
+# /dev/wendyos/boot is the partition named "boot" on the disk / is mounted from.
+# A second disk can carry its own "boot" partition; that one must never be /boot.
+ACTION!="remove", SUBSYSTEM=="block", ENV{ID_PART_ENTRY_SCHEME}=="gpt", \
+    ENV{ID_PART_ENTRY_NAME}=="boot", \
+    PROGRAM="/usr/sbin/root-disk-part boot %k", \
+    SYMLINK+="wendyos/boot"

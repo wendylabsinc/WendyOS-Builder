@@ -23,10 +23,9 @@ SRC_URI:append = " \
 RPI_FSTAB_TEMPLATE = "rpi-fstab"
 RPI_FSTAB_TEMPLATE:raspberrypi3-64 = "rpi-mbr-fstab"
 
-# The wendy A/B fstab references /boot by LABEL on both GPT (RPi4/5) and MBR
-# (RPi3): a baked PARTUUID drifts across builds since OTA only rewrites the
-# rootfs slot and never re-partitions (WDY-1768), and PARTUUID won't resolve on
-# MBR anyway. Same :raspberrypi3-64 pin rationale as above.
+# The wendy A/B fstab mounts /boot through the /dev/wendyos/boot link on GPT
+# (RPi4/5) and by LABEL on MBR (RPi3), which has no partition names for the
+# link's rule to match. Same :raspberrypi3-64 pin rationale as above.
 RPI_WENDY_FSTAB_TEMPLATE = "rpi-wendy-fstab"
 RPI_WENDY_FSTAB_TEMPLATE:raspberrypi3-64 = "rpi-wendy-mbr-fstab"
 
@@ -35,11 +34,11 @@ do_install:append() {
         # wendyos-update A/B layout (RPi3/4/5): nothing else generates the
         # fstab, so install our A/B fstab (no "/" entry — the kernel mounts the
         # slot via boot-ab.cmd.in's root=; /boot stays mounted for fw_setenv's
-        # uboot.env). /boot is referenced by LABEL and /data by the udev alias
-        # /dev/wendyos/data on every RPi variant. /config is referenced by the
-        # udev link /dev/wendyos/config on RPi4/5 (GPT) and by LABEL on RPi3
-        # (MBR has no partition names). So there is no placeholder to
-        # substitute on this path (WDY-1768).
+        # uboot.env). /data is referenced by the udev alias /dev/wendyos/data
+        # on every RPi variant. /boot and /config are referenced by the udev
+        # links /dev/wendyos/boot and /dev/wendyos/config on RPi4/5 (GPT) and
+        # by LABEL on RPi3 (MBR has no partition names). So there is no
+        # placeholder to substitute on this path.
         install -m 0644 ${UNPACKDIR}/${RPI_WENDY_FSTAB_TEMPLATE} ${D}${sysconfdir}/fstab
     elif [ "${WENDYOS_RPI_UBOOT}" = "1" ]; then
         # Legacy single-rootfs MBR layout: boot/A/B/extended{config,data}. The
