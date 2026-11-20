@@ -88,8 +88,7 @@ class MeshLocalContractTest(unittest.TestCase):
                               ('meta-rpi-extensions', 'linux-raspberrypi'),
                               ('meta-qcom-extensions', 'linux-qcom-next'),
                               ('meta-x86-extensions', 'linux-yocto'),
-                              ('meta-vm-extensions', 'linux-yocto'),
-                              ('meta-qemu-extensions', 'linux-yocto')]:
+                              ('meta-vm-extensions', 'linux-yocto')]:
             text = (ROOT / layer / 'recipes-kernel/linux' / (recipe + '_%.bbappend')).read_text()
             self.assertIn('require recipes-kernel/linux/mesh-local.inc', text)
 

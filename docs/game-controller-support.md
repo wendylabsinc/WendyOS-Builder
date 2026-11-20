@@ -11,7 +11,7 @@ kernel must expose: one list of symbols that must resolve to `=y`, and one that 
 resolve to `=m` provided the `kernel-module-*` package named beside it ships in the image.
 
 Every shipping kernel bbappend requires `recipes-kernel/linux/game-controller.inc` behind
-`WENDYOS_GAME_CONTROLLER`, which defaults to `1` and is `0` for QEMU. The kernel task
+`WENDYOS_GAME_CONTROLLER`, which defaults to `1`. The kernel task
 checks the config Kconfig actually resolved, because a fragment is a request and a vendor
 kernel can drop a symbol whose parent it turned off. Where a symbol resolves to a module,
 `packagegroup-wendyos-kernel` recommends its package and build CI confirms it landed in

@@ -1,6 +1,6 @@
 # RPi-specific distro configuration
 # This file is included when building for RPi machines (MACHINEOVERRIDES
-# contains 'rpi'). All non-QEMU RPi machines (RPi3/4/5) emit wendyos-update
+# contains 'rpi'). All RPi machines (RPi3/4/5) emit wendyos-update
 # OTA artifacts via the rpi-wendy-ab*.wks wic layouts; geometry is per-machine.
 
 # No EFI/UEFI on RPi

@@ -7,7 +7,6 @@
 This repository provides the meta-layer and build flow to build **WendyOS** — a Yocto-based embedded Linux distribution — across a broad range of ARM64 hardware:
 - **NVIDIA Jetson** Developer Kits — Orin Nano, AGX Orin, and AGX Thor
 - **Raspberry Pi** — Pi 3, Pi 4, and Pi 5 (SD card; the Pi 3/4 image also boots from a USB disk, the Pi 5 image from NVMe)
-- **QEMU ARM64** (virtual machine, for development)
 - **Generic x86_64 PCs** (experimental UEFI/BIOS disk image)
 
 ### Supported Hardware
@@ -20,7 +19,6 @@ This repository provides the meta-layer and build flow to build **WendyOS** — 
 | Raspberry Pi 3 (B/B+) | Broadcom BCM2837 | 1GB | `rpi3` | `raspberrypi3-64-wendyos` | SD or USB | wendyos-update |
 | Raspberry Pi 4 | Broadcom BCM2711 | 1–8GB | `rpi4` | `raspberrypi4-64-wendyos` | SD or USB | wendyos-update |
 | Raspberry Pi 5 | Broadcom BCM2712 | 8GB | `rpi5` | `raspberrypi5-wendyos` | SD or NVMe | wendyos-update |
-| QEMU ARM64 | virtual | configurable | `qemu-arm64` | `qemuarm64-wendyos` | virtio | none |
 | Generic x86_64 PC | Intel/AMD x86_64 | varies | `generic-x86-64` | `genericx86-64-wendyos` | USB / disk (.wic) | wendyos-update |
 | Virtual machine (x86_64) | virtual | configurable | `vm-x86-64` | `vm-x86-64-wendyos` | virtio (.wic) | wendyos-update |
 | Virtual machine (arm64) | virtual | configurable | `vm-arm64` | `vm-arm64-wendyos` | virtio (.wic) | wendyos-update |
@@ -74,12 +72,6 @@ make flash-to-external  # Raspberry Pi / x86; Jetson: see Install on a Jetson
   - [Run](#vm-run)
   - [Several VMs at once](#several-vms-at-once)
   - [arm64 guests](#arm64-guests)
-- [QEMU (ARM64)](#qemu-arm64)
-  - [Prerequisites](#qemu-prerequisites)
-  - [Build](#qemu-build)
-  - [Run](#run)
-  - [Networking](#networking)
-  - [Cleanup](#cleanup)
 - [Architecture Notes](#architecture-notes)
 - [License](#license)
 
@@ -187,10 +179,6 @@ make build
 make setup BOARD=rpi5
 make build
 
-# QEMU (ARM64, for development)
-make setup BOARD=qemu-arm64
-make build
-
 # Generic x86_64 PC (experimental)
 make setup BOARD=generic-x86-64
 make build MACHINE=genericx86-64-wendyos
@@ -263,7 +251,6 @@ for optional driver installation, Bluetooth wiring and hardware testing status.
    BOARD=rpi3                  ./meta-wendyos/bootstrap.sh
    BOARD=rpi4                  ./meta-wendyos/bootstrap.sh
    BOARD=rpi5                  ./meta-wendyos/bootstrap.sh
-   BOARD=qemu-arm64            ./meta-wendyos/bootstrap.sh
    BOARD=generic-x86-64        ./meta-wendyos/bootstrap.sh
    BOARD=vm-x86-64             ./meta-wendyos/bootstrap.sh
    BOARD=vm-arm64              ./meta-wendyos/bootstrap.sh
@@ -298,7 +285,6 @@ for optional driver installation, Bluetooth wiring and hardware testing status.
      - `rpi3`                    → `raspberrypi3-64-wendyos`
      - `rpi4`                    → `raspberrypi4-64-wendyos`
      - `rpi5`                    → `raspberrypi5-wendyos`
-     - `qemu-arm64`              → `qemuarm64-wendyos`
      - `generic-x86-64`          → `genericx86-64-wendyos`
      - `vm-x86-64`               → `vm-x86-64-wendyos`
      - `vm-arm64`                → `vm-arm64-wendyos`
@@ -698,9 +684,6 @@ Enable **Internet Sharing** in **System Settings → General → Sharing → Int
 
 macOS assigns itself `192.168.2.1` and hands the Jetson an address in `192.168.2.x`.
 
-> **Note:** QEMU networking (`10.43.0.0/24`) is independent of Jetson USB gadget
-> networking (`10.42.0.0/24`). Both can be active simultaneously without conflict.
-
 For a detailed explanation of the full USB-C enumeration stack, see
 [`docs/usb-gadget-vbus-notification-deep-dive.md`](docs/usb-gadget-vbus-notification-deep-dive.md).
 
@@ -912,7 +895,7 @@ above are refreshed from the booted image on every boot:
 | `device-type` | `/etc/wendyos/device-type` (rootfs) | `setup-etc-binds.sh` copies the image's file to `/data` on every boot when the `/data` copy differs (missing, empty, damaged, or from another image) — stays current across OTA |
 | `version.txt` | `/usr/lib/wendyos/version.txt` (authoritative) + `/etc/wendyos/version.txt` symlink | `setup-etc-binds.sh` overwrites `/etc/wendyos/version.txt` from `/usr/lib/` on every boot — stays current across OTA |
 
-On images built without the OTA stack (`WENDYOS_OTA = "none"`, e.g. QEMU)
+On images built without the OTA stack (`WENDYOS_OTA = "none"`)
 there is no `/data` and `setup-etc-binds.sh` doesn't run. `device-type` lives
 directly on rootfs and `version.txt` is a symlink to the `/usr/lib/` copy —
 both always current.
@@ -1109,11 +1092,9 @@ agent, the same app deployment flow, and the same A/B OTA stack. Input comes
 from network-attached sensors (IP cameras and similar), so there is no GPU
 acceleration and no peripheral passthrough.
 
-Unlike the QEMU ARM64 target below — which boots a kernel and rootfs directly as
-a development loop — these boot the real UEFI/GPT disk image through UEFI
-firmware and the A/B GRUB chain. The guest takes the same boot path a physical
-device does, so an OTA installed in the VM exercises the code that runs on
-hardware.
+These boot the real UEFI/GPT disk image through UEFI firmware and the A/B GRUB
+chain. The guest takes the same boot path a physical device does, so an OTA
+installed in the VM exercises the code that runs on hardware.
 
 Two machines, one layout: `vm-x86-64` for x86_64 hosts and `vm-arm64` for arm64
 hosts (Apple Silicon via UTM, or arm64 Linux). The sections below cover x86_64;
@@ -1249,88 +1230,6 @@ route, which needs no command line at all.
 > device tree with no disk buses, so root never appears. A real UEFI
 > implementation (AAVMF, or UTM's own) is the supported path.
 
-## QEMU (ARM64)
-
-QEMU provides a virtual ARM64 machine for development and testing without physical hardware.
-It runs the same WendyOS image as physical devices but uses `virtio-net` instead of the USB
-gadget for networking.
-
-### QEMU Prerequisites
-
-Install `qemu-system-aarch64` on your host:
-
-```bash
-# Debian/Ubuntu
-sudo apt install qemu-system-arm
-
-# Fedora/RHEL
-sudo dnf install qemu-system-aarch64
-
-# Arch
-sudo pacman -S qemu-system-aarch64
-```
-
-### QEMU Build
-
-```bash
-make setup BOARD=qemu-arm64
-make build
-```
-
-The build produces:
-```
-build/tmp/deploy/images/qemuarm64-wendyos/wendyos-image-qemuarm64-wendyos.rootfs.ext4
-build/tmp/deploy/images/qemuarm64-wendyos/Image
-```
-
-### Run
-
-Run the QEMU image directly from the **host** (not inside the Docker container):
-
-```bash
-./scripts/run-qemu.sh
-```
-
-**Options:**
-```bash
-./scripts/run-qemu.sh --build-dir /path/to/build   # custom build directory
-./scripts/run-qemu.sh --usb 1234:5678               # pass through a USB device
-./scripts/run-qemu.sh --dry-run                     # show what would run without executing
-```
-
-To exit QEMU: press **Ctrl-A**, then **X**.
-
-### Networking
-
-`run-qemu.sh` automatically sets up host networking on first run by calling
-`scripts/manage-qemu-network-host.sh setup`. This creates:
-
-- A TAP interface `tap-wendyos` and bridge `br-wendyos` on the host
-- Host IP `10.43.0.1/24`, QEMU guest receives an address in `10.43.0.10–10.43.0.250` via dnsmasq
-- NAT via iptables for internet access from inside the VM
-
-You may be prompted for your `sudo` password since creating network interfaces requires
-elevated privileges.
-
-> **Note:** QEMU networking (`10.43.0.0/24`) is independent of Jetson USB gadget networking
-> (`10.42.0.0/24`). Both can be active simultaneously on the same host without conflict.
-> Use `scripts/manage-net-sharing.sh` to manage internet sharing for a connected Jetson device.
-
-### Cleanup
-
-The bridge and TAP interface persist after QEMU exits (so subsequent runs start faster).
-When you no longer need the QEMU network, remove it:
-
-```bash
-sudo ./scripts/manage-qemu-network-host.sh cleanup
-```
-
-To check the current state:
-
-```bash
-./scripts/manage-qemu-network-host.sh status
-```
-
 ## Architecture Notes
 
 - **Yocto Version**: `blacksail` (every board)
@@ -1338,7 +1237,7 @@ To check the current state:
 - **Init System**: `systemd`
 - **Package Manager**: `RPM`
 - **Boot Method**: UEFI with extlinux (Jetson); U-Boot (Raspberry Pi)
-- **OTA System**: `wendyos-update` A/B on every hardware board (Jetson, Raspberry Pi, x86-64); none on QEMU
+- **OTA System**: `wendyos-update` A/B on every hardware board (Jetson, Raspberry Pi, x86-64)
 - **Display Features**: Removed (headless embedded system)
 
 ## Building on macOS

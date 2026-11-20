@@ -13,7 +13,7 @@ RDEPENDS:${PN}:append = " \
 # blobs to /var/lib/tee, loads dynamic TAs, and forwards RPMB. 
 # Without it, any TA that uses persistent objects (PKCS#11 tokens, device
 # keys) has no backing store.
-# Tegra-only (this .inc is Tegra-only), QEMU/RPi have no OP-TEE.
+# Tegra-only (this .inc is Tegra-only), RPi has no OP-TEE.
 # Requires the OP-TEE OS loaded by the bootloader + the tee kernel
 # driver to be functional at runtime (both handled by the Tegra boot assembly).
 RDEPENDS:${PN}:append = " optee-client"
@@ -29,7 +29,7 @@ RDEPENDS:${PN}:append = " optee-os"
 # own NV survive A/B OTA (the rootfs copy of /var/lib/tee is wiped on every A/B
 # switch).
 # Gated on OP-TEE, which is present on every Tegra machine.
-# QEMU/RPi have no OP-TEE.
+# RPi has no OP-TEE.
 # The mount is unconditional: /var/lib/tee is bound from /config/tee on every
 # Tegra board, encrypted or not. /config is the home rather than /data because
 # the fTPM's NV cannot live inside the volume the fTPM unlocks.

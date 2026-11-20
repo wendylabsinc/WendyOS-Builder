@@ -29,7 +29,7 @@ PACKAGECONFIG:append = " pam"
 # Debug packages are not deployed to the target image, so this has no runtime impact.
 INHIBIT_PACKAGE_DEBUG_SPLIT = "1"
 
-# RPi5-specific systemd extensions — isolated so Tegra/QEMU builds are unaffected
+# RPi5-specific systemd extensions — isolated so other builds are unaffected
 require ${@'rpi-systemd.inc' if 'rpi' in d.getVar('MACHINEOVERRIDES').split(':') else ''}
 
 # systemd's two security PACKAGECONFIGs follow different gates. tpm2 belongs to the

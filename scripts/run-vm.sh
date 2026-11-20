@@ -2,11 +2,8 @@
 #
 # Launch a WendyOS VM image (vm-x86-64-wendyos or vm-arm64-wendyos) under QEMU.
 #
-# Supersedes run-qemu.sh for the VM machines. The differences are deliberate:
-# run-qemu.sh boots a kernel+rootfs directly on a host bridge for the old
-# qemuarm64 dev loop; this boots the real UEFI/GPT disk image through UEFI
-# firmware and the A/B GRUB chain, so the guest exercises the same boot path a
-# device does.
+# It boots the real UEFI/GPT disk image through UEFI firmware and the A/B GRUB
+# chain, so the guest exercises the same boot path a device does.
 #
 # Either machine runs on either host. A guest whose architecture differs from the
 # host falls back to TCG emulation -- slow, but it exercises the real boot chain,
