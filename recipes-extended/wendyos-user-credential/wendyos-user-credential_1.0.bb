@@ -11,12 +11,11 @@ inherit systemd
 SRC_URI = " \
     file://wendyos-user-credential.sh \
     file://wendyos-user-credential-restore.service \
-    file://wendyos-user-credential-save.service \
-    file://wendyos-user-credential.path \
+    file://wendyos-user-credential-watch.service \
     "
 S = "${UNPACKDIR}"
 
-SYSTEMD_SERVICE:${PN} = "wendyos-user-credential-restore.service wendyos-user-credential.path"
+SYSTEMD_SERVICE:${PN} = "wendyos-user-credential-restore.service wendyos-user-credential-watch.service"
 SYSTEMD_AUTO_ENABLE = "enable"
 
 do_install() {
@@ -25,11 +24,7 @@ do_install() {
 
     install -d ${D}${systemd_system_unitdir}
     install -m 0644 ${UNPACKDIR}/wendyos-user-credential-restore.service ${D}${systemd_system_unitdir}/
-    install -m 0644 ${UNPACKDIR}/wendyos-user-credential-save.service ${D}${systemd_system_unitdir}/
-    install -m 0644 ${UNPACKDIR}/wendyos-user-credential.path ${D}${systemd_system_unitdir}/
+    install -m 0644 ${UNPACKDIR}/wendyos-user-credential-watch.service ${D}${systemd_system_unitdir}/
 }
-
-# The save service has no [Install] section: the path unit starts it.
-FILES:${PN} += "${systemd_system_unitdir}/wendyos-user-credential-save.service"
 
 RDEPENDS:${PN} = "bash coreutils grep shadow util-linux-flock util-linux-mountpoint wendyos-user"
