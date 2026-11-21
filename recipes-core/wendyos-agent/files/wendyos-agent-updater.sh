@@ -9,7 +9,7 @@ set -e
 # Load configuration. /etc is on the A/B rootfs and is replaced wholesale by an
 # OS OTA, so a pin written there is lost on the next `wendy os update`. /data is
 # the only writable storage that survives a slot switch, so a copy there is read
-# second and wins. Devices with no OTA stack (QEMU) have no /data and just skip
+# second and wins. Devices with no OTA stack have no /data and just skip
 # it. Keep this list in sync with download-wendyos-agent.sh.
 for conf in /etc/default/wendy-agent /data/etc/default/wendy-agent; do
     if [ -f "${conf}" ]; then

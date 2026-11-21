@@ -8,7 +8,7 @@ inherit systemd
 # Storage medium ("nvme"/"emmc"/"sd") for /etc/wendyos/device-type; set only by
 # boards whose image boots from a single medium. Weak default keeps ${STORAGE}
 # well-defined (empty) for images that boot from several media (e.g. the Orin
-# boards) or declare none (e.g. qemu), so the do_install guard below reliably
+# boards) or declare none, so the do_install guard below reliably
 # skips the STORAGE line instead of risking a literal.
 STORAGE ??= ""
 

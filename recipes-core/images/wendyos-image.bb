@@ -297,7 +297,7 @@ IMAGE_FEATURES += "${@bb.utils.contains('WENDYOS_ENABLE_PACKAGE_MANAGEMENT', '1'
 # Set WENDYOS_SSHD = "1" in local.conf to include sshd in the image.
 IMAGE_FEATURES += "${@oe.utils.ifelse(d.getVar('WENDYOS_SSHD') == '1', 'ssh-server-openssh', '')}"
 
-# Common packages for all machines (real hardware and QEMU)
+# Common packages for all machines
 IMAGE_INSTALL:append = " \
     packagegroup-wendyos-base \
     packagegroup-wendyos-kernel \
@@ -325,7 +325,7 @@ IMAGE_INSTALL:append = " \
     "
 
 # Enable USB peripheral (gadget) support for real hardware
-# Controlled by WENDYOS_USB_GADGET variable (not needed for QEMU)
+# Controlled by WENDYOS_USB_GADGET variable
 IMAGE_INSTALL:append = " \
     ${@oe.utils.ifelse( \
         d.getVar('WENDYOS_USB_GADGET') == '1', \
@@ -380,7 +380,6 @@ BUILDCFG_VARS += " \
 
 # Include hardware-specific image configuration
 # These files contain IMAGE_INSTALL modifications and other hardware-specific settings
-require ${@'conf/distro/include/qemu-image.inc' if 'qemuall' in d.getVar('MACHINEOVERRIDES').split(':') else ''}
 require ${@'conf/distro/include/tegra-image.inc' if 'tegra' in d.getVar('MACHINEOVERRIDES').split(':') else ''}
 require ${@'conf/distro/include/rpi-image.inc' if 'rpi' in d.getVar('MACHINEOVERRIDES').split(':') else ''}
 require ${@'conf/distro/include/x86-image.inc' if 'x86-wendyos' in d.getVar('MACHINEOVERRIDES').split(':') else ''}

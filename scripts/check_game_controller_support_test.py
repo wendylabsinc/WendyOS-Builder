@@ -154,7 +154,7 @@ class ValidationTests(unittest.TestCase):
 
 class LayerWiringTests(unittest.TestCase):
     def test_every_shipping_kernel_requires_the_contract(self):
-        shipping = [p for p in kernel_bbappends() if "meta-qemu-extensions" not in p.parts]
+        shipping = kernel_bbappends()
         self.assertTrue(shipping, "no shipping kernel bbappends found")
         wired = [p for p in shipping if GATED_REQUIRE in p.read_text(encoding="utf-8")]
         for bbappend in shipping:
@@ -167,11 +167,6 @@ class LayerWiringTests(unittest.TestCase):
                     continue
                 self.assertIn(GATED_REQUIRE, text)
                 self.assertIn("WENDYOS_GAME_CONTROLLER", text)
-
-    def test_qemu_kernel_is_outside_the_hardware_contract(self):
-        for bbappend in kernel_bbappends():
-            if "meta-qemu-extensions" in bbappend.parts:
-                self.assertNotIn(GATED_REQUIRE, bbappend.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":
