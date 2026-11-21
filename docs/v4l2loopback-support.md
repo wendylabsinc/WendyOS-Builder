@@ -20,9 +20,10 @@ Tegra images require the package through `packagegroup-wendyos-tegra`.
 `rpi-image.inc` does the same on every `rpi` target (Pi 3, Pi 4 and Pi 5).
 `vm-image.inc` and `qemu-image.inc` explicitly install both loopback drivers for
 both VM architectures and the QEMU ARM64 image. Their linux-yocto appends
-include the shared `virtual-loopback.cfg` fragment: it enables the media core
-and UVC, which selects the videobuf2 allocator required by v4l2loopback, plus
-modular ALSA and `CONFIG_SND_ALOOP=m`. The agent loads ALSA loopback on demand.
+include the shared `virtual-loopback.cfg` fragment: it enables camera support
+and the USB webcam (UVC) driver, plus `CONFIG_SND_ALOOP=m`. Media and sound
+stay at each board's own setting, module or built-in. The agent loads ALSA
+loopback on demand.
 These are required image packages. Missing drivers fail the image build.
 
 The v4l2loopback recipe generates module loading and modprobe configuration
@@ -38,17 +39,18 @@ The Qualcomm kernel fragment preserves the BSP's modular sound and media
 stacks and requires `CONFIG_SND_ALOOP=m`. ALSA selects the PCM and timer
 dependencies. No ALSA card is created by an additional boot autoload rule.
 Raspberry Pi kernels need no fragment: the RPi defconfigs set
-`CONFIG_SND_ALOOP=m` and build media and UVC as modules, which resolves
-`CONFIG_VIDEO_DEV` and `CONFIG_VIDEOBUF2_VMALLOC` to `m`.
+`CONFIG_SND_ALOOP=m` and build media support as modules with the media filter
+off. Camera support and `CONFIG_VIDEO_DEV=m` then follow by default.
 
 ## Build checks
 
 The module recipe checks the effective kernel configuration for
-`CONFIG_VIDEO_DEV` and `CONFIG_VIDEOBUF2_VMALLOC`. The Qualcomm kernel
-append also checks those settings and requires `CONFIG_SND_ALOOP=m`
-after Kconfig resolves its fragments. VM and QEMU kernels separately check
-`CONFIG_VIDEO_DEV`, `CONFIG_VIDEOBUF2_VMALLOC` and modular `CONFIG_SND_ALOOP`
-after configuration.
+`CONFIG_VIDEO_DEV`. v4l2loopback uses only the V4L2 core (`videodev`). It
+keeps its own frame buffers and does not use the videobuf2 allocator. The
+Qualcomm kernel append also checks `CONFIG_VIDEO_DEV` and requires
+`CONFIG_SND_ALOOP=m` after Kconfig resolves its fragments. VM and QEMU kernels
+separately check `CONFIG_VIDEO_DEV` and modular `CONFIG_SND_ALOOP` after
+configuration.
 Existing simulator disks need a rebuilt matching image or OTA update; changing
 the image recipe does not install a module into a running simulator.
 

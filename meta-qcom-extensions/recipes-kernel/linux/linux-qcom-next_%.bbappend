@@ -72,7 +72,7 @@ python __anonymous() {
 wendyos_check_sensor_loopback() {
     config="${B}/.config"
     [ -f "$config" ] || bbfatal "SensorLink loopback: no resolved kernel config at $config"
-    for symbol in CONFIG_VIDEO_DEV CONFIG_VIDEOBUF2_VMALLOC; do
+    for symbol in CONFIG_VIDEO_DEV; do
         grep -Eq "^$symbol=(y|m)$" "$config" || \
             bbfatal "SensorLink loopback: $symbol is disabled for ${MACHINE}"
     done

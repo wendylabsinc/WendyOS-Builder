@@ -11,7 +11,7 @@ python __anonymous() {
 wendyos_check_virtual_loopback() {
     config="${B}/.config"
     [ -f "$config" ] || bbfatal "virtual loopback: missing resolved kernel config at $config"
-    for symbol in CONFIG_VIDEO_DEV CONFIG_VIDEOBUF2_VMALLOC; do
+    for symbol in CONFIG_VIDEO_DEV; do
         grep -Eq "^$symbol=(y|m)$" "$config" || \
             bbfatal "virtual loopback: $symbol is disabled for ${MACHINE}"
     done

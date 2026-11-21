@@ -28,13 +28,11 @@ class SensorLoopbackImageTests(unittest.TestCase):
         self.modules.mkdir(parents=True)
         self.config = {
             'CONFIG_VIDEO_DEV': 'm',
-            'CONFIG_VIDEOBUF2_VMALLOC': 'm',
             'CONFIG_SND_ALOOP': 'm',
         }
         self.files = {
             'extra/v4l2loopback.ko.xz': ['kernel/media/videodev.ko.xz'],
             'kernel/media/videodev.ko.xz': [],
-            'kernel/media/videobuf2-vmalloc.ko.xz': [],
             'kernel/sound/snd-aloop.ko.xz': ['kernel/sound/snd-pcm.ko.xz'],
             'kernel/sound/snd-pcm.ko.xz': ['kernel/sound/snd.ko.xz'],
             'kernel/sound/snd.ko.xz': [],
@@ -61,7 +59,6 @@ class SensorLoopbackImageTests(unittest.TestCase):
 
     def test_external_driver_is_required_even_with_builtin_media(self):
         self.config['CONFIG_VIDEO_DEV'] = 'y'
-        self.config['CONFIG_VIDEOBUF2_VMALLOC'] = 'y'
         del self.files['extra/v4l2loopback.ko.xz']
         self.write_modules()
         self.assertTrue(any('external module v4l2loopback' in error for error in self.validate()))
@@ -99,20 +96,12 @@ class SensorLoopbackImageTests(unittest.TestCase):
             'CONFIG_SND': 'y',
             'CONFIG_SND_ALOOP': 'm',
             'CONFIG_VIDEO_DEV': 'm',
-            'CONFIG_VIDEOBUF2_VMALLOC': 'm',
         }
         media = 'kernel/drivers/media'
         self.files = {
             'extra/v4l2loopback.ko.xz': [f'{media}/v4l2-core/videodev.ko.xz', f'{media}/mc/mc.ko.xz'],
             f'{media}/v4l2-core/videodev.ko.xz': [f'{media}/mc/mc.ko.xz'],
             f'{media}/mc/mc.ko.xz': [],
-            f'{media}/common/videobuf2/videobuf2-vmalloc.ko.xz': [
-                f'{media}/common/videobuf2/videobuf2-memops.ko.xz',
-                f'{media}/common/videobuf2/videobuf2-common.ko.xz',
-                f'{media}/mc/mc.ko.xz'],
-            f'{media}/common/videobuf2/videobuf2-memops.ko.xz': [
-                f'{media}/common/videobuf2/videobuf2-common.ko.xz', f'{media}/mc/mc.ko.xz'],
-            f'{media}/common/videobuf2/videobuf2-common.ko.xz': [f'{media}/mc/mc.ko.xz'],
             'kernel/sound/drivers/snd-aloop.ko.xz': [],
         }
         self.write_modules()
@@ -186,7 +175,7 @@ class SensorLoopbackBuildContractTests(unittest.TestCase):
         recipe = ROOT / 'recipes-kernel/linux/virtual-loopback.inc'
         body = re.search(r'^wendyos_check_virtual_loopback\(\) \{\n(.*?)^\}',
                          recipe.read_text(), re.M | re.S)[1]
-        symbols = ('CONFIG_VIDEO_DEV', 'CONFIG_VIDEOBUF2_VMALLOC')
+        symbols = ('CONFIG_VIDEO_DEV',)
         with tempfile.TemporaryDirectory() as tmp:
             script = body.replace('${B}', tmp).replace('${MACHINE}', 'vm-arm64-wendyos')
             script = 'bbfatal() { echo "$*" >&2; exit 1; }\n' + script
@@ -213,7 +202,7 @@ class SensorLoopbackBuildContractTests(unittest.TestCase):
         recipe = ROOT / 'meta-qcom-extensions/recipes-kernel/linux/linux-qcom-next_%.bbappend'
         body = re.search(r'^wendyos_check_sensor_loopback\(\) \{\n(.*?)^\}',
                          recipe.read_text(), re.M | re.S)[1]
-        values = {'CONFIG_VIDEO_DEV': 'm', 'CONFIG_VIDEOBUF2_VMALLOC': 'm', 'CONFIG_SND_ALOOP': 'm'}
+        values = {'CONFIG_VIDEO_DEV': 'm', 'CONFIG_SND_ALOOP': 'm'}
         with tempfile.TemporaryDirectory() as tmp:
             script = body.replace('${B}', tmp).replace('${MACHINE}', 'iq-9075-evk-wendyos')
             script = 'bbfatal() { echo "$*" >&2; exit 1; }\n' + script
