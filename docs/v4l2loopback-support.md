@@ -1,8 +1,8 @@
 # V4L2 and ALSA loopback support
 
-WendyOS includes `v4l2loopback` on Tegra, Qualcomm and Raspberry Pi images.
+WendyOS includes `v4l2loopback` on Tegra, Qualcomm, Raspberry Pi and VM images.
 The agent uses its control device to create virtual cameras for IP cameras and
-SensorLink sources. Qualcomm and Raspberry Pi images also include `snd-aloop`,
+SensorLink sources. Qualcomm, Raspberry Pi and VM images also include `snd-aloop`,
 which exposes SensorLink microphones through ALSA PCM devices.
 
 ## Packages and loading
@@ -18,6 +18,11 @@ Tegra images require the package through `packagegroup-wendyos-tegra`.
 `qcom-image.inc` explicitly installs `v4l2loopback` and
 `kernel-module-snd-aloop` on every `qcom-wendyos` target, including Uno Q.
 `rpi-image.inc` does the same on every `rpi` target (Pi 3, Pi 4 and Pi 5).
+`vm-image.inc` explicitly installs both loopback drivers for both VM
+architectures. Their linux-yocto append includes the shared `virtual-loopback.cfg` fragment: it enables camera support
+and the USB webcam (UVC) driver, plus `CONFIG_SND_ALOOP=m`. Media and sound
+stay at each board's own setting, module or built-in. The agent loads ALSA
+loopback on demand.
 These are required image packages. Missing drivers fail the image build.
 
 The v4l2loopback recipe generates module loading and modprobe configuration
@@ -33,18 +38,23 @@ The Qualcomm kernel fragment preserves the BSP's modular sound and media
 stacks and requires `CONFIG_SND_ALOOP=m`. ALSA selects the PCM and timer
 dependencies. No ALSA card is created by an additional boot autoload rule.
 Raspberry Pi kernels need no fragment: the RPi defconfigs set
-`CONFIG_SND_ALOOP=m` and build media and UVC as modules, which resolves
-`CONFIG_VIDEO_DEV` and `CONFIG_VIDEOBUF2_VMALLOC` to `m`.
+`CONFIG_SND_ALOOP=m` and build media support as modules with the media filter
+off. Camera support and `CONFIG_VIDEO_DEV=m` then follow by default.
 
 ## Build checks
 
 The module recipe checks the effective kernel configuration for
-`CONFIG_VIDEO_DEV` and `CONFIG_VIDEOBUF2_VMALLOC`. The Qualcomm kernel
-append also checks those settings and requires `CONFIG_SND_ALOOP=m`
-after Kconfig resolves its fragments.
+`CONFIG_VIDEO_DEV`. v4l2loopback uses only the V4L2 core (`videodev`). It
+keeps its own frame buffers and does not use the videobuf2 allocator. The
+Qualcomm kernel append also checks `CONFIG_VIDEO_DEV` and requires
+`CONFIG_SND_ALOOP=m` after Kconfig resolves its fragments. VM kernels
+separately check `CONFIG_VIDEO_DEV` and modular `CONFIG_SND_ALOOP` after
+configuration.
+Existing simulator disks need a rebuilt matching image or OTA update; changing
+the image recipe does not install a module into a running simulator.
 
 After `do_rootfs` generates `modules.dep`, `sensor-loopback-check.bbclass`
-validates each Qualcomm and Raspberry Pi image. It checks both loopback
+validates each Qualcomm, Raspberry Pi and VM image. It checks both loopback
 driver files and every module dependency against the compiled kernel
 release. A module tree
 for a different kernel, a missing dependency, or an absent driver fails

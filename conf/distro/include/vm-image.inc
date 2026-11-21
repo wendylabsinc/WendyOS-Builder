@@ -110,3 +110,8 @@ create_lib64_compat() {
 
 ROOTFS_POSTPROCESS_COMMAND:append:vm-wendyos = " create_lib64_compat"
 
+
+# Virtual cameras and microphones need the same loopback drivers as hardware.
+# Required, rather than recommended: a missing module must fail the image build.
+inherit sensor-loopback-check
+IMAGE_INSTALL:append = " v4l2loopback kernel-module-snd-aloop"

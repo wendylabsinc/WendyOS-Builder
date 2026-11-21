@@ -14,7 +14,8 @@ sys.path.insert(0, str(SCRIPT.parent))
 spec = importlib.util.spec_from_file_location('sensor_loopback_check', SCRIPT)
 check = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(check)
-GATED_IMAGES = ('conf/distro/include/qcom-image.inc', 'conf/distro/include/rpi-image.inc')
+GATED_IMAGES = tuple(f'conf/distro/include/{family}-image.inc'
+                     for family in ('qcom', 'rpi', 'vm'))
 
 
 class SensorLoopbackImageTests(unittest.TestCase):
@@ -27,13 +28,11 @@ class SensorLoopbackImageTests(unittest.TestCase):
         self.modules.mkdir(parents=True)
         self.config = {
             'CONFIG_VIDEO_DEV': 'm',
-            'CONFIG_VIDEOBUF2_VMALLOC': 'm',
             'CONFIG_SND_ALOOP': 'm',
         }
         self.files = {
             'extra/v4l2loopback.ko.xz': ['kernel/media/videodev.ko.xz'],
             'kernel/media/videodev.ko.xz': [],
-            'kernel/media/videobuf2-vmalloc.ko.xz': [],
             'kernel/sound/snd-aloop.ko.xz': ['kernel/sound/snd-pcm.ko.xz'],
             'kernel/sound/snd-pcm.ko.xz': ['kernel/sound/snd.ko.xz'],
             'kernel/sound/snd.ko.xz': [],
@@ -60,7 +59,6 @@ class SensorLoopbackImageTests(unittest.TestCase):
 
     def test_external_driver_is_required_even_with_builtin_media(self):
         self.config['CONFIG_VIDEO_DEV'] = 'y'
-        self.config['CONFIG_VIDEOBUF2_VMALLOC'] = 'y'
         del self.files['extra/v4l2loopback.ko.xz']
         self.write_modules()
         self.assertTrue(any('external module v4l2loopback' in error for error in self.validate()))
@@ -98,20 +96,12 @@ class SensorLoopbackImageTests(unittest.TestCase):
             'CONFIG_SND': 'y',
             'CONFIG_SND_ALOOP': 'm',
             'CONFIG_VIDEO_DEV': 'm',
-            'CONFIG_VIDEOBUF2_VMALLOC': 'm',
         }
         media = 'kernel/drivers/media'
         self.files = {
             'extra/v4l2loopback.ko.xz': [f'{media}/v4l2-core/videodev.ko.xz', f'{media}/mc/mc.ko.xz'],
             f'{media}/v4l2-core/videodev.ko.xz': [f'{media}/mc/mc.ko.xz'],
             f'{media}/mc/mc.ko.xz': [],
-            f'{media}/common/videobuf2/videobuf2-vmalloc.ko.xz': [
-                f'{media}/common/videobuf2/videobuf2-memops.ko.xz',
-                f'{media}/common/videobuf2/videobuf2-common.ko.xz',
-                f'{media}/mc/mc.ko.xz'],
-            f'{media}/common/videobuf2/videobuf2-memops.ko.xz': [
-                f'{media}/common/videobuf2/videobuf2-common.ko.xz', f'{media}/mc/mc.ko.xz'],
-            f'{media}/common/videobuf2/videobuf2-common.ko.xz': [f'{media}/mc/mc.ko.xz'],
             'kernel/sound/drivers/snd-aloop.ko.xz': [],
         }
         self.write_modules()
@@ -153,7 +143,7 @@ class SensorLoopbackBuildContractTests(unittest.TestCase):
 
     def test_shared_recipe_and_visible_kconfig_selectors(self):
         recipe = ROOT / 'recipes-kernel/v4l2loopback/v4l2loopback_0.15.4.bb'
-        self.assertIn('COMPATIBLE_MACHINE = "(tegra|qcom-wendyos|rpi)"', recipe.read_text())
+        self.assertIn('COMPATIBLE_MACHINE = "(tegra|qcom-wendyos|rpi|vm-wendyos)"', recipe.read_text())
         self.assertFalse((ROOT / 'meta-tegra-extensions-jp7/recipes-kernel/v4l2loopback' / recipe.name).exists())
         fragment = ROOT / 'meta-qcom-extensions/recipes-kernel/linux/linux-qcom-next/sensor-loopback.cfg'
         config = check.read_config(fragment)
@@ -163,11 +153,56 @@ class SensorLoopbackBuildContractTests(unittest.TestCase):
         self.assertEqual(config['CONFIG_SND'], 'm')
         self.assertEqual(config['CONFIG_MEDIA_SUPPORT'], 'm')
 
+    def test_virtual_images_require_loopback_modules(self):
+        recipe = (ROOT / 'recipes-kernel/v4l2loopback/v4l2loopback_0.15.4.bb').read_text()
+        compatible = re.search(r'^COMPATIBLE_MACHINE = "([^"]+)"', recipe, re.M)[1]
+        for family, override in [('vm', 'vm-wendyos')]:
+            with self.subTest(family=family):
+                self.assertIsNotNone(re.match(compatible, override))
+                image = (ROOT / f'conf/distro/include/{family}-image.inc').read_text()
+                packages = ' '.join(re.findall(r'^IMAGE_INSTALL:append = "([^"]*)"', image, re.M)).split()
+                self.assertIn('v4l2loopback', packages)
+                append = (ROOT / f'meta-{family}-extensions/recipes-kernel/linux/linux-yocto_%.bbappend').read_text()
+                self.assertIn('require recipes-kernel/linux/virtual-loopback.inc', append)
+        fragment = check.read_config(ROOT / 'recipes-kernel/linux/virtual-loopback/virtual-loopback.cfg')
+        self.assertEqual(fragment['CONFIG_SND_ALOOP'], 'm')
+        # Media and sound stay at each board's own setting.
+        for symbol in ('CONFIG_MEDIA_SUPPORT', 'CONFIG_SOUND', 'CONFIG_SND'):
+            self.assertNotIn(symbol, fragment)
+        self.assertEqual(fragment['CONFIG_USB_VIDEO_CLASS'], 'm')
+
+    def test_virtual_loopback_gate_accepts_builtin_or_modular_and_rejects_missing(self):
+        recipe = ROOT / 'recipes-kernel/linux/virtual-loopback.inc'
+        body = re.search(r'^wendyos_check_virtual_loopback\(\) \{\n(.*?)^\}',
+                         recipe.read_text(), re.M | re.S)[1]
+        symbols = ('CONFIG_VIDEO_DEV',)
+        with tempfile.TemporaryDirectory() as tmp:
+            script = body.replace('${B}', tmp).replace('${MACHINE}', 'vm-arm64-wendyos')
+            script = 'bbfatal() { echo "$*" >&2; exit 1; }\n' + script
+            for value in ('y', 'm'):
+                for missing in [None, *symbols, 'CONFIG_SND_ALOOP']:
+                    with self.subTest(value=value, missing=missing):
+                        (Path(tmp) / '.config').write_text(''.join(
+                            f'{key}={value}\n' for key in symbols if key != missing)
+                            + ('' if missing == 'CONFIG_SND_ALOOP' else 'CONFIG_SND_ALOOP=m\n'))
+                        result = subprocess.run(['sh', '-eu'], input=script, text=True, capture_output=True)
+                        self.assertEqual(result.returncode == 0, missing is None, result.stderr)
+                        if missing:
+                            self.assertIn(missing, result.stderr)
+            (Path(tmp) / '.config').write_text(''.join(f'{key}=y\n' for key in symbols) + 'CONFIG_SND_ALOOP=y\n')
+            result = subprocess.run(['sh', '-eu'], input=script, text=True, capture_output=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('CONFIG_SND_ALOOP must be modular', result.stderr)
+            (Path(tmp) / '.config').unlink()
+            result = subprocess.run(['sh', '-eu'], input=script, text=True, capture_output=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('missing resolved kernel config', result.stderr)
+
     def test_resolved_kernel_gate_rejects_dropped_features(self):
         recipe = ROOT / 'meta-qcom-extensions/recipes-kernel/linux/linux-qcom-next_%.bbappend'
         body = re.search(r'^wendyos_check_sensor_loopback\(\) \{\n(.*?)^\}',
                          recipe.read_text(), re.M | re.S)[1]
-        values = {'CONFIG_VIDEO_DEV': 'm', 'CONFIG_VIDEOBUF2_VMALLOC': 'm', 'CONFIG_SND_ALOOP': 'm'}
+        values = {'CONFIG_VIDEO_DEV': 'm', 'CONFIG_SND_ALOOP': 'm'}
         with tempfile.TemporaryDirectory() as tmp:
             script = body.replace('${B}', tmp).replace('${MACHINE}', 'iq-9075-evk-wendyos')
             script = 'bbfatal() { echo "$*" >&2; exit 1; }\n' + script

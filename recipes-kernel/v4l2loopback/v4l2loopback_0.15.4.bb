@@ -1,6 +1,6 @@
 SUMMARY = "v4l2loopback kernel module (virtual V4L2 capture devices)"
 DESCRIPTION = "Builds the out-of-tree v4l2loopback module against \
-the target kernel on Tegra, Qualcomm Dragonwing and Raspberry Pi. It is required for IP-camera and SensorLink container parity: \
+the target kernel on Tegra, Qualcomm Dragonwing, Raspberry Pi and virtual machines. It is required for IP-camera and SensorLink container parity: \
 the WendyAgent device agent creates one pinned-number /dev/video<nr> \
 loopback node per camera (via V4L2LOOPBACK_CTL_ADD on the control device) \
 and feeds decoded RTSP frames into it, so any container that only knows how \
@@ -26,7 +26,7 @@ SRC_URI = " \
     "
 SRCREV = "0f9ee86760b7f2bea174b7e3e7a1d38845da0ab4"
 
-COMPATIBLE_MACHINE = "(tegra|qcom-wendyos|rpi)"
+COMPATIBLE_MACHINE = "(tegra|qcom-wendyos|rpi|vm-wendyos)"
 
 # Standard single-file Kbuild module (Kbuild just declares
 # obj-m := v4l2loopback.o at the repo root) — no nested build subdir and no
@@ -77,11 +77,13 @@ module_conf_v4l2loopback = "options v4l2loopback devices=0"
 # Fail with the missing kernel contract instead of a later, opaque module link
 # error. Keep this check on the module recipe so changing it does not invalidate
 # the shared Tegra kernel's sstate.
+# v4l2loopback uses only the V4L2 core (videodev). It keeps its own frame
+# buffers and does not use the videobuf2 allocator.
 do_configure:append() {
     config="${STAGING_KERNEL_BUILDDIR}/.config"
     [ -f "$config" ] || bbfatal "v4l2loopback: effective kernel config not found at $config"
 
-    for symbol in CONFIG_VIDEO_DEV CONFIG_VIDEOBUF2_VMALLOC; do
+    for symbol in CONFIG_VIDEO_DEV; do
         if ! grep -Eq "^$symbol=(y|m)$" "$config"; then
             found="$(grep -E "^(# )?$symbol(=| is not set)" "$config" || true)"
             [ -n "$found" ] || found="not present"

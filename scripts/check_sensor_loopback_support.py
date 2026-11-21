@@ -16,7 +16,6 @@ def validate(config: dict[str, str], rootfs: Path, release: str) -> list[str]:
         errors.append('CONFIG_SND_ALOOP must be modular for the required package and on-demand loading')
     errors.extend(validate_kernel(config, rootfs, release, [], {
         'CONFIG_VIDEO_DEV': 'videodev',
-        'CONFIG_VIDEOBUF2_VMALLOC': 'videobuf2_vmalloc',
         'CONFIG_SND_ALOOP': 'snd_aloop',
     }, external_modules=['v4l2loopback']))
     return errors
