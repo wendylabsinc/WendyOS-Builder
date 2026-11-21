@@ -94,6 +94,16 @@ def trusted(name, job, seen=()):
     return any(match and match[1] in needs(body) and trusted(name, match[1], seen + (job,)) for match in succeeded)
 
 
+def feeds_a_privileged_job(name, job):
+    """Whether a privileged job waits for this one, and so may use what it built."""
+    jobs = LOADED[name][0]['jobs']
+
+    def ancestors(child):
+        return {parent for direct in needs(jobs[child]) for parent in {direct} | ancestors(direct)}
+
+    return any(privileged(name, body) and job in ancestors(other) for other, body in jobs.items())
+
+
 def steps(body, action):
     return [step for step in body.get('steps', []) if str(step.get('uses', '')).startswith(action + '@')]
 
@@ -102,6 +112,7 @@ def evaluate(expression, event, fork=False, actor='maintainer', cancelled=False,
     values = {'github.event_name': event, 'github.actor': actor,
               'github.event.pull_request.head.repo.full_name': 'outside/fork' if fork else REPOSITORY,
               'github.repository': REPOSITORY, 'needs.publish.result': detected,
+              'needs.publisher.result': detected,
               'needs.detect-changes.result': detected, 'needs.detect-changes.outputs.devices': devices}
     # GitHub adds success() to a condition that names no status function.
     implicit = not STATUS_FUNCTION.search(expression)
@@ -173,9 +184,9 @@ class TrustBoundaryTests(unittest.TestCase):
                     kept = step.get('with', {}).get('persist-credentials') is not False
                     self.assertEqual(kept, (name, job) in PUSHES_WITH_CHECKOUT_TOKEN)
 
-    def test_privileged_jobs_restore_no_shared_cache(self):
+    def test_privileged_jobs_and_what_feeds_them_restore_no_shared_cache(self):
         for name, job, body in JOBS:
-            if not privileged(name, body):
+            if not (privileged(name, body) or feeds_a_privileged_job(name, job)):
                 continue
             for step in body.get('steps', []):
                 action = str(step.get('uses', '')).split('@')[0]
@@ -250,8 +261,9 @@ class BuildGateTests(unittest.TestCase):
         self.assertFalse(privileged('build.yml', job))
         script = job['steps'][0]['run']
 
-        def check(detect, build, devices):
-            env = {'PATH': os.environ['PATH'], 'DETECT_RESULT': detect, 'BUILD_RESULT': build, 'DEVICES': devices}
+        def check(detect, build, devices, publisher='success'):
+            env = {'PATH': os.environ['PATH'], 'DETECT_RESULT': detect, 'BUILD_RESULT': build, 'DEVICES': devices,
+                   'PUBLISHER_RESULT': publisher}
             return subprocess.run(['bash', '-e', '-c', script], env=env, capture_output=True, text=True)
 
         skipped = check('skipped', 'skipped', '')
@@ -259,9 +271,17 @@ class BuildGateTests(unittest.TestCase):
         self.assertIn('::error::', skipped.stdout)
         self.assertEqual(check('success', 'success', 'rpi4').returncode, 0)
         self.assertEqual(check('success', 'skipped', '').returncode, 0)
+        self.assertNotEqual(check('success', 'skipped', '', publisher='failure').returncode, 0)
         for detect, build, devices in [('failure', 'skipped', ''), ('success', 'failure', 'rpi4'),
                                        ('success', 'skipped', 'rpi4'), ('success', 'cancelled', 'rpi4')]:
             self.assertNotEqual(check(detect, build, devices).returncode, 0)
+
+    def test_publishing_jobs_compile_nothing_themselves(self):
+        for name, job, body in JOBS:
+            if privileged(name, body):
+                with self.subTest(workflow=name, job=job):
+                    self.assertEqual(steps(body, 'actions/setup-go'), [])
+                    self.assertNotIn('go build', yaml.safe_dump(body))
 
     def test_reusable_workflow_receives_only_named_cloud_secrets(self):
         self.assertEqual(BUILD_JOBS['drivers']['secrets'], {
