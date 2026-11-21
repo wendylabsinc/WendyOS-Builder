@@ -177,7 +177,9 @@ class SensorLoopbackBuildContractTests(unittest.TestCase):
                 self.assertIn('require recipes-kernel/linux/virtual-loopback.inc', append)
         fragment = check.read_config(ROOT / 'recipes-kernel/linux/virtual-loopback/virtual-loopback.cfg')
         self.assertEqual(fragment['CONFIG_SND_ALOOP'], 'm')
-        self.assertEqual(fragment['CONFIG_SND'], 'm')
+        # Media and sound stay at each board's own setting.
+        for symbol in ('CONFIG_MEDIA_SUPPORT', 'CONFIG_SOUND', 'CONFIG_SND'):
+            self.assertNotIn(symbol, fragment)
         self.assertEqual(fragment['CONFIG_USB_VIDEO_CLASS'], 'm')
 
     def test_virtual_loopback_gate_accepts_builtin_or_modular_and_rejects_missing(self):
