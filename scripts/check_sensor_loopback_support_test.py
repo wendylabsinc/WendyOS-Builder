@@ -15,7 +15,7 @@ spec = importlib.util.spec_from_file_location('sensor_loopback_check', SCRIPT)
 check = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(check)
 GATED_IMAGES = tuple(f'conf/distro/include/{family}-image.inc'
-                     for family in ('qcom', 'rpi', 'vm', 'qemu'))
+                     for family in ('qcom', 'rpi', 'vm'))
 
 
 class SensorLoopbackImageTests(unittest.TestCase):
@@ -143,7 +143,7 @@ class SensorLoopbackBuildContractTests(unittest.TestCase):
 
     def test_shared_recipe_and_visible_kconfig_selectors(self):
         recipe = ROOT / 'recipes-kernel/v4l2loopback/v4l2loopback_0.15.4.bb'
-        self.assertIn('COMPATIBLE_MACHINE = "(tegra|qcom-wendyos|rpi|vm-wendyos|qemuall)"', recipe.read_text())
+        self.assertIn('COMPATIBLE_MACHINE = "(tegra|qcom-wendyos|rpi|vm-wendyos)"', recipe.read_text())
         self.assertFalse((ROOT / 'meta-tegra-extensions-jp7/recipes-kernel/v4l2loopback' / recipe.name).exists())
         fragment = ROOT / 'meta-qcom-extensions/recipes-kernel/linux/linux-qcom-next/sensor-loopback.cfg'
         config = check.read_config(fragment)
@@ -156,7 +156,7 @@ class SensorLoopbackBuildContractTests(unittest.TestCase):
     def test_virtual_images_require_loopback_modules(self):
         recipe = (ROOT / 'recipes-kernel/v4l2loopback/v4l2loopback_0.15.4.bb').read_text()
         compatible = re.search(r'^COMPATIBLE_MACHINE = "([^"]+)"', recipe, re.M)[1]
-        for family, override in [('vm', 'vm-wendyos'), ('qemu', 'qemuall')]:
+        for family, override in [('vm', 'vm-wendyos')]:
             with self.subTest(family=family):
                 self.assertIsNotNone(re.match(compatible, override))
                 image = (ROOT / f'conf/distro/include/{family}-image.inc').read_text()

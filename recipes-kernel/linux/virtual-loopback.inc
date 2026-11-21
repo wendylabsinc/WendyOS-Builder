@@ -1,4 +1,4 @@
-# Camera and audio loopback prerequisites for the linux-yocto VM and QEMU images.
+# Camera and audio loopback prerequisites for the linux-yocto VM images.
 FILESEXTRAPATHS:prepend := "${THISDIR}/virtual-loopback:"
 SRC_URI += "file://virtual-loopback.cfg"
 

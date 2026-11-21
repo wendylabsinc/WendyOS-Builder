@@ -26,7 +26,7 @@ SRC_URI = " \
     "
 SRCREV = "0f9ee86760b7f2bea174b7e3e7a1d38845da0ab4"
 
-COMPATIBLE_MACHINE = "(tegra|qcom-wendyos|rpi|vm-wendyos|qemuall)"
+COMPATIBLE_MACHINE = "(tegra|qcom-wendyos|rpi|vm-wendyos)"
 
 # Standard single-file Kbuild module (Kbuild just declares
 # obj-m := v4l2loopback.o at the repo root) — no nested build subdir and no
