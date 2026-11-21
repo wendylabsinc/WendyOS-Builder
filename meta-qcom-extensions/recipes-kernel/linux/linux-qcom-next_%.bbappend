@@ -36,6 +36,9 @@ require recipes-kernel/linux/cve-2026-98432.inc
 # Remote SensorLink camera and microphone endpoints need local loopback drivers.
 SRC_URI:append:qcom-wendyos = " file://sensor-loopback.cfg"
 
+# Serial adapters and other devices plugged into a host port need their drivers.
+SRC_URI:append:qcom-wendyos = " file://usb-peripherals.cfg"
+
 # Native Intel Wi-Fi 7 support for either card fitted to the EVK's M.2 Key-E
 # slot. Keep the existing ath11k stack: no out-of-tree wireless replacement is
 # needed on this kernel. Uno Q also uses qcom-wendyos, so scope this to the EVKs.
@@ -63,6 +66,7 @@ wendyos_check_intel_be200() {
 python __anonymous() {
     if 'qcom-wendyos' in (d.getVar('MACHINEOVERRIDES') or '').split(':'):
         d.appendVarFlag('do_configure', 'postfuncs', ' wendyos_check_sensor_loopback')
+        d.appendVarFlag('do_configure', 'postfuncs', ' wendyos_check_usb_peripherals')
 }
 
 wendyos_check_sensor_loopback() {
@@ -75,4 +79,18 @@ wendyos_check_sensor_loopback() {
     # Match the required module package and the agent's on-demand modprobe.
     grep -q '^CONFIG_SND_ALOOP=m$' "$config" || \
         bbfatal "SensorLink loopback: CONFIG_SND_ALOOP must be modular for ${MACHINE}"
+}
+
+wendyos_check_usb_peripherals() {
+    config="${B}/.config"
+    [ -f "$config" ] || bbfatal "USB peripherals: no resolved kernel config at $config"
+    # An empty list would walk the loop below without checking anything.
+    set -- ${WENDYOS_QCOM_USB_PERIPHERAL_MODULES}
+    [ $# -gt 0 ] || bbfatal "USB peripherals: the driver list is empty"
+    for entry in ${WENDYOS_QCOM_USB_PERIPHERAL_MODULES}; do
+        symbol="${entry%%:*}"
+        # The image installs each driver's package, and only a module emits one.
+        grep -q "^$symbol=m$" "$config" || \
+            bbfatal "USB peripherals: $symbol must be modular for ${MACHINE}"
+    done
 }

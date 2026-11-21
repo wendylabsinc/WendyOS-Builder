@@ -24,9 +24,6 @@ inherit packagegroup
 #                      the driver does not enable /data encryption --
 #                      WENDYOS_DATA_ENCRYPTED stays 0 -- it just stops the
 #                      hardware being invisible.
-#  uvcvideo            USB webcams on whichever port the board offers in host
-#                      role. The rest of the V4L2 stack already ships for the
-#                      on-SoC camera path.
 RDEPENDS:${PN} = " \
     kernel-module-pwrseq-pcie-m2 \
     kernel-module-at24 \
@@ -36,7 +33,6 @@ RDEPENDS:${PN} = " \
     kernel-module-snd-soc-dmic \
     kernel-module-tpm-tis-core \
     kernel-module-tpm-tis-spi \
-    kernel-module-uvcvideo \
     "
 
 # The native Intel add-on delegates these shared stacks to the image. Require
