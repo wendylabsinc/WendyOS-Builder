@@ -79,7 +79,7 @@ WENDYOS_SSHD ??= "0"
 # both off. Otherwise enable either one in local.conf or board config.
 # UART/serial = serial-getty@ + console-getty on serial-console boards;
 # VT = getty@ + autovt@ (+ console-getty on x86, where /dev/console is tty0).
-# Root is never opened — log in as the wendy user (passwordless sudo).
+# Root is never opened — log in as the wendy user (sudo asks for its password).
 WENDYOS_ENABLE_UART_LOGIN ??= "0"
 WENDYOS_ENABLE_VT_LOGIN ??= "0"
 
