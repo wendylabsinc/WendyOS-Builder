@@ -24,6 +24,7 @@ inherit module
 SRC_URI = " \
     git://github.com/v4l2loopback/v4l2loopback.git;branch=main;protocol=https \
     file://0001-output-completion-queue.patch \
+    file://0002-fresh-capture-start.patch \
     "
 SRCREV = "0f9ee86760b7f2bea174b7e3e7a1d38845da0ab4"
 
