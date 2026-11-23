@@ -75,6 +75,58 @@ def connectivity_confs(installed):
                   and nm_conf(file).has_section('connectivity'))
 
 
+def spec_entry_matches(entry, device):
+    """One entry of a NetworkManager device spec, for the kinds the installed files use."""
+    if entry == '*':
+        return True
+    kind, _, value = entry.partition(':')
+    if kind == 'interface-name':
+        if value.startswith('='):
+            return device['interface'] == value[1:]
+        # NM globs support only * and ?.
+        glob = re.escape(value.removeprefix('~')).replace(r'\*', '.*').replace(r'\?', '.')
+        return re.fullmatch(glob, device['interface']) is not None
+    if kind == 'driver' and '/' not in value:
+        return device['driver'] == value
+    if kind == 'type':
+        return device['type'] == value
+    raise AssertionError(f'this test does not model the device spec {entry!r}')
+
+
+def spec_matches(spec, device):
+    """A device spec list: a matching except: entry wins, and a list of only except: matches all."""
+    entries = [entry.strip() for entry in re.split('[,;]', spec) if entry.strip()]
+    negative = [entry.removeprefix('except:') for entry in entries if entry.startswith('except:')]
+    positive = [entry for entry in entries if not entry.startswith('except:')]
+    if any(spec_entry_matches(entry, device) for entry in negative):
+        return False
+    return not positive or any(spec_entry_matches(entry, device) for entry in positive)
+
+
+def connection_default(installed, key, device):
+    """The [connection*] default NetworkManager gives this device for key.
+
+    NM reads NetworkManager.conf, then conf.d in name order, and a later file
+    wins. Within a file it searches sections top to bottom, [connection] last,
+    until a section that matches the device sets the key or has stop-match.
+    """
+    paths = ['etc/NetworkManager/NetworkManager.conf'] + sorted(
+        path for path in installed
+        if path.startswith('etc/NetworkManager/conf.d/') and path.endswith('.conf'))
+    confs = [nm_conf(installed[path]) for path in reversed(paths)]
+    sections = [(conf, name) for conf in confs for name in conf.sections()
+                if name.startswith('connection') and name != 'connection']
+    sections += [(conf, 'connection') for conf in confs if conf.has_section('connection')]
+    for conf, name in sections:
+        if not spec_matches(conf.get(name, 'match-device', fallback='*'), device):
+            continue
+        if conf.has_option(name, key):
+            return conf.get(name, key)
+        if conf.getboolean(name, 'stop-match', fallback=False):
+            return None
+    return None
+
+
 class NetworkManagerConfigTest(unittest.TestCase):
     def test_ethernet_dhcp_never_times_out(self):
         conf = nm_conf(FILES / DHCP_CONF)
@@ -98,6 +150,35 @@ class NetworkManagerConfigTest(unittest.TestCase):
                             and conf.has_option(section, 'ipv4.dhcp-timeout')):
                         self.assertEqual(conf.get(section, 'match-device', fallback=''),
                                          'interface-name:usb0', f'{path} [{section}]')
+
+    def test_usb_links_rank_behind_ethernet_and_wifi(self):
+        # A USB network link is an ethernet device to NM, so the USB section
+        # has to win over [connection-ethernet] for it.
+        cases = (
+            # (interface, driver, NM device type, route metric)
+            ('usb0', 'g_ether', 'ethernet', '700'),     # USB gadget link to a computer
+            ('usb1', 'rndis_host', 'ethernet', '700'),  # SIM7600G-H, RNDIS mode
+            ('usb1', 'cdc_ether', 'ethernet', '700'),   # SIM7600G-H, CDC-ECM mode
+            ('wwan0', 'qmi_wwan', 'ethernet', '700'),
+            # Modems and phones that show a factory Ethernet address are named eth*.
+            ('eth1', 'rndis_host', 'ethernet', '700'),
+            ('eth1', 'cdc_ether', 'ethernet', '700'),
+            ('eth1', 'ipheth', 'ethernet', '700'),      # iPhone
+            # Wired Ethernet, including USB adapters that have their own driver.
+            ('eth0', 'bcmgenet', 'ethernet', '100'),
+            ('enp1s0', 'igc', 'ethernet', '100'),
+            ('eth1', 'r8152', 'ethernet', '100'),
+            ('eth1', 'ax88179_178a', 'ethernet', '100'),
+            ('eth1', 'cdc_ncm', 'ethernet', '100'),
+            ('wlan0', 'brcmfmac', 'wifi', '300'),
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            installed = run_install(install_values(tmp))
+            for interface, driver, device_type, metric in cases:
+                device = {'interface': interface, 'driver': driver, 'type': device_type}
+                for key in ('ipv4.route-metric', 'ipv6.route-metric'):
+                    with self.subTest(**device, key=key):
+                        self.assertEqual(connection_default(installed, key, device), metric)
 
     def test_install(self):
         with tempfile.TemporaryDirectory() as tmp:
