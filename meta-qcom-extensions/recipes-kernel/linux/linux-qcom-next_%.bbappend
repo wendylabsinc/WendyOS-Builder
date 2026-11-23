@@ -29,6 +29,10 @@ SRC_URI:append:iq-8275-evk = " \
 # SerDes reconfiguration rather than a false link-up.
 SRC_URI:append:qcom-wendyos = " file://0002-net-stmmac-qcom-ethqos-advertise-serdes-interfaces.patch file://0003-net-stmmac-propagate-platform-mac-finish-errors.patch"
 
+# A remote whose QRTR HELLO beats ours is never told about our services, so the
+# UNO Q modem waits for rmtfs until its watchdog fires. Upstream since v7.4.
+SRC_URI:append:qcom-wendyos = " file://0009-net-qrtr-announce-local-services-again-once-our-HELLO-is-sent.patch"
+
 require recipes-kernel/linux/mesh-local.inc
 require recipes-kernel/linux/mesh-internet.inc
 require recipes-kernel/linux/cve-2026-98432.inc
