@@ -348,6 +348,7 @@ jobs:
                      scripts/qcom-npu.test.sh \
                      meta-qcom-extensions/recipes-core/wendyos-config-setup/files/wendyos-config-init.sh \
                      recipes-support/data-device/files/wendyos-data.sh \
+                     recipes-support/data-device/files/wendyos-data.test.sh \
                      recipes-support/data-crypt/files/data-recovery-key \
                      recipes-support/wendyos-config-convert/files/wendyos-config-convert.sh \
                      recipes-core/wendyos-etc-binds/files/setup-etc-binds.sh
@@ -407,6 +408,14 @@ jobs:
 
       - name: Run DHCP NTP dispatcher tests
         run: bash recipes-connectivity/networkmanager/files/wendyos-dhcp-ntp.test.sh
+
+      # The /data resolver decides on every boot whether the filesystem on /data
+      # is kept or made again. Wrong one way a reflashed board comes back with
+      # its previous identity, wrong the other way a healthy /data is erased
+      # (WDY-4295). It needs root and a real partition table, so the test starts
+      # a privileged container and runs there against loop devices.
+      - name: Run /data resolver tests
+        run: bash recipes-support/data-device/files/wendyos-data.test.sh
 
       # This config runs before any userspace exists, so a mistake in it surfaces
       # only as a device that will not boot. Asserts its couplings to
