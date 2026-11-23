@@ -24,6 +24,7 @@ on:
       - 'scripts/t234_flashpack_manifest*'
       - 'scripts/make-jetson-disk-img.py'
       - 'scripts/make_jetson_disk_img_test.py'
+      - 'scripts/testdata/**'
       - 'scripts/tegra_boot_efi_generator_test.py'
       - 'meta-tegra-extensions/recipes-bsp/tools/**'
       - 'scripts/tegra_minimal_init_test.py'
@@ -159,6 +160,7 @@ on:
       - 'scripts/t234_flashpack_manifest*'
       - 'scripts/make-jetson-disk-img.py'
       - 'scripts/make_jetson_disk_img_test.py'
+      - 'scripts/testdata/**'
       - 'scripts/tegra_boot_efi_generator_test.py'
       - 'meta-tegra-extensions/recipes-bsp/tools/**'
       - 'scripts/tegra_minimal_init_test.py'
@@ -437,8 +439,14 @@ jobs:
           dpkg-query -W fdisk mtools
           python3 -m unittest scripts/mark_fat_volumes_test.py -v
 
+      # One test has sgdisk write the table and reads it back, so a start that
+      # sgdisk would move cannot pass. Without sgdisk that test is skipped.
       - name: Run Jetson raw disk image tests
-        run: python3 -m unittest scripts/make_jetson_disk_img_test.py
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gdisk
+          dpkg-query -W gdisk
+          python3 -m unittest scripts/make_jetson_disk_img_test.py
 
       - name: Check Jetson root-disk EFI mount generation
         run: |
