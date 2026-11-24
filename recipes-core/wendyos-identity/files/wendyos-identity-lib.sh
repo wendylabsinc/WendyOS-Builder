@@ -1,7 +1,7 @@
 # shellcheck shell=bash
-# Shared identity helpers, sourced by update-mdns-uuid.sh and generate-hostname.sh
-# so the name rules have one source. is_valid_hostname mirrors validHostname in
-# the agent (services/hostname.go).
+# Shared identity helpers, sourced by update-mdns-uuid.sh, generate-hostname.sh
+# and gadget-setup.sh so the name rules have one source. is_valid_hostname
+# mirrors validHostname in the agent (services/hostname.go).
 
 # A single DNS label: letter-led, 1-63 chars, no trailing hyphen.
 is_valid_hostname() {

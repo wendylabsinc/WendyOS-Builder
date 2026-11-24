@@ -47,6 +47,8 @@ SYSTEMD_SERVICE:${PN} = "gadget-setup.service"
 SYSTEMD_AUTO_ENABLE:${PN} = "enable"
 
 RDEPENDS:${PN} += "bash udev kmod iproute2 systemd"
+# gadget-setup.sh sources the shared lib shipped by wendyos-identity.
+RDEPENDS:${PN} += "wendyos-identity"
 
 FILES:${PN} += " \
     ${sbindir}/gadget-setup.sh \

@@ -105,6 +105,7 @@ on:
       - 'recipes-kernel/wendyos-kernel-devkit/files/*.sh'
       - 'recipes-core/wendyos-identity/files/*.sh'
       - 'recipes-core/wendyos-identity/wendyos-identity_1.0.bb'
+      - 'recipes-core/gadget-setup/files/*'
       - 'scripts/device_type_test.py'
       - 'recipes-connectivity/avahi/files/*.sh'
       - 'recipes-connectivity/networkmanager/**'
@@ -239,6 +240,7 @@ on:
       - 'recipes-kernel/wendyos-kernel-devkit/files/*.sh'
       - 'recipes-core/wendyos-identity/files/*.sh'
       - 'recipes-core/wendyos-identity/wendyos-identity_1.0.bb'
+      - 'recipes-core/gadget-setup/files/*'
       - 'scripts/device_type_test.py'
       - 'recipes-connectivity/avahi/files/*.sh'
       - 'recipes-connectivity/networkmanager/**'
@@ -356,6 +358,7 @@ jobs:
                      recipes-core/wendyos-identity/files/update-mdns-uuid.test.sh \
                      recipes-core/wendyos-identity/files/generate-device-name.sh \
                      recipes-core/wendyos-identity/files/generate-device-name.test.sh \
+                     recipes-core/gadget-setup/files/gadget-setup.test.sh \
                      recipes-connectivity/avahi/files/generate-hostname.sh \
                      meta-arduino-extensions/recipes-connectivity/wendyos-radio-addr/files/wendyos-radio-addr.sh \
                      meta-arduino-extensions/recipes-bsp/wendyos-mcu/files/mcu-flash \
@@ -404,6 +407,11 @@ jobs:
 
       - name: Run first-boot device name tests
         run: bash recipes-core/wendyos-identity/files/generate-device-name.test.sh
+
+      # The USB product string is the name a computer gives the board's USB
+      # network port: it has to follow a rename and leave room for the name.
+      - name: Run USB gadget name tests
+        run: bash recipes-core/gadget-setup/files/gadget-setup.test.sh
 
       - name: Run DHCP NTP dispatcher tests
         run: bash recipes-connectivity/networkmanager/files/wendyos-dhcp-ntp.test.sh
