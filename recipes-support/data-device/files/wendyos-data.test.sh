@@ -45,6 +45,8 @@
 #       filesystem too, so there is nothing to carry and the partition grows.
 #   (g) encryption requested on a used disk that was not reflashed: nothing is
 #       erased before the identity carry, and the identity reaches /config.
+#   (h) the conversion's erase ends the boot while an earlier attempt's marker
+#       is still there: the marker must not survive, or /data never mounts.
 #
 # Not covered: the LUKS container and everything after it (it needs a TPM; the
 # conversion cases stop at luksFormat), the MBR extended container, and the
@@ -96,7 +98,8 @@ KDEV="${WORK}/kdev"
 MNT="${WORK}/mnt"
 STUBS="${WORK}/stubs"
 NO_MKFS="${WORK}/no-mkfs"
-mkdir -p "${KDEV}" "${MNT}" "${STUBS}" "${NO_MKFS}"
+NO_WIPEFS="${WORK}/no-wipefs"
+mkdir -p "${KDEV}" "${MNT}" "${STUBS}" "${NO_MKFS}" "${NO_WIPEFS}"
 
 LOOP=""
 DATA=""
@@ -155,7 +158,9 @@ EOF
 # A mkfs.ext4 that fails without writing anything: on the disk, a boot that
 # reaches it and stops there is a boot that lost power just before it.
 printf '#!/bin/sh\nexit 1\n' > "${NO_MKFS}/mkfs.ext4"
-chmod +x "${STUBS}/root-disk-part" "${NO_MKFS}/mkfs.ext4"
+# A wipefs that fails: the erase of a stale filesystem then ends the program.
+printf '#!/bin/sh\nexit 1\n' > "${NO_WIPEFS}/wipefs"
+chmod +x "${STUBS}/root-disk-part" "${NO_MKFS}/mkfs.ext4" "${NO_WIPEFS}/wipefs"
 
 # The crypt tools the conversion requires. luksFormat fails, which stops the
 # conversion at a known step: after the identity carry, the grow and the wipe.
@@ -389,6 +394,9 @@ expect_converted() {
         *"luksFormat of ${DATA} failed"*) ;;
         *) why="the conversion did not reach luksFormat" ;;
     esac
+    [ "${RC}" -eq 1 ] || why="${why:+$why, }exit ${RC}"
+    grep -qx 'result=convert_failed' /config/data.status 2>/dev/null \
+        || why="${why:+$why, }data.status does not say convert_failed"
     [ ! -e /config/data.enroll.pending ] || why="${why:+$why, }the conversion marker was left behind"
     identity
     case $? in
@@ -525,6 +533,30 @@ if [ -z "${why}" ]; then
     ok "encryption requested, no reflash: nothing erased, the identity is carried"
 else
     bad "encryption requested, no reflash: ${why}"
+    show_out
+fi
+
+# --- (h) the erase ends the boot, with an earlier attempt's marker on /config -
+# data.mount is skipped while the marker exists, so a boot that ends before the
+# conversion writes its own marker must not leave an old one behind.
+used_board
+flash gpt empty
+arm_encryption
+echo "left by an interrupted conversion" > /config/data.enroll.pending
+boot "${NO_WIPEFS}:${CRYPT}"
+why=""
+[ "${RC}" -ne 0 ] || why="exit 0"
+case "${OUT}" in
+    *"wipefs could not erase it"*) ;;
+    *) why="${why:+$why, }the erase did not end the boot" ;;
+esac
+grep -qx 'result=format_failed' /config/data.status 2>/dev/null \
+    || why="${why:+$why, }data.status does not say format_failed"
+[ ! -e /config/data.enroll.pending ] || why="${why:+$why, }the conversion marker was left behind"
+if [ -z "${why}" ]; then
+    ok "conversion ends at the erase: no marker is left behind"
+else
+    bad "conversion ends at the erase: ${why}"
     show_out
 fi
 
