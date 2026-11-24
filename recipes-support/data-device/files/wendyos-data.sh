@@ -917,8 +917,8 @@ fs_overruns_device() {
 }
 
 # Erase an ext4 filesystem that is larger than the partition, BEFORE the
-# partition is grown (WDY-4295). The first step of prepare_plain, and called
-# from nowhere else.
+# partition is grown (WDY-4295). The first step of prepare_plain and of the
+# conversion.
 #
 # A reflash writes a new partition table, which puts /data back at its small
 # stock size, and on the boards whose flash layout carves /data empty it writes
@@ -975,7 +975,7 @@ fs_overruns_device() {
 # the grow, exactly as before.
 #
 # Like prepare_filesystem this can end the program itself through finish, so
-# prepare_plain clears the marker first.
+# both callers clear the marker first.
 erase_stale_filesystem() {
     if [ "$DATA" = "$ALIAS" ]; then
         return 0
@@ -1063,13 +1063,13 @@ prepare_filesystem() {
         finish not_ext4 1 "$DATA carries a $fs_type signature, which is not ours to make or to replace, so it is left exactly as it is and /data cannot be mounted"
     fi
 
-    # On the plain path erase_stale_filesystem asked before the grow and erased
-    # a filesystem whose superblock overruns the partition, so one of those
-    # never gets this far there (WDY-4295). The check stays for what that
-    # leaves: a superblock dumpe2fs cannot read at all, and every caller that
-    # does not come through it -- the abort doors and the device with no parent
-    # disk, where nothing is grown and the partition is still the size the
-    # question needs, and the MBR board, where the erase is not allowed.
+    # On the plain path and the conversion erase_stale_filesystem asked before
+    # the grow and erased a filesystem whose superblock overruns the partition,
+    # so one of those never gets this far there (WDY-4295). The check stays for
+    # what that leaves: a superblock dumpe2fs cannot read at all, and every
+    # caller that does not come through it -- the device with no parent disk,
+    # where nothing is grown and the partition is still the size the question
+    # needs, and the MBR board, where the erase is not allowed.
     if ! fs_fits_device "$DATA"; then
         announce "the ext4 filesystem on $DATA does not fit the partition (a stale superblock from a prior, larger layout), so it is being remade"
         # -F because blkid still reports a valid ext4 here and mkfs.ext4 would
@@ -1450,7 +1450,8 @@ helper=$(find_cryptsetup_helper)
 #
 # ONE CALLER SITS BEFORE BOTH OF THOSE, and the two paragraphs above are scoped
 # to the rest. The failed write_marker at step 1 aborts before the wipe and
-# before the grow, so for that caller: nothing has been destroyed, so the
+# before the grow, so for that caller nothing in use has been destroyed (step 0
+# erases only a previous installation's filesystem), so the
 # "contents are gone by intent" reasoning does not apply and is not needed --
 # prepare_filesystem formats only a device carrying no filesystem AND no
 # partition table, or an ext4 superblock that overruns its partition, so a
@@ -1624,6 +1625,12 @@ preserve_identity() {
 }
 
 announce "converting /data to LUKS2 (this device was armed through $CONF)"
+
+# 0) A reflash leaves the previous installation's ext4 larger than the
+#    partition, and preserve_identity cannot mount it. Erased before the marker,
+#    because erase_stale_filesystem can end the program through finish.
+clear_marker
+erase_stale_filesystem
 
 # 1) The marker brackets the whole conversion and is cleared LAST, immediately
 #    before the reboot (C34).

@@ -15,7 +15,8 @@
 #
 # The program runs whole and unmodified, the way wendyos-data.service starts it:
 # `sh wendyos-data.sh`, with /config not mounted, so the encryption flag reads
-# as unset and every run takes the plain path. Each "boot" below is one run.
+# as unset and the run takes the plain path. Only the conversion cases at the
+# end mount an ext4 /config armed for encryption. Each "boot" below is one run.
 # Only root-disk-part is replaced, because it names the /data partition on the
 # disk / is mounted from and a container's / is not on a disk.
 #
@@ -40,9 +41,14 @@
 #       way through the filesystem resize, and a board with no room to grow.
 #   (e) the board that finds /data by its filesystem label (MBR) is never
 #       erased ahead of the grow, because the label is the only name it has.
+#   (f) a reflash with encryption requested: the conversion erases the old
+#       filesystem too, so there is nothing to carry and the partition grows.
+#   (g) encryption requested on a used disk that was not reflashed: nothing is
+#       erased before the identity carry, and the identity reaches /config.
 #
-# Not covered: every LUKS path (they need a TPM), the MBR extended container,
-# and the online resize unit, whose result is stood in for by resize2fs.
+# Not covered: the LUKS container and everything after it (it needs a TPM; the
+# conversion cases stop at luksFormat), the MBR extended container, and the
+# online resize unit, whose result is stood in for by resize2fs.
 set -uo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -100,6 +106,7 @@ FS_UUID=""
 
 detach() {
     umount "${MNT}" 2>/dev/null
+    umount /config 2>/dev/null
     if [ -n "${LOOP}" ]; then
         losetup -d "${LOOP}" 2>/dev/null
         rm -f "${LOOP}"p[0-9]
@@ -111,6 +118,7 @@ detach() {
 cleanup() {
     detach
     rm -rf /dev/wendyos
+    rm -f /dev/tpmrm0
     umount /dev/console /dev/ttyS0 2>/dev/null
     umount "${KDEV}" 2>/dev/null
     rm -rf "${WORK}"
@@ -148,6 +156,19 @@ EOF
 # reaches it and stops there is a boot that lost power just before it.
 printf '#!/bin/sh\nexit 1\n' > "${NO_MKFS}/mkfs.ext4"
 chmod +x "${STUBS}/root-disk-part" "${NO_MKFS}/mkfs.ext4"
+
+# The crypt tools the conversion requires. luksFormat fails, which stops the
+# conversion at a known step: after the identity carry, the grow and the wipe.
+CRYPT="${WORK}/crypt"
+mkdir -p "${CRYPT}"
+cat > "${CRYPT}/cryptsetup" <<'EOF'
+#!/bin/sh
+[ "$1" = luksFormat ] && exit 1
+exit 0
+EOF
+printf '#!/bin/sh\nexit 0\n' > "${CRYPT}/systemd-cryptenroll"
+printf '#!/bin/sh\nexit 0\n' > "${CRYPT}/systemd-cryptsetup"
+chmod +x "${CRYPT}/cryptsetup" "${CRYPT}/systemd-cryptenroll" "${CRYPT}/systemd-cryptsetup"
 
 # --- the fixture ---------------------------------------------------------------
 # Sizes in MiB. The image is what gets flashed: config, then /data at its stock
@@ -226,7 +247,7 @@ start=$((DATA_START * MIB / 512)), size=$((DATA_SIZE * MIB / 512)), type=83"
     [ -b "${DATA}" ] || die "no /data partition after the flash"
 }
 
-# One boot: the whole program, the plain path. Sets OUT and RC. An argument is
+# One boot: the whole program. Sets OUT and RC. An argument is
 # a directory put in front of PATH for this boot only.
 boot() {
     OUT=$(PATH="${1:+$1:}${STUBS}:${PATH}" sh "${SCRIPT}" 2>&1)
@@ -349,6 +370,34 @@ used_board() {
     seed
 }
 
+# An ext4 /config on the fixture's config partition, armed for encryption, and
+# a TPM node for the program to find. detach unmounts it.
+arm_encryption() {
+    mkfs.ext4 -q -F -L config "${LOOP}p1" || die "cannot make the /config filesystem"
+    mkdir -p /config
+    mount -t ext4 "${LOOP}p1" /config || die "cannot mount /config"
+    echo "data_encryption=1" > /config/data.conf
+    [ -e /dev/tpmrm0 ] || mknod /dev/tpmrm0 c 1 3 || die "cannot make a TPM node"
+}
+
+# expect_converted — prints why the conversion did not run up to the failing
+# luksFormat and leave no marker and a mountable /data without the identity.
+# Prints nothing when it did.
+expect_converted() {
+    local why=""
+    case "${OUT}" in
+        *"luksFormat of ${DATA} failed"*) ;;
+        *) why="the conversion did not reach luksFormat" ;;
+    esac
+    [ ! -e /config/data.enroll.pending ] || why="${why:+$why, }the conversion marker was left behind"
+    identity
+    case $? in
+        0) why="${why:+$why, }the device identity is still on /data" ;;
+        2) why="${why:+$why, }/data does not mount" ;;
+    esac
+    printf '%s\n' "${why}"
+}
+
 # --- (a) a reflash over a used disk ------------------------------------------
 used_board
 flash gpt empty
@@ -440,6 +489,43 @@ if [ "$(blkid -p -o value -s LABEL "${DATA}")" = data ]; then
     ok "MBR board, filesystem larger than the partition: the label the alias is built from is still there"
 else
     bad "MBR board, filesystem larger than the partition: the label is gone, and with it the only name for /data"
+fi
+
+# --- (f) a reflash with encryption requested --------------------------------
+# Without the erase, the identity carry cannot mount the old filesystem and the
+# conversion stops there, leaving a plain /data at the flashed size.
+used_board
+flash gpt empty
+arm_encryption
+boot "${CRYPT}"
+why=$(expect_converted)
+case "${OUT}" in
+    *"${STALE_LINE}"*"nothing to carry across the wipe"*) ;;
+    *) why="${why:+$why, }the old filesystem was not erased before the identity carry" ;;
+esac
+fills_disk || why="${why:+$why, }the partition did not grow"
+if [ -z "${why}" ]; then
+    ok "reflash, encryption requested: the old filesystem is erased and the conversion goes on"
+else
+    bad "reflash, encryption requested: ${why}"
+    show_out
+fi
+
+# --- (g) encryption requested on a used disk that was not reflashed ----------
+used_board
+arm_encryption
+boot "${CRYPT}"
+why=$(expect_converted)
+case "${OUT}" in
+    *"is being remade"*) why="${why:+$why, }a /data in use was erased" ;;
+esac
+carried=$(tar -xOf /config/backup/configuration.tar etc/wendyos/device-uuid 2>/dev/null)
+[ "${carried}" = "0b9e8a52-old-installation" ] || why="${why:+$why, }the device identity was not carried to /config"
+if [ -z "${why}" ]; then
+    ok "encryption requested, no reflash: nothing erased, the identity is carried"
+else
+    bad "encryption requested, no reflash: ${why}"
+    show_out
 fi
 
 echo
