@@ -237,6 +237,10 @@ start=$((DATA_START * MIB / 512)), size=$((DATA_SIZE * MIB / 512)), type=83"
     esac
     echo "${table}" | sfdisk -q "${img}" >/dev/null 2>&1 || die "sfdisk could not write the image's partition table"
 
+    # The machine's udev probes a disk each time a writer closes it, and the
+    # re-read fails while it holds a partition open. It stays off a locked disk.
+    exec 9<"${LOOP}" || die "cannot open ${LOOP}"
+    flock -x 9 || die "cannot lock ${LOOP}"
     dd if="${img}" of="${LOOP}" bs=1M count="${DATA_START}" conv=notrunc status=none \
         || die "cannot write the head of the image"
     if [ "${content}" = fs ]; then
@@ -249,6 +253,7 @@ start=$((DATA_START * MIB / 512)), size=$((DATA_SIZE * MIB / 512)), type=83"
         || die "cannot write the tail of the image"
     sync
     blockdev --rereadpt "${LOOP}" || die "the kernel did not re-read the partition table"
+    exec 9<&-
     [ -b "${DATA}" ] || die "no /data partition after the flash"
 }
 
