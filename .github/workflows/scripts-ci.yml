@@ -120,6 +120,7 @@ on:
       - 'meta-arduino-extensions/recipes-connectivity/arduino-router/files/*'
       - 'tests/uno-q-mcu/**'
       - 'scripts/root_disk_boot_link_test.py'
+      - 'scripts/uart_login_gate_test.py'
       - 'recipes-core/base-files/files/rpi-wendy*-fstab'
       - 'meta-rpi-extensions/recipes-core/images/wendyos-image.bbappend'
       # No *.sh filter: data-recovery-key is a command and carries no extension.
@@ -256,6 +257,7 @@ on:
       - 'meta-arduino-extensions/recipes-connectivity/arduino-router/files/*'
       - 'tests/uno-q-mcu/**'
       - 'scripts/root_disk_boot_link_test.py'
+      - 'scripts/uart_login_gate_test.py'
       - 'recipes-core/base-files/files/rpi-wendy*-fstab'
       - 'meta-rpi-extensions/recipes-core/images/wendyos-image.bbappend'
       # No *.sh filter: data-recovery-key is a command and carries no extension.
@@ -455,6 +457,9 @@ jobs:
 
       - name: Check the Pi boot link stays on the root disk
         run: python3 -m unittest scripts/root_disk_boot_link_test.py -v
+
+      - name: Check that UART login off leaves no serial getty
+        run: python3 -m unittest scripts/uart_login_gate_test.py -v
 
       # The initramfs root lookup runs as PID 1: a mistake there is a unit that never boots.
       - name: Check Jetson initramfs root-disk lookup
