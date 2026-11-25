@@ -123,8 +123,10 @@ cleanup() {
     rm -rf /dev/wendyos
     rm -f /dev/tpmrm0
     umount /dev/console /dev/ttyS0 2>/dev/null
-    umount "${KDEV}" 2>/dev/null
-    rm -rf "${WORK}"
+    # Only once KDEV is unmounted: while it is mounted, rm -rf would go through
+    # it and delete the machine's device nodes (see below). A WORK left behind
+    # goes with the container.
+    umount "${KDEV}" 2>/dev/null && rm -rf "${WORK}"
 }
 trap cleanup EXIT
 
@@ -132,7 +134,9 @@ trap cleanup EXIT
 # learns about a loop partition made later. devtmpfs is the kernel's own view,
 # where a partition's node comes and goes with the partition. It is mounted
 # beside /dev and linked into it, not over it: /dev stays the container's own,
-# so nothing made there (/dev/wendyos/data) appears on the machine.
+# so nothing made there (/dev/wendyos/data) appears on the machine. KDEV itself
+# is the machine's: the kernel has one devtmpfs, and mounting it again shows
+# the same nodes. Nothing here writes or removes anything under it.
 mount -t devtmpfs devtmpfs "${KDEV}" || die "cannot mount devtmpfs"
 
 # The program repeats every line on /dev/console and /dev/ttyS0 when it can
