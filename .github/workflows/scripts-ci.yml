@@ -24,6 +24,7 @@ on:
       - 'scripts/t234_flashpack_manifest*'
       - 'scripts/make-jetson-disk-img.py'
       - 'scripts/make_jetson_disk_img_test.py'
+      - 'scripts/testdata/**'
       - 'scripts/tegra_boot_efi_generator_test.py'
       - 'meta-tegra-extensions/recipes-bsp/tools/**'
       - 'scripts/tegra_minimal_init_test.py'
@@ -105,6 +106,7 @@ on:
       - 'recipes-kernel/wendyos-kernel-devkit/files/*.sh'
       - 'recipes-core/wendyos-identity/files/*.sh'
       - 'recipes-core/wendyos-identity/wendyos-identity_1.0.bb'
+      - 'recipes-core/gadget-setup/files/*'
       - 'scripts/device_type_test.py'
       - 'recipes-connectivity/avahi/files/*.sh'
       - 'recipes-connectivity/networkmanager/**'
@@ -118,6 +120,7 @@ on:
       - 'meta-arduino-extensions/recipes-connectivity/arduino-router/files/*'
       - 'tests/uno-q-mcu/**'
       - 'scripts/root_disk_boot_link_test.py'
+      - 'scripts/uart_login_gate_test.py'
       - 'recipes-core/base-files/files/rpi-wendy*-fstab'
       - 'meta-rpi-extensions/recipes-core/images/wendyos-image.bbappend'
       # No *.sh filter: data-recovery-key is a command and carries no extension.
@@ -158,6 +161,7 @@ on:
       - 'scripts/t234_flashpack_manifest*'
       - 'scripts/make-jetson-disk-img.py'
       - 'scripts/make_jetson_disk_img_test.py'
+      - 'scripts/testdata/**'
       - 'scripts/tegra_boot_efi_generator_test.py'
       - 'meta-tegra-extensions/recipes-bsp/tools/**'
       - 'scripts/tegra_minimal_init_test.py'
@@ -239,6 +243,7 @@ on:
       - 'recipes-kernel/wendyos-kernel-devkit/files/*.sh'
       - 'recipes-core/wendyos-identity/files/*.sh'
       - 'recipes-core/wendyos-identity/wendyos-identity_1.0.bb'
+      - 'recipes-core/gadget-setup/files/*'
       - 'scripts/device_type_test.py'
       - 'recipes-connectivity/avahi/files/*.sh'
       - 'recipes-connectivity/networkmanager/**'
@@ -252,6 +257,7 @@ on:
       - 'meta-arduino-extensions/recipes-connectivity/arduino-router/files/*'
       - 'tests/uno-q-mcu/**'
       - 'scripts/root_disk_boot_link_test.py'
+      - 'scripts/uart_login_gate_test.py'
       - 'recipes-core/base-files/files/rpi-wendy*-fstab'
       - 'meta-rpi-extensions/recipes-core/images/wendyos-image.bbappend'
       # No *.sh filter: data-recovery-key is a command and carries no extension.
@@ -357,6 +363,7 @@ jobs:
                      recipes-core/wendyos-identity/files/update-mdns-uuid.test.sh \
                      recipes-core/wendyos-identity/files/generate-device-name.sh \
                      recipes-core/wendyos-identity/files/generate-device-name.test.sh \
+                     recipes-core/gadget-setup/files/gadget-setup.test.sh \
                      recipes-connectivity/avahi/files/generate-hostname.sh \
                      meta-arduino-extensions/recipes-connectivity/wendyos-radio-addr/files/wendyos-radio-addr.sh \
                      meta-arduino-extensions/recipes-bsp/wendyos-mcu/files/mcu-flash \
@@ -406,6 +413,11 @@ jobs:
       - name: Run first-boot device name tests
         run: bash recipes-core/wendyos-identity/files/generate-device-name.test.sh
 
+      # The USB product string is the name a computer gives the board's USB
+      # network port: it has to follow a rename and leave room for the name.
+      - name: Run USB gadget name tests
+        run: bash recipes-core/gadget-setup/files/gadget-setup.test.sh
+
       - name: Run DHCP NTP dispatcher tests
         run: bash recipes-connectivity/networkmanager/files/wendyos-dhcp-ntp.test.sh
 
@@ -438,8 +450,14 @@ jobs:
           dpkg-query -W fdisk mtools
           python3 -m unittest scripts/mark_fat_volumes_test.py -v
 
+      # One test has sgdisk write the table and reads it back, so a start that
+      # sgdisk would move cannot pass. Without sgdisk that test is skipped.
       - name: Run Jetson raw disk image tests
-        run: python3 -m unittest scripts/make_jetson_disk_img_test.py
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gdisk
+          dpkg-query -W gdisk
+          python3 -m unittest scripts/make_jetson_disk_img_test.py
 
       - name: Check Jetson root-disk EFI mount generation
         run: |
@@ -448,6 +466,9 @@ jobs:
 
       - name: Check the Pi boot link stays on the root disk
         run: python3 -m unittest scripts/root_disk_boot_link_test.py -v
+
+      - name: Check that UART login off leaves no serial getty
+        run: python3 -m unittest scripts/uart_login_gate_test.py -v
 
       # The initramfs root lookup runs as PID 1: a mistake there is a unit that never boots.
       - name: Check Jetson initramfs root-disk lookup

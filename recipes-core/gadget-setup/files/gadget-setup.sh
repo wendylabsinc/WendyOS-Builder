@@ -5,9 +5,6 @@
 # Supports: Jetson (tegra-xudc), RPi5 (dwc2), and other Linux USB controllers
 #
 
-exec 1> >(logger -s -t "$(basename "$0")") 2> >(logger -s -t "$(basename "$0")" -p daemon.err)
-set -euo pipefail
-
 log_info()    { logger -s -t "$(basename "$0")" -p daemon.info    "$1"; }
 log_warning() { logger -s -t "$(basename "$0")" -p daemon.warning "$1"; }
 log_error()   { logger -s -t "$(basename "$0")" -p daemon.err     "$1"; }
@@ -28,6 +25,67 @@ generate_mac() {
         0x${mac_base:8:2} \
         0x${mac_base:10:2}
 }
+
+# Overridable so the test can run against a temp tree; the unit sets none of
+# these on a device, so they take the defaults.
+DEVICE_NAME_FILE="${DEVICE_NAME_FILE:-/etc/wendyos/device-name}"
+# Literal hostname from 'wendy device rename'. Outranks the device-name (as in
+# update-mdns-uuid.sh and the agent's DeviceName) so the USB name follows a
+# rename from the next boot on.
+EXPLICIT_HOSTNAME_FILE="${EXPLICIT_HOSTNAME_FILE:-/etc/wendy-agent/hostname}"
+# Shared identity helpers, one source of truth with update-mdns-uuid.sh.
+IDENTITY_LIB="${IDENTITY_LIB:-/usr/share/wendyos/wendyos-identity-lib.sh}"
+
+# Set DEVICE_FRIENDLY_NAME to the name the board goes by: the rename, else the
+# device-name, else the serial suffix passed as $1.
+#
+# Each file is validated before use, as update-mdns-uuid.sh does. The name goes
+# into a USB string descriptor: junk there would be shown to the host as the
+# board's name, and a value too long for configfs fails the write, which would
+# leave the board with no gadget at all.
+resolve_device_name() {
+    local file name
+    DEVICE_FRIENDLY_NAME="$1"
+
+    # Unlike the other identity scripts, carry on without the helpers: the USB
+    # link is how a board with no network is reached, so a broken install may
+    # cost the name but never the gadget.
+    # shellcheck source=/dev/null
+    if ! . "$IDENTITY_LIB" 2>/dev/null; then
+        log_warning "Cannot source identity helpers: $IDENTITY_LIB, using serial: $DEVICE_FRIENDLY_NAME"
+        return 0
+    fi
+
+    for file in "$EXPLICIT_HOSTNAME_FILE" "$DEVICE_NAME_FILE"; do
+        [ -s "$file" ] || continue
+        name=$(read_name_file "$file" 2>/dev/null) || name=""
+        if is_valid_hostname "$name"; then
+            DEVICE_FRIENDLY_NAME="$name"
+            log_info "Using device name from $file: $DEVICE_FRIENDLY_NAME"
+            return 0
+        fi
+        log_warning "$file is not a valid hostname label; ignoring it"
+    done
+
+    log_warning "No device name found, using serial: $DEVICE_FRIENDLY_NAME"
+}
+
+# The product string is what a computer shows for the board, and macOS names
+# the USB network port after it, keeping only the first 31 characters. So the
+# prefix is short: "WendyOS " leaves 23 characters for the name, and a longer
+# name loses its end there. The prefix cannot go altogether: on macOS the CLI
+# tells the board's port from other network ports by the "wendy" in its name.
+usb_product_string() {
+    printf 'WendyOS %s' "$1"
+}
+
+# Tests source this file for the functions above.
+if [ "${BASH_SOURCE[0]}" != "$0" ]; then
+    return 0
+fi
+
+exec 1> >(logger -s -t "$(basename "$0")") 2> >(logger -s -t "$(basename "$0")" -p daemon.err)
+set -euo pipefail
 
 ### Resolve device serial number — combined fallback chain ###
 
@@ -56,19 +114,12 @@ CLEAN_SERIAL=$(echo "$SHORT_SERIAL" | tr -d ':')
 
 # Friendly device name (falls back to serial suffix)
 USB_SERIAL=${USB_SERIAL:-$DEVICE_SERIAL}
-DEVICE_NAME_FILE="/etc/wendyos/device-name"
-if [ -f "$DEVICE_NAME_FILE" ]; then
-    DEVICE_FRIENDLY_NAME=$(cat "$DEVICE_NAME_FILE" | tr -d '[:space:]') || true
-    log_info "Using device name from $DEVICE_NAME_FILE: $DEVICE_FRIENDLY_NAME"
-else
-    DEVICE_FRIENDLY_NAME="${CLEAN_SERIAL}"
-    log_warning "Device name file not found, using serial: $DEVICE_FRIENDLY_NAME"
-fi
+resolve_device_name "$CLEAN_SERIAL"
 
 USB_VID=${USB_VID:-0x1d6b}          # Linux Foundation
 USB_PID=${USB_PID:-0x0104}          # Multifunction Composite Gadget
 USB_MFR=${USB_MFR:-"Wendy Labs Inc"}
-USB_PROD=${USB_PROD:-"WendyOS Device ${DEVICE_FRIENDLY_NAME}"}
+USB_PROD=${USB_PROD:-"$(usb_product_string "$DEVICE_FRIENDLY_NAME")"}
 CFG_NAME=${CFG_NAME:-"CDC+ACM"}
 GADGET_FUNC_ORDER="${GADGET_FUNC_ORDER:-ncm ecm}"
 

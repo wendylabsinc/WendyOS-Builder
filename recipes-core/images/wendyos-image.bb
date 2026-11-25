@@ -36,13 +36,14 @@ IMAGE_FEATURES += "${@oe.utils.ifelse(d.getVar('WENDYOS_DEBUG') == '1', d.getVar
 # getty is disabled by default and each console type is separately opt-in. No
 # login implies opening root: credentials are a separate concern — root stays
 # locked (root:*: on every image via zap_empty_root_password); log in as the
-# wendy user, which has passwordless sudo. bootstrap.sh --debug and the CI PR
+# wendy user; sudo asks for that user's password. bootstrap.sh --debug and the CI PR
 # profile turn both logins on; nightly and release builds keep both off.
 #
 #   getty@ + autovt@ (+ logind auto-VTs)       -> monitor/keyboard VT login
 #                                                 WENDYOS_ENABLE_VT_LOGIN (default 0)
-#   serial-getty@<port> (from SERIAL_CONSOLES) -> named serial login
-#                                                 WENDYOS_ENABLE_UART_LOGIN (default 0)
+#   serial-getty@<port> (from SERIAL_CONSOLES, -> named serial login
+#       and systemd-getty-generator's on every    WENDYOS_ENABLE_UART_LOGIN (default 0)
+#       serial console= and hvc0)
 #   console-getty (login on /dev/console)      -> the LAST console= on the
 #       cmdline, which is NOT the serial port everywhere, as this comment
 #       used to claim. Measured on jetson-agx-orin 2026-10-04: Tegra and x86
@@ -58,9 +59,9 @@ IMAGE_FEATURES += "${@oe.utils.ifelse(d.getVar('WENDYOS_DEBUG') == '1', d.getVar
 #       The same fact is why a recovery key written to /dev/console on a
 #       Jetson reaches nobody.
 #
-# The kernel `console=` bootarg (boot + printk output, not a getty) is separate:
-# on RPi it is gated on WENDYOS_DEBUG_UART (rpi-cmdline.bbappend); Tegra emits it
-# regardless (task A2). Independent of the login knobs here.
+# The kernel `console=` bootarg itself (boot + printk output) is set per board
+# and independent of these knobs. A serial console= still gets a login, from
+# systemd-getty-generator, unless disable_uart_login masks that generator.
 #
 # Masking is fatal: systemd's 90-systemd.preset enables getty@/serial-getty@ and
 # the rootfs preset-all pass rejects "enable a masked unit". So preset-disable
@@ -91,6 +92,10 @@ disable_uart_login() {
     install -d ${IMAGE_ROOTFS}${systemd_unitdir}/system-preset
     printf 'disable serial-getty@.service\n' \
         > ${IMAGE_ROOTFS}${systemd_unitdir}/system-preset/10-wendyos-no-uart-login.preset
+    # systemd-getty-generator adds serial-getty@ from /run at boot, where no preset
+    # reaches. It is not a unit, so masking it is safe (systemd.generator(7)).
+    install -d ${IMAGE_ROOTFS}${sysconfdir}/systemd/system-generators
+    ln -sf /dev/null ${IMAGE_ROOTFS}${sysconfdir}/systemd/system-generators/systemd-getty-generator
 }
 
 disable_console_getty() {

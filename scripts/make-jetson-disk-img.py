@@ -5,6 +5,10 @@ The bundle's doexternal.sh signs the layout and then writes it with make-sdcard.
 This does only the write, offline, for the raw artifacts retained behind
 ``wendy install --rootfs-only``. It never signs or talks to a Jetson.
 
+Partitions start on 1 MiB boundaries, where make-sdcard puts them. One whose
+layout entry asks for a larger ``align_boundary`` starts on that instead, where
+the Wendy CLI's USB flash puts it.
+
 Requires ``sgdisk`` and, when a layout references Android sparse images,
 ``simg2img``.
 """
@@ -35,6 +39,22 @@ def parse_int(value: str | None, label: str) -> int:
 def child_text(element: ET.Element, name: str, default: str = "") -> str:
     child = element.find(name)
     return (child.text or "").strip() if child is not None else default
+
+
+def align_boundary_sectors(element: ET.Element, name: str, sector_size: int) -> int:
+    text = child_text(element, "align_boundary")
+    if not text:
+        return 0
+    try:
+        boundary = int(text, 0)
+    except ValueError:
+        boundary = 0
+    if boundary < sector_size or boundary & (boundary - 1):
+        raise ValueError(
+            f"partition {name} has invalid align_boundary {text!r} "
+            f"(want a power of two in bytes, at least {sector_size})"
+        )
+    return boundary // sector_size
 
 
 def safe_image_path(bundle_dir: pathlib.Path, name: str) -> pathlib.Path:
@@ -97,6 +117,7 @@ def parse_layout(bundle_dir: pathlib.Path, layout_name: str,
             "type_guid": child_text(element, "partition_type_guid") or None,
             "unique_guid": child_text(element, "unique_guid") or None,
             "fill_to_end": bool(attributes & 0x800),
+            "align_sectors": align_boundary_sectors(element, name, sector_size),
         })
     if not partitions:
         raise ValueError(f"{device_type} layout has no partitions")
@@ -125,8 +146,8 @@ def assign_gpt_numbers(partitions: list[dict]) -> None:
             used.add(next_number)
 
 
-def align(value: int) -> int:
-    return ((value + ALIGN_SECTORS - 1) // ALIGN_SECTORS) * ALIGN_SECTORS
+def align(value: int, boundary: int = ALIGN_SECTORS) -> int:
+    return ((value + boundary - 1) // boundary) * boundary
 
 
 def place_partitions(partitions: list[dict], num_sectors: int,
@@ -134,7 +155,7 @@ def place_partitions(partitions: list[dict], num_sectors: int,
     next_sector = ALIGN_SECTORS
     last_usable = num_sectors - GPT_BACKUP_SECTORS - 1
     for index, partition in enumerate(partitions):
-        start = align(next_sector)
+        start = align(next_sector, max(ALIGN_SECTORS, partition.get("align_sectors", 0)))
         minimum = partition["size_bytes"] // sector_size
         if partition["fill_to_end"]:
             if index != len(partitions) - 1:
