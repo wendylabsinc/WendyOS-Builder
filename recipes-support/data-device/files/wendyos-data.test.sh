@@ -34,7 +34,8 @@
 #       the board came back with its old identity.
 #   (b) the same, with the first boot cut short between the grow and the mkfs:
 #       the next boot must not find the old filesystem either.
-#   (c) the same on a board whose /data cannot grow: remade at the flashed size.
+#   (c) the same on a board whose /data cannot grow: erased ahead of the grow
+#       all the same, and remade at the flashed size.
 #   (d) a healthy /data is kept: a later boot, a boot after the other root slot
 #       was rewritten, a first boot of an image that ships its own filesystem on
 #       a larger disk, a first boot cut short after the partition grew or part
@@ -80,7 +81,13 @@ if [ ! -f /.dockerenv ]; then
 fi
 
 SCRIPT=/test/wendyos-data.sh
-STALE_LINE="does not fit the partition (a stale superblock from a prior, larger layout), so it is being remade"
+# The two places that can get rid of a previous installation's filesystem log
+# different lines, so a case can tell which one did. ERASE_LINE: the erase
+# ahead of the grow (erase_stale_filesystem). REMADE_LINE: the check after the
+# grow (prepare_filesystem), which on a GPT board finds one only when the erase
+# ahead of it did not.
+ERASE_LINE="so a previous installation left it and it is being erased before the partition is grown"
+REMADE_LINE="does not fit the partition (a stale superblock from a prior, larger layout), so it is being remade"
 
 pass=0
 fail=0
@@ -321,7 +328,7 @@ expect_kept() {
     [ "${RC}" -eq 0 ] || why="${why:+$why, }exit ${RC}"
     [ "$(blkid -p -o value -s UUID "${DATA}")" = "${FS_UUID}" ] || why="${why:+$why, }the filesystem was replaced"
     case "${OUT}" in
-        *"is being remade"*|*"making the filesystem"*) why="${why:+$why, }the program said it made a filesystem" ;;
+        *"${ERASE_LINE}"*|*"${REMADE_LINE}"*|*"making the filesystem"*) why="${why:+$why, }the program said it erased or made a filesystem" ;;
     esac
     if [ -n "${2:-}" ]; then
         case "${OUT}" in
@@ -339,7 +346,9 @@ expect_kept() {
 
 # expect_new LABEL grown|flashed [LINE] — the boot succeeded and /data is a new,
 # empty filesystem that fills its partition. grown: the partition reaches the
-# end of the disk. flashed: it is still the size it was flashed at.
+# end of the disk. flashed: it is still the size it was flashed at. In every
+# case here the erase ahead of the grow must have got there first, so the check
+# after the grow must not have remade anything (REMADE_LINE).
 expect_new() {
     local why="" part fs
     identity
@@ -357,6 +366,9 @@ expect_new() {
     case "$2" in
         grown)   fills_disk || why="${why:+$why, }the partition did not grow" ;;
         flashed) [ "${part}" -eq $((DATA_SIZE * MIB)) ] || why="${why:+$why, }the partition is ${part} bytes" ;;
+    esac
+    case "${OUT}" in
+        *"${REMADE_LINE}"*) why="${why:+$why, }the check after the grow remade it, not the erase ahead of the grow" ;;
     esac
     if [ -n "${3:-}" ]; then
         case "${OUT}" in
@@ -421,7 +433,7 @@ flash gpt empty
 [ "$(part_bytes)" -eq $((DATA_SIZE * MIB)) ] || die "the reflash did not put /data back at its flashed size"
 [ "$(blkid -p -o value -s TYPE "${DATA}")" = ext4 ] || die "the reflash did not leave the old filesystem behind"
 boot
-expect_new "reflash: the previous installation's filesystem is remade, over the whole disk" grown "${STALE_LINE}"
+expect_new "reflash: the previous installation's filesystem is remade, over the whole disk" grown "${ERASE_LINE}"
 
 # --- (b) ... and the first boot after it dies between the grow and the mkfs ---
 used_board
@@ -437,10 +449,13 @@ boot
 expect_new "reflash, first boot cut short: the next boot does not find the old filesystem" grown "carries no signature at all"
 
 # --- (c) a reflash onto a board whose /data cannot grow -----------------------
+# The check after the grow would remake this one on its own, because the
+# partition is still the size it was flashed at. Only ERASE_LINE shows that
+# the erase ahead of the grow ran.
 used_board
 flash gpt-tail empty
 boot
-expect_new "reflash, no room to grow: remade at the flashed size" flashed "${STALE_LINE}"
+expect_new "reflash, no room to grow: erased ahead of the grow, remade at the flashed size" flashed "${ERASE_LINE}"
 
 # --- (d) a healthy /data is kept ---------------------------------------------
 used_board
@@ -517,7 +532,7 @@ arm_encryption
 boot "${CRYPT}"
 why=$(expect_converted)
 case "${OUT}" in
-    *"${STALE_LINE}"*"nothing to carry across the wipe"*) ;;
+    *"${ERASE_LINE}"*"nothing to carry across the wipe"*) ;;
     *) why="${why:+$why, }the old filesystem was not erased before the identity carry" ;;
 esac
 fills_disk || why="${why:+$why, }the partition did not grow"
@@ -534,7 +549,7 @@ arm_encryption
 boot "${CRYPT}"
 why=$(expect_converted)
 case "${OUT}" in
-    *"is being remade"*) why="${why:+$why, }a /data in use was erased" ;;
+    *"${ERASE_LINE}"*|*"${REMADE_LINE}"*) why="${why:+$why, }a /data in use was erased" ;;
 esac
 carried=$(tar -xOf /config/backup/configuration.tar etc/wendyos/device-uuid 2>/dev/null)
 [ "${carried}" = "0b9e8a52-old-installation" ] || why="${why:+$why, }the device identity was not carried to /config"

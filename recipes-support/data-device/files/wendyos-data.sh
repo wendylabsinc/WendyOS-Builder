@@ -898,6 +898,9 @@ fs_fits_device() {
 # 1.47.4: "Invalid argument while reading journal super block", exit 1. When
 # it prints no size at all the answer here is no, and prepare_filesystem
 # decides after the grow exactly as it did before this function existed.
+#
+# On a yes it leaves _fs_bytes and _bytes set, and erase_stale_filesystem logs
+# them: the two sizes are the whole reason for the erase.
 fs_overruns_device() {
     _sb=$(dumpe2fs -h "$1" 2>/dev/null)
     _blocks=$(sb_field "Block count" "$_sb")
@@ -913,7 +916,8 @@ fs_overruns_device() {
         esac
     done
 
-    [ $((_blocks * _bsize)) -gt "$_bytes" ]
+    _fs_bytes=$((_blocks * _bsize))
+    [ "$_fs_bytes" -gt "$_bytes" ]
 }
 
 # Erase an ext4 filesystem that is larger than the partition, BEFORE the
@@ -992,7 +996,11 @@ erase_stale_filesystem() {
         return 0
     fi
 
-    announce "the ext4 filesystem on $DATA does not fit the partition (a stale superblock from a prior, larger layout), so it is being remade"
+    # Its own line, not the one prepare_filesystem logs when it remakes a
+    # filesystem after the grow, so the journal and the tests can tell which
+    # of the two found it. It also says "erased", not "remade": on the
+    # conversion path no ext4 is made in its place.
+    announce "the ext4 filesystem on $DATA is $_fs_bytes bytes, larger than the partition ($_bytes bytes), so a previous installation left it and it is being erased before the partition is grown"
     timeout "$TOOL_TIMEOUT" wipefs -a "$DATA" >/dev/null 2>&1 \
         || finish format_failed 1 "$DATA carries a filesystem that does not fit it and wipefs could not erase it ($(exit_reason $?)), so /data cannot be mounted"
 }
