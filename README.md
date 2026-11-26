@@ -26,6 +26,24 @@ This repository provides the meta-layer and build flow to build **WendyOS** — 
 | Qualcomm Dragonwing IQ-9075 EVK | QCS9075 (aarch64) | 12 GB | `dragonwing-iq9075` | `iq-9075-evk-wendyos` | UFS (EDL / qdl) | wendyos-update |
 | Arduino UNO Q | QRB2210 (aarch64) | 2 / 4 GB | `arduino-uno-q` | `arduino-uno-q-wendyos` | eMMC (EDL / qdl) | wendyos-update |
 
+### Experimental Unitree Go2 EDU build
+
+`BOARD=unitree-go2` selects the Go2 EDU expansion dock with the Jetson Orin
+NX 16 GB module (P3767-0000) and NVMe. It uses the current Jetson Linux BSP
+and builds a Tegra recovery bundle. The dock recovery USB-C is configured
+for USB 2.0 device mode. The robot-facing Ethernet port uses
+`192.168.123.18/24`, with no default route on that port.
+
+```bash
+make setup BOARD=unitree-go2
+make build MACHINE=unitree-go2-orin-nx
+```
+
+Start hardware bring-up with the bundle's Linux `initrd-flash` workflow
+and a matching QSPI and NVMe backup. Confirm APX recovery, the module SKU,
+and the dock revision before flashing. The Go2 build has no published
+Wendy CLI installer artifact.
+
 ## TL;DR
 
 ```bash
