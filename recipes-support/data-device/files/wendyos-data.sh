@@ -20,8 +20,9 @@
 # format_failed, fsck_failed and not_ext4 outcomes report, on every board
 # including the ones that can never encrypt.
 #
-# It also PREPARES a plain /data -- grow the partition to fill the disk, then
-# make sure the partition carries a filesystem the kernel can mount. That work
+# It also PREPARES a plain /data -- erase a filesystem a previous installation
+# left behind, grow the partition to fill the disk, then make sure the
+# partition carries a filesystem the kernel can mount, in that order. That work
 # comes from grow-data-part.sh and wendyos-data-init.sh, which this program
 # replaces (C57). Three programs ran before data.mount and all three moved the
 # GPT backup header then ran `parted resizepart`, and every /data ordering bug
@@ -709,8 +710,9 @@ find_cryptsetup_helper() {
 # in `systemctl --failed` to see.
 #
 # One unit cannot carry two timeouts, so the split lives here: sfdisk
-# --relocate, parted, e2fsck and mkfs.ext4 run under `timeout $TOOL_TIMEOUT`,
-# and blkdiscard and the rest of the conversion deliberately do not.
+# --relocate, parted, e2fsck, mkfs.ext4 and the wipefs of a stale filesystem
+# run under `timeout $TOOL_TIMEOUT`, and blkdiscard and the rest of the
+# conversion deliberately do not.
 # grow_partition() is shared with the conversion path, so its parted and sfdisk
 # --relocate are bounded there too -- that is the intent, not an oversight: a
 # wedged parted on a conversion boot would stall forever under an infinite unit
@@ -848,6 +850,11 @@ sb_field() {
 # cannot read the superblock at all counts as "does not fit" -- that is the
 # same case, seen from the tool that overshoots the device.
 #
+# The answer is only worth having for the partition AS FLASHED. Once the
+# partition has been grown back to the end of the disk the old filesystem fits
+# it again, which is why erase_stale_filesystem asks before the grow, with a
+# stricter question of its own (fs_overruns_device).
+#
 # Carried over from wendyos-data-init.sh, which found this the hard way.
 fs_fits_device() {
     # The superblock is captured in a variable, not through a temp file and not
@@ -876,6 +883,126 @@ fs_fits_device() {
     _bytes=${_bytes:-0}
     [ -n "$_blocks" ] && [ -n "$_bsize" ] && [ "$_bytes" -gt 0 ] \
         && [ $((_blocks * _bsize)) -le "$_bytes" ]
+}
+
+# True when the ext4 superblock on $1 itself states a size larger than the
+# device. Not the negation of fs_fits_device, and the difference is deliberate.
+# That function decides whether a filesystem may be KEPT, so it counts a
+# superblock it cannot read as one that does not fit. This one decides whether
+# a filesystem may be ERASED ahead of the grow, so it needs the superblock to
+# say so in numbers, and anything less is a no.
+#
+# dumpe2fs's exit status is ignored for that reason. On a filesystem that
+# overshoots its device it prints the whole superblock and then fails on the
+# journal, which lies past the end of the device -- measured with e2fsprogs
+# 1.47.4: "Invalid argument while reading journal super block", exit 1. When
+# it prints no size at all the answer here is no, and prepare_filesystem
+# decides after the grow exactly as it did before this function existed.
+#
+# On a yes it leaves _fs_bytes and _bytes set, and erase_stale_filesystem logs
+# them: the two sizes are the whole reason for the erase.
+fs_overruns_device() {
+    _sb=$(dumpe2fs -h "$1" 2>/dev/null)
+    _blocks=$(sb_field "Block count" "$_sb")
+    _bsize=$(sb_field "Block size" "$_sb")
+    _bytes=$(blockdev --getsize64 "$1" 2>/dev/null)
+    # Digits or nothing: a field that is not a number must never reach $(( )),
+    # where it would end the program instead of answering no.
+    for _n in "$_blocks" "$_bsize" "$_bytes"; do
+        case $_n in
+            ''|*[!0-9]*)
+                return 1
+                ;;
+        esac
+    done
+
+    _fs_bytes=$((_blocks * _bsize))
+    [ "$_fs_bytes" -gt "$_bytes" ]
+}
+
+# Erase an ext4 filesystem that is larger than the partition, BEFORE the
+# partition is grown (WDY-4295). The first step of prepare_plain and of the
+# conversion.
+#
+# A reflash writes a new partition table, which puts /data back at its small
+# stock size, and on the boards whose flash layout carves /data empty it writes
+# nothing inside the partition. The previous installation's filesystem is
+# therefore still on the disk, at the same start, and that installation had
+# grown it to the end of the disk. Its size is the one thing on the disk that
+# tells it from a filesystem this installation made: it is larger than the
+# partition as flashed, which is what fs_overruns_device tests.
+#
+# THE ORDER IS THE WHOLE POINT. Grow the partition first and it reaches the
+# end of the disk again, the old filesystem fits it exactly, and the board
+# comes back with the previous installation's device identity, cloud
+# enrollment and apps. wendyos-data-init.sh asked before it grew. Folding it
+# into this program (C57) put the grow first, and from then on the check in
+# prepare_filesystem could fire only when the grow had failed.
+#
+# ERASED HERE, NOT REMEMBERED AND REMADE AFTER THE GROW. Once the partition has
+# grown the question cannot be asked again, so the answer may not live in a
+# variable alone: a power cut between the grow and the mkfs would leave the
+# next boot looking at a grown partition and an old filesystem that fits it.
+# With the signature gone, that boot finds a partition carrying nothing and
+# makes the filesystem. This is the stale LUKS header's rule applied to ext4:
+# erase and fall through. From here on the board is in the state of one flashed
+# onto a new disk and takes the same path, so prepare_filesystem makes the new
+# filesystem once, over the whole grown partition.
+#
+# IT CANNOT FIRE ON A /data THAT WAS IN USE ON THE LAST BOOT. The kernel
+# refuses to mount an ext4 whose block count exceeds its device ("bad geometry:
+# block count N exceeds size of device"), mkfs.ext4 and resize2fs never make a
+# filesystem larger than the device they are given, and nothing in WendyOS
+# makes a partition smaller. So a filesystem that mounted under this partition
+# table fits the partition now:
+#
+#   a later boot        the filesystem fills the grown partition exactly.
+#   an A/B update       writes a root slot, never the partition table.
+#   a first boot cut    the partition is grown and the filesystem is still the
+#   short               size it was made at, or part way through the online
+#                       resize. Smaller than the partition either way.
+#   an image written    the same: a small filesystem on a larger disk.
+#   to a larger disk
+#   no room to grow     nothing changes size at all.
+#
+# What is left is a partition table newer than the filesystem under it, which
+# is a reflash, or the same thing done by hand.
+#
+# NOT ON THE BOARD THAT KNOWS /data BY ITS FILESYSTEM LABEL. DATA is the alias
+# only on an MBR table (resolve_data_device), and there udev builds the alias
+# from the ext4 label (99-wendyos-data-mbr.rules). Erasing the signature would
+# erase the only name this program has for the partition: the mkfs that follows
+# would have no device to work on, and every later boot would find no /data at
+# all. That board's image ships /data with a filesystem of its own, so a
+# reflash puts a new superblock over the old one and a stale filesystem cannot
+# come out of a flash there. It keeps the check in prepare_filesystem, after
+# the grow, exactly as before.
+#
+# Like prepare_filesystem this can end the program itself through finish, so
+# both callers clear the marker first.
+erase_stale_filesystem() {
+    if [ "$DATA" = "$ALIAS" ]; then
+        return 0
+    fi
+
+    # probe_data refuses to continue on anything but a clear answer, so a probe
+    # that FAILED can never be read as an ext4 that is too large.
+    probe_data
+    if [ "$fs_type" != "ext4" ]; then
+        return 0
+    fi
+
+    if ! fs_overruns_device "$DATA"; then
+        return 0
+    fi
+
+    # Its own line, not the one prepare_filesystem logs when it remakes a
+    # filesystem after the grow, so the journal and the tests can tell which
+    # of the two found it. It also says "erased", not "remade": on the
+    # conversion path no ext4 is made in its place.
+    announce "the ext4 filesystem on $DATA is $_fs_bytes bytes, larger than the partition ($_bytes bytes), so a previous installation left it and it is being erased before the partition is grown"
+    timeout "$TOOL_TIMEOUT" wipefs -a "$DATA" >/dev/null 2>&1 \
+        || finish format_failed 1 "$DATA carries a filesystem that does not fit it and wipefs could not erase it ($(exit_reason $?)), so /data cannot be mounted"
 }
 
 # Make sure the raw partition carries a filesystem the kernel can mount, and
@@ -913,9 +1040,10 @@ prepare_filesystem() {
         fi
 
         # Nothing at all, and now proven so: no filesystem and no partition
-        # table. Reachable three ways: a flash layout that carves /data empty,
-        # the stale-LUKS erase above falling through, and a bad flash or a
-        # hand-run wipefs -- which used to need a reflash to recover.
+        # table. Reachable four ways: a flash layout that carves /data empty,
+        # the stale-LUKS erase above falling through, erase_stale_filesystem
+        # doing the same to a previous installation's ext4, and a bad flash or
+        # a hand-run wipefs -- which used to need a reflash to recover.
         #
         # The line below claims "no signature at all", and that is true only
         # because of the PTTYPE check above it. Whoever removes that check has
@@ -943,6 +1071,13 @@ prepare_filesystem() {
         finish not_ext4 1 "$DATA carries a $fs_type signature, which is not ours to make or to replace, so it is left exactly as it is and /data cannot be mounted"
     fi
 
+    # On the plain path and the conversion erase_stale_filesystem asked before
+    # the grow and erased a filesystem whose superblock overruns the partition,
+    # so one of those never gets this far there (WDY-4295). The check stays for
+    # what that leaves: a superblock dumpe2fs cannot read at all, and every
+    # caller that does not come through it -- the device with no parent disk,
+    # where nothing is grown and the partition is still the size the question
+    # needs, and the MBR board, where the erase is not allowed.
     if ! fs_fits_device "$DATA"; then
         announce "the ext4 filesystem on $DATA does not fit the partition (a stale superblock from a prior, larger layout), so it is being remade"
         # -F because blkid still reports a valid ext4 here and mkfs.ext4 would
@@ -986,9 +1121,17 @@ prepare_filesystem() {
 # marker spoke for is gone -- this path has already established that /data is
 # not LUKS -- so clearing it is what C34 asks for.
 #
+# The order of the three steps after that is load-bearing (WDY-4295): the
+# stale check, then the grow, then the filesystem. The grow is what makes a
+# previous installation's filesystem fit the partition again, so the check that
+# tells the two apart has to come before it -- see erase_stale_filesystem.
+#
 # Reads the globals resolved in resolve_device().
 prepare_plain() {
     clear_marker
+
+    # Before the grow, never after it (WDY-4295).
+    erase_stale_filesystem
 
     # Not fatal here, unlike on the conversion path: a /data that did not grow
     # is smaller than it could be, and still mounts and works.
@@ -1315,7 +1458,8 @@ helper=$(find_cryptsetup_helper)
 #
 # ONE CALLER SITS BEFORE BOTH OF THOSE, and the two paragraphs above are scoped
 # to the rest. The failed write_marker at step 1 aborts before the wipe and
-# before the grow, so for that caller: nothing has been destroyed, so the
+# before the grow, so for that caller nothing in use has been destroyed (step 0
+# erases only a previous installation's filesystem), so the
 # "contents are gone by intent" reasoning does not apply and is not needed --
 # prepare_filesystem formats only a device carrying no filesystem AND no
 # partition table, or an ext4 superblock that overruns its partition, so a
@@ -1489,6 +1633,12 @@ preserve_identity() {
 }
 
 announce "converting /data to LUKS2 (this device was armed through $CONF)"
+
+# 0) A reflash leaves the previous installation's ext4 larger than the
+#    partition, and preserve_identity cannot mount it. Erased before the marker,
+#    because erase_stale_filesystem can end the program through finish.
+clear_marker
+erase_stale_filesystem
 
 # 1) The marker brackets the whole conversion and is cleared LAST, immediately
 #    before the reboot (C34).
