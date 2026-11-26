@@ -143,9 +143,9 @@ ROOTFS_POSTPROCESS_COMMAND += "stamp_boot_screen"
 # guarded against is a drift of the string.
 #
 # Finding the path is option A, reading it back out of the finished rootfs from
-# the two places that decide it. fstab carries a /data line on x86, VM and every
-# RPi. data.mount is the only source on Tegra and Qualcomm, which have no /data
-# fstab line at all -- rpi-image.inc:66, x86-image.inc:78 and vm-image.inc:78
+# the two places that decide it. fstab carries a /data line on x86, VM, every
+# RPi and Rockchip. data.mount is the only source on Tegra and Qualcomm, which
+# have no /data fstab line at all -- the rpi, x86, vm and rockchip image incs
 # remove the data-mount package, the other two keep it. No board has both, so
 # two answers that disagree are a defect rather than a board variant.
 check_data_ordering() {
@@ -390,6 +390,7 @@ require ${@'conf/distro/include/rpi-image.inc' if 'rpi' in d.getVar('MACHINEOVER
 require ${@'conf/distro/include/x86-image.inc' if 'x86-wendyos' in d.getVar('MACHINEOVERRIDES').split(':') else ''}
 require ${@'conf/distro/include/vm-image.inc' if 'vm-wendyos' in d.getVar('MACHINEOVERRIDES').split(':') else ''}
 require ${@'conf/distro/include/qcom-image.inc' if 'qcom-wendyos' in d.getVar('MACHINEOVERRIDES').split(':') else ''}
+require ${@'conf/distro/include/rockchip-image.inc' if 'rockchip-wendyos' in d.getVar('MACHINEOVERRIDES').split(':') else ''}
 
 # Config sanity check. Encrypting /data needs a TPM at runtime -- the /data
 # resolver seals the LUKS2 keyslot to it -- so WENDYOS_DATA_ENCRYPTED turns

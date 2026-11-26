@@ -1,0 +1,11 @@
+AMPAK AP6256 NVRAM and Bluetooth patch (BCM43456 Wi-Fi, BCM4345C5 Bluetooth)
+
+brcmfmac43456-sdio.txt (the module's NVRAM) and BCM4345C5.hcd are proprietary
+files from the module and chip vendors. They are taken unmodified from
+https://github.com/armbian/firmware (commit
+db8cc456dad5ad511b04f8a5130acda392cad20b, brcm/), which redistributes them, as
+does the board vendor in its own images. No license text accompanies them
+upstream. Review the redistribution terms before shipping a commercial image.
+
+The Wi-Fi firmware and CLM blob come from Raspberry Pi's firmware-nonfree under
+the Synaptics licence (rpidistro-firmware-nonfree-*-copyright).

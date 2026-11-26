@@ -17,7 +17,8 @@ RULE = FILES / "99-wendyos-boot.rules"
 FSTABS = ROOT / "recipes-core/base-files/files"
 LINKS_CLASS = ROOT / "classes/wendyos-links-check.bbclass"
 # Every image recipe snippet whose fstab mounts /dev/wendyos links.
-LINK_IMAGES = (ROOT / "meta-rpi-extensions/recipes-core/images/wendyos-image.bbappend",)
+LINK_IMAGES = (ROOT / "meta-rpi-extensions/recipes-core/images/wendyos-image.bbappend",
+               ROOT / "conf/distro/include/rockchip-image.inc")
 PI_RULES = ("99-wendyos-boot.rules", "99-wendyos-config.rules", "99-wendyos-data.rules")
 PI_PARTITIONS = ("boot", "config", "rootfsA", "rootfsB", "data")
 

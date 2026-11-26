@@ -1,0 +1,28 @@
+# --- Kernel cmdline + boot (Rockchip) -------------------------------------
+# Kernel and DTB come from the selected slot. The mmc aliases make U-Boot's
+# mmc N Linux's mmcblkN; a PARTUUID would also match a disk cloned from the same
+# image. rw: the A/B fstab has no "/" entry. panic=10 and rootwait=60 turn a
+# trial slot that panics or never finds root into a reboot to the fall-back.
+# Any console= makes the kernel ignore the DT stdout-path (the debug UART).
+if test "${wendyos_if}" = "mmc"; then
+    setenv wendyos_root /dev/mmcblk${wendyos_dev}p${wendyos_root_part}
+elif test "${wendyos_if} ${wendyos_dev}" = "nvme 0"; then
+    setenv wendyos_root /dev/nvme0n1p${wendyos_root_part}
+elif part uuid ${wendyos_if} ${wendyos_dev}:${wendyos_root_part} wendyos_root_uuid; then
+    setenv wendyos_root PARTUUID=${wendyos_root_uuid}
+else
+    echo "wendyos: cannot read PARTUUID of ${wendyos_if} ${wendyos_dev}:${wendyos_root_part}; resetting"
+    reset
+fi
+setenv bootargs "@@WENDYOS_CONSOLE_ARGS@@ root=${wendyos_root} rootwait=60 rw panic=10"
+
+# A failed load or a returning boot falls through to reset, which during a
+# trial advances bootcount toward the fall-back above.
+if ext4load ${wendyos_if} ${wendyos_dev}:${wendyos_root_part} ${fdt_addr_r} /boot/@@WENDYOS_ROCKCHIP_DTB@@; then
+    if ext4load ${wendyos_if} ${wendyos_dev}:${wendyos_root_part} ${kernel_addr_r} /boot/@@KERNEL_IMAGETYPE@@; then
+        booti ${kernel_addr_r} - ${fdt_addr_r}
+    fi
+fi
+
+echo "wendyos: slot ${wendyos_boot_slot} failed to boot; resetting"
+reset

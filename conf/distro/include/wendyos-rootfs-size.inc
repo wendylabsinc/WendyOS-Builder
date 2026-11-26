@@ -48,6 +48,10 @@ WENDYOS_ROOTFS_SIZE_KB:x86-wendyos = "12582912"
 # ~89.6 GiB of the 114.4 GiB UFS LUN 0 for /data.
 WENDYOS_ROOTFS_SIZE_KB:qcom-wendyos = "12582912"
 
+# Rockchip A/B (rockchip-wendy-ab.wks): 8 GiB/slot, the same as the Pi. These
+# are SD-card boards too, and the measured rootfs is far below it.
+WENDYOS_ROOTFS_SIZE_KB:rockchip-wendyos = "8388608"
+
 # Expose it to wic so the RPi A/B slots derive their --fixed-size straight from
 # this one constant (rpi-wendy-ab*.wks: `--fixed-size ${WENDYOS_ROOTFS_SIZE_KB}K`
 # — wic reads a K suffix as KiB, so slot == the pinned image size exactly, with

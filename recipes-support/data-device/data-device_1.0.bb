@@ -44,9 +44,11 @@ SRC_URI:append:raspberrypi3-64 = " \
     file://10-device-mbr.conf \
     "
 
-# Only the GPT Pi fstab mounts /boot through the /dev/wendyos/boot link, so no
-# other board ships its rule. On the Pi 3 (MBR, no names) it never matches.
+# Only the GPT Pi and Rockchip fstabs mount /boot through the /dev/wendyos/boot
+# link, so no other board ships its rule. On the Pi 3 (MBR, no names) it never
+# matches.
 SRC_URI:append:rpi = " file://99-wendyos-boot.rules"
+SRC_URI:append:rockchip-wendyos = " file://99-wendyos-boot.rules"
 
 # The package contents differ per machine. Without this the package is shared
 # across every board of the same tune, and sstate could hand an rpi4/rpi5 build
@@ -86,6 +88,9 @@ do_install() {
 do_install:append:rpi() {
     install -m 0644 ${UNPACKDIR}/99-wendyos-boot.rules ${D}${sysconfdir}/udev/rules.d/
 }
+do_install:append:rockchip-wendyos() {
+    install -m 0644 ${UNPACKDIR}/99-wendyos-boot.rules ${D}${sysconfdir}/udev/rules.d/
+}
 
 do_install:append:raspberrypi3-64() {
     install -m 0644 ${UNPACKDIR}/99-wendyos-data-mbr.rules ${D}${sysconfdir}/udev/rules.d/
@@ -111,6 +116,7 @@ FILES:${PN} = " \
     ${systemd_system_unitdir}/wendyos-data.service.d/10-device.conf \
     "
 FILES:${PN}:append:rpi = " ${sysconfdir}/udev/rules.d/99-wendyos-boot.rules"
+FILES:${PN}:append:rockchip-wendyos = " ${sysconfdir}/udev/rules.d/99-wendyos-boot.rules"
 FILES:${PN}:append:raspberrypi3-64 = " \
     ${sysconfdir}/udev/rules.d/99-wendyos-data-mbr.rules \
     ${systemd_system_unitdir}/wendyos-data.service.d/10-device-mbr.conf \
