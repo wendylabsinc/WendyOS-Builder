@@ -2455,7 +2455,12 @@ func applyFlashpack(meta *VersionMetadata, storageType, flashpackPath, flashpack
 }
 
 func isRecoveryFirstT234(deviceType string) bool {
-	return deviceType == "jetson-orin-nano" || deviceType == "jetson-agx-orin"
+	switch deviceType {
+	case "jetson-orin-nano", "jetson-agx-orin", "unitree-go2", "unitree-g1-pc2":
+		return true
+	default:
+		return false
+	}
 }
 
 // isEDLFlashBundle reports whether a device's install artifact is an EDL flash
@@ -2700,15 +2705,17 @@ func validateRecoveryPromotion(deviceType string, source VersionMetadata, paths 
 	if source.InstallMode != "recovery" {
 		return nil
 	}
-	required := []struct{ label, source, copied string }{
+	type recoveryArtifact struct{ label, source, copied string }
+	required := []recoveryArtifact{
 		{"NVMe flashpack", source.NVMEFlashpackPath, paths.nvmeFlashpack},
-		{"NVMe rootfs-only image", source.NVMERootfsOnlyPath, paths.nvmeRootfs},
 	}
+	nvmeRootfs := recoveryArtifact{"NVMe rootfs-only image", source.NVMERootfsOnlyPath, paths.nvmeRootfs}
 	switch deviceType {
 	case "jetson-orin-nano":
-		required = append(required, struct{ label, source, copied string }{"SD rootfs-only image", source.SDRootfsOnlyPath, paths.sdRootfs})
+		required = append(required, nvmeRootfs, recoveryArtifact{"SD rootfs-only image", source.SDRootfsOnlyPath, paths.sdRootfs})
 	case "jetson-agx-orin":
-		required = append(required, struct{ label, source, copied string }{"eMMC flashpack", source.EMMCFlashpackPath, paths.emmcFlashpack})
+		required = append(required, nvmeRootfs, recoveryArtifact{"eMMC flashpack", source.EMMCFlashpackPath, paths.emmcFlashpack})
+	case "unitree-go2", "unitree-g1-pc2":
 	default:
 		return fmt.Errorf("unsupported recovery-first promotion target %q", deviceType)
 	}

@@ -29,6 +29,20 @@ HOST_GENERATED_PARTITION_TYPES = frozenset({
 })
 
 TARGETS = {
+    ("unitree-go2", "nvme"): {
+        "module_id": "3767", "module_sku": "0000",
+        "carrier_id": "3768", "carrier_sku": "0000",
+        "rootfs_device": "nvme0n1",
+        "machine": "unitree-go2-orin-nx",
+        "usb_product_id": "0x7323",
+    },
+    ("unitree-g1-pc2", "nvme"): {
+        "module_id": "3767", "module_sku": "0000",
+        "carrier_id": "3768", "carrier_sku": "0000",
+        "rootfs_device": "nvme0n1",
+        "machine": "unitree-g1-pc2-orin-nx",
+        "usb_product_id": "0x7323",
+    },
     ("jetson-orin-nano", "nvme"): {
         "module_id": "3767", "module_sku": "0005",
         "carrier_id": "3768", "carrier_sku": "0000",
@@ -173,7 +187,7 @@ def generate(root: pathlib.Path, *, version: str, device: str, storage: str,
         "schema": SCHEMA,
         "family": FAMILY,
         "protocol": PROTOCOL,
-        "usb_product_id": USB_PRODUCT_ID,
+        "usb_product_id": target.get("usb_product_id", USB_PRODUCT_ID),
         "wendyos_version": version,
         "target": {
             "device": device,

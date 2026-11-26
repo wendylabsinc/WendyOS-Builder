@@ -132,6 +132,24 @@ func TestValidateRecoveryPromotionRequiresQualifiedMatrix(t *testing.T) {
 	}
 }
 
+func TestUnitreePromotionRequiresOnlyTheNVMeFlashpack(t *testing.T) {
+	for _, device := range []string{"unitree-go2", "unitree-g1-pc2"} {
+		t.Run(device, func(t *testing.T) {
+			if !isRecoveryFirstT234(device) {
+				t.Fatal("manifest must use recovery install mode")
+			}
+			source := VersionMetadata{InstallMode: "recovery", NVMEFlashpackPath: "nightly/recovery.flashpack"}
+			paths := promotedRecoveryPaths{nvmeFlashpack: "stable/recovery.flashpack"}
+			if err := validateRecoveryPromotion(device, source, paths); err != nil {
+				t.Fatal(err)
+			}
+			if err := validateRecoveryPromotion(device, source, promotedRecoveryPaths{}); err == nil {
+				t.Fatal("promotion accepted a missing NVMe flashpack")
+			}
+		})
+	}
+}
+
 // Test validation functions
 func TestValidateDeviceType(t *testing.T) {
 	tests := []struct {

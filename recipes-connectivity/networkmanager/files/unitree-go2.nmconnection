@@ -1,0 +1,14 @@
+[connection]
+id=unitree-go2
+type=ethernet
+interface-name=enP8p1s0
+autoconnect-priority=50
+
+[ipv4]
+method=manual
+address1=192.168.123.18/24
+never-default=true
+
+[ipv6]
+method=link-local
+never-default=true

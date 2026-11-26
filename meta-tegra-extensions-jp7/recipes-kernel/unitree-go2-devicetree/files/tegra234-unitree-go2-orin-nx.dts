@@ -1,0 +1,85 @@
+// SPDX-License-Identifier: GPL-2.0-only
+
+#include "tegra234-p3768-0000+p3767-0000-nv.dts"
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/gpio/tegra234-gpio.h>
+
+/ {
+	model = "Unitree Go2 EDU Orin NX 16GB expansion dock";
+
+	go2_usb_a_vbus: regulator-usb-a-vbus {
+		compatible = "regulator-fixed";
+		regulator-name = "go2-usb-a-vbus";
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+		gpio = <&gpio TEGRA234_MAIN_GPIO(P, 6) GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		vin-supply = <&vdd_5v0_sys>;
+	};
+};
+
+/*
+ * Go2 dock wiring as described and tested on R39.2 by RoboLegion:
+ * recovery USB-C on USB2 port 0, SuperSpeed Type-A on USB2/USB3 port 1,
+ * and DisplayPort Type-C on USB2 port 2. Keep the NVIDIA-compatible
+ * strings so the module's dynamic overlays can still match.
+ */
+&{/bus@0/i2c@c240000} {
+	/delete-node/ fusb301@25;
+};
+
+&{/bus@0/padctl@3520000} {
+	pads {
+		usb3 {
+			lanes {
+				usb3-0 {
+					status = "disabled";
+				};
+
+				usb3-2 {
+					nvidia,function = "xusb";
+					status = "okay";
+				};
+			};
+		};
+	};
+
+	ports {
+		usb2-0 {
+			mode = "peripheral";
+			/delete-node/ port;
+		};
+
+		usb2-1 {
+			vbus-supply = <&go2_usb_a_vbus>;
+		};
+
+		usb3-0 {
+			nvidia,usb2-companion = <0>;
+			status = "disabled";
+		};
+
+		usb3-1 {
+			nvidia,usb2-companion = <1>;
+		};
+
+		usb3-2 {
+			nvidia,usb2-companion = <2>;
+			status = "okay";
+		};
+	};
+};
+
+&{/bus@0/usb@3550000} {
+	phys = <&{/bus@0/padctl@3520000/pads/usb2/lanes/usb2-0}>;
+	phy-names = "usb2-0";
+};
+
+&{/bus@0/usb@3610000} {
+	phys = <&{/bus@0/padctl@3520000/pads/usb2/lanes/usb2-0}>,
+	       <&{/bus@0/padctl@3520000/pads/usb2/lanes/usb2-1}>,
+	       <&{/bus@0/padctl@3520000/pads/usb2/lanes/usb2-2}>,
+	       <&{/bus@0/padctl@3520000/pads/usb3/lanes/usb3-1}>,
+	       <&{/bus@0/padctl@3520000/pads/usb3/lanes/usb3-2}>;
+	phy-names = "usb2-0", "usb2-1", "usb2-2", "usb3-1", "usb3-2";
+};

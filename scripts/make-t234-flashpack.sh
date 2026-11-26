@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Produce a Jetson Orin-family (T234) "flashpack" from an extracted WendyOS
-# tegraflash bundle (jetson-agx-orin nvme/emmc, jetson-orin-nano nvme).
+# tegraflash bundle (jetson-agx-orin nvme/emmc, jetson-orin-nano nvme,
+# unitree-go2 nvme, unitree-g1-pc2 nvme).
 #
 # The flashpack is the single, self-describing artifact the wendy CLI downloads,
 # extracts and flashes from a Mac or Linux host. All of the offline (no-device)
@@ -57,7 +58,7 @@ done
 [ -n "$DEVICE" ]     || err "--device is required"
 [ -n "$STORAGE" ]    || err "--storage is required"
 case "$DEVICE/$STORAGE" in
-    jetson-orin-nano/nvme|jetson-agx-orin/nvme|jetson-agx-orin/emmc) ;;
+    jetson-orin-nano/nvme|jetson-agx-orin/nvme|jetson-agx-orin/emmc|unitree-go2/nvme|unitree-g1-pc2/nvme) ;;
     *) err "unsupported T234 recovery target: $DEVICE/$STORAGE";;
 esac
 
@@ -92,6 +93,12 @@ export BOARDID="${DEFAULTS[BOARDID]-}" FAB="${DEFAULTS[FAB]-}" BOARDSKU="${DEFAU
 export BOARDREV="${DEFAULTS[BOARDREV]-}" CHIPREV="${DEFAULTS[CHIPREV]-}"
 export serial_number=""
 { [ -n "$BOARDID" ] && [ -n "$FAB" ]; } || err "DEFAULTS[BOARDID]/[FAB] missing from .env.initrd-flash"
+case "$DEVICE" in
+    unitree-go2|unitree-g1-pc2)
+        [[ "$MACHINE" = "${DEVICE}-orin-nx" && "$BOARDID" = 3767 && "$BOARDSKU" = 0000 ]] ||
+            err "$DEVICE requires its own Orin NX 16 GB tegraflash bundle"
+        ;;
+esac
 
 logfile="$here/make-t234-flashpack.log"
 : > "$logfile"

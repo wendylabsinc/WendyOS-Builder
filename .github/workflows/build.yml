@@ -23,6 +23,8 @@ on:
           - jetson-agx-orin
           - jetson-orin-nano
           - jetson-agx-thor
+          - unitree-go2
+          - unitree-g1-pc2
           - generic-x86-64
           - dragonwing-iq-8275
           - dragonwing-iq-9075
@@ -131,7 +133,8 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Build version: $VERSION"
 
-      - id: set
+      - name: Select device matrix
+        id: set
         env:
           EVENT_NAME: ${{ github.event_name }}
           INPUT_DEVICE: ${{ inputs.device }}
@@ -165,6 +168,8 @@ jobs:
             {"device":"jetson-agx-thor","storages":"nvme"},
             {"device":"jetson-agx-orin","storages":"nvme emmc"},
             {"device":"jetson-orin-nano","storages":"nvme sd"},
+            {"device":"unitree-go2","storages":"nvme"},
+            {"device":"unitree-g1-pc2","storages":"nvme"},
             {"device":"dragonwing-iq-8275","storages":"ufs"},
             {"device":"generic-x86-64","storages":"disk"},
             {"device":"dragonwing-iq-9075","storages":"ufs"},
@@ -306,6 +311,8 @@ jobs:
               jetson-agx-orin:nvme|jetson-agx-orin:emmc)  BOARD=jetson-agx-orin;  MACHINE=jetson-agx-orin-devkit-wendyos ;;
               jetson-orin-nano:nvme|jetson-orin-nano:sd)  BOARD=jetson-orin-nano; MACHINE=jetson-orin-nano-devkit-wendyos ;;
               jetson-agx-thor:nvme) BOARD=jetson-agx-thor;       MACHINE=jetson-agx-thor-devkit-nvme-wendyos ;;
+              unitree-go2:nvme)    BOARD=unitree-go2;          MACHINE=unitree-go2-orin-nx ;;
+              unitree-g1-pc2:nvme) BOARD=unitree-g1-pc2;       MACHINE=unitree-g1-pc2-orin-nx ;;
               generic-x86-64:disk)  BOARD=generic-x86-64;       MACHINE=genericx86-64-wendyos ;;
               dragonwing-iq-8275:ufs) BOARD=dragonwing-iq8275;   MACHINE=iq-8275-evk-wendyos ;;
               dragonwing-iq-9075:ufs) BOARD=dragonwing-iq9075;   MACHINE=iq-9075-evk-wendyos ;;
@@ -773,7 +780,7 @@ jobs:
       # the runner image.
 
       - name: Generate flashable image (Jetson)
-        if: startsWith(matrix.device, 'jetson-')
+        if: startsWith(matrix.device, 'jetson-') || matrix.device == 'unitree-go2' || matrix.device == 'unitree-g1-pc2'
         env:
           DEVICE: ${{ matrix.device }}
           MAP: ${{ steps.vars.outputs.map }}
@@ -834,7 +841,7 @@ jobs:
 
             # Build the explicit rootfs-only raw artifact from the external
             # layout. Targets that resolve to the same image file share it.
-            # eMMC and Thor remain recovery-only; their flashpack is built from the bundle.
+            # Recovery-only targets use the flashpack built from the bundle.
             case "$IMAGE_KIND" in
               generated-raw-img)
                 if [[ -z "${generated[$IMAGE_FILE]:-}" ]]; then
@@ -882,7 +889,7 @@ jobs:
         # flow against sandboxed pr/<N>/ flashpacks before merge. Cost: each PR
         # push now builds + zstd-compresses + uploads ~3 GB per Jetson flashpack.
         # Narrow to a label gate here if that per-PR cost becomes a problem.
-        if: startsWith(matrix.device, 'jetson-')
+        if: startsWith(matrix.device, 'jetson-') || matrix.device == 'unitree-go2' || matrix.device == 'unitree-g1-pc2'
         env:
           UPLOAD_VERSION: ${{ needs.detect-changes.outputs.version }}
           DEVICE: ${{ matrix.device }}
@@ -993,8 +1000,8 @@ jobs:
                 BMAP_FILE="${IMAGE_FILE}.bmap"
                 ;;
               tegraflash-bundle)
-                # eMMC / Thor NVMe install from the flashpack built from this
-                # bundle, which is therefore not published.
+                # Recovery-only targets install from the flashpack built from
+                # this bundle, so the source bundle stays in the build workspace.
                 if [[ "$FLASHPACK_REQUIRED" != "true" ]]; then
                   echo "::error::${DEVICE}/${STORAGE} ships a tegraflash bundle without a flashpack; nothing would be installable" >&2
                   exit 1
