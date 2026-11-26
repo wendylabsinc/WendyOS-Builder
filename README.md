@@ -7,6 +7,7 @@
 This repository provides the meta-layer and build flow to build **WendyOS** — a Yocto-based embedded Linux distribution — across a broad range of ARM64 hardware:
 - **NVIDIA Jetson** Developer Kits — Orin Nano, AGX Orin, and AGX Thor
 - **Raspberry Pi** — Pi 3, Pi 4, and Pi 5 (SD card; the Pi 3/4 image also boots from a USB disk, the Pi 5 image from NVMe)
+- **Orange Pi** — Orange Pi 5 Pro (Rockchip RK3588S; microSD, eMMC or NVMe), see [docs/orange-pi-5-pro.md](docs/orange-pi-5-pro.md)
 - **Generic x86_64 PCs** (experimental UEFI/BIOS disk image)
 
 ### Supported Hardware
@@ -25,6 +26,7 @@ This repository provides the meta-layer and build flow to build **WendyOS** — 
 | Qualcomm Dragonwing IQ-8275 EVK | QCS8275 (aarch64) | 12 GB | `dragonwing-iq8275` | `iq-8275-evk-wendyos` | UFS (EDL / qdl) | wendyos-update |
 | Qualcomm Dragonwing IQ-9075 EVK | QCS9075 (aarch64) | 12 GB | `dragonwing-iq9075` | `iq-9075-evk-wendyos` | UFS (EDL / qdl) | wendyos-update |
 | Arduino UNO Q | QRB2210 (aarch64) | 2 / 4 GB | `arduino-uno-q` | `arduino-uno-q-wendyos` | eMMC (EDL / qdl) | wendyos-update |
+| Orange Pi 5 Pro | Rockchip RK3588S | 4–16 GB | `orange-pi-5-pro` | `orangepi-5-pro-wendyos` | microSD, eMMC or NVMe (.wic) | wendyos-update |
 
 ## TL;DR
 
@@ -202,6 +204,10 @@ make build MACHINE=iq-9075-evk-wendyos
 # Arduino UNO Q (eMMC, flashed over EDL with qdl)
 make setup BOARD=arduino-uno-q
 make build MACHINE=arduino-uno-q-wendyos
+
+# Orange Pi 5 Pro (microSD, eMMC or NVMe)
+make setup BOARD=orange-pi-5-pro
+make build MACHINE=orangepi-5-pro-wendyos
 ```
 
 See [Intel BE200/BE202 support on IQ8/IQ9](docs/dragonwing-intel-wifi.md)
@@ -257,6 +263,7 @@ for optional driver installation, Bluetooth wiring and hardware testing status.
    BOARD=dragonwing-iq8275     ./meta-wendyos/bootstrap.sh
    BOARD=dragonwing-iq9075     ./meta-wendyos/bootstrap.sh
    BOARD=arduino-uno-q         ./meta-wendyos/bootstrap.sh
+   BOARD=orange-pi-5-pro       ./meta-wendyos/bootstrap.sh
    ```
 
    `MACHINE=<board-id>` remains supported as a deprecated alias (prints a
@@ -291,6 +298,7 @@ for optional driver installation, Bluetooth wiring and hardware testing status.
      - `dragonwing-iq8275`       → `iq-8275-evk-wendyos`
      - `dragonwing-iq9075`       → `iq-9075-evk-wendyos`
      - `arduino-uno-q`           → `arduino-uno-q-wendyos`
+     - `orange-pi-5-pro`         → `orangepi-5-pro-wendyos`
 
 4. **Build the image**
 
