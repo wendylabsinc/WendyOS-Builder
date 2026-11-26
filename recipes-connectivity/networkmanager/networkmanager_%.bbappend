@@ -20,6 +20,8 @@ PACKAGECONFIG:append = " concheck"
 
 SRC_URI:append:unitree-go2-orin-nx = " file://unitree-go2.nmconnection"
 PACKAGE_ARCH:unitree-go2-orin-nx = "${MACHINE_ARCH}"
+SRC_URI:append:unitree-g1-pc2-orin-nx = " file://unitree-g1-pc2.nmconnection"
+PACKAGE_ARCH:unitree-g1-pc2-orin-nx = "${MACHINE_ARCH}"
 
 # NM accepts a malformed check config and failover then quietly degrades.
 python () {
@@ -104,4 +106,9 @@ SYSTEMD_AUTO_ENABLE = "enable"
 do_install:append:unitree-go2-orin-nx() {
     install -D -m 0600 ${UNPACKDIR}/unitree-go2.nmconnection \
         ${D}${nonarch_libdir}/NetworkManager/system-connections/unitree-go2.nmconnection
+}
+
+do_install:append:unitree-g1-pc2-orin-nx() {
+    install -D -m 0600 ${UNPACKDIR}/unitree-g1-pc2.nmconnection \
+        ${D}${nonarch_libdir}/NetworkManager/system-connections/unitree-g1-pc2.nmconnection
 }

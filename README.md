@@ -17,6 +17,7 @@ This repository provides the meta-layer and build flow to build **WendyOS** — 
 | Jetson AGX Orin DevKit | Tegra234 | 64GB | `jetson-agx-orin` | `jetson-agx-orin-devkit-wendyos` | onboard eMMC or NVMe | wendyos-update |
 | Jetson AGX Thor DevKit | Tegra264 | 128GB | `jetson-agx-thor` | `jetson-agx-thor-devkit-nvme-wendyos` | NVMe | _(coming, wendyos-update)_ |
 | Unitree Go2 EDU expansion dock | Jetson Orin NX | 16GB | `unitree-go2` | `unitree-go2-orin-nx` | NVMe | wendyos-update |
+| Unitree G1 EDU PC2 | Jetson Orin NX | 16GB | `unitree-g1-pc2` | `unitree-g1-pc2-orin-nx` | NVMe | wendyos-update |
 | Raspberry Pi 3 (B/B+) | Broadcom BCM2837 | 1GB | `rpi3` | `raspberrypi3-64-wendyos` | SD or USB | wendyos-update |
 | Raspberry Pi 4 | Broadcom BCM2711 | 1–8GB | `rpi4` | `raspberrypi4-64-wendyos` | SD or USB | wendyos-update |
 | Raspberry Pi 5 | Broadcom BCM2712 | 8GB | `rpi5` | `raspberrypi5-wendyos` | SD or NVMe | wendyos-update |
@@ -67,6 +68,28 @@ To test this local build, pass its archive to the installer.
 
 ```sh
 wendy install --device-type unitree-go2 --flashpack ./go2.flashpack.tar.zst --no-wifi
+```
+
+### Unitree G1 EDU PC2
+
+Install the published image on the Orin NX 16 GB companion computer with
+internal NVMe. The CLI guides you through the PC2 buttons and writes both
+QSPI firmware and the internal SSD over the flashing USB-C port.
+
+```sh
+wendy install --device-type unitree-g1-pc2 --no-wifi
+```
+
+Use the [G1 PC2 install guide](https://docs.wendy.dev/latest/advanced/clients/wendy-cli/commands/os/install/#unitree-g1-edu-pc2)
+to identify the port and enter recovery. The image assigns
+`192.168.123.164/24` to PC2's robot-facing Ethernet interface.
+
+For a local build, use the G1 board and machine. Builder CI packages that
+machine's Tegra recovery bundle as the NVMe flashpack.
+
+```sh
+make setup BOARD=unitree-g1-pc2
+make build MACHINE=unitree-g1-pc2-orin-nx
 ```
 
 ## TL;DR

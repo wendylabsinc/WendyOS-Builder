@@ -1,13 +1,21 @@
-# The Go2 board port reads CVM identity from the module. The carrier does not
-# provide the CVB EEPROM expected by the P3768 MB2 configuration.
-do_install:append:unitree-go2-orin-nx() {
+# Both Unitree carriers use the module EEPROM and omit the separate carrier EEPROM.
+wendy_install_unitree_mb2_bct() {
     flashdir="${D}${datadir}/tegraflash"
     stock="$flashdir/tegra234-mb2-bct-misc-p3767-0000.dts"
     if [ "$(grep -cE '^[[:space:]]*cvb_eeprom_read_size[[:space:]]*=[[:space:]]*<0x100>;' "$stock")" != 1 ]; then
-        bbfatal "Go2: unexpected CVB EEPROM size in $stock"
+        bbfatal "${MACHINE}: unexpected CVB EEPROM size in $stock"
     fi
     sed -E 's/(^[[:space:]]*cvb_eeprom_read_size[[:space:]]*=[[:space:]]*)<0x100>;/\1<0x0>;/' \
         "$stock" > "$flashdir/${TEGRA_FLASHVAR_MB2BCT_CFG}"
+}
+
+do_install:append:unitree-g1-pc2-orin-nx() {
+    wendy_install_unitree_mb2_bct
+}
+
+do_install:append:unitree-go2-orin-nx() {
+    wendy_install_unitree_mb2_bct
+    flashdir="${D}${datadir}/tegraflash"
 
     # The factory image switches PP.06 to push-pull GPIO before asserting
     # USB-A VBUS. Set the pad in MB1 and let the kernel regulator own the line.

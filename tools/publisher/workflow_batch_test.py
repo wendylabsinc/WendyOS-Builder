@@ -77,16 +77,17 @@ with (Path(os.environ["TEST_ROOT"]) / "calls.jsonl").open("a") as f:
         self.write_json(f"manifest-entries/{name}.json",
                         dict(device=device, version="new", nightly=nightly, **extra))
 
-    def test_go2_matrix_targets_nvme(self):
+    def test_unitree_matrix_targets_nvme(self):
         output = self.root / "matrix-output"
-        go2 = [{"device": "unitree-go2", "storages": "nvme"}]
+        unitree = [{"device": name, "storages": "nvme"} for name in ("unitree-go2", "unitree-g1-pc2")]
         for event, input_device, driver_only, expected in (
-            ("pull_request", "all", False, go2),
+            ("pull_request", "all", False, unitree),
             ("pull_request", "all", True, []),
-            ("push", "all", False, go2),
-            ("workflow_dispatch", "unitree-go2", False, go2),
+            ("push", "all", False, unitree),
+            ("workflow_dispatch", "unitree-go2", False, unitree[:1]),
+            ("workflow_dispatch", "unitree-g1-pc2", False, unitree[1:]),
         ):
-            with self.subTest(event=event, driver_only=driver_only):
+            with self.subTest(event=event, input_device=input_device, driver_only=driver_only):
                 output.unlink(missing_ok=True)
                 self.env.update(EVENT_NAME=event, INPUT_DEVICE=input_device, PR_BASE="main",
                                 FILTER_DRIVERS="true" if driver_only else "false",
@@ -96,8 +97,9 @@ with (Path(os.environ["TEST_ROOT"]) / "calls.jsonl").open("a") as f:
                 self.assertEqual(result.returncode, 0, result.stderr)
                 emitted = dict(line.split("=", 1) for line in output.read_text().splitlines())
                 rows = json.loads(emitted["matrix"])["include"]
-                self.assertEqual([row for row in rows if row["device"] == "unitree-go2"], expected)
-                self.assertEqual("unitree-go2" in emitted["devices"].split(), bool(expected))
+                self.assertEqual([row for row in rows if row["device"].startswith("unitree-")], expected)
+                self.assertEqual([device for device in emitted["devices"].split() if device.startswith("unitree-")],
+                                 [row["device"] for row in expected])
 
     def test_pr_batches_all_devices_and_storage_variants(self):
         self.entry("iq", "iq", stability="experimental")

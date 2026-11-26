@@ -132,18 +132,21 @@ func TestValidateRecoveryPromotionRequiresQualifiedMatrix(t *testing.T) {
 	}
 }
 
-func TestGo2PromotionRequiresOnlyTheNVMeFlashpack(t *testing.T) {
-	const device = "unitree-go2"
-	if !isRecoveryFirstT234(device) {
-		t.Fatal("Go2 manifests must use recovery install mode")
-	}
-	source := VersionMetadata{InstallMode: "recovery", NVMEFlashpackPath: "nightly/go2.flashpack"}
-	paths := promotedRecoveryPaths{nvmeFlashpack: "stable/go2.flashpack"}
-	if err := validateRecoveryPromotion(device, source, paths); err != nil {
-		t.Fatal(err)
-	}
-	if err := validateRecoveryPromotion(device, source, promotedRecoveryPaths{}); err == nil {
-		t.Fatal("promotion accepted a missing Go2 flashpack")
+func TestUnitreePromotionRequiresOnlyTheNVMeFlashpack(t *testing.T) {
+	for _, device := range []string{"unitree-go2", "unitree-g1-pc2"} {
+		t.Run(device, func(t *testing.T) {
+			if !isRecoveryFirstT234(device) {
+				t.Fatal("manifest must use recovery install mode")
+			}
+			source := VersionMetadata{InstallMode: "recovery", NVMEFlashpackPath: "nightly/recovery.flashpack"}
+			paths := promotedRecoveryPaths{nvmeFlashpack: "stable/recovery.flashpack"}
+			if err := validateRecoveryPromotion(device, source, paths); err != nil {
+				t.Fatal(err)
+			}
+			if err := validateRecoveryPromotion(device, source, promotedRecoveryPaths{}); err == nil {
+				t.Fatal("promotion accepted a missing NVMe flashpack")
+			}
+		})
 	}
 }
 

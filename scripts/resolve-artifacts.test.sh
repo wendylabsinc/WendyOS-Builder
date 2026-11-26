@@ -314,6 +314,7 @@ test_matrix_coverage() {
     jetson-orin-nano/nvme
     jetson-orin-nano/sd
     unitree-go2/nvme
+    unitree-g1-pc2/nvme
     raspberry-pi-5/disk
     raspberry-pi-4/disk
     raspberry-pi-3/disk

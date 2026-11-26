@@ -1,0 +1,60 @@
+// SPDX-License-Identifier: GPL-2.0-only
+
+#include "tegra234-p3768-0000+p3767-0000-nv.dts"
+
+/ {
+	model = "Unitree G1 EDU PC2 Orin NX 16GB";
+};
+
+/*
+ * PC2 pairs each SuperSpeed lane with the USB2 lane of the same index.
+ * Pair 0 serves the flashing connector and pairs 1 and 2 serve USB hosts.
+ */
+&{/bus@0/padctl@3520000} {
+	pads {
+		usb3 {
+			lanes {
+				usb3-2 {
+					nvidia,function = "xusb";
+					status = "okay";
+				};
+			};
+		};
+	};
+
+	ports {
+		usb2-0 {
+			mode = "otg";
+		};
+
+		usb3-0 {
+			nvidia,usb2-companion = <0>;
+			status = "okay";
+		};
+
+		usb3-1 {
+			nvidia,usb2-companion = <1>;
+		};
+
+		usb3-2 {
+			nvidia,usb2-companion = <2>;
+			status = "okay";
+		};
+	};
+};
+
+&{/bus@0/usb@3550000} {
+	phys = <&{/bus@0/padctl@3520000/pads/usb2/lanes/usb2-0}>,
+	       <&{/bus@0/padctl@3520000/pads/usb3/lanes/usb3-0}>;
+	phy-names = "usb2-0", "usb3-0";
+};
+
+&{/bus@0/usb@3610000} {
+	phys = <&{/bus@0/padctl@3520000/pads/usb2/lanes/usb2-0}>,
+	       <&{/bus@0/padctl@3520000/pads/usb2/lanes/usb2-1}>,
+	       <&{/bus@0/padctl@3520000/pads/usb2/lanes/usb2-2}>,
+	       <&{/bus@0/padctl@3520000/pads/usb3/lanes/usb3-0}>,
+	       <&{/bus@0/padctl@3520000/pads/usb3/lanes/usb3-1}>,
+	       <&{/bus@0/padctl@3520000/pads/usb3/lanes/usb3-2}>;
+	phy-names = "usb2-0", "usb2-1", "usb2-2", "usb3-0", "usb3-1", "usb3-2";
+};

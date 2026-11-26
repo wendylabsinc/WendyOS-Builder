@@ -2455,7 +2455,12 @@ func applyFlashpack(meta *VersionMetadata, storageType, flashpackPath, flashpack
 }
 
 func isRecoveryFirstT234(deviceType string) bool {
-	return deviceType == "jetson-orin-nano" || deviceType == "jetson-agx-orin" || deviceType == "unitree-go2"
+	switch deviceType {
+	case "jetson-orin-nano", "jetson-agx-orin", "unitree-go2", "unitree-g1-pc2":
+		return true
+	default:
+		return false
+	}
 }
 
 // isEDLFlashBundle reports whether a device's install artifact is an EDL flash
@@ -2710,7 +2715,7 @@ func validateRecoveryPromotion(deviceType string, source VersionMetadata, paths 
 		required = append(required, nvmeRootfs, recoveryArtifact{"SD rootfs-only image", source.SDRootfsOnlyPath, paths.sdRootfs})
 	case "jetson-agx-orin":
 		required = append(required, nvmeRootfs, recoveryArtifact{"eMMC flashpack", source.EMMCFlashpackPath, paths.emmcFlashpack})
-	case "unitree-go2":
+	case "unitree-go2", "unitree-g1-pc2":
 	default:
 		return fmt.Errorf("unsupported recovery-first promotion target %q", deviceType)
 	}
