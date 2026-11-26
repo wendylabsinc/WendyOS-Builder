@@ -1,0 +1,81 @@
+From fa416f6c05d9194abcb6a24caf59f938b1088444 Mon Sep 17 00:00:00 2001
+From: Benjamin Kelenyi <benjamin@wendy.sh>
+Date: Wed, 25 Nov 2026 12:27:27 +0200
+Subject: [PATCH 6/7] ASoC: es8328: Support a shared LRCK on the ES8388
+
+With everest,shared-lrck, set DACCONTROL21 SLRCK so the ADC runs from
+DACLRC. Without it, capture on such boards reads a constant -1 (SDIN
+idle). regcache_sync() restores the bit on resume.
+
+Upstream-Status: Pending
+Signed-off-by: Benjamin Kelenyi <benjamin@wendy.sh>
+---
+ sound/soc/codecs/es8328.c | 15 +++++++++++++++
+ sound/soc/codecs/es8328.h |  2 ++
+ 2 files changed, 17 insertions(+)
+
+diff --git a/sound/soc/codecs/es8328.c b/sound/soc/codecs/es8328.c
+index 9838fe4..034c2b7 100644
+--- a/sound/soc/codecs/es8328.c
++++ b/sound/soc/codecs/es8328.c
+@@ -11,6 +11,7 @@
+ #include <linux/delay.h>
+ #include <linux/module.h>
+ #include <linux/pm.h>
++#include <linux/property.h>
+ #include <linux/regmap.h>
+ #include <linux/slab.h>
+ #include <linux/regulator/consumer.h>
+@@ -84,6 +85,7 @@ struct es8328_priv {
+ 	const struct snd_pcm_hw_constraint_list *sysclk_constraints;
+ 	const int *mclk_ratios;
+ 	bool provider;
++	bool shared_lrck;
+ 	struct regulator_bulk_data supplies[ES8328_SUPPLY_NUM];
+ };
+ 
+@@ -831,8 +833,20 @@ static int es8328_component_probe(struct snd_soc_component *component)
+ 		goto clk_fail;
+ 	}
+ 
++	if (es8328->shared_lrck) {
++		ret = regmap_update_bits(es8328->regmap, ES8328_DACCONTROL21,
++					 ES8388_DACCONTROL21_SLRCK,
++					 ES8388_DACCONTROL21_SLRCK);
++		if (ret) {
++			dev_err(component->dev, "unable to share LRCK\n");
++			goto lrck_fail;
++		}
++	}
++
+ 	return 0;
+ 
++lrck_fail:
++	clk_disable_unprepare(es8328->clk);
+ clk_fail:
+ 	regulator_bulk_disable(ARRAY_SIZE(es8328->supplies),
+ 			       es8328->supplies);
+@@ -893,6 +907,7 @@ int es8328_probe(struct device *dev, struct regmap *regmap)
+ 		return -ENOMEM;
+ 
+ 	es8328->regmap = regmap;
++	es8328->shared_lrck = device_property_read_bool(dev, "everest,shared-lrck");
+ 
+ 	for (i = 0; i < ARRAY_SIZE(es8328->supplies); i++)
+ 		es8328->supplies[i].supply = supply_names[i];
+diff --git a/sound/soc/codecs/es8328.h b/sound/soc/codecs/es8328.h
+index 9109f6b..c8b63e7 100644
+--- a/sound/soc/codecs/es8328.h
++++ b/sound/soc/codecs/es8328.h
+@@ -225,6 +225,8 @@ int es8328_probe(struct device *dev, struct regmap *regmap);
+ #define ES8328_DACCONTROL21_LI2MOVOL (7 << 3)
+ #define ES8328_DACCONTROL21_LI2MO (1 << 6)
+ #define ES8328_DACCONTROL21_LD2MO (1 << 7)
++/* ES8388: the ADC takes its frame clock from DACLRC */
++#define ES8388_DACCONTROL21_SLRCK (1 << 7)
+ 
+ #define ES8328_DACCONTROL22	0x2c
+ #define ES8328_DACCONTROL22_RI2MOVOL (7 << 3)
+-- 
+2.43.0
+

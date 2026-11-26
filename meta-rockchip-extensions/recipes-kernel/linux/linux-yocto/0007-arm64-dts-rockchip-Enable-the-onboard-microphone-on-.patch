@@ -1,0 +1,42 @@
+From c44a34381ca351311171c30042937abf4f3d6967 Mon Sep 17 00:00:00 2001
+From: Benjamin Kelenyi <benjamin@wendy.sh>
+Date: Wed, 25 Nov 2026 12:27:35 +0200
+Subject: [PATCH 7/7] arm64: dts: rockchip: Enable the onboard microphone on
+ Orange Pi 5 Pro
+
+The board wires only the ES8388's DACLRC to the I2S frame clock, and
+its electret microphones need the codec's bias supply. Set
+everest,shared-lrck and route Mic Bias to both microphones.
+
+Upstream-Status: Pending
+Signed-off-by: Benjamin Kelenyi <benjamin@wendy.sh>
+---
+ arch/arm64/boot/dts/rockchip/rk3588s-orangepi-5-pro.dts | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/arch/arm64/boot/dts/rockchip/rk3588s-orangepi-5-pro.dts b/arch/arm64/boot/dts/rockchip/rk3588s-orangepi-5-pro.dts
+index 7836753..45d20ed 100644
+--- a/arch/arm64/boot/dts/rockchip/rk3588s-orangepi-5-pro.dts
++++ b/arch/arm64/boot/dts/rockchip/rk3588s-orangepi-5-pro.dts
+@@ -28,7 +28,9 @@
+ 			"LINPUT1", "Microphone Jack",
+ 			"RINPUT1", "Microphone Jack",
+ 			"LINPUT2", "Onboard Microphone",
+-			"RINPUT2", "Onboard Microphone";
++			"RINPUT2", "Onboard Microphone",
++			"Microphone Jack", "Mic Bias",
++			"Onboard Microphone", "Mic Bias";
+ 		simple-audio-card,widgets =
+ 			"Microphone", "Microphone Jack",
+ 			"Microphone", "Onboard Microphone",
+@@ -131,6 +133,7 @@
+ 		compatible = "everest,es8388", "everest,es8328";
+ 		reg = <0x11>;
+ 		#sound-dai-cells = <0>;
++		everest,shared-lrck;
+ 		AVDD-supply = <&vcca_3v3_s0>;
+ 		DVDD-supply = <&vcca_1v8_s0>;
+ 		HPVDD-supply = <&vcca_3v3_s0>;
+-- 
+2.43.0
+

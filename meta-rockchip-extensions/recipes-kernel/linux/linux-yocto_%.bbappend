@@ -9,12 +9,15 @@ require ${@'recipes-kernel/linux/game-controller.inc' if d.getVar('WENDYOS_GAME_
 
 SRC_URI:append:rockchip-wendyos = " file://rockchip-wendyos.cfg"
 
-# Orange Pi 5 Pro: the board DTS from Linux 7.3.
+# Orange Pi 5 Pro: the board DTS from Linux 7.3, then the onboard microphone.
 SRC_URI:append:orangepi-5-pro-wendyos = " \
     file://0001-arm64-dts-rockchip-rename-PLDO-regulator-labels-to-m.patch \
     file://0002-arm64-dts-rockchip-refactor-items-from-Orange-Pi-5-b.patch \
     file://0003-arm64-dts-rockchip-Add-Orange-Pi-5-Pro-board-support.patch \
     file://0004-arm64-dts-rockchip-Use-GPIO-function-for-PCIe-reset-.patch \
+    file://0005-ASoC-dt-bindings-everest-es8328-Add-everest-shared-l.patch \
+    file://0006-ASoC-es8328-Support-a-shared-LRCK-on-the-ES8388.patch \
+    file://0007-arm64-dts-rockchip-Enable-the-onboard-microphone-on-.patch \
     "
 
 require recipes-kernel/linux/mesh-local.inc
