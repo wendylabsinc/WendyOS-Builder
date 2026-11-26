@@ -27,6 +27,7 @@ on:
           - dragonwing-iq-8275
           - dragonwing-iq-9075
           - arduino-uno-q
+          - orange-pi-5-pro
           - vm-arm64
           - vm-x86-64
       version:
@@ -161,6 +162,9 @@ jobs:
           #
           # arduino-uno-q follows, ahead of the Pis: no other board shares its
           # cortexa53 tune (raspberry-pi-3 is cortexa53-nocrypto), so its sstate is cold.
+          #
+          # orange-pi-5-pro likewise: the only cortexa76-cortexa55 board, with its
+          # own linux-yocto 7.2 and U-Boot, so nothing reaches it from sstate.
           ALL_MATRIX='[
             {"device":"jetson-agx-thor","storages":"nvme"},
             {"device":"jetson-agx-orin","storages":"nvme emmc"},
@@ -169,6 +173,7 @@ jobs:
             {"device":"generic-x86-64","storages":"disk"},
             {"device":"dragonwing-iq-9075","storages":"ufs"},
             {"device":"arduino-uno-q","storages":"emmc"},
+            {"device":"orange-pi-5-pro","storages":"disk"},
             {"device":"raspberry-pi-5","storages":"disk"},
             {"device":"raspberry-pi-4","storages":"disk"},
             {"device":"raspberry-pi-3","storages":"disk"},
@@ -310,6 +315,7 @@ jobs:
               dragonwing-iq-8275:ufs) BOARD=dragonwing-iq8275;   MACHINE=iq-8275-evk-wendyos ;;
               dragonwing-iq-9075:ufs) BOARD=dragonwing-iq9075;   MACHINE=iq-9075-evk-wendyos ;;
               arduino-uno-q:emmc)   BOARD=arduino-uno-q;        MACHINE=arduino-uno-q-wendyos ;;
+              orange-pi-5-pro:disk) BOARD=orange-pi-5-pro;         MACHINE=orangepi-5-pro-wendyos ;;
               vm-arm64:disk)        BOARD=vm-arm64;             MACHINE=vm-arm64-wendyos ;;
               vm-x86-64:disk)       BOARD=vm-x86-64;            MACHINE=vm-x86-64-wendyos ;;
               *) echo "Unknown device/storage: $DEVICE/$STORAGE"; exit 1 ;;
@@ -653,6 +659,7 @@ jobs:
           EXPECTED_KB=12582912  # 12 GiB, Jetson + generic-x86-64
           case "$DEVICE" in
             raspberry-pi-*) EXPECTED_KB=8388608 ;;  # 8 GiB, RPi
+            orange-pi-*)    EXPECTED_KB=8388608 ;;  # 8 GiB, Rockchip
             vm-*)           EXPECTED_KB=3145728 ;;  # 3 GiB, VM (two A/B slots on a laptop disk)
             arduino-uno-q)  EXPECTED_KB=4194304 ;;  # 4 GiB, UNO Q (two A/B slots on a 16 GB eMMC)
           esac
