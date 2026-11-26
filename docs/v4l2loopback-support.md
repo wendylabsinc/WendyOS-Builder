@@ -14,6 +14,51 @@ The agent's ioctl definitions match that version. Upstream changed the public
 ioctl numbers and structure layout in v0.15.0, so a future version change
 must check the agent's definitions against the new header.
 
+The shared recipe applies the OUTPUT completion queue correction described in
+`v4l2-output-queue-candidate.md`, followed by `0002-fresh-capture-start.patch`.
+Both patches apply to every machine using this recipe, including VM images.
+
+The second patch adds an optional boolean V4L2 control, `fresh_start`
+(`0x0098f904`, default `0`). When enabled, each new CAPTURE `STREAMON` anchors
+that reader to the current producer position before publishing capture demand.
+Its first successful read/dequeue requires a subsequent producer write.
+Retained frames, sustain-framerate repeats and timeout images cannot satisfy
+that first read. After the first real frame, normal sustain and timeout behavior
+resumes. Repeated `STREAMON` on an already active reader does not discard queued
+frames; `STREAMOFF` followed by `STREAMON` starts a fresh interval. The `read(2)`
+path uses the same rule through its lazy stream startup. After `S_FMT`, `poll`
+also starts that stream when STREAMON can succeed (a writer is streaming or
+`keep_format` is set), so such a reader does not wake for an old frame.
+The ID `0x0098f904` is an ABI shared with the agent. Keep it when rebasing,
+even if upstream later defines its own control at `V4L2LOOPBACK_CID_BASE + 4`.
+
+Demand-driven camera sharing enables this control before exposing a node to an
+app. Agents must check control support and report camera sharing unavailable on
+an older module; writing a blank frame is not a substitute for fresh capture.
+
+The control is opt-in, but the patches also change these defaults for every
+loopback user, to match the kernel's videobuf2 framework:
+
+- A signal interrupts a capture `DQBUF` or `read(2)` that is waiting for a frame
+  (`EINTR`, or a restart with `SA_RESTART`). Upstream returned a repeated frame.
+- An MMAP writer's `poll` reports `POLLOUT` only while a completed buffer waits
+  to be dequeued. Writers queue their buffers before they poll.
+- `STREAMOFF` ends a `DQBUF` that is waiting on either queue with `EINVAL`, and
+  a blocking OUTPUT `DQBUF` on a stopped queue returns `EINVAL`. A nonblocking
+  `DQBUF` with nothing ready still returns `EAGAIN`.
+
+Before releasing these patches, run the real Linux camera-sharing fixture from
+[WendyOS #3011](https://github.com/wendylabsinc/WendyOS/pull/3011) against this
+exact source revision and patch pair. Require first-frame pixel checks for new
+readers, same-descriptor restart, late peers and producer restart, including
+no-frame blocking and sustain/timeout readiness. Then share a real camera on one
+Tegra, one Qualcomm and one Raspberry Pi board. Check a new reader's first
+frame, a reader restart, and that an app stops cleanly while it waits for a
+frame.
+Compile and patch-application checks alone do not establish these runtime
+guarantees. Rollback requires removing the patches from `SRC_URI` and rebuilding
+matching OS images; newer agents then take their unsupported-control fallback.
+
 Tegra images require the package through `packagegroup-wendyos-tegra`.
 `qcom-image.inc` explicitly installs `v4l2loopback` and
 `kernel-module-snd-aloop` on every `qcom-wendyos` target, including Uno Q.

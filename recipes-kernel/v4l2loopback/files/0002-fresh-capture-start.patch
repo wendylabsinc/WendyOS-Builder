@@ -1,0 +1,234 @@
+Subject: [PATCH] Add opt-in fresh capture starts for demand-driven producers
+
+A new reader must not receive the previous reader's retained frame before a
+producer observes capture demand. Add fresh_start (0x0098f904), default off.
+At a real CAPTURE STREAMON, anchor the reader to the current write position
+under the producer lock before notifying capture demand. Ignore sustain and
+timeout readiness until a later real write, and never replace that first
+fresh frame with a retained timeout image. read(2) uses the same STREAMON
+path. Duplicate STREAMON leaves the cursor alone; STREAMOFF/STREAMON starts
+a fresh capture interval on the same descriptor.
+
+DQBUF re-checks the anchor under the producer lock, so a restart from another
+thread cannot return a frame from before it, and O_NONBLOCK never waits for a
+frame. As in vb2: STREAMOFF wakes a DQBUF that began while streaming and it
+returns EINVAL; a signal interrupts a waiting DQBUF or read(2) for every user;
+with fresh_start, poll starts the stream of a read(2) reader that has set its
+format, when STREAMON can succeed, before reporting POLLIN.
+
+Upstream-Status: Pending
+
+diff --git a/v4l2loopback.c b/v4l2loopback.c
+index ef90483..37b164b 100644
+--- a/v4l2loopback.c
++++ b/v4l2loopback.c
+@@ -262,6 +262,8 @@ static DEFINE_MUTEX(v4l2loopback_ctl_mutex);
+ #define CID_SUSTAIN_FRAMERATE (V4L2LOOPBACK_CID_BASE + 1)
+ #define CID_TIMEOUT (V4L2LOOPBACK_CID_BASE + 2)
+ #define CID_TIMEOUT_IMAGE_IO (V4L2LOOPBACK_CID_BASE + 3)
++/* Wendy ABI: agents set this ID; keep it if upstream claims BASE + 4. */
++#define CID_FRESH_START (V4L2LOOPBACK_CID_BASE + 4)
+ 
+ static int v4l2loopback_s_ctrl(struct v4l2_ctrl *ctrl);
+ static const struct v4l2_ctrl_ops v4l2loopback_ctrl_ops = {
+@@ -291,6 +293,18 @@ static const struct v4l2_ctrl_config v4l2loopback_ctrl_sustainframerate = {
+ 	.def	= 0,
+ 	// clang-format on
+ };
++static const struct v4l2_ctrl_config v4l2loopback_ctrl_freshstart = {
++	// clang-format off
++	.ops	= &v4l2loopback_ctrl_ops,
++	.id	= CID_FRESH_START,
++	.name	= "fresh_start",
++	.type	= V4L2_CTRL_TYPE_BOOLEAN,
++	.min	= 0,
++	.max	= 1,
++	.step	= 1,
++	.def	= 0,
++	// clang-format on
++};
+ static const struct v4l2_ctrl_config v4l2loopback_ctrl_timeout = {
+ 	// clang-format off
+ 	.ops	= &v4l2loopback_ctrl_ops,
+@@ -361,6 +375,7 @@ struct v4l2_loopback_device {
+ 			  * `keep_format` to attach a new writer) */
+ 	int sustain_framerate; /* CID_SUSTAIN_FRAMERATE; duplicate frames to maintain
+ 				  (close to) nominal framerate */
++	int fresh_start; /* CID_FRESH_START; capture starts after STREAMON */
+ 	unsigned long timeout_jiffies; /* CID_TIMEOUT; 0 means disabled */
+ 	int timeout_image_io; /* CID_TIMEOUT_IMAGE_IO; next opener will
+ 			       * queue/dequeue the timeout image buffer */
+@@ -418,6 +433,7 @@ struct v4l2_loopback_opener {
+ 			   * REQBUFS */
+ 	s64 read_position; /* sequence number of the next 'captured' frame */
+ 	unsigned int reread_count;
++	bool fresh_start_pending; /* suppress synthetic frames until a new write */
+ 	enum v4l2l_io_method io_method;
+ 
+ 	struct v4l2_fh fh;
+@@ -1390,6 +1406,13 @@ static int v4l2loopback_set_ctrl(struct v4l2_loopback_device *dev, u32 id,
+ 		check_timers(dev);
+ 		spin_unlock_bh(&dev->lock);
+ 		break;
++	case CID_FRESH_START:
++		if (val < 0 || val > 1)
++			return -EINVAL;
++		spin_lock_bh(&dev->lock);
++		dev->fresh_start = val;
++		spin_unlock_bh(&dev->lock);
++		break;
+ 	case CID_TIMEOUT:
+ 		if (val < 0 || val > MAX_TIMEOUT)
+ 			return -EINVAL;
+@@ -1956,32 +1979,60 @@ static int can_read(struct v4l2_loopback_device *dev,
+ 	spin_lock_bh(&dev->lock);
+ 	check_timers(dev);
+ 	ret = dev->write_position > opener->read_position ||
+-	      dev->reread_count > opener->reread_count || dev->timeout_happened;
++	      (!opener->fresh_start_pending &&
++	       (dev->reread_count > opener->reread_count || dev->timeout_happened));
+ 	spin_unlock_bh(&dev->lock);
+ 	return ret;
+ }
+ 
++static bool capture_stopped(struct v4l2_loopback_opener *opener,
++			    bool was_streaming)
++{
++	return was_streaming &&
++	       !has_capture_token(READ_ONCE(opener->stream_token));
++}
++
+ static int get_capture_buffer(struct file *file)
+ {
+ 	struct v4l2_loopback_device *dev = v4l2loopback_getdevice(file);
+ 	struct v4l2_loopback_opener *opener =
+ 		v4l2l_f_to_opener(file, file->private_data);
+-	int pos, timeout_happened;
++	bool streaming = has_capture_token(opener->stream_token);
++	int pos, timeout_happened, result;
+ 	u32 index;
+ 
+-	if ((file->f_flags & O_NONBLOCK) &&
+-	    (dev->write_position <= opener->read_position &&
+-	     dev->reread_count <= opener->reread_count &&
+-	     !dev->timeout_happened))
+-		return -EAGAIN;
+-	wait_event_interruptible(dev->read_event, can_read(dev, opener));
++	for (;;) {
++		if (file->f_flags & O_NONBLOCK) {
++			if (!can_read(dev, opener))
++				return -EAGAIN;
++		} else {
++			result = wait_event_interruptible(
++				dev->read_event,
++				can_read(dev, opener) ||
++					capture_stopped(opener, streaming));
++			if (result)
++				return result;
++		}
++		/* As vb2: STREAMOFF ends a DQBUF that began while streaming. */
++		if (capture_stopped(opener, streaming))
++			return -EINVAL;
+ 
+-	mutex_lock(&dev->image_mutex);
+-	if (!dev->image || dev->used_buffer_count == 0) {
++		mutex_lock(&dev->image_mutex);
++		if (!dev->image || dev->used_buffer_count == 0) {
++			mutex_unlock(&dev->image_mutex);
++			return -EINVAL;
++		}
++		spin_lock_bh(&dev->lock);
++		/* A STREAMOFF/STREAMON from another thread may have re-anchored
++		 * this reader after can_read(); its first frame must be new. */
++		if (!opener->fresh_start_pending ||
++		    dev->write_position > opener->read_position)
++			break;
++		spin_unlock_bh(&dev->lock);
+ 		mutex_unlock(&dev->image_mutex);
+-		return -EINVAL;
++		if (file->f_flags & O_NONBLOCK)
++			return -EAGAIN;
+ 	}
+-	spin_lock_bh(&dev->lock);
+ 	if (dev->write_position == opener->read_position) {
+ 		if (dev->reread_count > opener->reread_count + 2)
+ 			opener->reread_count = dev->reread_count - 1;
+@@ -1998,7 +2049,12 @@ static int get_capture_buffer(struct file *file)
+ 				  dev->used_buffer_count);
+ 		++opener->read_position;
+ 	}
+-	timeout_happened = dev->timeout_happened && (dev->timeout_jiffies > 0);
++	/* A timeout from the previous reader must not replace the first fresh
++	 * producer frame with the timeout image. Normal timeout/sustain behavior
++	 * resumes after that real frame has been delivered. */
++	timeout_happened = !opener->fresh_start_pending &&
++			   dev->timeout_happened && (dev->timeout_jiffies > 0);
++	opener->fresh_start_pending = false;
+ 	dev->timeout_happened = 0;
+ 	index = dev->bufpos2index[pos];
+ 	if (timeout_happened)
+@@ -2129,6 +2185,16 @@ static int vidioc_streamon(struct file *file, void *fh, enum v4l2_buf_type type)
+ 		if (has_output_token(dev->stream_tokens) && !dev->keep_format)
+ 			return -EIO;
+ 		if (dev->stream_tokens & token) {
++			/* Anchor before publishing capture demand: the producer may
++			 * write its first frame as soon as that event is observed.
++			 * Duplicate STREAMON never enters this branch. */
++			spin_lock_bh(&dev->lock);
++			opener->fresh_start_pending = dev->fresh_start;
++			if (opener->fresh_start_pending) {
++				opener->read_position = dev->write_position;
++				opener->reread_count = 0;
++			}
++			spin_unlock_bh(&dev->lock);
+ 			acquire_token(dev, opener, stream, token);
+ 			client_usage_queue_event(dev->vdev);
+ 		}
+@@ -2178,6 +2244,8 @@ static int vidioc_streamoff(struct file *file, void *fh,
+ 		if (opener->stream_token & token) {
+ 			release_token(dev, opener, stream);
+ 			client_usage_queue_event(dev->vdev);
++			/* A blocking capture DQBUF must observe stream cancellation. */
++			wake_up_all(&dev->read_event);
+ 		}
+ 		return 0;
+ 	default:
+@@ -2355,6 +2423,8 @@ exit_mmap_unlock:
+ 	return result;
+ }
+ 
++static int start_fileio(struct file *file, void *fh, enum v4l2_buf_type type);
++
+ static unsigned int v4l2_loopback_poll(struct file *file,
+ 				       struct poll_table_struct *pts)
+ {
+@@ -2386,6 +2456,15 @@ static unsigned int v4l2_loopback_poll(struct file *file,
+ 			ret_mask |= POLLOUT | POLLWRNORM;
+ 		break;
+ 	case V4L2L_TOKEN_CAPTURE:
++		/* As vb2: poll starts a read(2) reader's stream, so its
++		 * fresh_start anchor exists before POLLIN is reported. Only
++		 * when STREAMON can succeed; read(2) reports other failures. */
++		if (opener->io_method == V4L2L_IO_NONE &&
++		    READ_ONCE(dev->fresh_start) &&
++		    (req_events & (POLLIN | POLLRDNORM)) &&
++		    (dev->keep_format || !has_output_token(dev->stream_tokens)))
++			start_fileio(file, file->private_data,
++				     V4L2_BUF_TYPE_VIDEO_CAPTURE);
+ 		if ((opener->io_method == V4L2L_IO_NONE ||
+ 		     opener->stream_token != 0) &&
+ 		    can_read(dev, opener))
+@@ -3026,11 +3105,12 @@ static int v4l2_loopback_add(struct v4l2_loopback_config *conf, int *ret_nr)
+ 	/* initialise the control handler and add controls */
+ 	MARK();
+ 	hdl = &dev->ctrl_handler;
+-	err = v4l2_ctrl_handler_init(hdl, 4);
++	err = v4l2_ctrl_handler_init(hdl, 5);
+ 	if (err)
+ 		goto out_unregister;
+ 	v4l2_ctrl_new_custom(hdl, &v4l2loopback_ctrl_keepformat, NULL);
+ 	v4l2_ctrl_new_custom(hdl, &v4l2loopback_ctrl_sustainframerate, NULL);
++	v4l2_ctrl_new_custom(hdl, &v4l2loopback_ctrl_freshstart, NULL);
+ 	v4l2_ctrl_new_custom(hdl, &v4l2loopback_ctrl_timeout, NULL);
+ 	v4l2_ctrl_new_custom(hdl, &v4l2loopback_ctrl_timeoutimageio, NULL);
+ 	if (hdl->error) {
