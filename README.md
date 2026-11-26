@@ -77,7 +77,7 @@ internal NVMe. The CLI guides you through the PC2 buttons and writes both
 QSPI firmware and the internal SSD over the flashing USB-C port.
 
 ```sh
-wendy install --device-type unitree-g1-pc2 --no-wifi
+wendy install --device-type unitree-g1 --no-wifi
 ```
 
 Use the [G1 PC2 install guide](https://docs.wendy.dev/latest/advanced/clients/wendy-cli/commands/os/install/#unitree-g1-edu-pc2)

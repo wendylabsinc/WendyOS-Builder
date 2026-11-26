@@ -82,7 +82,10 @@ do
     [[ -d "${board_dir}" ]] || continue
     board="$(basename "${board_dir}")"
 
-    required="$(required_repo_folders "${board_dir}" "${TEMPLATE_DIR}")"
+    if ! required="$(required_repo_folders "${board_dir}" "${TEMPLATE_DIR}")"; then
+        printf "Cannot resolve upstream layers from the bblayers.conf for %s.\n" "${board}" >&2
+        exit 1
+    fi
 
     # Resolve pins exactly as bootstrap does: defaults first, board file second,
     # plain assignment so the board wins. Subshell keeps boards independent.
