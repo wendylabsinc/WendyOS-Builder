@@ -1,6 +1,6 @@
 inherit partuuid-rpi
 
-# `root=` is set at boot by the A/B boot script (boot-ab.cmd, rpi-u-boot-scr)
+# `root=` is set at boot by the A/B boot script (boot.scr, rpi-u-boot-scr)
 # from the selected slot. We only contribute WendyOS console + USB-gadget
 # additions via :append:rpi.
 #
