@@ -2224,7 +2224,7 @@ func uploadFile(ctx context.Context, bucket *storage.BucketHandle, prefix, local
 	defer file.Close()
 
 	// Create the destination object writer
-	w := obj.NewWriter(ctx)
+	w := retryTransient(obj).NewWriter(ctx)
 	w.ContentType = contentType
 	w.ChunkRetryDeadline = chunkRetryDeadline
 	// Have GCS reject a corrupted upload server-side. The composite path already

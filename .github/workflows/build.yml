@@ -1101,8 +1101,8 @@ jobs:
             fi
 
             # No retry loop: uploads go to unique per-version paths (no shared
-            # state to race on) and the publisher's storage client already
-            # retries transient errors internally.
+            # state to race on) and the publisher retries transient GCS errors
+            # on every upload request, including session start and compose.
             "$RUNNER_TEMP/publisher" "${ARGS[@]}"
             # Keep the canonical identity for board-specific metadata handling.
             # Aliases receive the computed metadata and this variant's devkit.
