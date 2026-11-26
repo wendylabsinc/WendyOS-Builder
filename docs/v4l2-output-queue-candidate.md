@@ -25,9 +25,11 @@ returned at most once until another write. A new `output_pending` field is
 protected by `list_lock`. Publishing DONE metadata and this field happens under
 the same lock; DQBUF consumes it under that lock. Allocation and STREAMOFF clear
 OUTPUT completions. A CAPTURE allocation does not clear a producer's pending
-completion. Empty nonblocking DQBUF returns EAGAIN; blocking DQBUF waits on the
-existing event and STREAMOFF wakes it. MMAP OUTPUT poll readiness follows the
-pending completions; write(2) polling and capture polling retain their behavior.
+completion, and QUERYBUF still reports that completion as DONE. Empty
+nonblocking DQBUF returns EAGAIN; blocking DQBUF waits on the existing event,
+STREAMOFF wakes it, and on a stopped queue it returns EINVAL, as in vb2. MMAP
+OUTPUT poll readiness follows the pending completions; write(2) polling and
+capture polling retain their behavior.
 
 Wendy's existing H.264 producer intentionally reuses mapped OUTPUT buffers
 without DQBUF. Repeated writes keep the latest completion of each index and move
@@ -38,9 +40,10 @@ and timeout-image behavior still require the actual consumer checks below.
 ## Required disposable Linux proof
 
 Use the existing WendyOS Linux media job, its owned module and bounded process
-guardian. Do not load this candidate on a developer host or physical device.
-Do not omit any currently required consumer gate, add another runner, or turn
-an expected timeout into a passing negative control.
+guardian. Do not run this proof on a developer host. Physical devices get the
+module from OS images; the on-device gate in `v4l2loopback-support.md` covers
+them before release. Do not omit any currently required consumer gate, add
+another runner, or turn an expected timeout into a passing negative control.
 
 1. Compile the WendyOS services test binary with `-race -tags
    regression_camera_fixture`. With the original module loaded, run

@@ -4,8 +4,10 @@ The allocated-buffer ring also preserves capture-frame history. It is not an
 OUTPUT completion queue: returning its first entry can dequeue an unsubmitted
 buffer, and rotating it can return one completion more than once. Track the
 pending completion under list_lock without changing the capture position map.
-Wake empty blocking OUTPUT dequeues on STREAMOFF; report MMAP poll readiness
-only for pending output. Keep write(2) and capture polling semantics intact.
+Wake empty blocking OUTPUT dequeues on STREAMOFF; like vb2, a blocking DQBUF
+on a stopped queue returns EINVAL. QUERYBUF reports a pending completion as
+DONE even after a reader's REQBUFS. Report MMAP poll readiness only for
+pending output. Keep write(2) and capture polling semantics intact.
 
 Related upstream investigation: https://github.com/v4l2loopback/v4l2loopback/pull/656
 This is a separate minimal candidate, not an assertion that that PR was merged.
@@ -52,7 +54,26 @@ Upstream-Status: Pending
  		dev->used_buffer_count = opener->buffer_count = req_count;
  	}
  exit_reqbufs_unlock:
-@@ -1837,6 +1844,13 @@
+@@ -1794,8 +1801,17 @@
+ 	if (opener->format_token & V4L2L_TOKEN_TIMEOUT) {
+ 		*buf = dev->timeout_buffer.buffer;
+ 		buf->index = index;
+-	} else
++	} else {
+ 		*buf = dev->buffers[index].buffer;
++		/* A reader's REQBUFS clears the shared flags, not this writer's
++		 * pending completion; report what DQBUF would return. */
++		if (!V4L2_TYPE_IS_CAPTURE(type)) {
++			spin_lock_bh(&dev->list_lock);
++			if (dev->buffers[index].output_pending)
++				set_done(buf->flags);
++			spin_unlock_bh(&dev->list_lock);
++		}
++	}
+ 
+ 	buf->type = type;
+ 
+@@ -1837,6 +1853,13 @@
  		++dev->write_position;
  		dev->reread_count = 0;
  		spin_unlock_bh(&dev->lock);
@@ -66,7 +87,7 @@ Upstream-Status: Pending
  	}
  	mutex_unlock(&dev->image_mutex);
  
-@@ -1916,7 +1930,6 @@
+@@ -1916,7 +1939,6 @@
  		set_queued(bufd->buffer.flags);
  		*buf = bufd->buffer;
  		buffer_written(dev, bufd);
@@ -74,7 +95,7 @@ Upstream-Status: Pending
  		wake_up_all(&dev->read_event);
  		break;
  	default:
-@@ -1996,6 +2009,28 @@
+@@ -1996,6 +2018,28 @@
  	return (int)index;
  }
  
@@ -103,7 +124,7 @@ Upstream-Status: Pending
  /* put buffer to dequeue
   * called on VIDIOC_DQBUF
   */
-@@ -2028,18 +2063,26 @@
+@@ -2028,18 +2072,28 @@
  		unset_flags(buf->flags);
  		break;
  	case V4L2_BUF_TYPE_VIDEO_OUTPUT:
@@ -130,9 +151,11 @@ Upstream-Status: Pending
 +			spin_unlock_bh(&dev->list_lock);
 +			if (bufd)
 +				break;
-+			if ((file->f_flags & O_NONBLOCK) ||
-+			    !has_output_token(READ_ONCE(opener->stream_token)))
++			if (file->f_flags & O_NONBLOCK)
 +				return -EAGAIN;
++			/* As vb2; EAGAIN would make a blocking caller spin. */
++			if (!has_output_token(READ_ONCE(opener->stream_token)))
++				return -EINVAL;
 +			if (wait_event_interruptible(
 +				    dev->read_event,
 +				    !has_output_token(READ_ONCE(opener->stream_token)) ||
@@ -142,7 +165,16 @@ Upstream-Status: Pending
  		break;
  	default:
  		return -EINVAL;
-@@ -2116,7 +2159,9 @@
+@@ -2047,7 +2101,7 @@
+ 
+ 	buf->type = type;
+ 	dprintkrw("DQBUF(%s, index=%u) -> " BUFFER_DEBUG_FMT_STR,
+-		  V4L2_TYPE_IS_CAPTURE(type) ? "CAPTURE" : "OUTPUT", index,
++		  V4L2_TYPE_IS_CAPTURE(type) ? "CAPTURE" : "OUTPUT", buf->index,
+ 		  BUFFER_DEBUG_FMT_ARGS(buf));
+ 	return 0;
+ }
+@@ -2116,7 +2170,9 @@
  			release_token(dev, opener, stream);
  		/* reset output queue */
  		if (dev->used_buffer_count > 0)
@@ -153,7 +185,7 @@ Upstream-Status: Pending
  		return 0;
  	case V4L2_BUF_TYPE_VIDEO_CAPTURE:
  		if (opener->stream_token & token) {
-@@ -2323,8 +2368,10 @@
+@@ -2323,8 +2379,10 @@
  
  	switch (opener->format_token) {
  	case V4L2L_TOKEN_OUTPUT:
@@ -166,7 +198,7 @@ Upstream-Status: Pending
  			ret_mask |= POLLOUT | POLLWRNORM;
  		break;
  	case V4L2L_TOKEN_CAPTURE:
-@@ -2535,7 +2582,6 @@
+@@ -2535,7 +2593,6 @@
  	b->sequence = dev->write_position;
  	set_queued(b->flags);
  	buffer_written(dev, &dev->buffers[index]);
