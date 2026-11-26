@@ -105,6 +105,22 @@ test_thor() {
   rm -rf "$d"
 }
 
+test_go2_nvme() {
+  local deploy out rc
+  deploy=$(newdir)
+  local bundle="$deploy/wendyos-image-unitree-go2-orin-nx.tegraflash-tar"
+  : >"$bundle"
+  out=$(run_resolver unitree-go2 nvme unitree-go2-orin-nx "$deploy")
+  rc=$?
+  assert_eq "Go2 NVMe: exits 0" 0 "$rc"
+  assert_eq "Go2 NVMe: kind" tegraflash-bundle "$(field IMAGE_KIND <<<"$out")"
+  assert_eq "Go2 NVMe: bundle" "$bundle" "$(field TEGRAFLASH_BUNDLE <<<"$out")"
+  assert_eq "Go2 NVMe: flashpack" true "$(field FLASHPACK_REQUIRED <<<"$out")"
+  assert_eq "Go2 NVMe: bmap" false "$(field BMAP_REQUIRED <<<"$out")"
+  assert_eq "Go2 NVMe: pass_storage" true "$(field PASS_STORAGE <<<"$out")"
+  rm -rf "$deploy"
+}
+
 # Dragonwing: UFS is flashed over EDL, so the qcomflash tarball is the artifact.
 # One code path serves every board here, so they share one assertion set -- a
 # per-board copy is how one of them ends up with weaker coverage.
@@ -288,8 +304,7 @@ test_generated_raw_bundle_absent() {
 
 # ---------------------------------------------------------------------------
 # (c) Every device+storage combo in build.yml's matrix has a map entry, and every
-# map entry belongs to one. Hardcoded from build.yml's ALL_MATRIX — keep in sync
-# if the matrix changes.
+# map entry belongs to one. Keep in sync with the release and PR variants in build.yml.
 # ---------------------------------------------------------------------------
 test_matrix_coverage() {
   local combos=(
@@ -298,6 +313,7 @@ test_matrix_coverage() {
     jetson-agx-orin/emmc
     jetson-orin-nano/nvme
     jetson-orin-nano/sd
+    unitree-go2/nvme
     raspberry-pi-5/disk
     raspberry-pi-4/disk
     raspberry-pi-3/disk
@@ -342,6 +358,7 @@ test_jetson_nvme
 test_jetson_emmc
 test_jetson_agx_targets_share_bundle
 test_thor
+test_go2_nvme
 test_tegraflash_zst
 test_dragonwing_qcomflash
 test_dragonwing_versioned_fallback

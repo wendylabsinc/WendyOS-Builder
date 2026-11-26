@@ -96,10 +96,21 @@ class ManifestV2Tests(unittest.TestCase):
     def test_targets_name_the_bundle_machine(self):
         # The bundle's .env.initrd-flash carries TNSPEC_MACHINE, not the Yocto MACHINE.
         confs = {"jetson-orin-nano": "jetson-orin-nano-devkit-wendyos.conf",
-                 "jetson-agx-orin": "jetson-agx-orin-devkit-wendyos.conf"}
+                 "jetson-agx-orin": "jetson-agx-orin-devkit-wendyos.conf",
+                 "unitree-go2": "unitree-go2-orin-nx.conf"}
         for (device, _), target in manifest.TARGETS.items():
             conf = pathlib.Path(__file__).resolve().parents[1] / "conf/machine" / confs[device]
             self.assertIn(f'\nTNSPEC_MACHINE = "{target["machine"]}"\n', conf.read_text())
+
+    def test_go2_flashpack_binds_nx16_and_nvme(self):
+        result = self.generate(self.fixture(), device="unitree-go2",
+                               machine="unitree-go2-orin-nx", board_sku="0000")
+        self.assertEqual(result["usb_product_id"], "0x7323")
+        self.assertEqual(result["target"], {
+            "device": "unitree-go2", "storage": "nvme",
+            "module_id": "3767", "module_sku": "0000",
+            "carrier_id": "3768", "carrier_sku": "0000",
+        })
 
     def test_export_of_another_disk_is_rejected(self):
         root = self.fixture()

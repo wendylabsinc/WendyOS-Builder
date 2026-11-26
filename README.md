@@ -16,6 +16,7 @@ This repository provides the meta-layer and build flow to build **WendyOS** — 
 | Jetson Orin Nano DevKit | Tegra234 | 8GB | `jetson-orin-nano` | `jetson-orin-nano-devkit-wendyos` | SD or NVMe | wendyos-update |
 | Jetson AGX Orin DevKit | Tegra234 | 64GB | `jetson-agx-orin` | `jetson-agx-orin-devkit-wendyos` | onboard eMMC or NVMe | wendyos-update |
 | Jetson AGX Thor DevKit | Tegra264 | 128GB | `jetson-agx-thor` | `jetson-agx-thor-devkit-nvme-wendyos` | NVMe | _(coming, wendyos-update)_ |
+| Unitree Go2 EDU expansion dock | Jetson Orin NX | 16GB | `unitree-go2` | `unitree-go2-orin-nx` | NVMe | wendyos-update |
 | Raspberry Pi 3 (B/B+) | Broadcom BCM2837 | 1GB | `rpi3` | `raspberrypi3-64-wendyos` | SD or USB | wendyos-update |
 | Raspberry Pi 4 | Broadcom BCM2711 | 1–8GB | `rpi4` | `raspberrypi4-64-wendyos` | SD or USB | wendyos-update |
 | Raspberry Pi 5 | Broadcom BCM2712 | 8GB | `rpi5` | `raspberrypi5-wendyos` | SD or NVMe | wendyos-update |
@@ -26,7 +27,21 @@ This repository provides the meta-layer and build flow to build **WendyOS** — 
 | Qualcomm Dragonwing IQ-9075 EVK | QCS9075 (aarch64) | 12 GB | `dragonwing-iq9075` | `iq-9075-evk-wendyos` | UFS (EDL / qdl) | wendyos-update |
 | Arduino UNO Q | QRB2210 (aarch64) | 2 / 4 GB | `arduino-uno-q` | `arduino-uno-q-wendyos` | eMMC (EDL / qdl) | wendyos-update |
 
-### Experimental Unitree Go2 EDU build
+### Unitree Go2 EDU
+
+Use the Wendy CLI to download the recovery flashpack and install it over USB
+on the Go2 EDU expansion dock with an Orin NX 16 GB (P3767-0000) and internal
+NVMe.
+
+```sh
+wendy install --device-type unitree-go2 --no-wifi
+```
+
+The installer walks through Force Recovery and shows progress while it updates
+QSPI and erases and rewrites the internal NVMe. The [Go2 installation guide](https://docs.wendy.dev/latest/advanced/clients/wendy-cli/commands/os/install/#unitree-go2-edu)
+shows where to connect the cable and how to enter recovery.
+
+#### Building a Go2 image locally
 
 `BOARD=unitree-go2` selects the Go2 EDU expansion dock with the Jetson Orin
 NX 16 GB module (P3767-0000) and NVMe. It uses the current Jetson Linux BSP
@@ -39,10 +54,20 @@ make setup BOARD=unitree-go2
 make build MACHINE=unitree-go2-orin-nx
 ```
 
-Start hardware bring-up with the bundle's Linux `initrd-flash` workflow
-and a matching QSPI and NVMe backup. Confirm APX recovery, the module SKU,
-and the dock revision before flashing. The Go2 build has no published
-Wendy CLI installer artifact.
+On the Builder host, extract the Tegra recovery bundle into a scratch
+directory. Set `image_version` to the version of the WendyOS image and
+run the packager.
+
+```bash
+scripts/make-t234-flashpack.sh --bundle-dir /path/to/extracted-go2-bundle \
+    --out /path/to/output --version "$image_version" --device unitree-go2 --storage nvme
+```
+
+To test this local build, pass its archive to the installer.
+
+```sh
+wendy install --device-type unitree-go2 --flashpack ./go2.flashpack.tar.zst --no-wifi
+```
 
 ## TL;DR
 
