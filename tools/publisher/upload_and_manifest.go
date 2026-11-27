@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -297,17 +298,25 @@ type FirmwareManifest struct {
 
 // FirmwareVersionMetadata contains metadata about a specific firmware version
 type FirmwareVersionMetadata struct {
-	ReleaseDate  time.Time  `json:"release_date"`
-	Path         string     `json:"path"`
-	Checksum     string     `json:"checksum,omitempty"`
-	SizeBytes    int64      `json:"size_bytes"`
-	Changelog    string     `json:"changelog,omitempty"`
-	IsLatest     bool       `json:"is_latest"`
-	IsNightly    bool       `json:"is_nightly,omitempty"`
-	PromotedFrom *string    `json:"promoted_from,omitempty"`
-	PromotedAt   *time.Time `json:"promoted_at,omitempty"`
-	SwappedAt    *time.Time `json:"swapped_at,omitempty"`
-	SwapCount    *int       `json:"swap_count,omitempty"`
+	ReleaseDate  time.Time                  `json:"release_date"`
+	Path         string                     `json:"path"`
+	Checksum     string                     `json:"checksum,omitempty"`
+	SizeBytes    int64                      `json:"size_bytes"`
+	Changelog    string                     `json:"changelog,omitempty"`
+	IsLatest     bool                       `json:"is_latest"`
+	IsNightly    bool                       `json:"is_nightly,omitempty"`
+	PromotedFrom *string                    `json:"promoted_from,omitempty"`
+	PromotedAt   *time.Time                 `json:"promoted_at,omitempty"`
+	SwappedAt    *time.Time                 `json:"swapped_at,omitempty"`
+	SwapCount    *int                       `json:"swap_count,omitempty"`
+	Companion    *FirmwareCompanionMetadata `json:"companion,omitempty"`
+}
+
+type FirmwareCompanionMetadata struct {
+	BuildID   string `json:"build_id"`
+	Path      string `json:"path"`
+	Checksum  string `json:"checksum"`
+	SizeBytes int64  `json:"size_bytes"`
 }
 
 // ProgressReader wraps an io.Reader and reports progress
@@ -1168,6 +1177,8 @@ func main() {
 	promote := flag.Bool("promote", false, "Promote nightly to stable by removing 'nightly' from version name")
 	swap := flag.Bool("swap", false, "Replace existing version's image file while preserving metadata")
 	firmware := flag.Bool("firmware", false, "Upload firmware (.bin) instead of OS image")
+	companionFile := flag.String("companion-file", "", "Optional companion OTA binary for a firmware release")
+	companionBuildID := flag.String("companion-build-id", "", "Build ID reported by the companion image")
 	chip := flag.String("chip", "", "Chip type for firmware upload (e.g., esp32-s3)")
 	removeDevice := flag.Bool("remove-device", false, "Remove a device (or firmware chip with --firmware) and all its images/versions")
 	removeKeepFiles := flag.Bool("remove-keep-files", false, "When removing a device, keep uploaded files in the bucket (only remove from manifests)")
@@ -1176,6 +1187,13 @@ func main() {
 	uploadConcurrency := flag.Int("upload-concurrency", 16, "Maximum concurrent upload streams (composite parts + whole small files)")
 	parallelUploadThresholdFlag := flag.Int64("parallel-upload-threshold", 256<<20, "Files larger than this many bytes upload as concurrent composite parts (default 256 MiB)")
 	flag.Parse()
+
+	if (*companionFile == "") != (*companionBuildID == "") {
+		log.Fatal("--companion-file and --companion-build-id must be supplied together")
+	}
+	if *companionFile != "" && (!*firmware || *createDevice || *removeDevice || *listImages || *promote || *swap) {
+		log.Fatal("--companion-file requires a firmware upload")
+	}
 
 	if *debug {
 		log.SetLevel(logrus.DebugLevel)
@@ -1283,6 +1301,11 @@ func main() {
 		}
 		if err := validateFileExists(*localFile); err != nil {
 			log.WithError(err).Fatal("Invalid firmware file")
+		}
+		if *companionFile != "" {
+			if err := validateFirmwareCompanion(*localFile, *companionFile, *companionBuildID); err != nil {
+				log.WithError(err).Fatal("Invalid companion firmware")
+			}
 		}
 		if *otaUpdateFile != "" {
 			log.Fatal("--ota-update is not supported for firmware uploads")
@@ -1623,8 +1646,15 @@ func main() {
 			log.WithError(err).Fatal("Failed to get firmware file attributes")
 		}
 
+		var companion *FirmwareCompanionMetadata
+		if *companionFile != "" {
+			companion, err = uploadFirmwareCompanion(ctx, bucket, *companionFile, *chip, *version, *companionBuildID)
+			if err != nil {
+				log.WithError(err).Fatal("Failed to upload companion firmware")
+			}
+		}
 		// Update firmware manifests
-		updateFirmwareManifests(ctx, bucket, *chip, *version, fwPath, fwAttrs.Size, checksum, *nightly, *notifyDiscord)
+		updateFirmwareManifests(ctx, bucket, *chip, *version, fwPath, fwAttrs.Size, checksum, companion, *nightly, *notifyDiscord)
 		return
 	}
 
@@ -3926,8 +3956,61 @@ func uploadFirmwareFile(ctx context.Context, bucket *storage.BucketHandle, local
 	return destinationPath, nil
 }
 
-// updateFirmwareManifests orchestrates parallel chip manifest + master manifest update, verification, and Discord notification
-func updateFirmwareManifests(ctx context.Context, bucket *storage.BucketHandle, chip, version, filePath string, fileSize int64, fileChecksum string, isNightly bool, notifyDiscord bool) {
+var firmwareCompanionBuildID = regexp.MustCompile(`^wendy-[0-9a-f]{24}$`)
+
+func validateFirmwareCompanion(hostPath, companionPath, buildID string) error {
+	if !firmwareCompanionBuildID.MatchString(buildID) {
+		return fmt.Errorf("invalid companion build ID %q", buildID)
+	}
+	if filepath.Base(hostPath) == filepath.Base(companionPath) {
+		return errors.New("host and companion filenames must differ")
+	}
+	info, err := os.Stat(companionPath)
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() > 4<<20 {
+		return errors.New("companion must be a nonempty firmware file up to 4 MiB")
+	}
+	file, err := os.Open(companionPath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	// ESP-IDF images start with the 24-byte image header and 8-byte segment
+	// header, followed by esp_app_desc_t. Read through its version field.
+	var header [80]byte
+	if _, err := io.ReadFull(file, header[:]); err != nil {
+		return fmt.Errorf("reading companion application descriptor: %w", err)
+	}
+	if header[0] != 0xe9 || binary.LittleEndian.Uint16(header[12:14]) != 13 ||
+		binary.LittleEndian.Uint32(header[32:36]) != 0xabcd5432 {
+		return errors.New("companion is not an ESP32-C6 application image")
+	}
+	if got := string(bytes.TrimRight(header[48:80], "\x00")); got != buildID {
+		return fmt.Errorf("companion application version is %q, expected %q", got, buildID)
+	}
+	return nil
+}
+
+func uploadFirmwareCompanion(ctx context.Context, bucket *storage.BucketHandle, localPath, chip, version, buildID string) (*FirmwareCompanionMetadata, error) {
+	checksum, err := calculateChecksum(localPath)
+	if err != nil {
+		return nil, err
+	}
+	path, err := uploadFirmwareFile(ctx, bucket, localPath, chip, version)
+	if err != nil {
+		return nil, err
+	}
+	attrs, err := bucket.Object(path).Attrs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &FirmwareCompanionMetadata{BuildID: buildID, Path: path, Checksum: checksum, SizeBytes: attrs.Size}, nil
+}
+
+// Publish the chip manifest before master can advertise the new version.
+func updateFirmwareManifests(ctx context.Context, bucket *storage.BucketHandle, chip, version, filePath string, fileSize int64, fileChecksum string, companion *FirmwareCompanionMetadata, isNightly bool, notifyDiscord bool) {
 	logger := log.WithFields(logrus.Fields{
 		"chip":           chip,
 		"version":        version,
@@ -3935,69 +4018,28 @@ func updateFirmwareManifests(ctx context.Context, bucket *storage.BucketHandle, 
 		"is_nightly":     isNightly,
 		"notify_discord": notifyDiscord,
 	})
-	logger.Info("Updating firmware manifests in parallel")
-
-	// Update chip and master manifests in parallel
-	var wg sync.WaitGroup
-	wg.Add(2)
-
-	chipFields := logrus.Fields{
-		"chip":          chip,
-		"version":       version,
-		"file_path":     filePath,
-		"is_nightly":    isNightly,
-		"manifest_type": "chip",
+	if err := updateFirmwareChipManifest(ctx, logger, bucket, chip, version, filePath, fileSize, fileChecksum, companion, isNightly); err != nil {
+		logger.WithError(err).Fatal("Failed to update firmware chip manifest")
 	}
-	masterFields := logrus.Fields{
-		"chip":          chip,
-		"version":       version,
-		"is_nightly":    isNightly,
-		"manifest_type": "master",
-	}
-
-	chipErrChan := make(chan error, 1)
-	masterErrChan := make(chan error, 1)
-
-	go func() {
-		defer wg.Done()
-		chipLogger := log.WithFields(chipFields)
-		chipErrChan <- updateFirmwareChipManifest(ctx, chipLogger, bucket, chip, version, filePath, fileSize, fileChecksum, isNightly)
-	}()
-
-	go func() {
-		defer wg.Done()
-		masterLogger := log.WithFields(masterFields)
-		masterErrChan <- updateMasterManifestFirmware(ctx, masterLogger, bucket, chip, version, isNightly)
-	}()
-
-	wg.Wait()
-	close(chipErrChan)
-	close(masterErrChan)
-
-	// Check for errors
-	if chipErr := <-chipErrChan; chipErr != nil {
-		logger.WithError(chipErr).Fatal("Failed to update firmware chip manifest")
-	}
-	if masterErr := <-masterErrChan; masterErr != nil {
-		logger.WithError(masterErr).Fatal("Failed to update master manifest for firmware")
-	}
-
-	logger.Info("Firmware manifests updated successfully")
 
 	// Small delay to ensure manifest write is fully propagated
 	time.Sleep(2 * time.Second)
 
 	// Verify the upload before sending notifications
 	logger.Info("Verifying firmware upload integrity...")
-	if err := verifyFirmwareUpload(ctx, logger, bucket, chip, version, filePath, fileChecksum); err != nil {
+	if err := verifyFirmwareUpload(ctx, logger, bucket, chip, version, filePath, fileChecksum, companion); err != nil {
 		logger.WithError(err).Warn("Firmware upload verification failed - retrying once...")
 
 		time.Sleep(2 * time.Second)
-		if err := verifyFirmwareUpload(ctx, logger, bucket, chip, version, filePath, fileChecksum); err != nil {
+		if err := verifyFirmwareUpload(ctx, logger, bucket, chip, version, filePath, fileChecksum, companion); err != nil {
 			logger.WithError(err).Fatal("Firmware upload verification failed after retry")
 		}
 	}
 	logger.Info("Firmware upload verification passed")
+
+	if err := updateMasterManifestFirmware(ctx, logger, bucket, chip, version, isNightly); err != nil {
+		logger.WithError(err).Fatal("Failed to update master manifest for firmware")
+	}
 
 	// Send Discord notification if requested
 	if notifyDiscord {
@@ -4009,7 +4051,7 @@ func updateFirmwareManifests(ctx context.Context, bucket *storage.BucketHandle, 
 }
 
 // updateFirmwareChipManifest reads/creates manifests/<chip>.json as FirmwareManifest, updates version, writes back
-func updateFirmwareChipManifest(ctx context.Context, logger *logrus.Entry, bucket *storage.BucketHandle, chip, version, filePath string, fileSize int64, fileChecksum string, isNightly bool) error {
+func updateFirmwareChipManifest(ctx context.Context, logger *logrus.Entry, bucket *storage.BucketHandle, chip, version, filePath string, fileSize int64, fileChecksum string, companion *FirmwareCompanionMetadata, isNightly bool) error {
 	manifestPath := fmt.Sprintf("manifests/%s.json", chip)
 	logger = logger.WithField("manifest_path", manifestPath)
 	logger.Info("Processing firmware chip manifest")
@@ -4072,6 +4114,7 @@ func updateFirmwareChipManifest(ctx context.Context, logger *logrus.Entry, bucke
 		SizeBytes:   fileSize,
 		IsLatest:    true,
 		IsNightly:   isNightly,
+		Companion:   companion,
 	}
 
 	manifest.Versions[version] = versionMetadata
@@ -4193,7 +4236,7 @@ func updateMasterManifestFirmware(ctx context.Context, logger *logrus.Entry, buc
 }
 
 // verifyFirmwareUpload reads back chip manifest, verifies version exists with correct path/checksum
-func verifyFirmwareUpload(ctx context.Context, logger *logrus.Entry, bucket *storage.BucketHandle, chip, version, expectedPath, expectedChecksum string) error {
+func verifyFirmwareUpload(ctx context.Context, logger *logrus.Entry, bucket *storage.BucketHandle, chip, version, expectedPath, expectedChecksum string, companion *FirmwareCompanionMetadata) error {
 	logger.Info("Reading back firmware chip manifest for verification")
 
 	manifestPath := fmt.Sprintf("manifests/%s.json", chip)
@@ -4243,6 +4286,18 @@ func verifyFirmwareUpload(ctx context.Context, logger *logrus.Entry, bucket *sto
 	// Verify checksum if provided
 	if expectedChecksum != "" && versionData.Checksum != expectedChecksum {
 		return fmt.Errorf("firmware checksum mismatch: manifest has %q, expected %q", versionData.Checksum, expectedChecksum)
+	}
+	if companion != nil {
+		if versionData.Companion == nil || *versionData.Companion != *companion {
+			return errors.New("companion metadata in firmware manifest differs from the upload")
+		}
+		attrs, err := bucket.Object(companion.Path).Attrs(ctx)
+		if err != nil {
+			return fmt.Errorf("companion file not found at %s: %w", companion.Path, err)
+		}
+		if attrs.Size != companion.SizeBytes {
+			return fmt.Errorf("companion file at %s has size %d, expected %d", companion.Path, attrs.Size, companion.SizeBytes)
+		}
 	}
 
 	logger.WithFields(logrus.Fields{
