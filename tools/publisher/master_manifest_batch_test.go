@@ -33,6 +33,7 @@ type manifestTestServer struct {
 	names                   []string
 	concurrentDevice        bool
 	malformed               bool
+	chipReads               []FirmwareManifest
 }
 
 func (s *manifestTestServer) bucket(t *testing.T) *storage.BucketHandle {
@@ -41,6 +42,12 @@ func (s *manifestTestServer) bucket(t *testing.T) *storage.BucketHandle {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodGet {
+			if len(s.chipReads) > 0 && strings.HasSuffix(r.URL.Path, "/manifests/esp32p4.json") {
+				w.Header().Set("X-Goog-Generation", "1")
+				json.NewEncoder(w).Encode(s.chipReads[0])
+				s.chipReads = s.chipReads[1:]
+				return
+			}
 			s.reads++
 			if len(s.readStatus) > 0 {
 				code := s.readStatus[0]
@@ -298,13 +305,13 @@ func TestMasterManifestBatchPermanentWriteFailure(t *testing.T) {
 func TestMasterManifestRetryStops(t *testing.T) {
 	for _, code := range []int{403, 429, 412} {
 		err := &googleapi.Error{Code: code}
-		if got := retryMasterManifest(context.Background(), batchTestLogger(), err, 10, 10); got != err {
+		if got := retryManifest(context.Background(), batchTestLogger(), err, 10, 10); got != err {
 			t.Errorf("code %d: got %v", code, got)
 		}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := retryMasterManifest(ctx, batchTestLogger(), &googleapi.Error{Code: 429}, 1, 10); !errors.Is(err, context.Canceled) {
+	if err := retryManifest(ctx, batchTestLogger(), &googleapi.Error{Code: 429}, 1, 10); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancellation: %v", err)
 	}
 }
@@ -318,5 +325,39 @@ func TestMasterManifestSingleDeviceCompatibility(t *testing.T) {
 		if (s.writes == 1) != force {
 			t.Fatalf("force=%v writes=%d", force, s.writes)
 		}
+	}
+}
+
+func TestFirmwareMasterManifestFollowsCurrentBoardRelease(t *testing.T) {
+	const chip = "esp32p4"
+	first := FirmwareManifest{ChipID: chip, Versions: map[string]FirmwareVersionMetadata{
+		"1.1.0": {IsLatest: true},
+	}}
+	next := FirmwareManifest{ChipID: chip, Versions: map[string]FirmwareVersionMetadata{
+		"1.1.0":   {},
+		"1.2.0":   {IsLatest: true},
+		"nightly": {IsLatest: true, IsNightly: true},
+	}}
+	server := &manifestTestServer{
+		manifest: MasterManifest{
+			Devices:  map[string]DeviceLatestInfo{"printer": {Latest: "5.2.0"}},
+			Firmware: map[string]DeviceLatestInfo{chip: {Latest: "1.0.0", LatestNightly: "nightly"}},
+		},
+		chipReads: []FirmwareManifest{first, next},
+		// A second release replaces the stable entry between our read and write.
+		writeStatus:      []int{http.StatusPreconditionFailed},
+		concurrentDevice: true,
+	}
+	if err := updateFirmwareMasterManifest(t.Context(), batchTestLogger(), server.bucket(t), chip, false); err != nil {
+		t.Fatal(err)
+	}
+	if got := server.manifest.Firmware[chip]; got.Latest != "1.2.0" || got.LatestNightly != "nightly" {
+		t.Fatalf("firmware versions = %+v after concurrent publish", got)
+	}
+	if server.manifest.Devices["printer"].Latest != "5.2.0" || server.manifest.Devices["concurrent"].Latest != "other-release" {
+		t.Fatalf("other devices were lost: %+v", server.manifest.Devices)
+	}
+	if len(server.chipReads) != 0 || server.writes != 2 {
+		t.Fatalf("remaining board reads: %d, master writes: %d", len(server.chipReads), server.writes)
 	}
 }
