@@ -4028,7 +4028,8 @@ func publishFirmware(ctx context.Context, bucket *storage.BucketHandle, chip, ve
 	}
 	logger := log.WithFields(logrus.Fields{"chip": chip, "version": version, "is_nightly": nightly})
 	// Publish the chip manifest only after both objects have been committed.
-	err = updateManifestObject(ctx, logger, bucket.Object(deviceManifestPath("", chip)), func(manifest *FirmwareManifest) bool {
+	chipManifest := bucket.Object(deviceManifestPath("", chip))
+	err = updateManifestObject(ctx, logger, chipManifest, func(manifest *FirmwareManifest) (bool, error) {
 		manifest.ChipID = chip
 		if manifest.Versions == nil {
 			manifest.Versions = make(map[string]FirmwareVersionMetadata)
@@ -4040,30 +4041,12 @@ func publishFirmware(ctx context.Context, bucket *storage.BucketHandle, chip, ve
 			}
 		}
 		manifest.Versions[version] = release
-		return true
+		return true, nil
 	})
 	if err != nil {
 		return fmt.Errorf("updating firmware manifest: %w", err)
 	}
-	err = updateManifestObject(ctx, logger, bucket.Object(masterManifestPath("")), func(manifest *MasterManifest) bool {
-		if manifest.Devices == nil {
-			manifest.Devices = make(map[string]DeviceLatestInfo)
-		}
-		if manifest.Firmware == nil {
-			manifest.Firmware = make(map[string]DeviceLatestInfo)
-		}
-		info := manifest.Firmware[chip]
-		info.ManifestPath = deviceManifestPath("", chip)
-		if nightly {
-			info.LatestNightly = version
-		} else {
-			info.Latest = version
-		}
-		manifest.Firmware[chip] = info
-		manifest.LastUpdated = time.Now()
-		return true
-	})
-	if err != nil {
+	if err := updateFirmwareMasterManifest(ctx, logger, bucket, chip, nightly); err != nil {
 		return fmt.Errorf("updating master manifest: %w", err)
 	}
 
@@ -4073,6 +4056,49 @@ func publishFirmware(ctx context.Context, bucket *storage.BucketHandle, chip, ve
 		}
 	}
 	return nil
+}
+
+func updateFirmwareMasterManifest(ctx context.Context, logger *logrus.Entry, bucket *storage.BucketHandle, chip string, nightly bool) error {
+	chipPath := deviceManifestPath("", chip)
+	chipManifest := bucket.Object(chipPath).Retryer(storage.WithPolicy(storage.RetryNever))
+	master := bucket.Object(masterManifestPath(""))
+	return updateManifestObject(ctx, logger, master, func(manifest *MasterManifest) (bool, error) {
+		// Read the chip manifest after reading the master generation, on every
+		// attempt. Concurrent releases can reach this step in a different order
+		// from their chip writes.
+		board, _, err := readManifestObject[FirmwareManifest](ctx, chipManifest)
+		if err != nil {
+			return false, fmt.Errorf("reading current firmware manifest: %w", err)
+		}
+		var version string
+		for key, entry := range board.Versions {
+			if entry.IsNightly == nightly && entry.IsLatest {
+				if version != "" {
+					return false, fmt.Errorf("firmware manifest for %s has multiple latest releases in the same channel", chip)
+				}
+				version = key
+			}
+		}
+		if version == "" {
+			return false, fmt.Errorf("firmware manifest for %s is missing the latest release", chip)
+		}
+		if manifest.Devices == nil {
+			manifest.Devices = make(map[string]DeviceLatestInfo)
+		}
+		if manifest.Firmware == nil {
+			manifest.Firmware = make(map[string]DeviceLatestInfo)
+		}
+		info := manifest.Firmware[chip]
+		info.ManifestPath = chipPath
+		if nightly {
+			info.LatestNightly = version
+		} else {
+			info.Latest = version
+		}
+		manifest.Firmware[chip] = info
+		manifest.LastUpdated = time.Now()
+		return true, nil
+	})
 }
 
 // sendFirmwareDiscordNotification sends a Discord embed with firmware publication details
