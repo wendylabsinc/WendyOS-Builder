@@ -42,7 +42,7 @@ slots.
 |---|---|
 | 32 KiB (raw) | `idbloader.img` |
 | 8 MiB (raw) | `u-boot.itb` |
-| p1 `boot` (FAT) | `wendyos-rockchip.scr`, `uboot.env` |
+| p1 `boot` (FAT) | `wendyos-rockchip.scr`, `uboot.env`, `uboot-backup.env` |
 | p2 `config` (FAT) | first-boot provisioning seed |
 | p3 `rootfsA`, p4 `rootfsB` (ext4) | the two OTA slots, each with `/boot/Image` and the DTB |
 | p5 `data` (ext4) | `/data`, grown to fill the disk on first boot |
@@ -65,10 +65,16 @@ DTB from the selected slot and boots with `panic=10 rootwait=60`, so a trial slo
 that panics or never finds its root resets into the fall-back instead of
 hanging. The environment is `uboot.env` on the boot partition of the disk that
 booted, 0x8000 bytes (`WENDYOS_UBOOT_ENV_SIZE`, equal to `/etc/fw_env.config` and
-U-Boot's `CONFIG_ENV_SIZE`). The connector is `ubootenv`, the same as on the
-Raspberry Pi. OTA never rewrites the loaders or the script, so the paths it
-loads (`/boot/Image`, `/boot/rk3588s-orangepi-5-pro.dtb`) and the env size must
-not change.
+U-Boot's `CONFIG_ENV_SIZE`). The script keeps a byte copy in `uboot-backup.env`
+and restores a missing or damaged `uboot.env` from it, so the board keeps its
+committed slot. If both are lost it boots slot A and writes fresh copies. The
+connector is `ubootenv`, the same as on the Raspberry Pi. OTA never rewrites the
+loaders or the script, so the paths it loads (`/boot/Image`,
+`/boot/rk3588s-orangepi-5-pro.dtb`) and the env size must not change.
+
+If no disk boots (for example the NVMe link does not come up on a cold boot),
+U-Boot waits 5 seconds and resets. Press Ctrl-C during the wait to stay at the
+prompt.
 
 ## Console
 

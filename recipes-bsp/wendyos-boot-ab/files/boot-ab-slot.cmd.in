@@ -17,6 +17,7 @@ setenv wendyos_if ${devtype}
 setenv wendyos_dev ${devnum}
 if test -z "${wendyos_if}"; then setenv wendyos_if mmc; setenv wendyos_dev @@WENDYOS_SD_MMC_DEV@@; fi
 
+# --- A/B state: uboot.env and its backup -----------------------------------
 # U-Boot's own env storage is fixed at build time (the Pi: mmc 0:1, the SD
 # card; Rockchip: nowhere): the wrong file, or none, when booting from another
 # disk, and with an unrelated SD card inserted, saveenv would write to THAT
@@ -26,24 +27,60 @@ if test -z "${wendyos_if}"; then setenv wendyos_if mmc; setenv wendyos_dev @@WEN
 # full size (must match fw_env.config). Whole, not just our vars: a U-Boot
 # with its env in FAT (the Pi on SD) loads this file as its entire startup
 # env, replacing the defaults (bootcmd, load addresses, ...).
+#
+# uboot-backup.env is a byte copy of uboot.env, refreshed before this script
+# writes uboot.env. A uboot.env that a power cut tore or that went missing is
+# restored from it, so the board keeps its committed slot instead of falling
+# to slot 0. Linux reads and writes uboot.env only (a single-copy
+# fw_env.config): libubootenv's redundant layout has a flags byte that this
+# script and boards already in the field cannot read.
 setenv wendyos_boot_slot
 setenv wendyos_upgrade_available
 setenv bootcount
 setenv bootlimit
-if load ${wendyos_if} ${wendyos_dev}:1 ${ramdisk_addr_r} uboot.env; then
-    env import -c ${ramdisk_addr_r} @@WENDYOS_UBOOT_ENV_SIZE@@ wendyos_boot_slot wendyos_upgrade_available bootcount bootlimit
-fi
 setenv wendyos_saveenv "env export -c -s @@WENDYOS_UBOOT_ENV_SIZE@@ ${ramdisk_addr_r} && fatwrite ${wendyos_if} ${wendyos_dev}:1 ${ramdisk_addr_r} uboot.env @@WENDYOS_UBOOT_ENV_SIZE@@"
+setenv wendyos_env_src none
+# A short file is damaged too: env import would CRC whatever RAM follows it.
+# So is one without the slot: fw_setenv rebuilt it from U-Boot's defaults
+# (/etc/u-boot-initial-env) with only some of our vars, or saveenv ran by hand.
+if load ${wendyos_if} ${wendyos_dev}:1 ${ramdisk_addr_r} uboot.env && itest ${filesize} -ge @@WENDYOS_UBOOT_ENV_SIZE@@; then
+    if env import -c ${ramdisk_addr_r} @@WENDYOS_UBOOT_ENV_SIZE@@ wendyos_boot_slot wendyos_upgrade_available bootcount bootlimit; then
+        if test -n "${wendyos_boot_slot}"; then setenv wendyos_env_src primary; fi
+    fi
+fi
+if test "${wendyos_env_src}" = "none"; then
+    if load ${wendyos_if} ${wendyos_dev}:1 ${ramdisk_addr_r} uboot-backup.env && itest ${filesize} -ge @@WENDYOS_UBOOT_ENV_SIZE@@; then
+        if env import -c ${ramdisk_addr_r} @@WENDYOS_UBOOT_ENV_SIZE@@ wendyos_boot_slot wendyos_upgrade_available bootcount bootlimit; then
+            setenv wendyos_env_src backup
+            echo "wendyos: uboot.env missing or damaged; using uboot-backup.env"
+        fi
+    fi
+fi
+if test "${wendyos_env_src}" = "none"; then echo "wendyos: no saved A/B state; using defaults"; fi
 
-# --- First-boot env init (idempotent) -------------------------------------
-# Stock U-Boot has none of our vars compiled in; seed sane defaults. Persist
-# once (only if uboot.env is absent) so fw_setenv on the Linux side has a file
-# to edit before the first OTA.
+# --- Defaults ---------------------------------------------------------------
+# Stock U-Boot has none of our vars compiled in.
 if test "${wendyos_boot_slot}" = ""; then setenv wendyos_boot_slot 0; fi
 if test "${wendyos_upgrade_available}" = ""; then setenv wendyos_upgrade_available 0; fi
 if test "${bootlimit}" = ""; then setenv bootlimit @@WENDYOS_BOOTLIMIT@@; fi
 if test "${bootcount}" = ""; then setenv bootcount 0; fi
-if test ! -e ${wendyos_if} ${wendyos_dev}:1 uboot.env; then run wendyos_saveenv; fi
+
+# --- Keep both copies readable --------------------------------------------
+# Before any trial write: fw_setenv on Linux can edit only a readable
+# uboot.env, and the backup must hold the state as it was before the write.
+# The backup is rewritten only when it differs, to keep FAT writes rare.
+if test "${wendyos_env_src}" = "primary"; then
+    setexpr wendyos_env_bak ${ramdisk_addr_r} + @@WENDYOS_UBOOT_ENV_SIZE@@
+    if load ${wendyos_if} ${wendyos_dev}:1 ${wendyos_env_bak} uboot-backup.env && itest ${filesize} -ge @@WENDYOS_UBOOT_ENV_SIZE@@ && cmp.b ${ramdisk_addr_r} ${wendyos_env_bak} @@WENDYOS_UBOOT_ENV_SIZE@@; then
+        true
+    else
+        fatwrite ${wendyos_if} ${wendyos_dev}:1 ${ramdisk_addr_r} uboot-backup.env @@WENDYOS_UBOOT_ENV_SIZE@@
+    fi
+elif run wendyos_saveenv; then
+    if test "${wendyos_env_src}" = "none"; then
+        fatwrite ${wendyos_if} ${wendyos_dev}:1 ${ramdisk_addr_r} uboot-backup.env @@WENDYOS_UBOOT_ENV_SIZE@@
+    fi
+fi
 
 # --- Trial boot -----------------------------------------------------------
 # Only while an update is armed (set by `wendyos-update install`) do we count

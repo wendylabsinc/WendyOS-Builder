@@ -72,11 +72,14 @@ IMAGE_INSTALL:remove = "data-mount"
 # 2) wendy-stack RPi extras:
 #    - wendyos-fw-env       /etc/fw_env.config so the ubootenv connector's
 #                           fw_setenv reaches uboot.env on the boot FAT.
+#    - u-boot-default-env   /etc/u-boot-initial-env, U-Boot's built-in env:
+#                           fw_setenv rewrites a damaged uboot.env from it
+#                           instead of failing every OTA.
 #    - wendyos-update-config pins the connector to "ubootenv".
 #    - kernel-image          the boot script ext4loads /boot/${KERNEL_IMAGETYPE}
 #                            from the selected rootfs slot (A/B-safe); meta-
 #                            raspberrypi only deploys the kernel to the FAT.
-IMAGE_INSTALL:append = " wendyos-fw-env wendyos-update-config kernel-image"
+IMAGE_INSTALL:append = " wendyos-fw-env u-boot-default-env wendyos-update-config kernel-image"
 
 # 3) Fixed A/B rootfs sizing — the image, the A/B slot, and the .wendy OTA
 #    payload are all pinned to one per-platform constant so they are identical
