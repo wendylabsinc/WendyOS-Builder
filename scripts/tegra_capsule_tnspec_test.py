@@ -35,7 +35,8 @@ BOARDS = {
 COMMON = {"TEGRA_CHIPREV": "0", "NVIDIA_CHIP": "0x23", "LNXFILE": "boot.img",
           "BUP_PAYLOAD_DIR": "payloads_t23x",
           "TEGRA_BUPGEN_STRIP_CMD": 'sed -e"/<filename>.*esp.img/d" flash.xml.in > flash-stripped.xml.in'}
-# generate_bup_payload.sh of a merged Orin Nano build whose capsule carried all three names.
+# generate_bup_payload.sh of a merged Orin Nano build, and the legacy names that build was given.
+BUILT_NANO_LEGACY = "jetson-orin-nano-devkit-wendyos jetson-orin-nano-devkit-nvme-wendyos"
 BUILT_NANO_SCRIPT = """#!/bin/bash
 sed -e"/<filename>.*esp.img/d" flash.xml.in > flash-stripped.xml.in
 rm -rf signed multi_signed rollback.bin payloads_t23x
@@ -53,7 +54,8 @@ MACHINE=jetson-orin-nano-devkit-nvme-wendyos FAB="000" BOARDSKU="0005" BOARDREV=
 
 # Every machine name a fielded unit can carry in its write-once TegraPlatformSpec.
 LEGACY = {
-    "nano": ["jetson-orin-nano-devkit-wendyos", "jetson-orin-nano-devkit-nvme-wendyos"],
+    "nano": ["jetson-orin-nano-devkit-wendyos", "jetson-orin-nano-devkit-nvme-wendyos",
+             "jetson-orin-nano-devkit-nvme-edgeos"],
     "agx": ["jetson-agx-orin-devkit-emmc-wendyos", "jetson-agx-orin-devkit-nvme-wendyos"],
 }
 # Names a fresh merged install must not share: legacy, renamed, stock meta-tegra and Thor.
@@ -71,6 +73,10 @@ BENCH = {
     "agx": ("3701-501-0005-G.0-1-0-jetson-agx-orin-devkit-emmc-wendyos-",
             "3701--0005--1--jetson-agx-orin-devkit-emmc-wendyos-"),
 }
+# efivars read on an Orin Nano first flashed before the 2026-02-04 edgeos-to-wendyos rename and
+# updated over the air since: its /etc/nv_boot_control.conf says wendyos, the firmware still says edgeos.
+BENCH_BEFORE_RENAME = ("3767-300-0005-R.1-1-0-jetson-orin-nano-devkit-nvme-edgeos-",
+                       "3767--0005--1--jetson-orin-nano-devkit-nvme-edgeos-")
 # TnSpecs of today's split capsules: Nano NVMe and AGX eMMC read out of shipped tegra-bl.cap files,
 # the other two in their format.
 SPLIT_CAPSULES = {
@@ -292,6 +298,14 @@ class CapsuleTests(unittest.TestCase):
                     self.assertIsNotNone(picked)
                     self.assertTrue(picked.endswith(f"-{machine}-"))
 
+    def test_a_unit_flashed_before_the_rename_takes_the_capsule(self):
+        full, compat = BENCH_BEFORE_RENAME
+        boardspec = "-".join(full.split("-")[:6])
+        self.assertEqual(unit(boardspec, "jetson-orin-nano-devkit-nvme-edgeos"), (full, compat))
+        picked = applies(self.specs("nano"), (full, compat))
+        self.assertIsNotNone(picked, "UEFI rejects the capsule with ESRT status 6151 (0x1807)")
+        self.assertTrue(picked.endswith("-jetson-orin-nano-devkit-nvme-edgeos-"))
+
     def test_fab_and_revision_of_the_unit_do_not_matter(self):
         fabs = {"nano": ["000", "100", "300", "TS1", "EB2"], "agx": ["300", "400", "500", "501", "TS4"]}
         for board in BOARDS:
@@ -360,7 +374,7 @@ class AppendTests(unittest.TestCase):
     def test_the_append_gives_the_built_lines(self):
         # Only the order differs: each tegra-flash-helper.sh --bup run rebuilds its payload type
         # from every spec signed so far (l4t_bup_gen.func), so the last run of a type has them all.
-        result, script, _ = run_append("nano", upstream_script("nano", names("nano")[0]))
+        result, script, _ = run_append("nano", upstream_script("nano", names("nano")[0]), legacy=BUILT_NANO_LEGACY)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(sorted(script.splitlines()), sorted(BUILT_NANO_SCRIPT.splitlines()))
 
