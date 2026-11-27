@@ -133,6 +133,8 @@ on:
       - 'meta-rockchip-extensions/recipes-bsp/**'
       - 'conf/machine/include/rockchip-common-wendyos.inc'
       - 'conf/distro/include/rockchip-image.inc'
+      - 'conf/distro/include/rpi-image.inc'
+      - 'meta-rpi-extensions/recipes-bsp/u-boot/**'
       # No *.sh filter: data-recovery-key is a command and carries no extension.
       - 'recipes-support/data-device/files/*'
       - 'recipes-support/data-crypt/files/*'
@@ -280,6 +282,8 @@ on:
       - 'meta-rockchip-extensions/recipes-bsp/**'
       - 'conf/machine/include/rockchip-common-wendyos.inc'
       - 'conf/distro/include/rockchip-image.inc'
+      - 'conf/distro/include/rpi-image.inc'
+      - 'meta-rpi-extensions/recipes-bsp/u-boot/**'
       # No *.sh filter: data-recovery-key is a command and carries no extension.
       - 'recipes-support/data-device/files/*'
       - 'recipes-support/data-crypt/files/*'

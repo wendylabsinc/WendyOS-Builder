@@ -26,7 +26,10 @@ RK_COMMON = ROOT / "conf/machine/include/rockchip-common-wendyos.inc"
 RK_RECIPE = ROOT / "meta-rockchip-extensions/recipes-bsp/wendyos-boot-scr/wendyos-boot-scr.bb"
 RK_FW_ENV = ROOT / "meta-rockchip-extensions/recipes-bsp/wendyos-fw-env/wendyos-fw-env.bb"
 RPI_FW_ENV = ROOT / "meta-rpi-extensions/recipes-bsp/wendyos-fw-env/files/fw_env.config"
+RPI_UBOOT_APPEND = ROOT / "meta-rpi-extensions/recipes-bsp/u-boot/u-boot_%.bbappend"
 SHARED_INC = ROOT / "recipes-bsp/wendyos-boot-ab/wendyos-boot-ab.inc"
+IMAGE_INCS = {"rpi": ROOT / "conf/distro/include/rpi-image.inc",
+              "rockchip": ROOT / "conf/distro/include/rockchip-image.inc"}
 
 # The env contract of the wendyos-update ubootenv connector.
 PERSISTED = ("wendyos_boot_slot", "wendyos_upgrade_available", "bootcount", "bootlimit")
@@ -107,15 +110,38 @@ class EnvContractTests(unittest.TestCase):
                 self.assertRegex(self.head, rf'if test "\${{{name}}}" = ""; then setenv {name} ')
 
     def test_env_import_takes_exactly_the_contract(self):
-        imported = re.search(r"env import -c \S+ \S+ (.*)", self.head).group(1).split()
-        self.assertEqual(imported, list(PERSISTED))
+        # uboot.env, then uboot-backup.env when uboot.env is missing or damaged.
+        imports = re.findall(r"env import -c \S+ \S+ ([^;\n]*)", self.head)
+        self.assertEqual(len(imports), 2)
+        for imported in imports:
+            self.assertEqual(imported.split(), list(PERSISTED))
+
+    def test_backup_is_refreshed_before_the_trial_writes(self):
+        # A power cut during a trial write must find the pre-write state in the
+        # backup, so every backup write comes before the trial section.
+        trial = self.head.index("setexpr bootcount ${bootcount} + 1")
+        writes = [m.start() for m in re.finditer(r"fatwrite \S+ \S+ \S+ uboot-backup.env", self.head)]
+        self.assertEqual(len(writes), 2)
+        self.assertTrue(all(w < trial for w in writes))
+
+    def test_a_missing_or_damaged_uboot_env_is_rewritten(self):
+        # Only a uboot.env that imported cleanly is left alone; fw_setenv on
+        # Linux cannot edit a damaged one.
+        self.assertIn('if test "${wendyos_env_src}" = "primary"; then', self.head)
+        # A valid uboot.env without the slot (fw_setenv's default-env rebuild)
+        # must not override the backup.
+        self.assertIn('if test -n "${wendyos_boot_slot}"; then setenv wendyos_env_src primary; fi', self.head)
+        self.assertRegex(self.head, r"(?m)^elif run wendyos_saveenv; then$")
+        self.assertNotIn("test ! -e", self.head)
 
     def test_saveenv_size_matches_fw_env_config(self):
         for family, spec in FAMILIES.items():
             with self.subTest(family=family):
                 _, script = render(spec["tail"], spec["values"])
                 sizes = set(re.findall(r"env export -c -s (0x[0-9a-fA-F]+)", script))
-                sizes |= set(re.findall(r"fatwrite \S+ \S+ \S+ uboot.env (0x[0-9a-fA-F]+)", script))
+                sizes |= set(re.findall(r"fatwrite \S+ \S+ \S+ uboot(?:-backup)?\.env (0x[0-9a-fA-F]+)", script))
+                sizes |= set(re.findall(r"cmp\.b \S+ \S+ (0x[0-9a-fA-F]+)", script))
+                sizes |= set(re.findall(r"setexpr wendyos_env_bak \S+ \+ (0x[0-9a-fA-F]+)", script))
                 self.assertEqual(sizes, {spec["values"]["WENDYOS_UBOOT_ENV_SIZE"]})
         fw = [line.split() for line in RPI_FW_ENV.read_text().splitlines()
               if line.strip() and not line.startswith("#")]
@@ -123,6 +149,18 @@ class EnvContractTests(unittest.TestCase):
         # Rockchip writes fw_env.config from the variable the boot script uses.
         self.assertIn("/boot/uboot.env 0x0000 %s", RK_FW_ENV.read_text())
         self.assertIn('"${WENDYOS_UBOOT_ENV_SIZE}" > ${D}${sysconfdir}/fw_env.config', RK_FW_ENV.read_text())
+
+    def test_images_ship_the_default_env(self):
+        # Without /etc/u-boot-initial-env, fw_setenv fails on a damaged
+        # uboot.env (exit 243) and every OTA stops at the slot switch.
+        for family, inc in IMAGE_INCS.items():
+            with self.subTest(family=family):
+                installs = " ".join(re.findall(r'IMAGE_INSTALL:append = "([^"]*)"', inc.read_text()))
+                self.assertIn("wendyos-fw-env", installs.split())
+                self.assertIn("u-boot-default-env", installs.split())
+        # meta-raspberrypi's u-boot-env also carries an fw_env.config.
+        self.assertRegex(RPI_UBOOT_APPEND.read_text(),
+                         r"do_install:append:rpi \(\) \{\n    rm -f \$\{D\}\$\{sysconfdir\}/fw_env.config\n\}")
 
     def test_rockchip_env_size_comes_from_the_machine_include(self):
         self.assertIn('WENDYOS_UBOOT_ENV_SIZE = "0x8000"', RK_COMMON.read_text())
@@ -182,8 +220,10 @@ class RockchipUBootTests(unittest.TestCase):
                         if line.startswith("CONFIG_"))
 
     def test_the_script_commands_are_enabled(self):
-        # setexpr counts trial boots, fatwrite saves uboot.env, part reads PARTUUIDs.
-        for symbol in ("CONFIG_CMD_SETEXPR", "CONFIG_FAT_WRITE", "CONFIG_CMD_PART", "CONFIG_CMD_NVME"):
+        # setexpr counts trial boots, fatwrite saves uboot.env, itest checks its
+        # size, cmp compares its backup, part reads PARTUUIDs.
+        for symbol in ("CONFIG_CMD_SETEXPR", "CONFIG_FAT_WRITE", "CONFIG_CMD_ITEST", "CONFIG_CMD_MEMORY",
+                       "CONFIG_CMD_PART", "CONFIG_CMD_NVME"):
             self.assertEqual(self.cfg.get(symbol), "y", symbol)
 
     def script_name(self):

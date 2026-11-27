@@ -13,7 +13,9 @@ IMAGE_INSTALL:append = " ${WENDYOS_ROCKCHIP_BOARD_PACKAGEGROUP}"
 
 # OTA through the ubootenv connector; each slot carries its own kernel and DTB in
 # /boot. /data comes from the fstab (rpi-wendy-fstab), so data-mount is dropped.
-IMAGE_INSTALL:append = " wendyos-fw-env wendyos-update-config kernel-image kernel-devicetree"
+# u-boot-default-env (/etc/u-boot-initial-env) lets fw_setenv rewrite a damaged
+# uboot.env instead of failing the OTA.
+IMAGE_INSTALL:append = " wendyos-fw-env u-boot-default-env wendyos-update-config kernel-image kernel-devicetree"
 IMAGE_INSTALL:remove = "data-mount"
 
 # p1 carries the boot script; the loaders come from U-Boot (WKS_FILE_DEPENDS).
