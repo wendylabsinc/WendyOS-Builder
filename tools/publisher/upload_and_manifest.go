@@ -10,6 +10,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"hash/crc32"
 	"io"
 	"math/rand"
 	"net/http"
@@ -1627,34 +1628,9 @@ func main() {
 			"file":    *localFile,
 		}).Info("Starting firmware upload")
 
-		// Calculate checksum (no compression for .bin files)
-		checksum, err := calculateChecksum(*localFile)
-		if err != nil {
-			log.WithError(err).Fatal("Failed to calculate firmware checksum")
+		if err := publishFirmware(ctx, bucket, *chip, *version, *localFile, *companionFile, *companionBuildID, *nightly, *notifyDiscord); err != nil {
+			log.WithError(err).Fatal("Failed to publish firmware")
 		}
-
-		// Upload firmware file
-		fwPath, err := uploadFirmwareFile(ctx, bucket, *localFile, *chip, *version)
-		if err != nil {
-			log.WithError(err).Fatal("Failed to upload firmware file")
-		}
-
-		// Get file size from GCS attrs
-		fwObj := bucket.Object(fwPath)
-		fwAttrs, err := fwObj.Attrs(ctx)
-		if err != nil {
-			log.WithError(err).Fatal("Failed to get firmware file attributes")
-		}
-
-		var companion *FirmwareCompanionMetadata
-		if *companionFile != "" {
-			companion, err = uploadFirmwareCompanion(ctx, bucket, *companionFile, *chip, *version, *companionBuildID)
-			if err != nil {
-				log.WithError(err).Fatal("Failed to upload companion firmware")
-			}
-		}
-		// Update firmware manifests
-		updateFirmwareManifests(ctx, bucket, *chip, *version, fwPath, fwAttrs.Size, checksum, companion, *nightly, *notifyDiscord)
 		return
 	}
 
@@ -2123,7 +2099,7 @@ func listImagesInBucket(ctx context.Context, bucket *storage.BucketHandle) {
 
 		deviceType := parts[1]
 		version := parts[2]
-		filename := parts[3]
+		filename := strings.Join(parts[3:], "/")
 
 		// Add to our map
 		if _, exists := deviceImages[deviceType]; !exists {
@@ -2164,7 +2140,7 @@ func listImagesInBucket(ctx context.Context, bucket *storage.BucketHandle) {
 			return
 		}
 
-		// Parse path: firmware/{chip}/{version}/filename
+		// Parse firmware/{chip}/{version}/[pair digest/]filename
 		parts := strings.Split(attrs.Name, "/")
 		if len(parts) < 4 {
 			continue
@@ -2172,7 +2148,7 @@ func listImagesInBucket(ctx context.Context, bucket *storage.BucketHandle) {
 
 		chipType := parts[1]
 		version := parts[2]
-		filename := parts[3]
+		filename := strings.Join(parts[3:], "/")
 
 		if _, exists := firmwareFiles[chipType]; !exists {
 			firmwareFiles[chipType] = make(map[string][]string)
@@ -3916,44 +3892,67 @@ func updateMasterManifestTimestamp(ctx context.Context, logger *logrus.Entry, bu
 	logger.Info("Updated master manifest timestamp")
 }
 
-// uploadFirmwareFile uploads a firmware .bin file to GCS under firmware/<chip>/<version>/
-func uploadFirmwareFile(ctx context.Context, bucket *storage.BucketHandle, localPath, chip, version string) (string, error) {
-	filename := filepath.Base(localPath)
-	destinationPath := fmt.Sprintf("firmware/%s/%s/%s", chip, version, filename)
+type firmwareFile struct {
+	path     string
+	size     int64
+	checksum string
+	crc      uint32
+}
 
-	log.WithFields(logrus.Fields{
-		"local_path":  localPath,
-		"destination": destinationPath,
-	}).Info("Uploading firmware file")
-
-	// Open the local file
-	file, err := os.Open(localPath)
+func inspectFirmwareFile(path string) (firmwareFile, error) {
+	file, err := os.Open(path)
 	if err != nil {
-		log.WithError(err).Error("Failed to open local firmware file")
-		return "", fmt.Errorf("failed to open file %s: %w", localPath, err)
+		return firmwareFile{}, err
+	}
+	defer file.Close()
+	sha := sha256.New()
+	crc := crc32.New(crc32cTable)
+	size, err := io.Copy(io.MultiWriter(sha, crc), file)
+	if err != nil {
+		return firmwareFile{}, err
+	}
+	return firmwareFile{path: path, size: size, checksum: hex.EncodeToString(sha.Sum(nil)), crc: crc.Sum32()}, nil
+}
+
+func uploadFirmwareFile(ctx context.Context, bucket *storage.BucketHandle, local firmwareFile, destinationPath string, immutable bool) error {
+	file, err := os.Open(local.path)
+	if err != nil {
+		return err
 	}
 	defer file.Close()
 
-	// Create the destination object
 	obj := bucket.Object(destinationPath)
-	w := obj.NewWriter(ctx)
+	destination := obj
+	if immutable {
+		destination = obj.If(storage.Conditions{DoesNotExist: true})
+	}
+	writeCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	w := destination.NewWriter(writeCtx)
 	w.ContentType = "application/octet-stream"
-
-	// Stream the content
-	if _, err := io.Copy(w, file); err != nil {
-		w.Close() // Close without checking error since write already failed
-		log.WithError(err).Error("Failed to write firmware to GCS")
-		return "", fmt.Errorf("failed to write to GCS: %w", err)
+	w.CRC32C = local.crc
+	w.SendCRC32C = true
+	if n, err := io.Copy(w, file); err != nil {
+		return fmt.Errorf("writing %s: %w", destinationPath, err)
+	} else if n != local.size {
+		return fmt.Errorf("size of %s changed during upload", local.path)
 	}
-
-	// Close to commit the write (MUST check error - this is when upload finalizes)
 	if err := w.Close(); err != nil {
-		log.WithError(err).Error("Failed to close GCS writer for firmware")
-		return "", fmt.Errorf("failed to finalize firmware upload: %w", err)
+		var apiErr *googleapi.Error
+		if !immutable || !errors.As(err, &apiErr) || apiErr.Code != 412 {
+			return fmt.Errorf("uploading %s: %w", destinationPath, err)
+		}
+		// An earlier attempt or another publisher already stored this object.
+		attrs, err := obj.Attrs(ctx)
+		if err != nil {
+			return fmt.Errorf("checking existing %s: %w", destinationPath, err)
+		}
+		if attrs.Size != local.size || attrs.CRC32C != local.crc {
+			return fmt.Errorf("existing object %s differs from the firmware", destinationPath)
+		}
 	}
-
-	log.WithField("path", destinationPath).Info("Firmware file uploaded successfully")
-	return destinationPath, nil
+	log.WithField("path", destinationPath).Info("Firmware file available")
+	return nil
 }
 
 var firmwareCompanionBuildID = regexp.MustCompile(`^wendy-[0-9a-f]{24}$`)
@@ -3993,319 +3992,86 @@ func validateFirmwareCompanion(hostPath, companionPath, buildID string) error {
 	return nil
 }
 
-func uploadFirmwareCompanion(ctx context.Context, bucket *storage.BucketHandle, localPath, chip, version, buildID string) (*FirmwareCompanionMetadata, error) {
-	checksum, err := calculateChecksum(localPath)
+func publishFirmware(ctx context.Context, bucket *storage.BucketHandle, chip, version, host, radio, buildID string, nightly, notifyDiscord bool) error {
+	hostFile, err := inspectFirmwareFile(host)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	path, err := uploadFirmwareFile(ctx, bucket, localPath, chip, version)
-	if err != nil {
-		return nil, err
-	}
-	attrs, err := bucket.Object(path).Attrs(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return &FirmwareCompanionMetadata{BuildID: buildID, Path: path, Checksum: checksum, SizeBytes: attrs.Size}, nil
-}
-
-// Publish the chip manifest before master can advertise the new version.
-func updateFirmwareManifests(ctx context.Context, bucket *storage.BucketHandle, chip, version, filePath string, fileSize int64, fileChecksum string, companion *FirmwareCompanionMetadata, isNightly bool, notifyDiscord bool) {
-	logger := log.WithFields(logrus.Fields{
-		"chip":           chip,
-		"version":        version,
-		"file_path":      filePath,
-		"is_nightly":     isNightly,
-		"notify_discord": notifyDiscord,
-	})
-	if err := updateFirmwareChipManifest(ctx, logger, bucket, chip, version, filePath, fileSize, fileChecksum, companion, isNightly); err != nil {
-		logger.WithError(err).Fatal("Failed to update firmware chip manifest")
-	}
-
-	// Small delay to ensure manifest write is fully propagated
-	time.Sleep(2 * time.Second)
-
-	// Verify the upload before sending notifications
-	logger.Info("Verifying firmware upload integrity...")
-	if err := verifyFirmwareUpload(ctx, logger, bucket, chip, version, filePath, fileChecksum, companion); err != nil {
-		logger.WithError(err).Warn("Firmware upload verification failed - retrying once...")
-
-		time.Sleep(2 * time.Second)
-		if err := verifyFirmwareUpload(ctx, logger, bucket, chip, version, filePath, fileChecksum, companion); err != nil {
-			logger.WithError(err).Fatal("Firmware upload verification failed after retry")
-		}
-	}
-	logger.Info("Firmware upload verification passed")
-
-	if err := updateMasterManifestFirmware(ctx, logger, bucket, chip, version, isNightly); err != nil {
-		logger.WithError(err).Fatal("Failed to update master manifest for firmware")
-	}
-
-	// Send Discord notification if requested
-	if notifyDiscord {
-		logger.Info("Sending firmware Discord notification")
-		if err := sendFirmwareDiscordNotification(chip, version, isNightly, fileSize); err != nil {
-			logger.WithError(err).Warn("Failed to send firmware Discord notification (upload was still successful)")
-		}
-	}
-}
-
-// updateFirmwareChipManifest reads/creates manifests/<chip>.json as FirmwareManifest, updates version, writes back
-func updateFirmwareChipManifest(ctx context.Context, logger *logrus.Entry, bucket *storage.BucketHandle, chip, version, filePath string, fileSize int64, fileChecksum string, companion *FirmwareCompanionMetadata, isNightly bool) error {
-	manifestPath := fmt.Sprintf("manifests/%s.json", chip)
-	logger = logger.WithField("manifest_path", manifestPath)
-	logger.Info("Processing firmware chip manifest")
-
-	obj := bucket.Object(manifestPath)
-
-	// Read existing manifest or create new one
-	var manifest FirmwareManifest
-	r, err := obj.NewReader(ctx)
-	if err == nil {
-		defer r.Close()
-		logger.Info("Reading existing firmware chip manifest")
-
-		// Read content with size limit to prevent DoS
-		limitedReader := io.LimitReader(r, 10*1024*1024) // 10MB limit
-		content, err := io.ReadAll(limitedReader)
+	dir := fmt.Sprintf("firmware/%s/%s", chip, version)
+	var radioFile firmwareFile
+	var companion *FirmwareCompanionMetadata
+	if radio != "" {
+		radioFile, err = inspectFirmwareFile(radio)
 		if err != nil {
-			logger.WithError(err).Error("Failed to read existing firmware chip manifest")
-			return fmt.Errorf("failed to read existing firmware chip manifest: %w", err)
+			return err
 		}
-
-		if err := json.Unmarshal(content, &manifest); err != nil {
-			logger.WithError(err).Error("Failed to decode existing firmware chip manifest")
-			return fmt.Errorf("failed to decode existing firmware chip manifest: %w", err)
-		}
-
-		logger.WithField("version_count", len(manifest.Versions)).Info("Read existing firmware manifest")
-	} else {
-		logger.WithError(err).Info("Creating new firmware chip manifest as it doesn't exist")
-		manifest = FirmwareManifest{
-			ChipID:   chip,
-			Versions: make(map[string]FirmwareVersionMetadata),
+		// A failed retry must leave any previously published pair intact.
+		// Both objects are written to a new directory if either image changes.
+		pairDigest := sha256.Sum256([]byte(hostFile.checksum + radioFile.checksum))
+		dir = fmt.Sprintf("%s/%x", dir, pairDigest)
+		companion = &FirmwareCompanionMetadata{
+			BuildID: buildID, Path: dir + "/" + filepath.Base(radio), Checksum: radioFile.checksum, SizeBytes: radioFile.size,
 		}
 	}
-
-	// Update IsLatest flags based on nightly/stable
-	if isNightly {
-		for k, v := range manifest.Versions {
-			if v.IsNightly {
-				v.IsLatest = false
-				manifest.Versions[k] = v
-			}
-		}
-		logger.WithField("version", version).Info("Setting firmware version as latest nightly")
-	} else {
-		for k, v := range manifest.Versions {
-			if !v.IsNightly {
-				v.IsLatest = false
-				manifest.Versions[k] = v
-			}
-		}
-		logger.WithField("version", version).Info("Setting firmware version as latest stable")
-	}
-
-	// Add or update this version
-	versionMetadata := FirmwareVersionMetadata{
-		ReleaseDate: time.Now(),
-		Path:        filePath,
-		Checksum:    fileChecksum,
-		SizeBytes:   fileSize,
-		IsLatest:    true,
-		IsNightly:   isNightly,
-		Companion:   companion,
-	}
-
-	manifest.Versions[version] = versionMetadata
-
-	// Write back to bucket
-	logger.Info("Writing firmware chip manifest back to bucket")
-	w := obj.NewWriter(ctx)
-	w.CacheControl = manifestCacheControl
-
-	content, err := json.MarshalIndent(manifest, "", "  ")
-	if err != nil {
-		logger.WithError(err).Error("Failed to marshal firmware chip manifest")
-		return fmt.Errorf("failed to marshal firmware chip manifest: %w", err)
-	}
-
-	if _, err := w.Write(content); err != nil {
-		w.Close() // Close without checking error since write already failed
-		logger.WithError(err).Error("Failed to write firmware chip manifest")
-		return fmt.Errorf("failed to write firmware chip manifest: %w", err)
-	}
-
-	if err := w.Close(); err != nil {
-		logger.WithError(err).Error("Failed to finalize firmware chip manifest write")
-		return fmt.Errorf("failed to finalize firmware chip manifest write: %w", err)
-	}
-
-	logger.Info("Successfully wrote firmware chip manifest")
-	return nil
-}
-
-// updateMasterManifestFirmware reads master.json, ensures Firmware map exists, updates chip entry
-func updateMasterManifestFirmware(ctx context.Context, logger *logrus.Entry, bucket *storage.BucketHandle, chip, version string, isNightly bool) error {
-	masterManifestPath := "manifests/master.json"
-	logger = logger.WithField("manifest_path", masterManifestPath)
-	logger.Info("Processing master manifest for firmware")
-
-	obj := bucket.Object(masterManifestPath)
-
-	// Read existing manifest or create new one
-	var masterManifest MasterManifest
-	r, err := obj.NewReader(ctx)
-	if err == nil {
-		defer r.Close()
-		logger.Info("Reading existing master manifest")
-
-		limitedReader := io.LimitReader(r, 10*1024*1024) // 10MB limit
-		content, err := io.ReadAll(limitedReader)
-		if err != nil {
-			logger.WithError(err).Error("Failed to read existing master manifest")
-			return fmt.Errorf("failed to read existing master manifest: %w", err)
-		}
-
-		if err := json.Unmarshal(content, &masterManifest); err != nil {
-			logger.WithError(err).Error("Failed to decode existing master manifest")
-			return fmt.Errorf("failed to decode existing master manifest: %w", err)
-		}
-
-		logger.WithField("device_count", len(masterManifest.Devices)).Info("Read existing master manifest")
-	} else {
-		logger.WithError(err).Info("Creating new master manifest as it doesn't exist")
-		masterManifest = MasterManifest{
-			Devices: make(map[string]DeviceLatestInfo),
-		}
-	}
-
-	// Ensure Firmware map exists
-	if masterManifest.Firmware == nil {
-		masterManifest.Firmware = make(map[string]DeviceLatestInfo)
-	}
-
-	logger.WithFields(logrus.Fields{
-		"chip":       chip,
-		"version":    version,
-		"is_nightly": isNightly,
-	}).Info("Updating master manifest firmware entry")
-
-	masterManifest.LastUpdated = time.Now()
-
-	// Get or create chip info
-	chipInfo, exists := masterManifest.Firmware[chip]
-	if !exists {
-		chipInfo = DeviceLatestInfo{}
-	}
-
-	chipInfo.ManifestPath = fmt.Sprintf("manifests/%s.json", chip)
-
-	if isNightly {
-		chipInfo.LatestNightly = version
-	} else {
-		chipInfo.Latest = version
-	}
-
-	masterManifest.Firmware[chip] = chipInfo
-
-	// Write back to bucket
-	logger.Info("Writing master manifest back to bucket")
-	w := obj.NewWriter(ctx)
-	w.CacheControl = manifestCacheControl
-
-	content, err := json.MarshalIndent(masterManifest, "", "  ")
-	if err != nil {
-		logger.WithError(err).Error("Failed to marshal master manifest")
-		return fmt.Errorf("failed to marshal master manifest: %w", err)
-	}
-
-	if _, err := w.Write(content); err != nil {
-		w.Close() // Close without checking error since write already failed
-		logger.WithError(err).Error("Failed to write master manifest")
-		return fmt.Errorf("failed to write master manifest: %w", err)
-	}
-
-	if err := w.Close(); err != nil {
-		logger.WithError(err).Error("Failed to finalize master manifest write")
-		return fmt.Errorf("failed to finalize master manifest write: %w", err)
-	}
-
-	logger.Info("Successfully wrote master manifest for firmware")
-	return nil
-}
-
-// verifyFirmwareUpload reads back chip manifest, verifies version exists with correct path/checksum
-func verifyFirmwareUpload(ctx context.Context, logger *logrus.Entry, bucket *storage.BucketHandle, chip, version, expectedPath, expectedChecksum string, companion *FirmwareCompanionMetadata) error {
-	logger.Info("Reading back firmware chip manifest for verification")
-
-	manifestPath := fmt.Sprintf("manifests/%s.json", chip)
-	obj := bucket.Object(manifestPath)
-	r, err := obj.NewReader(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to read back firmware manifest: %w", err)
-	}
-	defer r.Close()
-
-	limitedReader := io.LimitReader(r, 10*1024*1024) // 10MB limit
-	content, err := io.ReadAll(limitedReader)
-	if err != nil {
-		return fmt.Errorf("failed to read firmware manifest content: %w", err)
-	}
-
-	var manifest FirmwareManifest
-	if err := json.Unmarshal(content, &manifest); err != nil {
-		return fmt.Errorf("failed to parse firmware manifest JSON: %w", err)
-	}
-
-	logger.WithFields(logrus.Fields{
-		"manifest_chip_id": manifest.ChipID,
-		"version_count":    len(manifest.Versions),
-		"looking_for":      version,
-	}).Debug("Firmware manifest loaded for verification")
-
-	// Verify version exists in manifest
-	versionData, exists := manifest.Versions[version]
-	if !exists {
-		return fmt.Errorf("firmware version %s not found in manifest after update", version)
-	}
-
-	// Verify path
-	if expectedPath != "" && versionData.Path != expectedPath {
-		return fmt.Errorf("firmware path mismatch: manifest has %q, expected %q", versionData.Path, expectedPath)
-	}
-
-	// Verify file exists at that path
-	fileObj := bucket.Object(versionData.Path)
-	attrs, err := fileObj.Attrs(ctx)
-	if err != nil {
-		return fmt.Errorf("firmware file not found at path %s: %w", versionData.Path, err)
-	}
-	logger.WithField("size", attrs.Size).Info("Firmware file verified")
-
-	// Verify checksum if provided
-	if expectedChecksum != "" && versionData.Checksum != expectedChecksum {
-		return fmt.Errorf("firmware checksum mismatch: manifest has %q, expected %q", versionData.Checksum, expectedChecksum)
+	hostPath := dir + "/" + filepath.Base(host)
+	if err := uploadFirmwareFile(ctx, bucket, hostFile, hostPath, companion != nil); err != nil {
+		return err
 	}
 	if companion != nil {
-		if versionData.Companion == nil || *versionData.Companion != *companion {
-			return errors.New("companion metadata in firmware manifest differs from the upload")
-		}
-		attrs, err := bucket.Object(companion.Path).Attrs(ctx)
-		if err != nil {
-			return fmt.Errorf("companion file not found at %s: %w", companion.Path, err)
-		}
-		if attrs.Size != companion.SizeBytes {
-			return fmt.Errorf("companion file at %s has size %d, expected %d", companion.Path, attrs.Size, companion.SizeBytes)
+		if err := uploadFirmwareFile(ctx, bucket, radioFile, companion.Path, true); err != nil {
+			return err
 		}
 	}
+	release := FirmwareVersionMetadata{
+		ReleaseDate: time.Now(), Path: hostPath, Checksum: hostFile.checksum, SizeBytes: hostFile.size,
+		IsLatest: true, IsNightly: nightly, Companion: companion,
+	}
+	logger := log.WithFields(logrus.Fields{"chip": chip, "version": version, "is_nightly": nightly})
+	// Publish the chip manifest only after both objects have been committed.
+	err = updateManifestObject(ctx, logger, bucket.Object(deviceManifestPath("", chip)), func(manifest *FirmwareManifest) bool {
+		manifest.ChipID = chip
+		if manifest.Versions == nil {
+			manifest.Versions = make(map[string]FirmwareVersionMetadata)
+		}
+		for key, entry := range manifest.Versions {
+			if entry.IsNightly == nightly && entry.IsLatest {
+				entry.IsLatest = false
+				manifest.Versions[key] = entry
+			}
+		}
+		manifest.Versions[version] = release
+		return true
+	})
+	if err != nil {
+		return fmt.Errorf("updating firmware manifest: %w", err)
+	}
+	err = updateManifestObject(ctx, logger, bucket.Object(masterManifestPath("")), func(manifest *MasterManifest) bool {
+		if manifest.Devices == nil {
+			manifest.Devices = make(map[string]DeviceLatestInfo)
+		}
+		if manifest.Firmware == nil {
+			manifest.Firmware = make(map[string]DeviceLatestInfo)
+		}
+		info := manifest.Firmware[chip]
+		info.ManifestPath = deviceManifestPath("", chip)
+		if nightly {
+			info.LatestNightly = version
+		} else {
+			info.Latest = version
+		}
+		manifest.Firmware[chip] = info
+		manifest.LastUpdated = time.Now()
+		return true
+	})
+	if err != nil {
+		return fmt.Errorf("updating master manifest: %w", err)
+	}
 
-	logger.WithFields(logrus.Fields{
-		"chip":    chip,
-		"version": version,
-		"path":    versionData.Path,
-	}).Info("Firmware upload verified successfully")
-
+	if notifyDiscord {
+		if err := sendFirmwareDiscordNotification(chip, version, nightly, hostFile.size); err != nil {
+			logger.WithError(err).Warn("Failed to send firmware Discord notification")
+		}
+	}
 	return nil
 }
 

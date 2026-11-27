@@ -298,13 +298,13 @@ func TestMasterManifestBatchPermanentWriteFailure(t *testing.T) {
 func TestMasterManifestRetryStops(t *testing.T) {
 	for _, code := range []int{403, 429, 412} {
 		err := &googleapi.Error{Code: code}
-		if got := retryMasterManifest(context.Background(), batchTestLogger(), err, 10, 10); got != err {
+		if got := retryManifest(context.Background(), batchTestLogger(), err, 10, 10); got != err {
 			t.Errorf("code %d: got %v", code, got)
 		}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := retryMasterManifest(ctx, batchTestLogger(), &googleapi.Error{Code: 429}, 1, 10); !errors.Is(err, context.Canceled) {
+	if err := retryManifest(ctx, batchTestLogger(), &googleapi.Error{Code: 429}, 1, 10); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancellation: %v", err)
 	}
 }

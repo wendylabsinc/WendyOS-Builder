@@ -96,39 +96,7 @@ func updateMasterManifestBatch(ctx context.Context, logger *logrus.Entry, bucket
 	}
 	path := masterManifestPath(prefix)
 	logger = logger.WithFields(logrus.Fields{"manifest_path": path, "device_count": len(updates)})
-	// Retry the complete read/modify/write transaction here rather than letting
-	// the SDK retry a stale upload indefinitely after a rate limit or conflict.
-	obj := bucket.Object(path).Retryer(storage.WithPolicy(storage.RetryNever))
-	const maxAttempts = 10
-	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		var manifest MasterManifest
-		var generation int64
-		r, err := obj.NewReader(ctx)
-		switch {
-		case err == nil:
-			content, readErr := io.ReadAll(io.LimitReader(r, 10*1024*1024+1))
-			generation = r.Attrs.Generation
-			r.Close()
-			if readErr != nil {
-				if err := retryMasterManifest(ctx, logger, readErr, attempt, maxAttempts); err != nil {
-					return fmt.Errorf("read master manifest: %w", err)
-				}
-				continue
-			}
-			if len(content) > 10*1024*1024 {
-				return fmt.Errorf("master manifest exceeds 10 MiB")
-			}
-			if err := json.Unmarshal(content, &manifest); err != nil {
-				return fmt.Errorf("decode master manifest: %w", err)
-			}
-		case errors.Is(err, storage.ErrObjectNotExist):
-			// Only a missing object permits creation; never overwrite on a read error.
-		default:
-			if err := retryMasterManifest(ctx, logger, err, attempt, maxAttempts); err != nil {
-				return fmt.Errorf("read master manifest: %w", err)
-			}
-			continue
-		}
+	return updateManifestObject(ctx, logger, bucket.Object(path), func(manifest *MasterManifest) bool {
 		if manifest.Devices == nil {
 			manifest.Devices = make(map[string]DeviceLatestInfo)
 		}
@@ -151,11 +119,52 @@ func updateMasterManifestBatch(ctx context.Context, logger *logrus.Entry, bucket
 			manifest.Devices[update.Device] = info
 		}
 		if !changed && !forceWrite {
-			return nil
+			return false
 		}
 		// Publishing an existing version still refreshes last_updated. forceWrite
 		// does not bypass the generation check: retries must preserve other writers.
 		manifest.LastUpdated = time.Now()
+		return true
+	})
+}
+
+func updateManifestObject[M any](ctx context.Context, logger *logrus.Entry, obj *storage.ObjectHandle, mutate func(*M) bool) error {
+	// Retry the complete read/modify/write transaction here rather than letting
+	// the SDK retry a stale upload indefinitely after a rate limit or conflict.
+	obj = obj.Retryer(storage.WithPolicy(storage.RetryNever))
+	const maxAttempts = 10
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		var manifest M
+		var generation int64
+		r, err := obj.NewReader(ctx)
+		switch {
+		case err == nil:
+			content, readErr := io.ReadAll(io.LimitReader(r, 10*1024*1024+1))
+			generation = r.Attrs.Generation
+			r.Close()
+			if readErr != nil {
+				if err := retryManifest(ctx, logger, readErr, attempt, maxAttempts); err != nil {
+					return fmt.Errorf("read manifest: %w", err)
+				}
+				continue
+			}
+			if len(content) > 10*1024*1024 {
+				return fmt.Errorf("manifest exceeds 10 MiB")
+			}
+			if err := json.Unmarshal(content, &manifest); err != nil {
+				return fmt.Errorf("decode manifest: %w", err)
+			}
+		case errors.Is(err, storage.ErrObjectNotExist):
+			// Only a missing object permits creation; never overwrite on a read error.
+		default:
+			if err := retryManifest(ctx, logger, err, attempt, maxAttempts); err != nil {
+				return fmt.Errorf("read manifest: %w", err)
+			}
+			continue
+		}
+		if !mutate(&manifest) {
+			return nil
+		}
 		content, err := json.MarshalIndent(manifest, "", "  ")
 		if err != nil {
 			return err
@@ -164,27 +173,26 @@ func updateMasterManifestBatch(ctx context.Context, logger *logrus.Entry, bucket
 		if generation == 0 {
 			conditions = storage.Conditions{DoesNotExist: true}
 		}
-		w := obj.If(conditions).NewWriter(ctx)
+		writeCtx, cancel := context.WithCancel(ctx)
+		w := obj.If(conditions).NewWriter(writeCtx)
 		w.CacheControl = manifestCacheControl
-		if _, err = w.Write(content); err != nil {
-			w.Close()
-		} else {
+		if _, err = w.Write(content); err == nil {
 			err = w.Close() // GCS commits the upload here, including rate-limit errors.
 		}
+		cancel()
 		if err == nil {
-			logger.Info("Published master manifest batch")
 			return nil
 		}
-		if err := retryMasterManifest(ctx, logger, err, attempt, maxAttempts); err != nil {
-			return fmt.Errorf("write master manifest: %w", err)
+		if err := retryManifest(ctx, logger, err, attempt, maxAttempts); err != nil {
+			return fmt.Errorf("write manifest: %w", err)
 		}
 	}
-	return fmt.Errorf("master manifest retry limit reached")
+	return fmt.Errorf("manifest retry limit reached")
 }
 
 // A retry rereads the object and reapplies the entire batch. Waiting is bounded
 // and cancellable, including for a server that continues returning 429.
-func retryMasterManifest(ctx context.Context, logger *logrus.Entry, err error, attempt, maxAttempts int) error {
+func retryManifest(ctx context.Context, logger *logrus.Entry, err error, attempt, maxAttempts int) error {
 	var apiErr *googleapi.Error
 	conflict := errors.As(err, &apiErr) && apiErr.Code == 412
 	if (!conflict && !storage.ShouldRetry(err)) || attempt >= maxAttempts {
@@ -195,7 +203,7 @@ func retryMasterManifest(ctx context.Context, logger *logrus.Entry, err error, a
 		delay = 10 * time.Second
 	}
 	delay += time.Duration(rand.Intn(200)) * time.Millisecond
-	logger.WithError(err).WithField("attempt", attempt).Warn("Retrying master manifest update")
+	logger.WithError(err).WithField("attempt", attempt).Warn("Retrying manifest update")
 	timer := time.NewTimer(delay)
 	defer timer.Stop()
 	select {
