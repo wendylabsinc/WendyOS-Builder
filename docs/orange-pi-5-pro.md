@@ -72,6 +72,10 @@ connector is `ubootenv`, the same as on the Raspberry Pi. OTA never rewrites the
 loaders or the script, so the paths it loads (`/boot/Image`,
 `/boot/rk3588s-orangepi-5-pro.dtb`) and the env size must not change.
 
+If no disk boots (for example the NVMe link does not come up on a cold boot),
+U-Boot waits 5 seconds and resets. Press Ctrl-C during the wait to stay at the
+prompt.
+
 ## Console
 
 The debug UART (`ttyS2`, 1500000 baud, 3.3 V) is on the 40-pin header: pin 8 TX,

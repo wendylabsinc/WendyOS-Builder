@@ -221,9 +221,10 @@ class RockchipUBootTests(unittest.TestCase):
 
     def test_the_script_commands_are_enabled(self):
         # setexpr counts trial boots, fatwrite saves uboot.env, itest checks its
-        # size, cmp compares its backup, part reads PARTUUIDs.
+        # size, cmp compares its backup, part reads PARTUUIDs, sleep delays the
+        # bootcmd's retry.
         for symbol in ("CONFIG_CMD_SETEXPR", "CONFIG_FAT_WRITE", "CONFIG_CMD_ITEST", "CONFIG_CMD_MEMORY",
-                       "CONFIG_CMD_PART", "CONFIG_CMD_NVME"):
+                       "CONFIG_CMD_PART", "CONFIG_CMD_NVME", "CONFIG_CMD_SLEEP"):
             self.assertEqual(self.cfg.get(symbol), "y", symbol)
 
     def script_name(self):
@@ -235,6 +236,11 @@ class RockchipUBootTests(unittest.TestCase):
                  (f"test -e mmc 1:1 {name}", f"test -e mmc 0:1 {name}", "nvme scan")]
         self.assertEqual(order, sorted(order))
         self.assertIn(f"load ${{devtype}} ${{devnum}}:1 ${{scriptaddr}} {name} && source ${{scriptaddr}}", bootcmd)
+
+    def test_bootcmd_retries_when_nothing_booted(self):
+        # A headless board must not wait at the prompt after a cold-boot miss.
+        bootcmd = self.cfg["CONFIG_BOOTCOMMAND"].strip('"')
+        self.assertRegex(bootcmd, r"&& source \$\{scriptaddr\}; .*; sleep [1-9] && reset$")
 
     def test_the_script_name_is_family_specific_and_shipped_under_it(self):
         # A Pi card's boot.scr must never be sourced on a Rockchip board.
