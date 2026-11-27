@@ -1,0 +1,6 @@
+# Per-board repo overrides for orange-pi-5-pro (blacksail tree).
+#
+# No SRCREV override: the shared blacksail pins include meta-rockchip and
+# meta-arm. U-Boot and the kernel move with SRCREV_OECORE: re-test boot from SD,
+# eMMC and NVMe when a pin bump moves either.
+WENDYOS_LAYER_TREE="blacksail"

@@ -123,6 +123,16 @@ on:
       - 'scripts/uart_login_gate_test.py'
       - 'recipes-core/base-files/files/rpi-wendy*-fstab'
       - 'meta-rpi-extensions/recipes-core/images/wendyos-image.bbappend'
+      - 'classes/wendyos-links-check.bbclass'
+      - 'scripts/boot_ab_script_test.py'
+      - 'recipes-bsp/wendyos-boot-ab/**'
+      - 'meta-rpi-extensions/recipes-bsp/rpi-u-boot-scr/**'
+      - 'meta-rpi-extensions/recipes-bsp/wendyos-fw-env/files/*'
+      - 'meta-rpi-extensions/files/wic/rpi-wendy-ab.wks'
+      - 'meta-rockchip-extensions/files/wic/*'
+      - 'meta-rockchip-extensions/recipes-bsp/**'
+      - 'conf/machine/include/rockchip-common-wendyos.inc'
+      - 'conf/distro/include/rockchip-image.inc'
       # No *.sh filter: data-recovery-key is a command and carries no extension.
       - 'recipes-support/data-device/files/*'
       - 'recipes-support/data-crypt/files/*'
@@ -260,6 +270,16 @@ on:
       - 'scripts/uart_login_gate_test.py'
       - 'recipes-core/base-files/files/rpi-wendy*-fstab'
       - 'meta-rpi-extensions/recipes-core/images/wendyos-image.bbappend'
+      - 'classes/wendyos-links-check.bbclass'
+      - 'scripts/boot_ab_script_test.py'
+      - 'recipes-bsp/wendyos-boot-ab/**'
+      - 'meta-rpi-extensions/recipes-bsp/rpi-u-boot-scr/**'
+      - 'meta-rpi-extensions/recipes-bsp/wendyos-fw-env/files/*'
+      - 'meta-rpi-extensions/files/wic/rpi-wendy-ab.wks'
+      - 'meta-rockchip-extensions/files/wic/*'
+      - 'meta-rockchip-extensions/recipes-bsp/**'
+      - 'conf/machine/include/rockchip-common-wendyos.inc'
+      - 'conf/distro/include/rockchip-image.inc'
       # No *.sh filter: data-recovery-key is a command and carries no extension.
       - 'recipes-support/data-device/files/*'
       - 'recipes-support/data-crypt/files/*'
@@ -357,7 +377,8 @@ jobs:
                      recipes-support/data-device/files/wendyos-data.test.sh \
                      recipes-support/data-crypt/files/data-recovery-key \
                      recipes-support/wendyos-config-convert/files/wendyos-config-convert.sh \
-                     recipes-core/wendyos-etc-binds/files/setup-etc-binds.sh
+                     recipes-core/wendyos-etc-binds/files/setup-etc-binds.sh \
+                     recipes-bsp/wendyos-boot-ab/files/boot-ab-render.sh
           shellcheck recipes-core/wendyos-identity/files/wendyos-identity-lib.sh \
                      recipes-core/wendyos-identity/files/update-mdns-uuid.sh \
                      recipes-core/wendyos-identity/files/update-mdns-uuid.test.sh \
@@ -469,6 +490,10 @@ jobs:
 
       - name: Check that UART login off leaves no serial getty
         run: python3 -m unittest scripts/uart_login_gate_test.py -v
+
+      # The boot script runs before userspace and OTA never rewrites it.
+      - name: Check the U-Boot A/B boot scripts
+        run: python3 -m unittest scripts/boot_ab_script_test.py -v
 
       # The initramfs root lookup runs as PID 1: a mistake there is a unit that never boots.
       - name: Check Jetson initramfs root-disk lookup

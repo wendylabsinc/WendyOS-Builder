@@ -1,0 +1,44 @@
+# --- Kernel cmdline + boot ------------------------------------------------
+# Inherit cmdline.txt args from the firmware-provided FDT /chosen, then point
+# root= at the selected slot (appended last, so it wins over any root= the
+# firmware put in cmdline.txt). The DTB stays the firmware-loaded ${fdt_addr}.
+#
+# `rw`: mount the rootfs read-write. The A/B fstab (rpi-wendy-fstab) has no "/"
+# entry (the slot device varies), so systemd never remounts "/", and without rw
+# here the kernel's default read-only mount sticks -- leaving /etc and /var/lib
+# read-only, which breaks first-boot postinsts, wendyos-hostname, and any service
+# with StateDirectory= (timesyncd, rfkill). Every other WendyOS RPi fstab mounts
+# / with "defaults" (= rw); this is the per-slot-safe equivalent for A/B.
+#
+# The SD card and the NVMe drive get a fixed root= path, since a PARTUUID also
+# matches any disk cloned from the same image. A USB disk's kernel name is not
+# known here, so it gets the PARTUUID from its partition table instead. An
+# unreadable table resets.
+fdt addr ${fdt_addr} && fdt get value bootargs /chosen bootargs
+if test "${wendyos_if} ${wendyos_dev}" = "mmc 0"; then
+    setenv bootargs "${bootargs} root=/dev/mmcblk0p${wendyos_root_part} rootwait rw"
+elif test "${wendyos_if} ${wendyos_dev}" = "nvme 0"; then
+    setenv bootargs "${bootargs} root=/dev/nvme0n1p${wendyos_root_part} rootwait rw"
+elif part uuid ${wendyos_if} ${wendyos_dev}:${wendyos_root_part} wendyos_root_uuid; then
+    setenv bootargs "${bootargs} root=PARTUUID=${wendyos_root_uuid} rootwait rw"
+else
+    echo "wendyos: cannot read PARTUUID of ${wendyos_if} ${wendyos_dev}:${wendyos_root_part}; resetting"
+    reset
+fi
+
+# Pi 4: stock U-Boot puts the DTB at the top of bootm_size, inside the window
+# the device tree's CMA pool must fit in, so that reservation fails. fdt_high
+# moves the DTB above the window; empty unsets it, the stock behaviour. Keep
+# this after the last `run wendyos_saveenv` so it never reaches uboot.env.
+setenv fdt_high @@WENDYOS_UBOOT_FDT_HIGH@@
+
+# Load the kernel from the SELECTED slot's rootfs /boot (A/B-safe: each slot
+# carries its own kernel). A failed load or a returning boot falls through to
+# reset, which during a trial advances bootcount toward the fall-back above.
+if ext4load ${wendyos_if} ${wendyos_dev}:${wendyos_root_part} ${kernel_addr_r} /boot/@@KERNEL_IMAGETYPE@@; then
+    @@KERNEL_BOOTCMD@@ ${kernel_addr_r} - ${fdt_addr}
+fi
+
+echo "wendyos: slot ${wendyos_boot_slot} failed to boot; resetting"
+reset
+

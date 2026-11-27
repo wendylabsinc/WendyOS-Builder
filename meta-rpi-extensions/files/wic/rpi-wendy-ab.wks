@@ -4,7 +4,7 @@
 # GPT. Partition ORDER is load-bearing and is duplicated in two places that
 # MUST stay in sync with it:
 #   - the boot script's slot->partition map
-#     (meta-rpi-extensions/recipes-bsp/rpi-u-boot-scr/files/boot-ab.cmd.in,
+#     (recipes-bsp/wendyos-boot-ab/files/boot-ab-slot.cmd.in,
 #      via WENDYOS_ROOTFS_PART_A/B in the bbappend), and
 #   - the ubootenv connector resolves slots by the GPT partlabels rootfsA/
 #     rootfsB (label-based, so it does NOT depend on the numbers — but root=

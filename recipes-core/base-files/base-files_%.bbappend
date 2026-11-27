@@ -54,3 +54,6 @@ require ${@'vm-base-files.inc' if 'vm-wendyos' in d.getVar('MACHINEOVERRIDES').s
 
 # Dragonwing A/B fstab — isolated so other boards are unaffected
 require ${@'qcom-base-files.inc' if 'qcom-wendyos' in d.getVar('MACHINEOVERRIDES').split(':') else ''}
+
+# Rockchip A/B fstab — isolated so other boards are unaffected
+require ${@'rockchip-base-files.inc' if 'rockchip-wendyos' in d.getVar('MACHINEOVERRIDES').split(':') else ''}

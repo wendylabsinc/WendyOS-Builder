@@ -33,7 +33,7 @@ do_install:append() {
     if [ "${WENDYOS_OTA}" = "wendy" ]; then
         # wendyos-update A/B layout (RPi3/4/5): nothing else generates the
         # fstab, so install our A/B fstab (no "/" entry — the kernel mounts the
-        # slot via boot-ab.cmd.in's root=; /boot stays mounted for fw_setenv's
+        # slot via boot.scr's root=; /boot stays mounted for fw_setenv's
         # uboot.env). /data is referenced by the udev alias /dev/wendyos/data
         # on every RPi variant. /boot and /config are referenced by the udev
         # links /dev/wendyos/boot and /dev/wendyos/config on RPi4/5 (GPT) and

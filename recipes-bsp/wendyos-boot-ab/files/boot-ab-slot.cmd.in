@@ -1,0 +1,84 @@
+# WendyOS A/B trial-boot script, board-neutral head (wendyos-boot-ab renders it).
+#
+# Selects the rootfs slot from uboot.env on the FAT boot partition and counts
+# trial boots; the board family's tail, appended after it, boots the slot. The
+# wendyos-update ubootenv connector edits the same vars from Linux (fw_setenv).
+#
+# Env-var contract (kept identical to the connector):
+#   wendyos_boot_slot          0|1  slot to boot (0=rootfsA, 1=rootfsB)
+#   wendyos_upgrade_available  0|1  a trial boot is armed
+#   bootcount / bootlimit      trial attempt counter / budget
+
+# --- Boot device ----------------------------------------------------------
+# U-Boot sets devtype/devnum ("mmc 0", "usb 0", "nvme 0") before sourcing
+# us: standard boot on the Pi 3 and Pi 4, the board's bootcmd elsewhere. Fall
+# back to the SD card if the script is sourced by hand.
+setenv wendyos_if ${devtype}
+setenv wendyos_dev ${devnum}
+if test -z "${wendyos_if}"; then setenv wendyos_if mmc; setenv wendyos_dev @@WENDYOS_SD_MMC_DEV@@; fi
+
+# U-Boot's own env storage is fixed at build time (the Pi: mmc 0:1, the SD
+# card; Rockchip: nowhere): the wrong file, or none, when booting from another
+# disk, and with an unrelated SD card inserted, saveenv would write to THAT
+# card. So never saveenv here: read our vars from uboot.env on the boot device
+# (clearing them first so nothing leaks in from whatever env U-Boot loaded at
+# startup), and write it back like saveenv does: the WHOLE env, CRC32 format,
+# full size (must match fw_env.config). Whole, not just our vars: a U-Boot
+# with its env in FAT (the Pi on SD) loads this file as its entire startup
+# env, replacing the defaults (bootcmd, load addresses, ...).
+setenv wendyos_boot_slot
+setenv wendyos_upgrade_available
+setenv bootcount
+setenv bootlimit
+if load ${wendyos_if} ${wendyos_dev}:1 ${ramdisk_addr_r} uboot.env; then
+    env import -c ${ramdisk_addr_r} @@WENDYOS_UBOOT_ENV_SIZE@@ wendyos_boot_slot wendyos_upgrade_available bootcount bootlimit
+fi
+setenv wendyos_saveenv "env export -c -s @@WENDYOS_UBOOT_ENV_SIZE@@ ${ramdisk_addr_r} && fatwrite ${wendyos_if} ${wendyos_dev}:1 ${ramdisk_addr_r} uboot.env @@WENDYOS_UBOOT_ENV_SIZE@@"
+
+# --- First-boot env init (idempotent) -------------------------------------
+# Stock U-Boot has none of our vars compiled in; seed sane defaults. Persist
+# once (only if uboot.env is absent) so fw_setenv on the Linux side has a file
+# to edit before the first OTA.
+if test "${wendyos_boot_slot}" = ""; then setenv wendyos_boot_slot 0; fi
+if test "${wendyos_upgrade_available}" = ""; then setenv wendyos_upgrade_available 0; fi
+if test "${bootlimit}" = ""; then setenv bootlimit @@WENDYOS_BOOTLIMIT@@; fi
+if test "${bootcount}" = ""; then setenv bootcount 0; fi
+if test ! -e ${wendyos_if} ${wendyos_dev}:1 uboot.env; then run wendyos_saveenv; fi
+
+# --- Trial boot -----------------------------------------------------------
+# Only while an update is armed (set by `wendyos-update install`) do we count
+# attempts. A healthy boot is finalized by `wendyos-update commit`, which clears
+# the flag and zeroes the counter from Linux. A slot that never commits keeps
+# climbing bootcount until it exceeds bootlimit, then we fall back to the other
+# slot (clearing the flag).
+if test "${wendyos_upgrade_available}" = "1"; then
+    setexpr bootcount ${bootcount} + 1
+    # A count that cannot be persisted never reaches bootlimit, so give up the
+    # trial now instead of looping in an unproven slot.
+    if run wendyos_saveenv; then true; else
+        echo "wendyos: cannot save bootcount; abandoning trial slot ${wendyos_boot_slot}"
+        setexpr bootcount ${bootlimit} + 1
+    fi
+    if test ${bootcount} -gt ${bootlimit}; then
+        echo "wendyos: trial slot ${wendyos_boot_slot} exhausted (bootcount=${bootcount} > bootlimit=${bootlimit}); falling back"
+        if test "${wendyos_boot_slot}" = "0"; then
+            setenv wendyos_boot_slot 1
+        else
+            setenv wendyos_boot_slot 0
+        fi
+        setenv wendyos_upgrade_available 0
+        setenv bootcount 0
+        run wendyos_saveenv
+    fi
+fi
+
+# --- Slot -> partition ----------------------------------------------------
+# MUST match the board's A/B wks: slot 0 = rootfsA, slot 1 = rootfsB.
+if test "${wendyos_boot_slot}" = "1"; then
+    setenv wendyos_root_part @@WENDYOS_ROOTFS_PART_B@@
+else
+    setenv wendyos_root_part @@WENDYOS_ROOTFS_PART_A@@
+fi
+
+echo "wendyos: booting slot ${wendyos_boot_slot} (rootfs partition ${wendyos_root_part})"
+

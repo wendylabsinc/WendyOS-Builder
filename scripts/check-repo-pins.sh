@@ -72,6 +72,8 @@ meta-virtualization:SRCREV_VIRT
 meta-raspberrypi:SRCREV_RPI
 meta-security:SRCREV_SECURITY
 meta-qcom:SRCREV_QCOM
+meta-rockchip:SRCREV_ROCKCHIP
+meta-arm:SRCREV_ARM
 "
 
 MATRIX="$(mktemp)"

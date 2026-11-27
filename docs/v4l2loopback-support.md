@@ -1,8 +1,8 @@
 # V4L2 and ALSA loopback support
 
-WendyOS includes `v4l2loopback` on Tegra, Qualcomm, Raspberry Pi and VM images.
+WendyOS includes `v4l2loopback` on Tegra, Qualcomm, Raspberry Pi, Rockchip and VM images.
 The agent uses its control device to create virtual cameras for IP cameras and
-SensorLink sources. Qualcomm, Raspberry Pi and VM images also include `snd-aloop`,
+SensorLink sources. Qualcomm, Raspberry Pi, Rockchip and VM images also include `snd-aloop`,
 which exposes SensorLink microphones through ALSA PCM devices.
 
 ## Packages and loading
@@ -64,7 +64,8 @@ Tegra images require the package through `packagegroup-wendyos-tegra`.
 `kernel-module-snd-aloop` on every `qcom-wendyos` target, including Uno Q.
 `rpi-image.inc` does the same on every `rpi` target (Pi 3, Pi 4 and Pi 5).
 `vm-image.inc` explicitly installs both loopback drivers for both VM
-architectures. Their linux-yocto append includes the shared `virtual-loopback.cfg` fragment: it enables camera support
+architectures, and `rockchip-image.inc` for every `rockchip-wendyos` board.
+Both linux-yocto appends include the shared `virtual-loopback.cfg` fragment: it enables camera support
 and the USB webcam (UVC) driver, plus `CONFIG_SND_ALOOP=m`. Media and sound
 stay at each board's own setting, module or built-in. The agent loads ALSA
 loopback on demand.

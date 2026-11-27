@@ -387,7 +387,7 @@ flash-to-external: _check-machine
 		mkdir -p "$(PROJECT_DIR)/deploy"; \
 		cp "$$SRC" "$(PROJECT_DIR)/deploy/wendyos.img"; \
 		printf "$(GREEN)x86_64 wic image ready: $(PROJECT_DIR)/deploy/wendyos.img$(NC)\n\n"; \
-	elif echo "$(MACHINE)" | grep -q "raspberrypi"; then \
+	elif echo "$(MACHINE)" | grep -Eq "raspberrypi|orangepi"; then \
 		WIC_IMG="$(PROJECT_DIR)/build/tmp/deploy/images/$(MACHINE)/$(IMAGE_TARGET)-$(MACHINE).rootfs.wic"; \
 		if [ -f "$$WIC_IMG" ]; then \
 			SRC="$$WIC_IMG"; KIND="wic"; \
@@ -398,7 +398,7 @@ flash-to-external: _check-machine
 		fi; \
 		mkdir -p "$(PROJECT_DIR)/deploy"; \
 		cp "$$SRC" "$(PROJECT_DIR)/deploy/wendyos.img"; \
-		printf "$(GREEN)RPi $$KIND image ready: $(PROJECT_DIR)/deploy/wendyos.img$(NC)\n\n"; \
+		printf "$(GREEN)$(MACHINE) $$KIND image ready: $(PROJECT_DIR)/deploy/wendyos.img$(NC)\n\n"; \
 	elif [ -f "$(PROJECT_DIR)/deploy/wendyos.img" ]; then \
 		IMG_SIZE=$$(ls -lh "$(PROJECT_DIR)/deploy/wendyos.img" | awk '{print $$5}'); \
 		printf "Using existing tegraflash image: $(PROJECT_DIR)/deploy/wendyos.img ($$IMG_SIZE)\n\n"; \

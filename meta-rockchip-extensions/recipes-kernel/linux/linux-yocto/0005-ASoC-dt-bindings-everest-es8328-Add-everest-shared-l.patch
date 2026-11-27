@@ -1,0 +1,54 @@
+From 713f330f062b4109bef88bae71b2fd1db7f1aba5 Mon Sep 17 00:00:00 2001
+From: Benjamin Kelenyi <benjamin@wendy.sh>
+Date: Wed, 25 Nov 2026 12:27:15 +0200
+Subject: [PATCH 5/7] ASoC: dt-bindings: everest,es8328: Add
+ everest,shared-lrck
+
+Some boards wire only the ES8388's DACLRC pin to the I2S frame clock
+and leave ADCLRC open, so the ADC never sends data. Add a property for
+them, which makes the ADC take its frame clock from DACLRC.
+
+Upstream-Status: Pending
+Signed-off-by: Benjamin Kelenyi <benjamin@wendy.sh>
+---
+ .../bindings/sound/everest,es8328.yaml          | 17 +++++++++++++++++
+ 1 file changed, 17 insertions(+)
+
+diff --git a/Documentation/devicetree/bindings/sound/everest,es8328.yaml b/Documentation/devicetree/bindings/sound/everest,es8328.yaml
+index ddddd7b..c6eff38 100644
+--- a/Documentation/devicetree/bindings/sound/everest,es8328.yaml
++++ b/Documentation/devicetree/bindings/sound/everest,es8328.yaml
+@@ -54,6 +54,12 @@ properties:
+   HPVDD-supply:
+     description: Regulator providing analog output voltage 3.3V
+ 
++  everest,shared-lrck:
++    type: boolean
++    description:
++      Only the DACLRC pin carries the frame clock and ADCLRC is not
++      connected, so the ADC uses DACLRC as well. ES8388 only.
++
+   port:
+     $ref: audio-graph-port.yaml#
+     unevaluatedProperties: false
+@@ -67,6 +73,17 @@ required:
+   - PVDD-supply
+   - HPVDD-supply
+ 
++allOf:
++  - if:
++      not:
++        properties:
++          compatible:
++            contains:
++              const: everest,es8388
++    then:
++      properties:
++        everest,shared-lrck: false
++
+ additionalProperties: false
+ 
+ examples:
+-- 
+2.43.0
+

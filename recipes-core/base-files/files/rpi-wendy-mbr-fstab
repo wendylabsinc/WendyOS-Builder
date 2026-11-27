@@ -8,7 +8,7 @@
 # /data uses the udev alias /dev/wendyos/data, the same as the GPT variant.
 #
 # Deliberately NO "/" entry: the rootfs slot is A/B and is mounted by the kernel
-# from the root= that boot-ab.cmd.in sets per slot, so a fixed root device here
+# from the root= that boot.scr sets per slot, so a fixed root device here
 # would be wrong on the other slot. The boot script mounts "/" READ-WRITE via
 # `rw` in bootargs.
 #

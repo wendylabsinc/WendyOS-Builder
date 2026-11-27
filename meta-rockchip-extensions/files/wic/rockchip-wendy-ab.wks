@@ -1,0 +1,14 @@
+# WendyOS A/B layout for Rockchip boards: the Rockchip loaders, then the Pi 4/5
+# table (rpi-wendy-ab.wks). The loaders are raw (--no-table), so the partitions
+# stay p1..p5 and match the boot script's slots. OTA never rewrites them.
+#   32 KiB  idbloader.img  DDR init + SPL, read by the BootROM
+#   8 MiB   u-boot.itb     TF-A + U-Boot, read by SPL
+# data is last, so wendyos-data.service can grow it on first boot.
+bootloader --ptable gpt
+part --source rawcopy --sourceparams="file=${SPL_BINARY}" --ondisk mmcblk0 --no-table --offset 32K
+part --source rawcopy --sourceparams="file=u-boot.${UBOOT_SUFFIX}" --ondisk mmcblk0 --no-table --offset 8M
+part /boot   --source bootimg-partition --ondisk mmcblk0 --fstype=vfat --label boot    --active --offset 16M --size 128M
+part         --ondisk mmcblk0 --fstype=vfat --label config  --align 4096 --size ${WENDYOS_CONFIG_PART_SIZE_MB}M
+part         --source rootfs  --ondisk mmcblk0 --fstype=ext4 --label rootfsA --align 4096 --fixed-size ${WENDYOS_ROOTFS_SIZE_KB}K
+part         --source rootfs  --ondisk mmcblk0 --fstype=ext4 --label rootfsB --align 4096 --fixed-size ${WENDYOS_ROOTFS_SIZE_KB}K
+part         --ondisk mmcblk0 --fstype=ext4 --label data    --align 4096 --size 512M

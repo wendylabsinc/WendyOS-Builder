@@ -15,7 +15,10 @@ FILES = ROOT / "recipes-support/data-device/files"
 HELPER = FILES / "root-disk-part"
 RULE = FILES / "99-wendyos-boot.rules"
 FSTABS = ROOT / "recipes-core/base-files/files"
-IMAGE_APPEND = ROOT / "meta-rpi-extensions/recipes-core/images/wendyos-image.bbappend"
+LINKS_CLASS = ROOT / "classes/wendyos-links-check.bbclass"
+# Every image recipe snippet whose fstab mounts /dev/wendyos links.
+LINK_IMAGES = (ROOT / "meta-rpi-extensions/recipes-core/images/wendyos-image.bbappend",
+               ROOT / "conf/distro/include/rockchip-image.inc")
 PI_RULES = ("99-wendyos-boot.rules", "99-wendyos-config.rules", "99-wendyos-data.rules")
 PI_PARTITIONS = ("boot", "config", "rootfsA", "rootfsB", "data")
 
@@ -109,7 +112,7 @@ class BootLinkTests(unittest.TestCase):
 
 
 class FstabLinkCheckTests(unittest.TestCase):
-    """Run the Pi image's check_wendyos_links against fake rootfs trees."""
+    """Run check_wendyos_links against fake rootfs trees."""
 
     def run_check(self, fstab, rules, rules_dir="etc/udev/rules.d"):
         tmp = tempfile.TemporaryDirectory()
@@ -121,7 +124,7 @@ class FstabLinkCheckTests(unittest.TestCase):
             (rootfs / rules_dir).mkdir(parents=True)
             for name, text in rules.items():
                 (rootfs / rules_dir / name).write_text(text)
-        body = re.search(r"^check_wendyos_links\(\) \{\n(.*?)^\}", IMAGE_APPEND.read_text(),
+        body = re.search(r"^check_wendyos_links\(\) \{\n(.*?)^\}", LINKS_CLASS.read_text(),
                          re.S | re.M).group(1)
         values = {"IMAGE_ROOTFS": rootfs, "sysconfdir": "/etc", "nonarch_base_libdir": "/usr/lib"}
         script = re.sub(r"\$\{(\w+)\}", lambda m: str(values[m.group(1)]), body)
@@ -145,9 +148,14 @@ class FstabLinkCheckTests(unittest.TestCase):
         self.assertIn('SYMLINK+="wendyos/boot"', result.stderr)
 
     def test_image_build_runs_the_check(self):
-        lines = [line.strip() for line in IMAGE_APPEND.read_text().splitlines()
+        lines = [line.strip() for line in LINKS_CLASS.read_text().splitlines()
                  if not line.lstrip().startswith("#")]
         self.assertIn('ROOTFS_POSTPROCESS_COMMAND += "check_wendyos_links"', lines)
+        for image in LINK_IMAGES:
+            with self.subTest(image=image.relative_to(ROOT)):
+                lines = [line.strip() for line in image.read_text().splitlines()
+                         if not line.lstrip().startswith("#")]
+                self.assertIn("inherit wendyos-links-check", lines)
 
     def test_pi3_fstab_needs_only_the_data_rule(self):
         result = self.run_check((FSTABS / "rpi-wendy-mbr-fstab").read_text(),

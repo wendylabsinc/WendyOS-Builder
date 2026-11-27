@@ -179,12 +179,14 @@ test_jetson_nano_sd() {
   rm -rf "$d"
 }
 
-# The Pis: one .wic for every boot disk, published without --storage.
+# The Pis and the Orange Pi: one .wic for every boot disk, published without
+# --storage.
 test_rpi_wic_disk() {
   local pair dev M d out rc
   for pair in raspberry-pi-3:raspberrypi3-64-wendyos \
               raspberry-pi-4:raspberrypi4-64-wendyos \
-              raspberry-pi-5:raspberrypi5-wendyos; do
+              raspberry-pi-5:raspberrypi5-wendyos \
+              orange-pi-5-pro:orangepi-5-pro-wendyos; do
     dev=${pair%%:*} M=${pair#*:} d=$(newdir)
     : >"$d/wendyos-image-$M.rootfs.wic"
     out=$(run_resolver "$dev" disk "$M" "$d"); rc=$?
@@ -307,6 +309,7 @@ test_matrix_coverage() {
     dragonwing-iq-8275/ufs
     dragonwing-iq-9075/ufs
     arduino-uno-q/emmc
+    orange-pi-5-pro/disk
   )
   local c
   for c in "${combos[@]}"; do

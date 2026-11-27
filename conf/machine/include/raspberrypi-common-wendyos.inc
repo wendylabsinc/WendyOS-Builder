@@ -16,7 +16,7 @@ LICENSE_FLAGS_ACCEPTED += "synaptics-killswitch"
 # consumes and erases the seed files (configpartition.Apply) but the
 # partition itself persists as a re-seed/recovery channel.
 
-# U-Boot provides the A/B slot selection (boot-ab.cmd boot script).
+# U-Boot provides the A/B slot selection (the boot.scr boot script).
 WENDYOS_RPI_UBOOT ?= "1"
 RPI_USE_U_BOOT = "${@'1' if d.getVar('WENDYOS_RPI_UBOOT') == '1' else '0'}"
 

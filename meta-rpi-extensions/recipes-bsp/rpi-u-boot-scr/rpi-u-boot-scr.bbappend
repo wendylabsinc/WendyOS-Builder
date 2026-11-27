@@ -6,27 +6,20 @@
 # the FAT boot partition (stock meta-raspberrypi U-Boot — no patches). For any
 # other WENDYOS_OTA value the original do_compile behaviour is preserved
 # verbatim, so non-OTA RPi builds are unaffected.
+#
+# The slot-selection head is shared with the other U-Boot boards
+# (recipes-bsp/wendyos-boot-ab); files/boot-ab-rpi.cmd.in is the Pi's tail.
 FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
 
-SRC_URI += "${@' file://boot-ab.cmd.in' if d.getVar('WENDYOS_OTA') == 'wendy' else ''}"
+require recipes-bsp/wendyos-boot-ab/wendyos-boot-ab.inc
 
-# Slot -> rootfs partition number. MUST match files/wic/rpi-wendy-ab*.wks
-# (p3 = rootfsA = slot 0, p4 = rootfsB = slot 1).
-WENDYOS_ROOTFS_PART_A ?= "3"
-WENDYOS_ROOTFS_PART_B ?= "4"
+SRC_URI += "${@' file://boot-ab-rpi.cmd.in' if d.getVar('WENDYOS_OTA') == 'wendy' else ''}"
 
-# Trial-boot retry budget: how many times the new slot may boot without being
-# committed before U-Boot falls back. 1 = one attempt.
-WENDYOS_BOOTLIMIT ?= "1"
-
-# Upper bound for U-Boot's DTB placement (see boot-ab.cmd.in); empty unsets it.
-# Pi 4: above the top of free low RAM on every model, so U-Boot puts the DTB as
-# high as it can, clear of the CMA window.
+# Upper bound for U-Boot's DTB placement (see boot-ab-rpi.cmd.in); empty unsets
+# it. Pi 4: above the top of free low RAM on every model, so U-Boot puts the DTB
+# as high as it can, clear of the CMA window.
 WENDYOS_UBOOT_FDT_HIGH ?= ""
 WENDYOS_UBOOT_FDT_HIGH:raspberrypi4-64 = "0x3e000000"
-
-# Must equal U-Boot's CONFIG_ENV_SIZE and the size in fw_env.config.
-WENDYOS_UBOOT_ENV_SIZE ?= "0x4000"
 
 # RPi3 (BCM2837) boots MBR only, so its A/B wks (rpi-wendy-ab-mbr.wks) puts the
 # two rootfs slots on PRIMARY partitions p2/p3 (boot=p1; config/data are logical
@@ -41,14 +34,10 @@ do_compile[vardeps] += "WENDYOS_OTA WENDYOS_ROOTFS_PART_A WENDYOS_ROOTFS_PART_B 
 
 do_compile() {
     if [ "${WENDYOS_OTA}" = "wendy" ]; then
-        sed -e 's/@@KERNEL_IMAGETYPE@@/${KERNEL_IMAGETYPE}/' \
-            -e 's/@@KERNEL_BOOTCMD@@/${KERNEL_BOOTCMD}/' \
-            -e 's/@@WENDYOS_ROOTFS_PART_A@@/${WENDYOS_ROOTFS_PART_A}/' \
-            -e 's/@@WENDYOS_ROOTFS_PART_B@@/${WENDYOS_ROOTFS_PART_B}/' \
-            -e 's/@@WENDYOS_BOOTLIMIT@@/${WENDYOS_BOOTLIMIT}/' \
-            -e 's/@@WENDYOS_UBOOT_ENV_SIZE@@/${WENDYOS_UBOOT_ENV_SIZE}/g' \
-            -e 's/@@WENDYOS_UBOOT_FDT_HIGH@@/${WENDYOS_UBOOT_FDT_HIGH}/' \
-            "${UNPACKDIR}/boot-ab.cmd.in" > "${WORKDIR}/boot.cmd"
+        wendyos_render_boot_ab "${UNPACKDIR}/boot-ab-rpi.cmd.in" "${WORKDIR}/boot.cmd" \
+            KERNEL_IMAGETYPE=${KERNEL_IMAGETYPE} \
+            KERNEL_BOOTCMD=${KERNEL_BOOTCMD} \
+            WENDYOS_UBOOT_FDT_HIGH=${WENDYOS_UBOOT_FDT_HIGH}
     else
         sed -e 's/@@KERNEL_IMAGETYPE@@/${KERNEL_IMAGETYPE}/' \
             -e 's/@@KERNEL_BOOTCMD@@/${KERNEL_BOOTCMD}/' \
@@ -64,4 +53,3 @@ do_compile() {
     # recipe's, so the upstream fix alone would never run for us.
     mkimage -A ${@oe.kernel.map_uboot_arch(d)} -T script -C none -n "Boot script" -d "${WORKDIR}/boot.cmd" boot.scr
 }
-

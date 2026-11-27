@@ -625,6 +625,8 @@ declare -a repos=(
     "1|${URL_RPI}||${SRCREV_RPI}"
     "1|${URL_QCOM}||${SRCREV_QCOM}"
     "1|${URL_SECURITY}||${SRCREV_SECURITY}"
+    "1|${URL_ROCKCHIP}||${SRCREV_ROCKCHIP}"
+    "1|${URL_ARM}||${SRCREV_ARM}"
 )
 
 # Append any extras declared by the override file.
