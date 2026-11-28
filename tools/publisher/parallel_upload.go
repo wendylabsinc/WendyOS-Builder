@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"hash/crc32"
 	"io"
@@ -66,6 +67,19 @@ func newUploadTransport(maxConns int) *http.Transport {
 		// Overrides ForceAttemptHTTP2 and keeps h2 out of the TLS handshake.
 		Protocols: http1Only,
 	}
+}
+
+// retryTransient makes obj retry transient errors. The SDK retries a write only
+// under a precondition, so an image upload's session start and compose got one
+// attempt. A repeat is safe: each call rewrites one name with the same bytes.
+func retryTransient(obj *storage.ObjectHandle) *storage.ObjectHandle {
+	return obj.Retryer(storage.WithPolicy(storage.RetryAlways), storage.WithErrorFunc(isTransientGCSError))
+}
+
+// isTransientGCSError adds a bare EOF (connection closed before any response)
+// to the SDK's list; GCS returned one on compose.
+func isTransientGCSError(err error) bool {
+	return storage.ShouldRetry(err) || errors.Is(err, io.EOF)
 }
 
 // crc32cTable is the Castagnoli table GCS uses for its CRC32C object checksums.
@@ -207,8 +221,7 @@ type bucketComposer struct {
 }
 
 func (b bucketComposer) uploadPart(ctx context.Context, partName, contentType string, chunkSize int, r io.Reader) error {
-	obj := b.bucket.Object(partName)
-	w := obj.NewWriter(ctx)
+	w := retryTransient(b.bucket.Object(partName)).NewWriter(ctx)
 	w.ContentType = contentType
 	w.ChunkSize = chunkSize
 	w.ChunkRetryDeadline = chunkRetryDeadline
@@ -223,7 +236,8 @@ func (b bucketComposer) uploadPart(ctx context.Context, partName, contentType st
 }
 
 func (b bucketComposer) composeInto(ctx context.Context, dstName, contentType string, partNames []string) (objAttrs, error) {
-	dst := b.bucket.Object(dstName)
+	// Compose retries follow the destination handle's policy.
+	dst := retryTransient(b.bucket.Object(dstName))
 	srcs := make([]*storage.ObjectHandle, len(partNames))
 	for i, n := range partNames {
 		srcs[i] = b.bucket.Object(n)
