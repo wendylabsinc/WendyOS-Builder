@@ -114,6 +114,27 @@ ROOTFS_POSTPROCESS_COMMAND += "${@oe.utils.ifelse(d.getVar('WENDYOS_ENABLE_VT_LO
 ROOTFS_POSTPROCESS_COMMAND += "${@oe.utils.ifelse(d.getVar('WENDYOS_ENABLE_UART_LOGIN') == '1', '', 'disable_uart_login')}"
 ROOTFS_POSTPROCESS_COMMAND += "${@oe.utils.ifelse(d.getVar('WENDYOS_CONSOLE_GETTY_KNOB') == '1', '', 'disable_console_getty')}"
 
+# Debug builds only: every getty imports agetty.*, so the consoles open a root
+# shell with no login. It is the way in when the agent or network is down.
+enable_console_autologin() {
+    install -d ${IMAGE_ROOTFS}${nonarch_libdir}/credstore
+    printf 'root' > ${IMAGE_ROOTFS}${nonarch_libdir}/credstore/agetty.autologin
+    chmod 0600 ${IMAGE_ROOTFS}${nonarch_libdir}/credstore/agetty.autologin
+}
+
+# WENDYOS_DEBUG alone is not enough: CI also sets it on every nightly build.
+python () {
+    if d.getVar('WENDYOS_CONSOLE_AUTOLOGIN') != '1':
+        return
+    kind = d.getVar('WENDYOS_BUILD_KIND')
+    if d.getVar('WENDYOS_DEBUG') != '1' or kind not in ('pr', 'local'):
+        bb.fatal('WENDYOS_CONSOLE_AUTOLOGIN = "1" is for debug builds only: it needs WENDYOS_DEBUG = "1" and WENDYOS_BUILD_KIND "pr" or "local" (got %r)' % kind)
+    if d.getVar('WENDYOS_ENABLE_UART_LOGIN') != '1' and d.getVar('WENDYOS_ENABLE_VT_LOGIN') != '1':
+        bb.fatal('WENDYOS_CONSOLE_AUTOLOGIN = "1" needs WENDYOS_ENABLE_UART_LOGIN or WENDYOS_ENABLE_VT_LOGIN = "1"')
+}
+
+ROOTFS_POSTPROCESS_COMMAND += "${@oe.utils.ifelse(d.getVar('WENDYOS_CONSOLE_AUTOLOGIN') == '1', 'enable_console_autologin', '')}"
+
 # Stamp build provenance onto the console boot screen (base-files' /etc/issue,
 # shown under the WendyOS logo before the login prompt). The build tag/ID is
 # shown on every build; the builder commit is added only on PR builds, keyed on
@@ -372,6 +393,7 @@ BUILDCFG_VARS += " \
     WENDYOS_DEBUG_UART \
     WENDYOS_ENABLE_UART_LOGIN \
     WENDYOS_ENABLE_VT_LOGIN \
+    WENDYOS_CONSOLE_AUTOLOGIN \
     WENDYOS_SSHD \
     WENDYOS_USB_GADGET \
     WENDYOS_USB_NET_MODE \
@@ -380,6 +402,7 @@ BUILDCFG_VARS += " \
     WENDYOS_UPDATE_BOOTLOADER \
     WENDYOS_NVIDIA_DGPU \
     WENDYOS_BUILD_VERSION \
+    WENDYOS_BUILD_KIND \
     WENDYOS_BUILD_COMMIT \
     "
 

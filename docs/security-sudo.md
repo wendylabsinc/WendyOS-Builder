@@ -42,7 +42,8 @@ ungranted user, and rejection of cached authentication after both a command and
 `sudo -v`. They do not modify the developer host's users or sudoers files.
 
 This addresses the source policy behind GPOS V-203723,
-SRG-OS-000373-GPOS-00156. The container tests use Debian's sudo and PAM; closing a
-deployed-image finding requires repeating the checks on each supported WendyOS
-image with its effective PAM configuration and full sudoers policy. Verify the
+SRG-OS-000373-GPOS-00156. The container tests use Debian's sudo with PAM, as the
+image does, but with Debian's PAM files; closing a deployed-image finding
+requires repeating the checks on each supported WendyOS image with its
+effective PAM configuration and full sudoers policy. Verify the
 provisioning and recovery path before deploying an image with this change.

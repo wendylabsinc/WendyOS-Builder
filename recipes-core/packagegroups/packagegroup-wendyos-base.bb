@@ -44,7 +44,7 @@ RDEPENDS:${PN} = " \
 # services would fail at boot.
 RDEPENDS:${PN}:append = " \
     ${@'' if (d.getVar('WENDYOS_OTA') or 'none') == 'none' else \
-        'wendyos-user-data-setup systemd-mount-containerd systemd-mount-wendy systemd-mount-timesync swapfile-setup wendyos-etc-binds'} \
+        'wendyos-user-data-setup systemd-mount-containerd systemd-mount-wendy systemd-mount-timesync swapfile-setup wendyos-etc-binds wendyos-user-credential'} \
     "
 
 # The /config FAT32 -> ext4 conversion service. Gated on WENDYOS_CONFIG_EXT4

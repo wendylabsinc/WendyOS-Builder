@@ -83,9 +83,17 @@ WENDYOS_SSHD ??= "0"
 WENDYOS_ENABLE_UART_LOGIN ??= "0"
 WENDYOS_ENABLE_VT_LOGIN ??= "0"
 
+# Debug builds only: the consoles enabled above open a root shell with no login.
+# The build fails without WENDYOS_DEBUG = "1" and one login above, and on any
+# build whose WENDYOS_BUILD_KIND is not "pr" or "local".
+WENDYOS_CONSOLE_AUTOLOGIN ??= "0"
+
 # Build provenance stamped into the image (boot screen /etc/issue + /etc/wendyos/commit).
 # CI overrides these in auto.conf per build: VERSION is the release/nightly/PR tag
 # (pr-<N> | nightly-<ts> | X.Y.Z), COMMIT is the full builder git SHA. Local builds
 # fall back to DISTRO_VERSION and an empty commit.
 WENDYOS_BUILD_VERSION ??= "${DISTRO_VERSION}"
 WENDYOS_BUILD_COMMIT ??= ""
+# What produced the image: CI stamps pr, nightly or release. A local build has
+# the same version as a release, so only this tells them apart.
+WENDYOS_BUILD_KIND ??= "local"

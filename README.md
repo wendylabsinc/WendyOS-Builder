@@ -627,12 +627,17 @@ Connect via SSH (over USB or Ethernet):
 ```bash
 # Find device IP (check DHCP, use .local name, or USB network)
 ssh wendy@wendy-<adjective>-<noun>.local
-# Default password: wendy
+# No default password is shipped. Provision access first as described below.
 
 # Verify system info
 cat /etc/os-release
 uname -a
 ```
+
+The `wendy` password is locked on new images, including debug images. Before
+using password login, provision a unique password through an authenticated
+Agent host shell. See [local credentials](docs/security-local-credentials.md)
+for provisioning, password requirements, and the effect of an A/B update.
 
 ### Available Images
 
@@ -839,7 +844,8 @@ You can modify these variables in `bootstrap.sh` before running:
 ### Build Configuration Variables
 
 In `build/conf/local.conf`:
-- `WENDYOS_DEBUG` - Enable debug packages and `debug-tweaks` (empty root password, passwordless root SSH) (default: 0)
+- `WENDYOS_DEBUG` - Enable debug packages (default: 0)
+- `WENDYOS_CONSOLE_AUTOLOGIN` - Open a root shell without a login on the enabled serial console and screen; debug builds only (default: 0; see [local credentials](docs/security-local-credentials.md))
 - `WENDYOS_DEBUG_UART` - Enable UART debug output (default: 0)
 - `WENDYOS_SSHD` - Include OpenSSH server (`sshd`) in the image (default: 0; set to `1` to enable sshd)
 - `WENDYOS_USB_GADGET` - Enable USB gadget mode (default: 0)
@@ -1139,8 +1145,11 @@ firmware, and selects a CPU model the image can actually run on.
 ./scripts/run-vm.sh --help                 # all options
 ```
 
-Log in on the serial console, or over SSH on the forwarded port the script
-prints (2222 by default):
+The `wendy` password is locked on a fresh image; see
+[local credentials](docs/security-local-credentials.md) for how one is
+provisioned. An image built with `bootstrap.sh --debug` opens a root shell on
+the serial console without a login. Otherwise log in on the serial console, or
+over SSH on the forwarded port the script prints (2222 by default):
 
 ```bash
 ssh -p 2222 wendy@localhost
