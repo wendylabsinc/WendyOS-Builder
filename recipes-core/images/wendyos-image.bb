@@ -131,6 +131,8 @@ python () {
         bb.fatal('WENDYOS_CONSOLE_AUTOLOGIN = "1" is for debug builds only: it needs WENDYOS_DEBUG = "1" and WENDYOS_BUILD_KIND "pr" or "local" (got %r)' % kind)
     if d.getVar('WENDYOS_ENABLE_UART_LOGIN') != '1' and d.getVar('WENDYOS_ENABLE_VT_LOGIN') != '1':
         bb.fatal('WENDYOS_CONSOLE_AUTOLOGIN = "1" needs WENDYOS_ENABLE_UART_LOGIN or WENDYOS_ENABLE_VT_LOGIN = "1"')
+    if d.getVar('WENDYOS_USG_NOTICE') == '1':
+        bb.fatal('WENDYOS_CONSOLE_AUTOLOGIN = "1" cannot be used with the USG access notice profile: it refuses a login without consent')
 }
 
 ROOTFS_POSTPROCESS_COMMAND += "${@oe.utils.ifelse(d.getVar('WENDYOS_CONSOLE_AUTOLOGIN') == '1', 'enable_console_autologin', '')}"
